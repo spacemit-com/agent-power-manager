@@ -32,9 +32,8 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
     - 配置模型：维护各类 Agent 上各类 Power 的安装列表。
     - Adapter：承接不同 Power 类型和目标 Agent 的格式转换、安装位置、注册及配置映射差异。
     - CLI：提供入口。
-- 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能。应用侧通过`list`获取云端服务Power资源列表、`get`获取特定Power资源。
-- 技术与运行方式：TBD
-- C4 模型：[`c4/workspace.dsl`](c4/workspace.dsl)。
+- 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能，CLI 语法为 `apm <verb> [name] --agent=<agent-id|all> [--type=<skill|plugin|mcp>]`，`--agent` 支持 `all` 对所有已注册目标 Agent 逐个执行独立事务；详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)。应用侧通过`list`获取云端服务Power资源列表、`get`获取特定Power资源。
+- 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单，安装过程采用 staging 目录 + 原子 rename + journal 实现中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md)。
 
 ## Constraints and Quality
 
@@ -52,7 +51,3 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
     - 配置格式、冲突处理、权限控制和失败恢复机制未确定。
 - 待决事项：
     - 确定 MVP 之后的框架、部署、安全校验与审计方案。
-    - 语言
-    - 技术栈
-    - 代码目录结构
-    - CLI 命令和 Power 类别交织
