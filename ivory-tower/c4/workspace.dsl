@@ -1,32 +1,31 @@
-workspace "System Architecture" "使用 C4 描述系统结构。" {
+workspace "Agent Power Manager" "APM：面向多 Agent，统一管理 Skill、Plugin、MCP 等 Power 的发现、安装、卸载与配置治理，通过 Adapter 适配不同目标 Agent。" {
     !identifiers hierarchical
 
     model {
-        user = person "User" "使用系统的目标用户。"
-        system = softwareSystem "System" "待设计的软件系统。" {
-            database = container "Database" "持久化业务数据。" "Technology"
-            webApplication = container "Web Application" "提供用户界面和 HTTP 接口。" "Technology" {
-                !include components/component1.dsl
-            }
+        user = person "User" "通过 CLI 使用 APM 管理 Power 的开发者/运维人员。"
 
-            !include containers/container1.dsl
+        cloudRegistry = softwareSystem "Cloud Power Registry" "云端 Power 资源服务，提供 Power 的 list/get 元数据与下载来源。"
+        targetAgent = softwareSystem "Target Agent" "用户本地的目标 Agent（如 Claude Code、Cursor 等），拥有自身的 Skill/Plugin/MCP 加载与运行时；不在 APM 的系统边界内。"
+
+        apm = softwareSystem "Agent Power Manager" "统一管理 Skill、Plugin、MCP 等 Power 的发现、安装、卸载与配置治理，通过 Adapter 适配不同目标 Agent。" {
+            !include containers/apm.dsl
         }
 
-        user -> system "Uses"
+        user -> apm.cli "运行APM命令"
     }
 
     views {
-        systemContext system "SystemContext" "系统上下文。" {
+        systemContext apm "SystemContext" "APM 位于能力提供方（Cloud Power Registry）、使用方（User）与目标 Agent 之间的系统边界；不承担目标 Agent 的运行时职责。" {
             include *
             autoLayout lr
         }
 
-        container system "Containers" "容器视图。" {
+        container apm "Containers" "APM 内部容器：CLI 进程与本地持久化存储（Agent 清单、下载缓存）。" {
             include *
             autoLayout lr
         }
 
-        component system.webApplication "Components" "组件视图。" {
+        component apm.cli "Components" "CLI 进程内的模块划分：入口、核心生命周期、Adapter、配置模型、锁、缓存、云端客户端。" {
             include *
             autoLayout lr
         }

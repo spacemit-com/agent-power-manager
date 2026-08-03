@@ -1,0 +1,20 @@
+// 由 containers/apm.dsl 的 !include 引用；本文件内容处于 CLI Binary 容器内。
+
+cliEntry = component "CLI Entry" "cobra 命令路由，解析 --agent/--type/name 并触发对应生命周期用例。" "Go (cobra)"
+lifecycle = component "Core Lifecycle" "定义 Power 的发现、安装、卸载、打印、配置读写和版本管理用例。" "Go"
+adapterRegistry = component "Adapter Registry" "承接不同 Power 类型和目标 Agent 的格式转换、安装位置、注册及配置映射差异。" "Go"
+configModel = component "Config Model" "维护各类 Agent 上各类 Power 的安装列表读写模型。" "Go"
+lockManager = component "Lock Manager" "基于 flock 实现防重入的文件锁。" "Go (flock)"
+cacheManager = component "Cache Manager" "管理下载 Power 的本地缓存。" "Go"
+cloudClient = component "Cloud Client" "调用云端 Power 服务的 list/get 接口。" "Go (net/http)"
+
+cliEntry -> lifecycle "调用生命周期用例"
+lifecycle -> adapterRegistry "按目标 Agent 与 Power 类型获取适配实现"
+lifecycle -> configModel "读写安装记录"
+lifecycle -> lockManager "获取/释放锁，防重入"
+lifecycle -> cacheManager "读写下载缓存"
+lifecycle -> cloudClient "list/get Power 资源"
+adapterRegistry -> targetAgent "安装/卸载 Power 到目标 Agent 的安装位置并写入注册配置" "本地文件系统"
+configModel -> apm.installedPower "读写 JSON 清单"
+cacheManager -> apm.powerCache "读写缓存内容"
+cloudClient -> cloudRegistry "list/get Power 资源" "HTTPS"
