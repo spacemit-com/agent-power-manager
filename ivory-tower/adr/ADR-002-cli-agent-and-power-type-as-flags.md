@@ -28,7 +28,7 @@ apm <verb> [name] --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 
 两个维度均以 flag 承载，不作为子命令命名空间；`verb`（`search`/`list`/`install`/`uninstall`）是唯一的子命令层级。
 
-`--agent=all` 的执行语义：对每个已注册目标 Agent 独立执行一次完整的生命周期事务（各自的 staging/rename/journal 与文件锁），单个 Agent 失败不影响其他 Agent 继续执行；命令结束后按 Agent 逐条汇总成功/失败结果，整体命令的退出码在任一 Agent 失败时为非零。
+`--agent=all` 的执行语义：对每个已注册目标 Agent 独立执行一次完整的生命周期事务（各自的 staging/rename/journal；全局 APM 文件锁在install/uninstall期间持有，见 ADR-001 锁机制），单个 Agent 失败不影响其他 Agent 继续执行；命令结束后按 Agent 逐条汇总成功/失败结果，整体命令的退出码在任一 Agent 失败时为非零。
 
 ## Consequences
 

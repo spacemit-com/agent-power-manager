@@ -1,8 +1,8 @@
 classDiagram
-    note for Locker "锁接口：按 Agent 粒度加锁，防重入"
+    note for Locker "全局 APM 锁：任何涉及本地文件写入的命令（install/uninstall）执行全程持有，整个 APM 串行化"
     class Locker {
         <<interface>>
-        +Acquire(AgentID) (Unlock, error)
+        +Acquire() (Unlock, error)
     }
 
     note for Unlock "锁句柄：持有者负责 Release；进程崩溃时内核自动释放"
@@ -11,9 +11,9 @@ classDiagram
         +Release() error
     }
 
-    note for flockLocker "flock(2) 实现：锁文件位于各 Agent 的状态目录"
+    note for flockLocker "flock(2) 实现：单一全局锁文件（类似 apt 的 /var/lib/dpkg/lock）"
     class flockLocker {
-        +Acquire(AgentID) (Unlock, error)
+        +Acquire() (Unlock, error)
     }
 
     flockLocker ..|> Locker

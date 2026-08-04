@@ -8,7 +8,7 @@ classDiagram
         +List(Flags) ([]InstalledPower, error)
     }
 
-    note for lifecycleService "用例编排者：加锁 → 取云端元数据 → 缓存 → Adapter 安装 → 写清单；--agent=all 时逐 Agent 独立事务并汇总结果"
+    note for lifecycleService "用例编排者：install/uninstall 先取全局锁再执行 取云端元数据 → 缓存 → Adapter 安装 → 写清单；--agent=all 时锁内逐 Agent 独立事务并汇总结果"
     class lifecycleService {
         +Search(...)
         +Install(...)
@@ -29,10 +29,10 @@ classDiagram
         +Write(AgentID, Manifest) error
     }
 
-    note for Locker "flock 文件锁，防重入"
+    note for Locker "全局 APM 文件锁：install/uninstall 全程持有"
     class Locker {
-        <<interface>
-        +Acquire(AgentID) (Unlock, error)
+        <<interface>>
+        +Acquire() (Unlock, error)
     }
 
     note for PowerCache "下载内容的本地缓存"
