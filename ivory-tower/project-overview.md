@@ -16,7 +16,10 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 
 - 包含：
     - 提供 `search`、`list`、`install`、`uninstall` 等 CLI 能力。
+    - `search <keyword>` 搜索云端资源；`list` 默认列出云端资源，`list --installed` 列出本地安装清单。
+    - `install <power>[=<version>]` 未指定版本时选择云端最新版，相同版本幂等成功，不同版本执行升级或显式降级。
     - 生命周期安全，在任意执行阶段中断，系统都可以识别并纠正。
+    - 四条命令均在全局锁内先检查唯一活动 journal；提交点前回滚，提交点后完成提交，修复失败则非零退出。
     - 实现类似apt的文件锁，保证软件执行安全。
     - 缓存下载的Power。
     - 可增添的Agent Power Adapters。
@@ -32,7 +35,7 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
     - 配置模型：维护各类 Agent 上各类 Power 的安装列表。
     - Adapter：承接不同 Power 类型和目标 Agent 的格式转换、安装位置、注册及配置映射差异。
     - CLI：提供入口。
-- 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能，CLI 语法为 `apm <verb> [name] --agent=<agent-id|all> [--type=<skill|plugin|mcp>]`，`--agent` 支持 `all` 对所有已注册目标 Agent 逐个执行独立事务；详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)。应用侧通过`list`获取云端服务Power资源列表、`get`获取特定Power资源。
+- 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)；生命周期恢复详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。`--agent` 支持 `all` 对所有已注册目标 Agent 执行。应用侧通过`list`获取云端服务Power资源列表、`get`获取特定Power资源。
 - 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单，安装过程采用 staging 目录 + 原子 rename + journal 实现中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md)。
 
 ## Constraints and Quality
@@ -48,6 +51,6 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 - 主要风险：
     - 不同目标 Agent 的安装位置、注册机制和配置能力差异较大，Adapter 的支持范围和一致性可能受限。
     - Power 版本选择、更新和兼容性规则未确定，可能影响升级、卸载和配置重建的可靠性。
-    - 配置格式、冲突处理、权限控制和失败恢复机制未确定。
+    - 配置格式、冲突处理和权限控制未确定。
 - 待决事项：
     - 确定 MVP 之后的框架、部署、安全校验与审计方案。

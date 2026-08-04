@@ -18,17 +18,24 @@ APM 的 `search`/`list`/`install`/`uninstall` 等命令都需要同时确定两�
 CLI 语法采用：
 
 ```text
-apm <verb> [name] --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
+apm search <keyword> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
+apm list --agent=<agent-id|all> [--type=<skill|plugin|mcp>] [--installed]
+apm install <power>[=<version>] --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
+apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 ```
 
 - `--agent`：必填（或由本地配置提供 default-agent 作为缺省值），取值为具体 Agent ID 或字面量 `all`。
 - `--type`：可选。缺省时由云端 Power 元数据推断；仅当同名 Power 跨类别产生歧义时，APM 报错并要求显式指定 `--type`。
-- `name`：Power 名称，作为 positional 参数；`search`/`list` 可省略（按 `--agent`/`--type`/关键字过滤）。
 - `--help` 顶层展示可用的 Agent/Power 类别枚举。
+
+- `search` 的 keyword 必填，只查询云端资源。
+- `list` 默认列出云端资源；`--installed` 改为读取本地安装清单。
+- `install` 未指定版本时选择云端最新版；显式 `<power>=<version>` 可安装、升级或降级到指定版本；相同版本视为成功且不重复安装。
+- `uninstall` 未找到本地安装记录时视为幂等成功；同名跨类别歧义要求显式 `--type`。
 
 两个维度均以 flag 承载，不作为子命令命名空间；`verb`（`search`/`list`/`install`/`uninstall`）是唯一的子命令层级。
 
-`--agent=all` 的执行语义：对每个已注册目标 Agent 独立执行一次完整的生命周期事务（各自的 staging/rename/journal；全局 APM 文件锁在install/uninstall期间持有，见 ADR-001 锁机制），单个 Agent 失败不影响其他 Agent 继续执行；命令结束后按 Agent 逐条汇总成功/失败结果，整体命令的退出码在任一 Agent 失败时为非零。
+`--agent=all` 的执行语义见 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md)：install/uninstall 按 Agent 串行且 fail-fast；`list --installed` 继续逐 Agent 读取并汇总失败。
 
 ## Consequences
 
