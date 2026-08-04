@@ -29,7 +29,7 @@ classDiagram
         +Write(AgentID, Manifest) error
     }
 
-    note for Locker "全局 APM 文件锁：install/uninstall 全程持有"
+    note for Locker "全局 APM 文件锁"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)
