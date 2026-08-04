@@ -1,8 +1,8 @@
 flowchart TD
     ListStart([生命周期入口]) --> ListLock[获取全局 APM 锁]
-    ListLock -->|失败| ListLockFail[打印锁错误] --> ListExitError([释放锁并非零退出])
+    ListLock -->|失败| ListLockFail[打印锁错误] --> ListLockExitError([未获得锁；非零退出])
     ListLock -->|成功| ListJournal{存在未完成 journal?}
-    ListJournal -->|检查失败| ListJournalFail[打印 journal 检查错误] --> ListExitError
+    ListJournal -->|检查失败| ListJournalFail[打印 journal 检查错误] --> ListExitError([释放锁并非零退出])
     ListJournal -->|否| ListCommand[进入当前命令]
     ListJournal -->|是| ListDecide{根据阶段与路径状态判断提交点}
     ListDecide -->|提交点前| ListRepairRollback[回滚上次事务]
@@ -10,18 +10,22 @@ flowchart TD
     ListRepairRollback --> ListRepairResult{修复成功?}
     ListRepairCommit --> ListRepairResult
     ListRepairResult -->|否| ListRepairFail[保留 journal 并打印修复失败] --> ListExitError
-    ListRepairResult -->|是| ListRepairLog[打印回滚或提交及修复内容] --> ListCommand
-    ListRepairRollback -.进程中断.-> ListInterrupted([内核释放锁；下次命令重新预检])
+    ListRepairResult -->|是| ListDeleteRecovered[删除已恢复 journal]
+    ListDeleteRecovered -->|失败| ListDeleteRecoveredFail[保留 journal 并打印删除失败] --> ListExitError
+    ListDeleteRecovered -->|成功| ListRepairLog[打印回滚或提交及修复内容] --> ListCommand
+    ListRepairRollback -.进程中断.-> ListInterrupted([内核释放锁；保留 journal；下次命令重新预检])
     ListRepairCommit -.进程中断.-> ListInterrupted
+    ListDeleteRecovered -.进程中断.-> ListInterrupted
     ListJournal -.进程中断.-> ListInterrupted
 
-    ListCommand --> ListValidate[校验 agent、type 与 installed flag]
+    ListCommand --> ListValidate[校验 agent、可选 type 与 installed flag]
     ListValidate -->|失败| ListFail[打印参数或 Agent 错误] --> ListExitError
     ListValidate -->|成功| ListInstalled{指定 --installed?}
-    ListInstalled -->|否| ListCloudList[调用云端接口列出并过滤资源]
+    ListInstalled -->|否| ListCloudList[调用云端接口列出资源；仅显式 type 才过滤]
     ListCloudList -->|失败| ListFail
     ListCloudList -->|成功| ListPrintCloud[打印云端 Power] --> ListExitOK([释放锁并正常退出])
-    ListInstalled -->|是| ListAll{agent 等于 all?}
+    ListInstalled -->|是| ListLocalType[从本地清单按可选 type 定位；仅本地同名跨类型歧义时要求显式 type]
+    ListLocalType --> ListAll{agent 等于 all?}
     ListAll -->|否| ListReadOne[读取目标 Agent 安装清单]
     ListReadOne -->|文件不存在| ListEmptyOne[打印空列表] --> ListExitOK
     ListReadOne -->|读取或解析失败| ListFail

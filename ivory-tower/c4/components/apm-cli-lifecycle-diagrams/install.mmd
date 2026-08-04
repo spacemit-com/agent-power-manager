@@ -1,8 +1,8 @@
 flowchart TD
     InstallStart([生命周期入口]) --> InstallLock[获取全局 APM 锁]
-    InstallLock -->|失败| InstallLockFail[打印锁错误] --> InstallExitError([释放锁并非零退出])
+    InstallLock -->|失败| InstallLockFail[打印锁错误] --> InstallLockExitError([未获得锁；非零退出])
     InstallLock -->|成功| InstallJournal{存在未完成 journal?}
-    InstallJournal -->|检查失败| InstallJournalFail[打印 journal 检查错误] --> InstallExitError
+    InstallJournal -->|检查失败| InstallJournalFail[打印 journal 检查错误] --> InstallExitError([释放锁并非零退出])
     InstallJournal -->|否| InstallCommand[进入当前命令]
     InstallJournal -->|是| InstallDecide{根据阶段与路径状态判断提交点}
     InstallDecide -->|提交点前| InstallRepairRollback[回滚上次事务]
@@ -10,55 +10,81 @@ flowchart TD
     InstallRepairRollback --> InstallRepairResult{修复成功?}
     InstallRepairCommit --> InstallRepairResult
     InstallRepairResult -->|否| InstallRepairFail[保留 journal 并打印修复失败] --> InstallExitError
-    InstallRepairResult -->|是| InstallRepairLog[打印回滚或提交及修复内容] --> InstallCommand
-    InstallRepairRollback -.进程中断.-> InstallInterrupted([内核释放锁；下次命令重新预检])
+    InstallRepairResult -->|是| InstallDeleteRecovered[删除已恢复 journal]
+    InstallDeleteRecovered -->|失败| InstallDeleteRecoveredFail[保留 journal 并打印删除失败] --> InstallExitError
+    InstallDeleteRecovered -->|成功| InstallRepairLog[打印回滚或提交及修复内容] --> InstallCommand
+    InstallRepairRollback -.进程中断.-> InstallInterrupted([内核释放锁；已存在的 journal 保留；下次命令预检恢复])
     InstallRepairCommit -.进程中断.-> InstallInterrupted
+    InstallDeleteRecovered -.进程中断.-> InstallInterrupted
     InstallJournal -.进程中断.-> InstallInterrupted
 
-    InstallCommand --> InstallResolve[解析 power 与可选 version；获取元数据和 Adapter]
-    InstallResolve -.-> InstallVersionRule[省略 version 使用云端最新；显式旧版本为降级；目标版本相同即成功]
-    InstallResolve -->|失败| InstallFail[打印失败阶段与原因] --> InstallBatchError([停止剩余 Agent；释放锁；非零退出])
-    InstallResolve -->|成功| InstallNextAgent{还有目标 Agent?}
-    InstallNextAgent -->|否| InstallOK([释放锁并正常退出])
-    InstallNextAgent -->|是| InstallReadManifest[读取该 Agent 安装清单]
+    InstallCommand --> InstallResolve[解析 power 与可选 version；获取云端元数据；省略 type 从云端元数据推断；省略 version 选云端最新；显式版本允许升级或降级]
+    InstallResolve -->|失败| InstallPreflightFail[记录解析失败；全部目标 Agent 标记 unexecuted] --> InstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> InstallBatchError([停止剩余 Agent；释放锁；非零退出])
+    InstallResolve -->|成功| InstallNextAgent{按已注册 Agent ID 升序还有目标 Agent?}
+    InstallNextAgent -->|否| InstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> InstallOK([释放锁并正常退出])
+    InstallNextAgent -->|是| InstallAdapter["Resolve(currentAgent, type) 解析当前 Agent Adapter"]
+    InstallAdapter -->|失败| InstallFail[记录当前 Agent failed；其余按确定顺序标记 unexecuted]
+    InstallAdapter -->|成功| InstallReadManifest[读取当前 Agent 安装清单]
     InstallReadManifest -->|失败| InstallFail
     InstallReadManifest -->|成功| InstallSame{已安装目标版本?}
-    InstallSame -->|是| InstallSkip[打印相同版本，幂等成功] --> InstallNextAgent
-    InstallSame -->|否| InstallCreateJournal[创建 install journal]
-    InstallCreateJournal -->|失败| InstallFail
-    InstallCreateJournal -->|成功| InstallCache[校验缓存；缺失则临时下载、校验并原子入缓存]
-    InstallCache -->|失败| InstallRollback[提交点前回滚临时文件、staging 与旧版本]
-    InstallCache -->|成功| InstallStage[在 staging 中转换并准备安装内容]
-    InstallStage -->|失败| InstallRollback
-    InstallStage -->|成功| InstallExisting{存在旧版本?}
-    InstallExisting -->|是| InstallBackup[原子移动旧版本到事务备份]
-    InstallBackup -->|失败| InstallRollback
-    InstallExisting -->|否| InstallIntent[持久化 publishing 意图]
-    InstallBackup -->|成功| InstallIntent
-    InstallIntent -->|失败| InstallRollback
-    InstallIntent -->|成功| InstallPublish[[原子 rename staging 到正式路径：提交点]]
-    InstallPublish -->|未越过提交点| InstallRollback
-    InstallPublish -->|已越过提交点| InstallRegister[补全 Adapter 注册]
-    InstallRegister -->|失败| InstallFinishCommit[完成注册、清单与清理]
-    InstallRegister -->|成功| InstallManifest[原子更新安装清单]
-    InstallManifest -->|失败| InstallFinishCommit
-    InstallManifest -->|成功| InstallCleanup[清理备份、临时文件与 journal]
-    InstallCleanup -->|失败| InstallFinishCommit
-    InstallCleanup -->|成功| InstallInstalled[打印首次安装、升级或降级成功] --> InstallNextAgent
-    InstallRollback --> InstallRollbackOK{回滚成功?}
-    InstallRollbackOK -->|是| InstallRolledBack[删除 journal；打印回滚内容] --> InstallBatchError
-    InstallRollbackOK -->|否| InstallKeepRollback[保留 journal；打印回滚失败] --> InstallBatchError
-    InstallFinishCommit --> InstallCommitOK{提交补全成功?}
-    InstallCommitOK -->|是| InstallCommitted[删除 journal；打印完成提交内容] --> InstallBatchError
-    InstallCommitOK -->|否| InstallKeepCommit[保留 journal；打印提交补全失败] --> InstallBatchError
+    InstallSame -->|是| InstallSkip[打印相同版本，记录当前 Agent completed] --> InstallNextAgent
+
+    subgraph InstallPreCommit["提交点前事务阶段（失败时回滚）"]
+        InstallSame -->|否| InstallCreateJournal[创建 install journal]
+        InstallCreateJournal -->|失败| InstallFail
+        InstallCreateJournal -->|成功| InstallCache[校验缓存；缺失则临时下载、校验并原子入缓存]
+        InstallCache -->|失败| InstallRollback[提交点前回滚临时文件、staging 与旧版本]
+        InstallCache -->|成功| InstallStage[在 staging 中转换并准备安装内容]
+        InstallStage -->|失败| InstallRollback
+        InstallStage -->|成功| InstallExisting{存在旧版本?}
+        InstallExisting -->|是| InstallBackup[原子移动旧版本到事务备份]
+        InstallBackup -->|失败| InstallRollback
+        InstallExisting -->|否| InstallIntent[持久化 publishing 意图]
+        InstallBackup -->|成功| InstallIntent
+        InstallIntent -->|失败| InstallRollback
+        InstallIntent -->|成功| InstallPublish[[原子 rename staging 到正式路径：提交点]]
+        InstallPublish -->|未越过提交点| InstallRollback
+        InstallRollback --> InstallRollbackOK{回滚成功?}
+        InstallRollbackOK -->|是| InstallRolledBack[删除 journal；打印回滚内容]
+        InstallRollbackOK -->|否| InstallKeepRollback[保留 journal；打印回滚失败]
+    end
+
+    subgraph InstallPostCommit["提交点后事务阶段（失败时完成提交）"]
+        InstallPublish -->|已越过提交点| InstallRegister[补全 Adapter 注册]
+        InstallRegister -->|失败| InstallFinishCommit[完成注册、清单与清理]
+        InstallRegister -->|成功| InstallManifest[原子更新安装清单]
+        InstallManifest -->|失败| InstallFinishCommit
+        InstallManifest -->|成功| InstallCleanup[清理备份、临时文件与 journal]
+        InstallCleanup -->|失败| InstallFinishCommit
+        InstallCleanup -->|成功| InstallInstalled[打印首次安装、升级或降级成功；记录当前 Agent completed]
+        InstallFinishCommit --> InstallCommitOK{提交补全成功?}
+        InstallCommitOK -->|是| InstallCommitted[删除 journal；打印完成提交内容]
+        InstallCommitOK -->|否| InstallKeepCommit[保留 journal；打印提交补全失败]
+    end
+
+    InstallInstalled --> InstallNextAgent
+    InstallRolledBack --> InstallFail
+    InstallKeepRollback --> InstallFail
+    InstallCommitted --> InstallFail
+    InstallKeepCommit --> InstallFail
+    InstallFail --> InstallPrintFailureSummary
+
     InstallResolve -.进程中断.-> InstallInterrupted
+    InstallAdapter -.进程中断.-> InstallInterrupted
     InstallReadManifest -.进程中断.-> InstallInterrupted
-    InstallCreateJournal -.进程中断.-> InstallInterrupted
-    InstallCache -.进程中断.-> InstallInterrupted
-    InstallStage -.进程中断.-> InstallInterrupted
-    InstallBackup -.进程中断.-> InstallInterrupted
-    InstallIntent -.进程中断.-> InstallInterrupted
-    InstallPublish -.进程中断.-> InstallInterrupted
-    InstallRegister -.进程中断.-> InstallInterrupted
-    InstallManifest -.进程中断.-> InstallInterrupted
-    InstallCleanup -.进程中断.-> InstallInterrupted
+    InstallCreateJournal -.进程中断；保留 journal.-> InstallInterrupted
+    InstallCache -.进程中断；保留 journal.-> InstallInterrupted
+    InstallStage -.进程中断；保留 journal.-> InstallInterrupted
+    InstallBackup -.进程中断；保留 journal.-> InstallInterrupted
+    InstallIntent -.进程中断；保留 journal.-> InstallInterrupted
+    InstallPublish -.进程中断；保留 journal.-> InstallInterrupted
+    InstallRegister -.进程中断；保留 journal.-> InstallInterrupted
+    InstallManifest -.进程中断；保留 journal.-> InstallInterrupted
+    InstallCleanup -.进程中断；保留 journal.-> InstallInterrupted
+    InstallRollback -.进程中断；保留 journal.-> InstallInterrupted
+    InstallRolledBack -.清理 journal 时中断；保留 journal.-> InstallInterrupted
+    InstallFinishCommit -.进程中断；保留 journal.-> InstallInterrupted
+    InstallCommitted -.清理 journal 时中断；保留 journal.-> InstallInterrupted
+
+    style InstallPreCommit fill:#fff4e5,stroke:#d97706,stroke-width:2px
+    style InstallPostCommit fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px

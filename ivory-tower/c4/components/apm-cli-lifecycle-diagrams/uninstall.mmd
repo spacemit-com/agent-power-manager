@@ -1,8 +1,8 @@
 flowchart TD
     UninstallStart([生命周期入口]) --> UninstallLock[获取全局 APM 锁]
-    UninstallLock -->|失败| UninstallLockFail[打印锁错误] --> UninstallExitError([释放锁并非零退出])
+    UninstallLock -->|失败| UninstallLockFail[打印锁错误] --> UninstallLockExitError([未获得锁；非零退出])
     UninstallLock -->|成功| UninstallJournal{存在未完成 journal?}
-    UninstallJournal -->|检查失败| UninstallJournalFail[打印 journal 检查错误] --> UninstallExitError
+    UninstallJournal -->|检查失败| UninstallJournalFail[打印 journal 检查错误] --> UninstallExitError([释放锁并非零退出])
     UninstallJournal -->|否| UninstallCommand[进入当前命令]
     UninstallJournal -->|是| UninstallDecide{根据阶段与路径状态判断提交点}
     UninstallDecide -->|提交点前| UninstallRepairRollback[回滚上次事务]
@@ -10,42 +10,66 @@ flowchart TD
     UninstallRepairRollback --> UninstallRepairResult{修复成功?}
     UninstallRepairCommit --> UninstallRepairResult
     UninstallRepairResult -->|否| UninstallRepairFail[保留 journal 并打印修复失败] --> UninstallExitError
-    UninstallRepairResult -->|是| UninstallRepairLog[打印回滚或提交及修复内容] --> UninstallCommand
-    UninstallRepairRollback -.进程中断.-> UninstallInterrupted([内核释放锁；下次命令重新预检])
+    UninstallRepairResult -->|是| UninstallDeleteRecovered[删除已恢复 journal]
+    UninstallDeleteRecovered -->|失败| UninstallDeleteRecoveredFail[保留 journal 并打印删除失败] --> UninstallExitError
+    UninstallDeleteRecovered -->|成功| UninstallRepairLog[打印回滚或提交及修复内容] --> UninstallCommand
+    UninstallRepairRollback -.进程中断.-> UninstallInterrupted([内核释放锁；已存在的 journal 保留；下次命令预检恢复])
     UninstallRepairCommit -.进程中断.-> UninstallInterrupted
+    UninstallDeleteRecovered -.进程中断.-> UninstallInterrupted
     UninstallJournal -.进程中断.-> UninstallInterrupted
 
-    UninstallCommand --> UninstallNextAgent{还有目标 Agent?}
-    UninstallNextAgent -->|否| UninstallOK([释放锁并正常退出])
-    UninstallNextAgent -->|是| UninstallFind[从该 Agent 清单按 power 与可选 type 定位记录]
-    UninstallFind -->|读取失败或类型歧义| UninstallFail[打印失败阶段与原因] --> UninstallBatchError([停止剩余 Agent；释放锁；非零退出])
-    UninstallFind -->|未安装| UninstallSkip[打印未安装、无需处理] --> UninstallNextAgent
-    UninstallFind -->|已安装| UninstallAdapter[解析 Adapter]
+    UninstallCommand --> UninstallNextAgent{按已注册 Agent ID 升序还有目标 Agent?}
+    UninstallNextAgent -->|否| UninstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> UninstallOK([释放锁并正常退出])
+    UninstallNextAgent -->|是| UninstallFind[从当前 Agent 本地清单按 power 与可选 type 定位；仅同名跨类型歧义时要求显式 type]
+    UninstallFind -->|读取失败或类型歧义| UninstallFail[记录当前 Agent failed；其余按确定顺序标记 unexecuted]
+    UninstallFind -->|未安装| UninstallSkip[打印未安装、无需处理；记录当前 Agent completed] --> UninstallNextAgent
+    UninstallFind -->|已安装| UninstallAdapter["Resolve(currentAgent, type) 解析 Adapter"]
     UninstallAdapter -->|失败| UninstallFail
-    UninstallAdapter -->|成功| UninstallCreateJournal[创建 uninstall journal]
-    UninstallCreateJournal -->|失败| UninstallFail
-    UninstallCreateJournal -->|成功| UninstallIntent[持久化 removing 意图]
-    UninstallIntent -->|失败| UninstallRollback[提交点前恢复原状态]
-    UninstallIntent -->|成功| UninstallQuarantine[[原子移动正式内容到隔离目录：提交点]]
-    UninstallQuarantine -->|未越过提交点| UninstallRollback
-    UninstallQuarantine -->|已越过提交点| UninstallUnregister[补全 Adapter 注销]
-    UninstallUnregister -->|失败| UninstallFinishCommit[完成注销、清单删除与清理]
-    UninstallUnregister -->|成功| UninstallManifest[原子删除安装清单记录]
-    UninstallManifest -->|失败| UninstallFinishCommit
-    UninstallManifest -->|成功| UninstallCleanup[清理隔离内容与 journal]
-    UninstallCleanup -->|失败| UninstallFinishCommit
-    UninstallCleanup -->|成功| UninstallRemoved[打印卸载成功] --> UninstallNextAgent
-    UninstallRollback --> UninstallRollbackOK{回滚成功?}
-    UninstallRollbackOK -->|是| UninstallRolledBack[删除 journal；打印回滚内容] --> UninstallBatchError
-    UninstallRollbackOK -->|否| UninstallKeepRollback[保留 journal；打印回滚失败] --> UninstallBatchError
-    UninstallFinishCommit --> UninstallCommitOK{提交补全成功?}
-    UninstallCommitOK -->|是| UninstallCommitted[删除 journal；打印完成提交内容] --> UninstallBatchError
-    UninstallCommitOK -->|否| UninstallKeepCommit[保留 journal；打印提交补全失败] --> UninstallBatchError
+
+    subgraph UninstallPreCommit["提交点前事务阶段（失败时回滚）"]
+        UninstallAdapter -->|成功| UninstallCreateJournal[创建 uninstall journal]
+        UninstallCreateJournal -->|失败| UninstallFail
+        UninstallCreateJournal -->|成功| UninstallIntent[持久化 removing 意图]
+        UninstallIntent -->|失败| UninstallRollback[提交点前恢复原状态]
+        UninstallIntent -->|成功| UninstallQuarantine[[原子移动正式内容到隔离目录：提交点]]
+        UninstallQuarantine -->|未越过提交点| UninstallRollback
+        UninstallRollback --> UninstallRollbackOK{回滚成功?}
+        UninstallRollbackOK -->|是| UninstallRolledBack[删除 journal；打印回滚内容]
+        UninstallRollbackOK -->|否| UninstallKeepRollback[保留 journal；打印回滚失败]
+    end
+
+    subgraph UninstallPostCommit["提交点后事务阶段（失败时完成提交）"]
+        UninstallQuarantine -->|已越过提交点| UninstallUnregister[补全 Adapter 注销]
+        UninstallUnregister -->|失败| UninstallFinishCommit[完成注销、清单删除与清理]
+        UninstallUnregister -->|成功| UninstallManifest[原子删除安装清单记录]
+        UninstallManifest -->|失败| UninstallFinishCommit
+        UninstallManifest -->|成功| UninstallCleanup[清理隔离内容与 journal]
+        UninstallCleanup -->|失败| UninstallFinishCommit
+        UninstallCleanup -->|成功| UninstallRemoved[打印卸载成功；记录当前 Agent completed]
+        UninstallFinishCommit --> UninstallCommitOK{提交补全成功?}
+        UninstallCommitOK -->|是| UninstallCommitted[删除 journal；打印完成提交内容]
+        UninstallCommitOK -->|否| UninstallKeepCommit[保留 journal；打印提交补全失败]
+    end
+
+    UninstallRemoved --> UninstallNextAgent
+    UninstallRolledBack --> UninstallFail
+    UninstallKeepRollback --> UninstallFail
+    UninstallCommitted --> UninstallFail
+    UninstallKeepCommit --> UninstallFail
+    UninstallFail --> UninstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> UninstallBatchError([停止剩余 Agent；释放锁；非零退出])
+
     UninstallFind -.进程中断.-> UninstallInterrupted
     UninstallAdapter -.进程中断.-> UninstallInterrupted
-    UninstallCreateJournal -.进程中断.-> UninstallInterrupted
-    UninstallIntent -.进程中断.-> UninstallInterrupted
-    UninstallQuarantine -.进程中断.-> UninstallInterrupted
-    UninstallUnregister -.进程中断.-> UninstallInterrupted
-    UninstallManifest -.进程中断.-> UninstallInterrupted
-    UninstallCleanup -.进程中断.-> UninstallInterrupted
+    UninstallCreateJournal -.进程中断；保留 journal.-> UninstallInterrupted
+    UninstallIntent -.进程中断；保留 journal.-> UninstallInterrupted
+    UninstallQuarantine -.进程中断；保留 journal.-> UninstallInterrupted
+    UninstallUnregister -.进程中断；保留 journal.-> UninstallInterrupted
+    UninstallManifest -.进程中断；保留 journal.-> UninstallInterrupted
+    UninstallCleanup -.进程中断；保留 journal.-> UninstallInterrupted
+    UninstallRollback -.进程中断；保留 journal.-> UninstallInterrupted
+    UninstallRolledBack -.清理 journal 时中断；保留 journal.-> UninstallInterrupted
+    UninstallFinishCommit -.进程中断；保留 journal.-> UninstallInterrupted
+    UninstallCommitted -.清理 journal 时中断；保留 journal.-> UninstallInterrupted
+
+    style UninstallPreCommit fill:#fff4e5,stroke:#d97706,stroke-width:2px
+    style UninstallPostCommit fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px

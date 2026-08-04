@@ -25,13 +25,13 @@ apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 ```
 
 - `--agent`：必填（或由本地配置提供 default-agent 作为缺省值），取值为具体 Agent ID 或字面量 `all`。
-- `--type`：可选。缺省时由云端 Power 元数据推断；仅当同名 Power 跨类别产生歧义时，APM 报错并要求显式指定 `--type`。
+- `--type`：可选，但缺省语义按命令的数据来源确定：`search` 与默认 `list` 不应用类别过滤；`install` 从云端 Power 元数据推断；`list --installed` 与 `uninstall` 从目标 Agent 的本地安装清单解析，仅当本地同名 Power 跨类别产生歧义时才报错并要求显式指定 `--type`。
 - `--help` 顶层展示可用的 Agent/Power 类别枚举。
 
-- `search` 的 keyword 必填，只查询云端资源。
-- `list` 默认列出云端资源；`--installed` 改为读取本地安装清单。
-- `install` 未指定版本时选择云端最新版；显式 `<power>=<version>` 可安装、升级或降级到指定版本；相同版本视为成功且不重复安装。
-- `uninstall` 未找到本地安装记录时视为幂等成功；同名跨类别歧义要求显式 `--type`。
+- `search` 的 keyword 必填，只查询云端资源；省略 `--type` 时不应用类别过滤。
+- `list` 默认列出云端资源，省略 `--type` 时不应用类别过滤；`--installed` 改为读取本地安装清单并按本地记录解析类别。
+- `install` 省略 `--type` 时从云端元数据推断类别；未指定版本时选择云端最新版；显式 `<power>=<version>` 可安装、升级或降级到指定版本；相同版本视为成功且不重复安装。
+- `uninstall` 从本地安装清单解析类别；未找到本地安装记录时视为幂等成功；同名跨类别歧义要求显式 `--type`。
 
 两个维度均以 flag 承载，不作为子命令命名空间；`verb`（`search`/`list`/`install`/`uninstall`）是唯一的子命令层级。
 
@@ -41,13 +41,13 @@ apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 
 - 正面影响：
   - Agent 集合可通过 Adapter 持续增添，不影响命令树结构和 `--help` 输出的稳定性，适合脚本化和自动化调用。
-  - `--type` 可选且可推断，减少常见场景下的输入负担，同时保留显式指定以消歧的能力。
-  - 四个动词共用同一套 flag 语义，`cobra` 层实现和文档维护成本低，Power 类别新增时无需扩展命令树。
+  - `--type` 保持可选，并由各命令依据云端查询、云端元数据或本地清单采用明确的缺省语义，减少常见场景下的输入负担。
+  - 四个动词共用同一套 flag 形式，命令树和 `--help` 保持稳定；生命周期层按命令数据来源实现类别过滤、推断或本地消歧。
 - 代价与风险：
   - `--agent=all` 下多 Agent 部分成功、部分失败的场景，要求错误汇总与非零退出码的实现足够清晰，避免用户误判整体命令是否成功。
 - 后续动作：
-  - 在 `internal/lifecycle` 中实现「按 Agent 汇总结果」的公共逻辑，供 `install`/`uninstall`（及未来可能受影响的动词）复用。
-  - 云端 `get` 接口需要保证返回 Power 的类别元数据，供 `--type` 缺省推断使用；若同名跨类别场景存在，需要在云端协议中明确如何返回歧义信息。
+  - 在 `internal/lifecycle` 中实现命令特定的 `--type` 缺省语义，以及「按 Agent 汇总结果」的公共逻辑，供 `install`/`uninstall`（及未来可能受影响的动词）复用。
+  - 云端 `get` 接口需要保证返回 Power 的类别元数据，供 install 在 `--type` 缺省时推断；本地清单查询需要检测同名跨类别歧义，供 `list --installed` 与 `uninstall` 要求显式消歧。
 
 ## Alternatives Considered
 

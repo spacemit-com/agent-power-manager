@@ -1,8 +1,8 @@
 flowchart TD
     SearchStart([生命周期入口]) --> SearchLock[获取全局 APM 锁]
-    SearchLock -->|失败| SearchLockFail[打印锁错误] --> SearchExitError([释放锁并非零退出])
+    SearchLock -->|失败| SearchLockFail[打印锁错误] --> SearchLockExitError([未获得锁；非零退出])
     SearchLock -->|成功| SearchJournal{存在未完成 journal?}
-    SearchJournal -->|检查失败| SearchJournalFail[打印 journal 检查错误] --> SearchExitError
+    SearchJournal -->|检查失败| SearchJournalFail[打印 journal 检查错误] --> SearchExitError([释放锁并非零退出])
     SearchJournal -->|否| SearchCommand[进入当前命令]
     SearchJournal -->|是| SearchDecide{根据阶段与路径状态判断提交点}
     SearchDecide -->|提交点前| SearchRepairRollback[回滚上次事务]
@@ -10,14 +10,17 @@ flowchart TD
     SearchRepairRollback --> SearchRepairResult{修复成功?}
     SearchRepairCommit --> SearchRepairResult
     SearchRepairResult -->|否| SearchRepairFail[保留 journal 并打印修复失败] --> SearchExitError
-    SearchRepairResult -->|是| SearchRepairLog[打印回滚或提交及修复内容] --> SearchCommand
-    SearchRepairRollback -.进程中断.-> SearchInterrupted([内核释放锁；下次命令重新预检])
+    SearchRepairResult -->|是| SearchDeleteRecovered[删除已恢复 journal]
+    SearchDeleteRecovered -->|失败| SearchDeleteRecoveredFail[保留 journal 并打印删除失败] --> SearchExitError
+    SearchDeleteRecovered -->|成功| SearchRepairLog[打印回滚或提交及修复内容] --> SearchCommand
+    SearchRepairRollback -.进程中断.-> SearchInterrupted([内核释放锁；保留 journal；下次命令重新预检])
     SearchRepairCommit -.进程中断.-> SearchInterrupted
+    SearchDeleteRecovered -.进程中断.-> SearchInterrupted
     SearchJournal -.进程中断.-> SearchInterrupted
 
-    SearchCommand --> SearchValidate[校验必填 keyword、agent 与 type]
+    SearchCommand --> SearchValidate[校验必填 keyword、agent 与可选 type]
     SearchValidate -->|失败| SearchFail[打印参数或 Agent/Adapter 错误] --> SearchExitError
-    SearchValidate -->|成功| SearchCloudSearch[调用云端列表接口并按 keyword 及 flags 过滤]
+    SearchValidate -->|成功| SearchCloudSearch[调用云端列表接口按 keyword 搜索；仅显式 type 才过滤]
     SearchCloudSearch -->|请求或解析失败| SearchFail
     SearchCloudSearch -->|成功| SearchPrint[打印匹配的云端 Power]
     SearchPrint --> SearchExitOK([释放锁并正常退出])
