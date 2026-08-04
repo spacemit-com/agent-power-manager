@@ -1,6 +1,6 @@
 // 由 containers/apm.dsl 的 !include 引用；本文件内容处于 CLI Binary 容器内。
 
-cliEntry = component "CLI Entry" "cobra 命令路由，解析 --agent/--type/name 并触发对应生命周期用例。" "Go (cobra)" {
+cliEntry = component "CLI Entry" "cobra 命令路由，解析 keyword/power/version、--agent/--type/--installed 并触发对应生命周期用例。" "Go (cobra)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cli-entry.mmd"
     }
@@ -8,6 +8,10 @@ cliEntry = component "CLI Entry" "cobra 命令路由，解析 --agent/--type/nam
 lifecycle = component "Core Lifecycle" "定义 Power 的发现、安装、卸载、打印、配置读写和版本管理用例。" "Go" {
     properties {
         "classDiagram" "apm-cli-diagrams/core-lifecycle.mmd"
+        "searchLifecycle" "apm-cli-lifecycle-diagrams/search.mmd"
+        "listLifecycle" "apm-cli-lifecycle-diagrams/list.mmd"
+        "installLifecycle" "apm-cli-lifecycle-diagrams/install.mmd"
+        "uninstallLifecycle" "apm-cli-lifecycle-diagrams/uninstall.mmd"
     }
 }
 adapterRegistry = component "Adapter Registry" "承接不同 Power 类型和目标 Agent 的格式转换、安装位置、注册及配置映射差异。" "Go" {
