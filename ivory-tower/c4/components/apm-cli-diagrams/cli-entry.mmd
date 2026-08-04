@@ -1,9 +1,18 @@
 classDiagram
-    note for Flags "解析后的命令行参数：--agent（含 all）/--type/name"
+    note for Flags "install 解析 <power>[=<version>]；search 必须提供 Keyword；list 使用 Installed"
     class Flags {
         +Agent string
         +Type string
         +Name string
+        +Version string
+        +Keyword string
+        +Installed bool
+    }
+
+    class ListResult {
+        +CloudPowers []PowerRef
+        +InstalledByAgent map~AgentID, []InstalledPower~
+        +Failures map~AgentID, error~
     }
 
     note for CLIEntry "cobra 命令树根：注册 search/list/install/uninstall 子命令并路由"
@@ -17,8 +26,9 @@ classDiagram
         +Search(Flags) ([]PowerRef, error)
         +Install(Flags) (Result, error)
         +Uninstall(Flags) (Result, error)
-        +List(Flags) ([]InstalledPower, error)
+        +List(Flags) (ListResult, error)
     }
 
     CLIEntry --> Flags : parses
     CLIEntry --> Lifecycle : invokes
+    Lifecycle --> ListResult : returns

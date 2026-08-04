@@ -5,10 +5,10 @@ classDiagram
         +Search(Flags) ([]PowerRef, error)
         +Install(Flags) (Result, error)
         +Uninstall(Flags) (Result, error)
-        +List(Flags) ([]InstalledPower, error)
+        +List(Flags) (ListResult, error)
     }
 
-    note for lifecycleService "用例编排者：install/uninstall 先取全局锁再执行 取云端元数据 → 缓存 → Adapter 安装 → 写清单；--agent=all 时锁内逐 Agent 独立事务并汇总结果"
+    note for lifecycleService "四个命令先取全局锁并修复唯一活动 journal；install/uninstall 以原子文件操作为提交点，--agent=all 串行且失败即停"
     class lifecycleService {
         +Search(...)
         +Install(...)
@@ -29,7 +29,14 @@ classDiagram
         +Write(AgentID, Manifest) error
     }
 
-    note for Locker "全局 APM 文件锁"
+    class JournalStore {
+        <<interface>>
+        +Inspect() (Journal, error)
+        +Write(Journal) error
+        +Delete() error
+    }
+
+    note for Locker "四个生命周期命令从启动预检到结束全程持有的全局 APM 文件锁"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)
@@ -51,6 +58,7 @@ classDiagram
     lifecycleService ..|> Lifecycle
     lifecycleService --> AdapterRegistry
     lifecycleService --> ConfigStore
+    lifecycleService --> JournalStore
     lifecycleService --> Locker
     lifecycleService --> PowerCache
     lifecycleService --> CloudClient
