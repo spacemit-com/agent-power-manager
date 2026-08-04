@@ -1,6 +1,9 @@
 classDiagram
     note for AdapterRegistry "对外唯一入口，按 Agent × Power 类别两个维度解析适配器（对应 --agent/--type）"
-    class AdapterRegistry { <<interface>> +Resolve(AgentID, PowerType) (Adapter, error) }
+    class AdapterRegistry {
+        <<interface>>
+        +Resolve(AgentID, PowerType) (Adapter, error)
+    }
 
     note for Adapter "单个 Agent × Power 类别组合的适配契约：安装位置、格式转换、注册配置"
     class Adapter {

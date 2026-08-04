@@ -1,6 +1,10 @@
 classDiagram
     note for CloudClient "云端客户端接口：List 搜索资源列表，Get 取单个 Power 元数据"
-    class CloudClient { <<interface>> +List(Query) ([]PowerRef, error) +Get(PowerRef) (PowerMeta, error) }
+    class CloudClient {
+        <<interface>>
+        +List(Query) ([]PowerRef, error)
+        +Get(PowerRef) (PowerMeta, error)
+    }
 
     note for PowerRef "Power 标识：名称 + 类别（skill/plugin/mcp），全局共享的引用类型"
     class PowerRef {

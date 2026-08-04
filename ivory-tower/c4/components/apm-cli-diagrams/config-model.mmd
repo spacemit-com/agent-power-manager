@@ -1,6 +1,10 @@
 classDiagram
     note for ConfigStore "清单读写接口：每个 Agent 一份独立清单"
-    class ConfigStore { <<interface>> +Read(AgentID) (Manifest, error) +Write(AgentID, Manifest) error }
+    class ConfigStore {
+        <<interface>>
+        +Read(AgentID) (Manifest, error)
+        +Write(AgentID, Manifest) error
+    }
 
     note for Manifest "单个 Agent 的已安装 Power 清单，按 Power 类别分类"
     class Manifest {

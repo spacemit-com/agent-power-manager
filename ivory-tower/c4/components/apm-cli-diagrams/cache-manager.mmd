@@ -1,6 +1,10 @@
 classDiagram
     note for PowerCache "缓存接口：Fetch 未命中时由调用方下载后 Put"
-    class PowerCache { <<interface>> +Fetch(PowerRef) (Content, error) +Put(PowerRef, data []byte) error }
+    class PowerCache {
+        <<interface>>
+        +Fetch(PowerRef) (Content, error)
+        +Put(PowerRef, data []byte) error
+    }
 
     note for Content "缓存条目：本地路径与校验和，供安装与完整性校验使用"
     class Content {
