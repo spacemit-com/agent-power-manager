@@ -1,0 +1,26 @@
+classDiagram
+    note for ConfigStore "清单读写接口：每个 Agent 一份独立清单"
+    class ConfigStore { <<interface>> +Read(AgentID) (Manifest, error) +Write(AgentID, Manifest) error }
+
+    note for Manifest "单个 Agent 的已安装 Power 清单，按 Power 类别分类"
+    class Manifest {
+        +Agent AgentID
+        +Powers []InstalledPower
+    }
+
+    note for InstalledPower "一条安装记录：Power 标识、版本与安装时间"
+    class InstalledPower {
+        +Ref PowerRef
+        +Version string
+        +InstalledAt time.Time
+    }
+
+    note for jsonConfigStore "JSON 文件实现：清单落盘为各 Agent 独立的 JSON 文件"
+    class jsonConfigStore {
+        +Read(AgentID) (Manifest, error)
+        +Write(AgentID, Manifest) error
+    }
+
+    jsonConfigStore ..|> ConfigStore
+    ConfigStore --> Manifest : reads/writes
+    Manifest --> InstalledPower : contains

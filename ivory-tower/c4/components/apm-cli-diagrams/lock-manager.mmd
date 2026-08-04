@@ -1,0 +1,14 @@
+classDiagram
+    note for Locker "锁接口：按 Agent 粒度加锁，防重入"
+    class Locker { <<interface>> +Acquire(AgentID) (Unlock, error) }
+
+    note for Unlock "锁句柄：持有者负责 Release；进程崩溃时内核自动释放"
+    class Unlock { <<interface>> +Release() error }
+
+    note for flockLocker "flock(2) 实现：锁文件位于各 Agent 的状态目录"
+    class flockLocker {
+        +Acquire(AgentID) (Unlock, error)
+    }
+
+    flockLocker ..|> Locker
+    Locker --> Unlock : returns

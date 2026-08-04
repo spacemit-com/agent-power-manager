@@ -1,0 +1,39 @@
+classDiagram
+    note for Lifecycle "生命周期用例接口：CLI 的四个动词一一对应"
+    class Lifecycle {
+        <<interface>>
+        +Search(Flags) ([]PowerRef, error)
+        +Install(Flags) (Result, error)
+        +Uninstall(Flags) (Result, error)
+        +List(Flags) ([]InstalledPower, error)
+    }
+
+    note for lifecycleService "用例编排者：加锁 → 取云端元数据 → 缓存 → Adapter 安装 → 写清单；--agent=all 时逐 Agent 独立事务并汇总结果"
+    class lifecycleService {
+        +Search(...)
+        +Install(...)
+        +Uninstall(...)
+        +List(...)
+    }
+
+    note for AdapterRegistry "按 Agent × Power 类别解析适配实现"
+    class AdapterRegistry { <<interface>> +Resolve(AgentID, PowerType) (Adapter, error) }
+
+    note for ConfigStore "各 Agent 独立的已安装 Power 清单读写"
+    class ConfigStore { <<interface>> +Read(AgentID) (Manifest, error) +Write(AgentID, Manifest) error }
+
+    note for Locker "flock 文件锁，防重入"
+    class Locker { <<interface>> +Acquire(AgentID) (Unlock, error) }
+
+    note for PowerCache "下载内容的本地缓存"
+    class PowerCache { <<interface>> +Fetch(PowerRef) (Content, error) }
+
+    note for CloudClient "云端 Power 资源的 list/get"
+    class CloudClient { <<interface>> +List(Query) ([]PowerRef, error) +Get(PowerRef) (PowerMeta, error) }
+
+    lifecycleService ..|> Lifecycle
+    lifecycleService --> AdapterRegistry
+    lifecycleService --> ConfigStore
+    lifecycleService --> Locker
+    lifecycleService --> PowerCache
+    lifecycleService --> CloudClient

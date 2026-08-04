@@ -1,0 +1,48 @@
+classDiagram
+    note for AdapterRegistry "对外唯一入口，按 Agent × Power 类别两个维度解析适配器（对应 --agent/--type）"
+    class AdapterRegistry { <<interface>> +Resolve(AgentID, PowerType) (Adapter, error) }
+
+    note for Adapter "单个 Agent × Power 类别组合的适配契约：安装位置、格式转换、注册配置"
+    class Adapter {
+        <<interface>>
+        +InstallPath(AgentID) string
+        +Install(Power, dest string) error
+        +Uninstall(Power) error
+        +Register(Power) error
+    }
+
+    note for adapterRegistry "编译期注册表：启动时 Add 注册所有内置 Adapter，运行时 Resolve 查表"
+    class adapterRegistry {
+        +Resolve(AgentID, PowerType) (Adapter, error)
+        +Add(AgentID, Adapter)
+    }
+
+    note for hermesAdapter "适配 Hermes：按其目录约定与注册文件写入 Power"
+    class hermesAdapter {
+        +InstallPath(AgentID) string
+        +Install(Power, dest string) error
+        +Uninstall(Power) error
+        +Register(Power) error
+    }
+
+    note for codexAdapter "适配 Codex：按其目录约定与配置格式写入 Power"
+    class codexAdapter {
+        +InstallPath(AgentID) string
+        +Install(Power, dest string) error
+        +Uninstall(Power) error
+        +Register(Power) error
+    }
+
+    note for claudeCodeAdapter "适配 Claude Code：skills/plugins 目录与 MCP JSON 配置"
+    class claudeCodeAdapter {
+        +InstallPath(AgentID) string
+        +Install(Power, dest string) error
+        +Uninstall(Power) error
+        +Register(Power) error
+    }
+
+    adapterRegistry ..|> AdapterRegistry
+    adapterRegistry --> Adapter : registers
+    hermesAdapter ..|> Adapter
+    codexAdapter ..|> Adapter
+    claudeCodeAdapter ..|> Adapter

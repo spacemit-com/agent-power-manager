@@ -1,0 +1,24 @@
+classDiagram
+    note for Flags "解析后的命令行参数：--agent（含 all）/--type/name"
+    class Flags {
+        +Agent string
+        +Type string
+        +Name string
+    }
+
+    note for CLIEntry "cobra 命令树根：注册 search/list/install/uninstall 子命令并路由"
+    class CLIEntry {
+        +Execute(args []string) error
+    }
+
+    note for Lifecycle "生命周期用例接口，CLI 入口的唯一下游依赖"
+    class Lifecycle {
+        <<interface>>
+        +Search(Flags) ([]PowerRef, error)
+        +Install(Flags) (Result, error)
+        +Uninstall(Flags) (Result, error)
+        +List(Flags) ([]InstalledPower, error)
+    }
+
+    CLIEntry --> Flags : parses
+    CLIEntry --> Lifecycle : invokes

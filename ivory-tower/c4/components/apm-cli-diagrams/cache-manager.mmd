@@ -1,0 +1,18 @@
+classDiagram
+    note for PowerCache "缓存接口：Fetch 未命中时由调用方下载后 Put"
+    class PowerCache { <<interface>> +Fetch(PowerRef) (Content, error) +Put(PowerRef, data []byte) error }
+
+    note for Content "缓存条目：本地路径与校验和，供安装与完整性校验使用"
+    class Content {
+        +Path string
+        +Checksum string
+    }
+
+    note for contentAddressedCache "内容寻址实现：按 name@version 或 sha256 分桶存储，天然去重"
+    class contentAddressedCache {
+        +Fetch(PowerRef) (Content, error)
+        +Put(PowerRef, []byte) error
+    }
+
+    contentAddressedCache ..|> PowerCache
+    PowerCache --> Content : returns
