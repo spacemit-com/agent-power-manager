@@ -12,12 +12,15 @@
 
 - `baea8bc docs(feature): define CLI foundation scope`
 - `97a738b chore: initialize APM Go module`
+- `c5aeac3 docs: record module initialization`
+- `64facaf docs: defer changelog entry`
 - `c563618 feat: add unified logging`
 - `bbe794c feat: add parse-only CLI`
 - `cb4b008 fix: route CLI help and errors correctly`
 - `6d4902f feat: add global APM file lock`
 - `7eaa75c chore: scaffold lifecycle transactions`
 - `ec3ec26 chore: scaffold APM components`
+- `609e72b fix: reset CLI verbose logging state`
 
 解决方案或完成结果：
 
