@@ -58,10 +58,10 @@ func bindCommonFlags(command *cobra.Command, flags *Flags) {
 
 func logParsedCommand(command *cobra.Command, logger *logging.Logger, flags Flags, args []string) {
 	verbose, _ := command.Flags().GetBool("verbose")
+	logger.SetVerbose(verbose)
 	if !verbose {
 		return
 	}
-	logger.SetVerbose(true)
 	logger.Verbose(
 		"command parsed",
 		slog.String("command", command.Name()),

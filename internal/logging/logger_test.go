@@ -4,12 +4,26 @@ import (
 	"bytes"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
 	"apm/internal/domain"
 	"apm/internal/logging"
 )
+
+func TestNewDefaultUsesProcessWriters(t *testing.T) {
+	logger := logging.NewDefault(false)
+	if logger == nil {
+		t.Fatal("NewDefault returned nil")
+	}
+	if logger.Stdout() != os.Stdout {
+		t.Fatalf("Stdout() = %v, want os.Stdout", logger.Stdout())
+	}
+	if logger.Stderr() != os.Stderr {
+		t.Fatalf("Stderr() = %v, want os.Stderr", logger.Stderr())
+	}
+}
 
 // TestRoutesAndVerbose catches regressions that route normal output or diagnostics
 // to the wrong stream, or emit verbose diagnostics while verbose mode is disabled.

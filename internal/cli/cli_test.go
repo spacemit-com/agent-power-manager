@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -20,10 +21,19 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 		{name: "list", args: []string{"list", "--agent=codex", "--installed"}},
 		{name: "install", args: []string{"install", "demo=1.2.3", "--agent=codex", "--type=skill"}},
 		{name: "uninstall", args: []string{"uninstall", "demo", "--agent=codex"}},
+		{name: "plugin type", args: []string{"search", "foo", "--agent=all", "--type=plugin"}},
+		{name: "mcp type", args: []string{"list", "--agent=codex", "--type=mcp"}},
 		{name: "missing agent", args: []string{"search", "foo"}, wantErr: true, wantMessage: "--agent is required"},
+		{name: "whitespace agent", args: []string{"search", "foo", "--agent= \t "}, wantErr: true, wantMessage: "--agent is required"},
 		{name: "invalid type", args: []string{"list", "--agent=all", "--type=other"}, wantErr: true, wantMessage: "invalid --type \"other\""},
+		{name: "whitespace keyword", args: []string{"search", " \t ", "--agent=all"}, wantErr: true, wantMessage: "keyword must not be empty"},
+		{name: "empty install name", args: []string{"install", "", "--agent=all"}, wantErr: true, wantMessage: "power name must not be empty"},
 		{name: "empty version", args: []string{"install", "demo=", "--agent=all"}, wantErr: true, wantMessage: "power version must not be empty"},
-		{name: "extra arg", args: []string{"uninstall", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
+		{name: "whitespace uninstall name", args: []string{"uninstall", " \t ", "--agent=all"}, wantErr: true, wantMessage: "power name must not be empty"},
+		{name: "extra search arg", args: []string{"search", "foo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
+		{name: "extra list arg", args: []string{"list", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 0 arg(s), received 1"},
+		{name: "extra install arg", args: []string{"install", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
+		{name: "extra uninstall arg", args: []string{"uninstall", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
 	}
 
 	for _, tt := range tests {
@@ -129,21 +139,24 @@ func TestCLIVerboseWritesOnlyDiagnosticsToStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	entry := cli.New(logging.New(&stdout, &stderr, false))
 
-	if err := entry.Execute([]string{"search", "foo", "--agent=all", "--verbose"}); err != nil {
+	if err := entry.Execute([]string{"search", "foo", "--agent=all", "--type=plugin", "--verbose"}); err != nil {
 		t.Fatalf("Execute(verbose search) error = %v", err)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("verbose stdout = %q, want empty", stdout.String())
 	}
 	got := stderr.String()
-	if !strings.Contains(got, "command=search") || !strings.Contains(got, "agent=all") {
-		t.Fatalf("verbose stderr = %q, want command and agent attributes", got)
+	for _, attribute := range []string{"command=search", "agent=all", "type=plugin", "args=[foo]"} {
+		if !strings.Contains(got, attribute) {
+			t.Fatalf("verbose stderr = %q, want attribute %q", got, attribute)
+		}
 	}
 }
 
 func TestCLIRepeatedExecutionDoesNotLeakFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	entry := cli.New(logging.New(&stdout, &stderr, false))
+	logger := logging.New(&stdout, &stderr, false)
+	entry := cli.New(logger)
 
 	if err := entry.Execute([]string{"search", "first", "--agent=all", "--verbose"}); err != nil {
 		t.Fatalf("first Execute error = %v", err)
@@ -156,6 +169,10 @@ func TestCLIRepeatedExecutionDoesNotLeakFlags(t *testing.T) {
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("second Execute output = stdout %q, stderr %q; want no leaked verbose state", stdout.String(), stderr.String())
+	}
+	logger.Verbose("after non-verbose execution", slog.String("command", "search"))
+	if stderr.Len() != 0 {
+		t.Fatalf("logger stderr after second Execute = %q, want verbose disabled", stderr.String())
 	}
 
 	if err := entry.Execute([]string{"search", "third"}); err == nil {
