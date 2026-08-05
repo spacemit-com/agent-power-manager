@@ -11,18 +11,19 @@ import (
 
 func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    []string
-		wantErr bool
+		name        string
+		args        []string
+		wantErr     bool
+		wantMessage string
 	}{
 		{name: "search", args: []string{"search", "foo", "--agent=all"}},
 		{name: "list", args: []string{"list", "--agent=codex", "--installed"}},
 		{name: "install", args: []string{"install", "demo=1.2.3", "--agent=codex", "--type=skill"}},
 		{name: "uninstall", args: []string{"uninstall", "demo", "--agent=codex"}},
-		{name: "missing agent", args: []string{"search", "foo"}, wantErr: true},
-		{name: "invalid type", args: []string{"list", "--agent=all", "--type=other"}, wantErr: true},
-		{name: "empty version", args: []string{"install", "demo=", "--agent=all"}, wantErr: true},
-		{name: "extra arg", args: []string{"uninstall", "demo", "extra", "--agent=all"}, wantErr: true},
+		{name: "missing agent", args: []string{"search", "foo"}, wantErr: true, wantMessage: "--agent is required"},
+		{name: "invalid type", args: []string{"list", "--agent=all", "--type=other"}, wantErr: true, wantMessage: "invalid --type \"other\""},
+		{name: "empty version", args: []string{"install", "demo=", "--agent=all"}, wantErr: true, wantMessage: "power version must not be empty"},
+		{name: "extra arg", args: []string{"uninstall", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
 	}
 
 	for _, tt := range tests {
@@ -43,8 +44,65 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 			if stdout.Len() != 0 {
 				t.Fatalf("invalid command stdout = %q, want empty", stdout.String())
 			}
-			if got := stderr.String(); got == "" || !strings.Contains(got, "Usage:") {
-				t.Fatalf("invalid command stderr = %q, want error and Cobra usage", got)
+			if got := stderr.String(); !strings.Contains(got, tt.wantMessage) || !strings.Contains(got, "Usage:") {
+				t.Fatalf("invalid command stderr = %q, want error %q and Cobra usage", got, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestCLIHelpFormsWriteGeneratedHelpToStdout(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantText string
+	}{
+		{name: "help command", args: []string{"help"}, wantText: "Available Commands:"},
+		{name: "help subcommand", args: []string{"help", "search"}, wantText: "apm search <keyword>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			entry := cli.New(logging.New(&stdout, &stderr, false))
+
+			if err := entry.Execute(tt.args); err != nil {
+				t.Fatalf("Execute(%q) error = %v", tt.args, err)
+			}
+			if !strings.Contains(stdout.String(), tt.wantText) {
+				t.Fatalf("help stdout = %q, want %q", stdout.String(), tt.wantText)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("help stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+func TestCLIExecutionErrorsWriteErrorAndGeneratedUsageToStderr(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantText string
+	}{
+		{name: "unknown command", args: []string{"unknown"}, wantText: "unknown command \"unknown\""},
+		{name: "invalid flag before help", args: []string{"--bad", "--help"}, wantText: "unknown flag: --bad"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			entry := cli.New(logging.New(&stdout, &stderr, false))
+
+			if err := entry.Execute(tt.args); err == nil {
+				t.Fatalf("Execute(%q) error = nil, want error", tt.args)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("error stdout = %q, want empty", stdout.String())
+			}
+			got := stderr.String()
+			if !strings.Contains(got, tt.wantText) || !strings.Contains(got, "Usage:") {
+				t.Fatalf("error stderr = %q, want %q and Cobra usage", got, tt.wantText)
 			}
 		})
 	}

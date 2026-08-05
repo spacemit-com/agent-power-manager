@@ -25,17 +25,20 @@ func (entry *CLIEntry) Execute(args []string) error {
 	// Cobra 的 flag value 会保留上次解析结果；每次重建命令树以隔离重复执行。
 	entry.root = newRootCommand(entry.logger)
 	entry.root.SetArgs(args)
-	if !requestsHelp(args) {
-		// Cobra 的错误 usage 使用 command output；非 help 执行将其路由到 stderr。
-		entry.root.SetOut(entry.logger.Stderr())
+	executed, err := entry.root.ExecuteC()
+	if err != nil {
+		executed.PrintErrln(executed.ErrPrefix(), err.Error())
+		executed.PrintErr(executed.UsageString())
 	}
-	return entry.root.Execute()
+	return err
 }
 
 func newRootCommand(logger *logging.Logger) *cobra.Command {
 	root := &cobra.Command{
-		Use:   "apm",
-		Short: "Agent Power Manager",
+		Use:           "apm",
+		Short:         "Agent Power Manager",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 	root.SetOut(logger.Stdout())
 	root.SetErr(logger.Stderr())
@@ -48,16 +51,6 @@ func newRootCommand(logger *logging.Logger) *cobra.Command {
 	)
 	return root
 }
-
-func requestsHelp(args []string) bool {
-	for _, arg := range args {
-		if arg == "--help" || arg == "-h" {
-			return true
-		}
-	}
-	return false
-}
-
 func bindCommonFlags(command *cobra.Command, flags *Flags) {
 	command.Flags().StringVar(&flags.Agent, "agent", "", "target agent ID or all")
 	command.Flags().StringVar(&flags.Type, "type", "", "power type: skill, plugin, or mcp")
