@@ -30,7 +30,7 @@ APM 使用 **Go** 实现，作为覆盖 CLI、Adapter、生命周期与配置治
 | 云端 API 客户端 | 标准库 `net/http` | 仅需 `list`/`get` 两个接口，不引入重框架 |
 | 下载缓存 | 内容寻址目录（按 name@version 或 sha256 分桶） | 遵循 XDG 缓存目录约定，便于去重与清理 |
 | 中断恢复 | staging 目录 + 原子 rename + 操作 journal | 启动时检测残留 staging/journal 即可识别并纠正 |
-| 日志/输出 | 标准库 `log/slog` | 用户可见输出与内部日志分离，满足失败可打印要求 |
+| 日志/输出 | 基于标准库 `log/slog` 的统一 `logging` 模块 | 所有打印统一管理；默认输出稳定的 CLI 信息，内部诊断通过全局 `--verbose` 开启 |
 | 测试 | 标准 `testing` + `rogpeppe/go-internal/testscript` | testscript 便于端到端验证 CLI 的装/断/修复行为 |
 | 版本管理 | `Masterminds/semver` | 为后续版本选择与兼容性规则预留 |
 
@@ -38,17 +38,93 @@ APM 使用 **Go** 实现，作为覆盖 CLI、Adapter、生命周期与配置治
 
 ```text
 apm/
-  cmd/apm/            # CLI 入口，cobra 命令注册
-  internal/
-    lifecycle/        # 发现、安装、卸载、配置读写、版本管理
-    adapter/           # 各目标 Agent 的 Adapter 实现与注册表
-    config/            # 各 Agent 的安装清单模型与读写
-    lock/              # 文件锁封装
-    cache/              # 下载缓存管理
-    cloud/              # 云端 Power 资源 list/get 客户端
-  ivory-tower/        # 设计和开发文档
-  go.mod
+├── cmd/
+│   └── apm/
+│       └── main.go                 # 组装依赖、注册内置 Adapter 并启动 CLI
+├── internal/
+│   ├── cli/
+│   │   ├── root.go                 # Cobra 根命令和全局 --verbose 参数
+│   │   ├── flags.go                # --agent、--type、--installed 等公共参数
+│   │   ├── search.go               # search 子命令及参数校验
+│   │   ├── list.go                 # list 子命令及参数校验
+│   │   ├── install.go              # install 子命令及 power[=version] 解析
+│   │   └── uninstall.go            # uninstall 子命令及参数校验
+│   ├── lifecycle/
+│   │   ├── service.go              # Lifecycle 接口及服务实现
+│   │   ├── dependencies.go         # 生命周期依赖接口集合
+│   │   ├── preflight.go            # 获取全局锁并触发公共 journal 预检
+│   │   ├── batch.go                # --agent=all 的排序、fail-fast 与结果汇总
+│   │   ├── search.go               # search 用例编排
+│   │   ├── list.go                 # 云端列表和本地安装清单用例编排
+│   │   ├── install.go              # 版本解析、幂等判断及安装事务编排
+│   │   └── uninstall.go            # 本地消歧、幂等判断及卸载事务编排
+│   ├── transaction/
+│   │   ├── journal.go              # journal 模型、操作类型和事务阶段
+│   │   ├── journal_store.go        # 唯一活动 journal 的原子读写和删除
+│   │   ├── recovery.go             # 判断提交点并执行回滚或完成提交
+│   │   ├── install.go              # staging、backup、publish 和清理
+│   │   ├── uninstall.go            # removing、quarantine 和清理
+│   │   └── path_state.go           # 检查事务路径状态，覆盖原子操作中断窗口
+│   ├── adapter/
+│   │   ├── adapter.go              # Adapter 接口及共享类型
+│   │   ├── registry.go             # Agent × Power 类型的编译期注册表
+│   │   ├── codex/
+│   │   │   ├── adapter.go          # Codex Adapter 实现
+│   │   │   ├── paths.go            # Codex Power 安装位置
+│   │   │   └── transform.go        # Codex Power 格式转换
+│   │   ├── claude_code/
+│   │   │   ├── adapter.go          # Claude Code Adapter 实现
+│   │   │   ├── paths.go            # Claude Code Power 安装位置
+│   │   │   └── transform.go        # Claude Code Power 格式转换
+│   │   └── hermes/
+│   │       ├── adapter.go          # Hermes Adapter 实现
+│   │       ├── paths.go            # Hermes Power 安装位置
+│   │       └── transform.go        # Hermes Power 格式转换
+│   ├── config/
+│   │   ├── manifest.go             # 各 Agent 的已安装 Power 清单模型
+│   │   ├── store.go                # ConfigStore 接口
+│   │   ├── json_store.go           # 每个 Agent 一份 JSON 清单的实现
+│   │   └── atomic_write.go         # 清单临时写入、同步和原子替换
+│   ├── lock/
+│   │   ├── locker.go               # Locker 和 Unlock 接口
+│   │   └── flock.go                # 全局 APM flock 实现
+│   ├── cache/
+│   │   ├── cache.go                # PowerCache 接口及缓存条目
+│   │   └── content_addressed.go    # 内容寻址缓存实现
+│   ├── cloud/
+│   │   ├── client.go               # CloudClient 接口
+│   │   ├── http_client.go          # list/get 的 net/http 实现
+│   │   └── model.go                # 查询参数和云端响应模型
+│   ├── logging/
+│   │   ├── logger.go               # 统一输出器及 --verbose 配置
+│   │   ├── output.go               # 稳定的 CLI 正常、恢复、警告和错误输出
+│   │   ├── verbose.go              # verbose 诊断日志
+│   │   └── fields.go               # Agent、Power、版本、阶段等结构化字段
+│   ├── domain/
+│   │   ├── agent.go                # AgentID 及 all 目标语义
+│   │   ├── power.go                # PowerRef、PowerType 和 InstalledPower
+│   │   └── result.go               # completed、failed、unexecuted 等结果
+│   ├── version/
+│   │   └── selector.go             # 最新版、指定版本及版本比较规则
+│   └── paths/
+│       └── paths.go                # 锁、journal、清单、缓存及事务目录约定
+├── ivory-tower/                    # 架构、ADR、C4 和 lifecycle 设计文档
+├── go.mod
+└── go.sum
 ```
+
+采用该结构的理由：
+
+1. `cmd/apm/main.go` 仅负责依赖装配和进程启动，Cobra 命令定义放入 `internal/cli`，避免入口文件同时承担业务编排。
+2. `lifecycle` 与四条命令的 lifecycle 流程对应，负责用例顺序、公共预检和多 Agent 调度；文件按命令拆分但保持在同一 package，便于共享锁内状态和结果模型。
+3. `transaction` 单独承载 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 的 journal、提交点、回滚和完成提交规则。当前命令在提交点后的清单更新或清理失败时保留 journal 并退出，由下一条命令的 `recovery.go` 完成遗留事务，不在当前命令中重复更新清单或清理。
+4. `transaction/path_state.go` 集中处理“原子文件操作已经完成、journal 阶段尚未更新”的中断窗口，使正常事务与恢复事务采用相同的路径状态判断。
+5. `adapter` 展开首批 `codex`、`claude_code`、`hermes` 内置实现。Adapter 只负责目标安装位置与格式转换，不负责 Agent 注册、运行时感知或更新通知；新增 Agent 遵循 `internal/adapter/<agent>/` 约定。
+6. `config` 独立管理各 Agent 的 JSON 安装清单。`atomic_write.go` 保证清单不会暴露半写入状态，事务完成与 journal 删除顺序仍由 `transaction` 控制。
+7. 所有用户输出和内部诊断统一经过 `logging`，其他 package 不直接调用 `fmt.Print*` 或自行创建 logger。稳定的资源数据和成功结果写入 `stdout`；journal 恢复过程、警告和失败写入 `stderr`；内部执行步骤、HTTP 请求细节和事务路径状态仅在全局 `--verbose` 开启后写入 `stderr`。默认 CLI 输出格式保持稳定，便于用户阅读和脚本处理。
+8. `domain` 保存跨组件共享的 Agent、Power 和执行结果类型，避免相同概念分别在 CLI、Cloud、Config 和 Lifecycle 中重复定义。
+9. `paths` 是所有本地状态路径的唯一来源，保证 lock、journal、manifest、cache、staging、backup 和 quarantine 在正常执行与恢复时使用同一套位置规则。
+10. 目录树只描述生产代码和主要文件，不展开测试布局，也不增加 APM 职责之外的 Agent runtime、daemon 或动态插件机制。
 
 ## Consequences
 
@@ -58,11 +134,14 @@ apm/
   - Helm、krew、gh CLI 等同类「发现-下载-缓存-安装-记录」工具均为 Go 实现，锁、原子安装、状态恢复等模式有成熟先例可循。
   - `flock` + staging/rename + journal 的组合可以直接满足「任意阶段中断都可识别并纠正」与「不支持并发、通过锁防重入」的约束。
   - Adapter 可用 Go interface + 编译期注册表实现，不需要引入运行时插件机制。
+  - 生命周期编排与事务恢复分包，journal 不变量和提交点规则具有明确的实现边界。
+  - 所有打印由统一 logging 模块管理，默认 CLI 输出保持稳定，同时可通过 `--verbose` 获取诊断信息。
 - 代价与风险：
   - 团队若无 Go 背景，需要一定学习成本。
   - 若未来需要支持第三方在不重新编译 APM 的情况下动态注册 Adapter，当前「编译期注册表」方案需要重新评估（例如引入插件机制或子进程协议）。
 - 后续动作：
   - 在 `apm` 工程根目录下按上述目录结构初始化 Go module。
+  - CLI 和各内部模块接收同一个 logging 实例，禁止绕过 logging 直接打印；在根命令中配置全局 `--verbose`。
   - 后续 feature 设计（CLI 命令与 Power 类别交织、配置格式、冲突处理等）在此技术栈约束下展开。
 
 ## Alternatives Considered
