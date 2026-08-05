@@ -4,7 +4,7 @@ flowchart TD
 
     InstallCommand --> InstallResolve[解析 power 与可选 version；获取云端元数据；省略 type 从云端元数据推断；省略 version 选云端最新；显式版本允许升级或降级]
     InstallResolve -->|失败| InstallPreflightFail[记录解析失败；全部目标 Agent 标记 unexecuted] --> InstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> InstallBatchError([停止剩余 Agent；释放锁；非零退出])
-    InstallResolve -->|成功| InstallNextAgent{按已注册 Agent ID 升序还有目标 Agent?}
+    InstallResolve -->|成功| InstallNextAgent{按已支持 Agent ID 升序还有目标 Agent?}
     InstallNextAgent -->|否| InstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> InstallOK([释放锁并正常退出])
     InstallNextAgent -->|是| InstallAdapter["Resolve(currentAgent, type) 解析当前 Agent Adapter"]
     InstallAdapter -->|失败| InstallFail[记录当前 Agent failed；其余按确定顺序标记 unexecuted]
@@ -34,10 +34,8 @@ flowchart TD
     end
 
     subgraph InstallPostCommit["提交点后事务阶段（失败时完成提交）"]
-        InstallPublish -->|已越过提交点| InstallRegister[补全 Adapter 注册]
-        InstallRegister -->|失败| InstallFinishCommit[完成注册、清单与清理]
-        InstallRegister -->|成功| InstallManifest[原子更新安装清单]
-        InstallManifest -->|失败| InstallFinishCommit
+        InstallPublish -->|已越过提交点| InstallManifest[原子更新安装清单]
+        InstallManifest -->|失败| InstallFinishCommit[完成清单更新与清理]
         InstallManifest -->|成功| InstallCleanup[清理备份、临时文件与 journal]
         InstallCleanup -->|失败| InstallFinishCommit
         InstallCleanup -->|成功| InstallInstalled[打印首次安装、升级或降级成功；记录当前 Agent completed]
@@ -62,7 +60,6 @@ flowchart TD
     InstallBackup -.进程中断；保留 journal.-> InstallInterrupted
     InstallIntent -.进程中断；保留 journal.-> InstallInterrupted
     InstallPublish -.进程中断；保留 journal.-> InstallInterrupted
-    InstallRegister -.进程中断；保留 journal.-> InstallInterrupted
     InstallManifest -.进程中断；保留 journal.-> InstallInterrupted
     InstallCleanup -.进程中断；保留 journal.-> InstallInterrupted
     InstallRollback -.进程中断；保留 journal.-> InstallInterrupted

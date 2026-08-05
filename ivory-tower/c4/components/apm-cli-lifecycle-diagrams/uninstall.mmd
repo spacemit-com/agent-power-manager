@@ -2,7 +2,7 @@ flowchart TD
     UninstallStart([生命周期入口]) --> UninstallRecovery[执行公共 journal 检查/修复；失败或中断在公共图内终止]
     UninstallRecovery -->|成功；锁保持| UninstallCommand[进入当前命令]
 
-    UninstallCommand --> UninstallNextAgent{按已注册 Agent ID 升序还有目标 Agent?}
+    UninstallCommand --> UninstallNextAgent{按已支持 Agent ID 升序还有目标 Agent?}
     UninstallNextAgent -->|否| UninstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> UninstallOK([释放锁并正常退出])
     UninstallNextAgent -->|是| UninstallFind[从当前 Agent 本地清单按 power 与可选 type 定位；仅同名跨类型歧义时要求显式 type]
     UninstallFind -->|读取失败或类型歧义| UninstallFail[记录当前 Agent failed；其余按确定顺序标记 unexecuted]
@@ -23,10 +23,8 @@ flowchart TD
     end
 
     subgraph UninstallPostCommit["提交点后事务阶段（失败时完成提交）"]
-        UninstallQuarantine -->|已越过提交点| UninstallUnregister[补全 Adapter 注销]
-        UninstallUnregister -->|失败| UninstallFinishCommit[完成注销、清单删除与清理]
-        UninstallUnregister -->|成功| UninstallManifest[原子删除安装清单记录]
-        UninstallManifest -->|失败| UninstallFinishCommit
+        UninstallQuarantine -->|已越过提交点| UninstallManifest[原子删除安装清单记录]
+        UninstallManifest -->|失败| UninstallFinishCommit[完成清单删除与清理]
         UninstallManifest -->|成功| UninstallCleanup[清理隔离内容与 journal]
         UninstallCleanup -->|失败| UninstallFinishCommit
         UninstallCleanup -->|成功| UninstallRemoved[打印卸载成功；记录当前 Agent completed]
@@ -47,7 +45,6 @@ flowchart TD
     UninstallCreateJournal -.进程中断；保留 journal.-> UninstallInterrupted
     UninstallIntent -.进程中断；保留 journal.-> UninstallInterrupted
     UninstallQuarantine -.进程中断；保留 journal.-> UninstallInterrupted
-    UninstallUnregister -.进程中断；保留 journal.-> UninstallInterrupted
     UninstallManifest -.进程中断；保留 journal.-> UninstallInterrupted
     UninstallCleanup -.进程中断；保留 journal.-> UninstallInterrupted
     UninstallRollback -.进程中断；保留 journal.-> UninstallInterrupted

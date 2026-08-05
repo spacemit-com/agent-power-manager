@@ -18,7 +18,7 @@ APM 要求任意命令启动时都能识别并纠正上一次 install/uninstall 
 
 install 在原子 staging-to-target rename 前记录 publishing 意图，该 rename 是提交点。uninstall 在原子 target-to-quarantine move 前记录 removing 意图，该 move 是提交点。恢复时结合 journal 阶段和 staging、target、backup/quarantine 路径状态覆盖“原子操作完成但阶段尚未更新”的中断窗口。
 
-install/uninstall 的 `--agent=all` 按已注册 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 failed、按相同顺序把全部剩余 Agent 记为 unexecuted，停止执行并非零退出；命令结束前统一打印 completed、failed 和 unexecuted 汇总。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent，但最终整体非零退出。
+install/uninstall 的 `--agent=all` 按已支持 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 failed、按相同顺序把全部剩余 Agent 记为 unexecuted，停止执行并非零退出；命令结束前统一打印 completed、failed 和 unexecuted 汇总。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent，但最终整体非零退出。
 
 install/uninstall 在即时回滚、提交补全或 journal 清理期间再次发生进程中断时，不尝试在中断路径继续修复；内核释放全局锁，现有 journal 保持可恢复，交由下一条任意命令的公共预检重新判断并恢复。
 

@@ -11,7 +11,7 @@ Agent Power Manager（APM）是一个面向多 Agent 的 Power（Skill、Plugin�
 - 生命周期安全：任意执行阶段中断，系统都可以识别并纠正。
 - 类 apt 的文件锁机制，不支持并发，通过锁防重入。
 - 缓存下载的 Power，维护已安装 Power 记录。
-- 可扩展的 Agent Power Adapter，适配不同目标 Agent 的安装位置、注册机制与配置格式。
+- 可扩展的 Agent Power Adapter，适配不同目标 Agent 的安装位置与 Power 格式。
 - 面向 bianbu（含 RISC-V）等多平台目标环境分发。
 
 详见 [project-overview.md](../project-overview.md) 的 Introduction、Scope 与 Architecture Snapshot。待决事项中的「语言」「技术栈」「代码目录结构」由本 ADR 一并决策。

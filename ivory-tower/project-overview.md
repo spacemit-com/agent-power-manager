@@ -33,9 +33,9 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 - 模块边界与职责：
     - 核心生命周期：定义 Power 的发现、安装、卸载、打印、配置读写和版本管理。
     - 配置模型：维护各类 Agent 上各类 Power 的安装列表。
-    - Adapter：承接不同 Power 类型和目标 Agent 的格式转换、安装位置、注册及配置映射差异。
+    - Adapter：承接不同 Power 类型和目标 Agent 的格式转换与安装位置差异；不负责目标 Agent 的注册或感知。
     - CLI：提供入口。
-- 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)；生命周期恢复详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。`--agent` 支持 `all` 对所有已注册目标 Agent 执行。应用侧通过`list`获取云端服务Power资源列表、`get`获取特定Power资源。
+- 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)；生命周期恢复详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。`--agent` 支持 `all` 对所有已支持目标 Agent 执行。应用侧通过`list`获取云端服务Power资源列表、`get`获取特定Power资源。
 - 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单，安装过程采用 staging 目录 + 原子 rename + journal 实现中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md)。
 
 ## Constraints and Quality
@@ -49,7 +49,7 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 ## Risks and Decisions
 
 - 主要风险：
-    - 不同目标 Agent 的安装位置、注册机制和配置能力差异较大，Adapter 的支持范围和一致性可能受限。
+    - 不同目标 Agent 的安装位置与 Power 格式差异较大，Adapter 的支持范围和一致性可能受限。
     - Power 兼容性约束与兼容版本求解规则尚未确定，可能影响跨版本依赖与配置重建的可靠性；最新版选择、显式版本、升级/降级和相同版本幂等语义已由 ADR-002 确定。
     - 配置格式、冲突处理和权限控制未确定。
 - 待决事项：

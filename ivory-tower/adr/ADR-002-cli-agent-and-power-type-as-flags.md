@@ -8,7 +8,7 @@
 
 APM 的 `search`/`list`/`install`/`uninstall` 等命令都需要同时确定两个维度：
 
-- **目标 Agent**：通过 Adapter 适配，是开放、可增添的集合，且需要支持 `all`（对所有已注册目标 Agent 执行）。
+- **目标 Agent**：通过 Adapter 适配，是开放、可增添的集合，且需要支持 `all`（对所有已支持目标 Agent 执行）。
 - **Power 类别**：`skill`/`plugin`/`mcp`，是封闭的小集合，通常可从云端 Power 元数据中获取。
 
 需要决定这两个维度如何映射到 CLI 语法：作为 flag、还是作为子命令命名空间。详见 [project-overview.md](../project-overview.md) 的 Architecture Snapshot（数据与接口）与待决事项「CLI 命令和 Power 类别交织」，以及 [ADR-001](ADR-001-use-go-as-implementation-language.md) 确定的 `cobra` 技术栈。
