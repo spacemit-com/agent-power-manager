@@ -1,22 +1,6 @@
 flowchart TD
-    SearchStart([生命周期入口]) --> SearchLock[获取全局 APM 锁]
-    SearchLock -->|失败| SearchLockFail[打印锁错误] --> SearchLockExitError([未获得锁；非零退出])
-    SearchLock -->|成功| SearchJournal{存在未完成 journal?}
-    SearchJournal -->|检查失败| SearchJournalFail[打印 journal 检查错误] --> SearchExitError([释放锁并非零退出])
-    SearchJournal -->|否| SearchCommand[进入当前命令]
-    SearchJournal -->|是| SearchDecide{根据阶段与路径状态判断提交点}
-    SearchDecide -->|提交点前| SearchRepairRollback[回滚上次事务]
-    SearchDecide -->|提交点后| SearchRepairCommit[完成上次事务提交]
-    SearchRepairRollback --> SearchRepairResult{修复成功?}
-    SearchRepairCommit --> SearchRepairResult
-    SearchRepairResult -->|否| SearchRepairFail[保留 journal 并打印修复失败] --> SearchExitError
-    SearchRepairResult -->|是| SearchDeleteRecovered[删除已恢复 journal]
-    SearchDeleteRecovered -->|失败| SearchDeleteRecoveredFail[保留 journal 并打印删除失败] --> SearchExitError
-    SearchDeleteRecovered -->|成功| SearchRepairLog[打印回滚或提交及修复内容] --> SearchCommand
-    SearchRepairRollback -.进程中断.-> SearchInterrupted([内核释放锁；保留 journal；下次命令重新预检])
-    SearchRepairCommit -.进程中断.-> SearchInterrupted
-    SearchDeleteRecovered -.进程中断.-> SearchInterrupted
-    SearchJournal -.进程中断.-> SearchInterrupted
+    SearchStart([生命周期入口]) --> SearchRecovery[执行公共 journal 检查/修复；失败或中断在公共图内终止]
+    SearchRecovery -->|成功；锁保持| SearchCommand[进入当前命令]
 
     SearchCommand --> SearchValidate[校验必填 keyword、agent 与可选 type]
     SearchValidate -->|失败| SearchFail[打印参数或 Agent/Adapter 错误] --> SearchExitError

@@ -1,22 +1,6 @@
 flowchart TD
-    InstallStart([生命周期入口]) --> InstallLock[获取全局 APM 锁]
-    InstallLock -->|失败| InstallLockFail[打印锁错误] --> InstallLockExitError([未获得锁；非零退出])
-    InstallLock -->|成功| InstallJournal{存在未完成 journal?}
-    InstallJournal -->|检查失败| InstallJournalFail[打印 journal 检查错误] --> InstallExitError([释放锁并非零退出])
-    InstallJournal -->|否| InstallCommand[进入当前命令]
-    InstallJournal -->|是| InstallDecide{根据阶段与路径状态判断提交点}
-    InstallDecide -->|提交点前| InstallRepairRollback[回滚上次事务]
-    InstallDecide -->|提交点后| InstallRepairCommit[完成上次事务提交]
-    InstallRepairRollback --> InstallRepairResult{修复成功?}
-    InstallRepairCommit --> InstallRepairResult
-    InstallRepairResult -->|否| InstallRepairFail[保留 journal 并打印修复失败] --> InstallExitError
-    InstallRepairResult -->|是| InstallDeleteRecovered[删除已恢复 journal]
-    InstallDeleteRecovered -->|失败| InstallDeleteRecoveredFail[保留 journal 并打印删除失败] --> InstallExitError
-    InstallDeleteRecovered -->|成功| InstallRepairLog[打印回滚或提交及修复内容] --> InstallCommand
-    InstallRepairRollback -.进程中断.-> InstallInterrupted([内核释放锁；已存在的 journal 保留；下次命令预检恢复])
-    InstallRepairCommit -.进程中断.-> InstallInterrupted
-    InstallDeleteRecovered -.进程中断.-> InstallInterrupted
-    InstallJournal -.进程中断.-> InstallInterrupted
+    InstallStart([生命周期入口]) --> InstallRecovery[执行公共 journal 检查/修复；失败或中断在公共图内终止]
+    InstallRecovery -->|成功；锁保持| InstallCommand[进入当前命令]
 
     InstallCommand --> InstallResolve[解析 power 与可选 version；获取云端元数据；省略 type 从云端元数据推断；省略 version 选云端最新；显式版本允许升级或降级]
     InstallResolve -->|失败| InstallPreflightFail[记录解析失败；全部目标 Agent 标记 unexecuted] --> InstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> InstallBatchError([停止剩余 Agent；释放锁；非零退出])

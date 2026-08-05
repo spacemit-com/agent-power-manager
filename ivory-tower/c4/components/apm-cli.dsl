@@ -8,6 +8,7 @@ cliEntry = component "CLI Entry" "cobra 命令路由，解析 keyword/power/vers
 lifecycle = component "Core Lifecycle" "定义 Power 的发现、安装、卸载、打印、配置读写和版本管理用例。" "Go" {
     properties {
         "classDiagram" "apm-cli-diagrams/core-lifecycle.mmd"
+        "journalRecovery" "apm-cli-lifecycle-diagrams/common-journal-recovery.mmd"
         "searchLifecycle" "apm-cli-lifecycle-diagrams/search.mmd"
         "listLifecycle" "apm-cli-lifecycle-diagrams/list.mmd"
         "installLifecycle" "apm-cli-lifecycle-diagrams/install.mmd"
