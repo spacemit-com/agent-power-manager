@@ -1,0 +1,10 @@
+flowchart TD
+    DiscoveryStart([调用方进入 Agent 刷新流程；全局锁已持有]) --> DiscoveryRegistry[读取 Registry 中编译期唯一 Agent 列表；按 Agent ID 升序]
+    DiscoveryRegistry --> DiscoveryNext{还有 Agent?}
+    DiscoveryNext -->|是| DiscoveryDetect[调用 Adapter.DetectAgent；只检查 Agent 根目录是否存在且为目录]
+    DiscoveryDetect -->|目录存在| DiscoveryAdd[加入已支持且已安装 Agent 快照] --> DiscoveryNext
+    DiscoveryDetect -->|目录不存在| DiscoveryNext
+    DiscoveryDetect -->|不是目录或检查错误| DiscoveryFail[通过 logging 打印 Agent 和失败原因] --> DiscoveryError([调用方释放锁并非零退出；不执行用户命令])
+    DiscoveryNext -->|否| DiscoverySnapshot[生成当前命令内不可变快照；不持久化] --> DiscoveryResume([返回调用方；锁保持])
+    DiscoveryRegistry -.进程中断.-> DiscoveryInterrupted([内核释放锁；丢弃内存快照；下次命令重新扫描])
+    DiscoveryDetect -.进程中断.-> DiscoveryInterrupted

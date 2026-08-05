@@ -8,7 +8,7 @@
 
 APM 要求任意命令启动时都能识别并纠正上一次 install/uninstall 中断留下的不一致状态。只让写命令持锁会使 search/list 在 journal 修复期间产生并发写入风险；`--agent=all` 在错误后继续也会与“至多一个未完成 journal”冲突。
 
-本 ADR 补充 [ADR-001](ADR-001-use-go-as-implementation-language.md) 的 staging、原子 rename 与 journal 技术选择，并约束 [ADR-002](ADR-002-cli-agent-and-power-type-as-flags.md) 的多 Agent 执行语义。
+本 ADR 补充 [ADR-001](ADR-001-use-go-as-implementation-language.md) 的 staging、原子 rename 与 journal 技术选择，并约束 [ADR-002](ADR-002-cli-agent-and-power-type-as-flags.md) 的多 Agent 执行语义；多 Agent 的目标集合由 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md) 定义的命令内快照确定。
 
 ## Decision
 
@@ -18,7 +18,7 @@ APM 要求任意命令启动时都能识别并纠正上一次 install/uninstall 
 
 install 在原子 staging-to-target rename 前记录 publishing 意图，该 rename 是提交点。uninstall 在原子 target-to-quarantine move 前记录 removing 意图，该 move 是提交点。恢复时结合 journal 阶段和 staging、target、backup/quarantine 路径状态覆盖“原子操作完成但阶段尚未更新”的中断窗口。
 
-install/uninstall 的 `--agent=all` 按已支持 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 failed、按相同顺序把全部剩余 Agent 记为 unexecuted，停止执行并非零退出；命令结束前统一打印 completed、failed 和 unexecuted 汇总。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent，但最终整体非零退出。
+install/uninstall 的 `--agent=all` 按当前快照中已支持且已安装 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 failed、按相同顺序把全部剩余 Agent 记为 unexecuted，停止执行并非零退出；命令结束前统一打印 completed、failed 和 unexecuted 汇总。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent，但最终整体非零退出。
 
 install/uninstall 在当前命令内的回滚、清单更新或清理期间再次发生进程中断时，不尝试在中断路径继续修复；内核释放全局锁，现有 journal 保持可恢复，交由下一条任意命令的公共预检重新判断并恢复。提交点后的清单更新或清理失败也不在当前命令中重试：保留 journal、打印失败并非零退出，由下一条命令的公共预检完成遗留事务。
 

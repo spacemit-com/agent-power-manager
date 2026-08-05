@@ -8,13 +8,16 @@ flowchart TD
     ListInstalled -->|否| ListCloudList[调用云端接口列出资源；仅显式 type 才过滤]
     ListCloudList -->|失败| ListFail
     ListCloudList -->|成功| ListPrintCloud[打印云端 Power] --> ListExitOK([释放锁并正常退出])
-    ListInstalled -->|是| ListLocalType[从本地清单按可选 type 定位；仅本地同名跨类型歧义时要求显式 type]
-    ListLocalType --> ListAll{agent 等于 all?}
-    ListAll -->|否| ListReadOne[读取目标 Agent 安装清单]
+    ListInstalled -->|是| ListDiscovery[执行公共 Agent 刷新流程；失败或中断在公共图内终止]
+    ListDiscovery -->|成功；锁保持| ListAll{agent 等于 all?}
+    ListAll -->|否| ListTarget{目标 Agent 在已支持且已安装快照中?}
+    ListTarget -->|否| ListUnavailable[打印目标 Agent 未受支持或未安装] --> ListExitError
+    ListTarget -->|是| ListLocalType[从本地清单按可选 type 定位；仅本地同名跨类型歧义时要求显式 type]
+    ListLocalType --> ListReadOne[读取目标 Agent 安装清单]
     ListReadOne -->|文件不存在| ListEmptyOne[打印空列表] --> ListExitOK
     ListReadOne -->|读取或解析失败| ListFail
     ListReadOne -->|成功| ListPrintOne[打印已安装 Power] --> ListExitOK
-    ListAll -->|是| ListNextAgent{还有 Agent?}
+    ListAll -->|是| ListNextAgent{按快照中已支持且已安装 Agent ID 升序还有目标 Agent?}
     ListNextAgent -->|是| ListReadAgent[读取该 Agent 安装清单]
     ListReadAgent -->|文件不存在| ListRecordEmpty[记录该 Agent 空列表] --> ListNextAgent
     ListReadAgent -->|读取或解析失败| ListRecordFailure[记录该 Agent 失败] --> ListNextAgent

@@ -40,7 +40,7 @@ APM 使用 **Go** 实现，作为覆盖 CLI、Adapter、生命周期与配置治
 apm/
 ├── cmd/
 │   └── apm/
-│       └── main.go                 # 组装依赖、注册内置 Adapter 并启动 CLI
+│       └── main.go                 # 组装依赖、初始化编译期 Adapter Registry 并启动 CLI
 ├── internal/
 │   ├── cli/
 │   │   ├── root.go                 # Cobra 根命令和全局 --verbose 参数
@@ -67,17 +67,20 @@ apm/
 │   │   └── path_state.go           # 检查事务路径状态，覆盖原子操作中断窗口
 │   ├── adapter/
 │   │   ├── adapter.go              # Adapter 接口及共享类型
-│   │   ├── registry.go             # Agent × Power 类型的编译期注册表
+│   │   ├── registry.go             # 编译期唯一 Agent Registry、Adapter 解析及已安装 Agent 快照刷新
 │   │   ├── codex/
 │   │   │   ├── adapter.go          # Codex Adapter 实现
+│   │   │   ├── detect.go           # 检查 Codex Agent 根目录是否存在
 │   │   │   ├── paths.go            # Codex Power 安装位置
 │   │   │   └── transform.go        # Codex Power 格式转换
 │   │   ├── claude_code/
 │   │   │   ├── adapter.go          # Claude Code Adapter 实现
+│   │   │   ├── detect.go           # 检查 Claude Code Agent 根目录是否存在
 │   │   │   ├── paths.go            # Claude Code Power 安装位置
 │   │   │   └── transform.go        # Claude Code Power 格式转换
 │   │   └── hermes/
 │   │       ├── adapter.go          # Hermes Adapter 实现
+│   │       ├── detect.go           # 检查 Hermes Agent 根目录是否存在
 │   │       ├── paths.go            # Hermes Power 安装位置
 │   │       └── transform.go        # Hermes Power 格式转换
 │   ├── config/
@@ -101,7 +104,7 @@ apm/
 │   │   ├── verbose.go              # verbose 诊断日志
 │   │   └── fields.go               # Agent、Power、版本、阶段等结构化字段
 │   ├── domain/
-│   │   ├── agent.go                # AgentID 及 all 目标语义
+│   │   ├── agent.go                # AgentID、AgentSnapshot 及 all 目标语义
 │   │   ├── power.go                # PowerRef、PowerType 和 InstalledPower
 │   │   └── result.go               # completed、failed、unexecuted 等结果
 │   ├── version/
@@ -119,7 +122,7 @@ apm/
 2. `lifecycle` 与四条命令的 lifecycle 流程对应，负责用例顺序、公共预检和多 Agent 调度；文件按命令拆分但保持在同一 package，便于共享锁内状态和结果模型。
 3. `transaction` 单独承载 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 的 journal、提交点、回滚和完成提交规则。当前命令在提交点后的清单更新或清理失败时保留 journal 并退出，由下一条命令的 `recovery.go` 完成遗留事务，不在当前命令中重复更新清单或清理。
 4. `transaction/path_state.go` 集中处理“原子文件操作已经完成、journal 阶段尚未更新”的中断窗口，使正常事务与恢复事务采用相同的路径状态判断。
-5. `adapter` 展开首批 `codex`、`claude_code`、`hermes` 内置实现。Adapter 只负责目标安装位置与格式转换，不负责 Agent 注册、运行时感知或更新通知；新增 Agent 遵循 `internal/adapter/<agent>/` 约定。
+5. `adapter` 展开首批 `codex`、`claude_code`、`hermes` 内置实现。Registry 在编译期保证 Agent ID 唯一；每个 Adapter 除目标安装位置与格式转换外，还按 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md) 检查对应 Agent 根目录是否存在。APM 不负责 Agent 安装、卸载、实时监控、运行时感知或更新通知；新增 Agent 遵循 `internal/adapter/<agent>/` 约定。
 6. `config` 独立管理各 Agent 的 JSON 安装清单。`atomic_write.go` 保证清单不会暴露半写入状态，事务完成与 journal 删除顺序仍由 `transaction` 控制。
 7. 所有用户输出和内部诊断统一经过 `logging`，其他 package 不直接调用 `fmt.Print*` 或自行创建 logger。稳定的资源数据和成功结果写入 `stdout`；journal 恢复过程、警告和失败写入 `stderr`；内部执行步骤、HTTP 请求细节和事务路径状态仅在全局 `--verbose` 开启后写入 `stderr`。默认 CLI 输出格式保持稳定，便于用户阅读和脚本处理。
 8. `domain` 保存跨组件共享的 Agent、Power 和执行结果类型，避免相同概念分别在 CLI、Cloud、Config 和 Lifecycle 中重复定义。
@@ -134,6 +137,7 @@ apm/
   - Helm、krew、gh CLI 等同类「发现-下载-缓存-安装-记录」工具均为 Go 实现，锁、原子安装、状态恢复等模式有成熟先例可循。
   - `flock` + staging/rename + journal 的组合可以直接满足「任意阶段中断都可识别并纠正」与「不支持并发、通过锁防重入」的约束。
   - Adapter 可用 Go interface + 编译期注册表实现，不需要引入运行时插件机制。
+  - Adapter Registry 能以命令内快照响应 Agent 的外部安装或卸载，不需要持久化第二份 Agent 状态。
   - 生命周期编排与事务恢复分包，journal 不变量和提交点规则具有明确的实现边界。
   - 所有打印由统一 logging 模块管理，默认 CLI 输出保持稳定，同时可通过 `--verbose` 获取诊断信息。
 - 代价与风险：

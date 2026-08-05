@@ -1,26 +1,36 @@
 classDiagram
-    note for AdapterRegistry "对外唯一入口，按 Agent × Power 类别两个维度解析适配器（对应 --agent/--type）"
+    note for AdapterRegistry "编译期保证 Agent ID 唯一；刷新当前命令的已支持且已安装 Agent 快照，并按 Agent × Power 类别解析适配器"
     class AdapterRegistry {
         <<interface>>
         +Resolve(AgentID, PowerType) (Adapter, error)
+        +RefreshInstalled() (AgentSnapshot, error)
     }
 
-    note for Adapter "单个 Agent × Power 类别组合的适配契约：安装位置与格式转换；不负责目标 Agent 的注册或感知"
+    note for Adapter "安装检测只检查 Agent 根目录存在且为目录，不检查目录是否为空；不负责 Agent 安装、卸载、实时监控或运行时感知"
     class Adapter {
         <<interface>>
+        +DetectAgent() (bool, error)
         +InstallPath(AgentID) string
         +Install(Power, dest string) error
         +Uninstall(Power) error
     }
 
-    note for adapterRegistry "编译期注册表：启动时 Add 注册所有内置 Adapter，运行时 Resolve 查表"
+    note for AgentSnapshot "当前命令内不可变且不持久化的已支持且已安装 Agent 列表"
+    class AgentSnapshot {
+        +Agents []AgentID
+        +Contains(AgentID) bool
+        +Ordered() []AgentID
+    }
+
+    note for adapterRegistry "编译期 Registry 以唯一 Agent ID 收录内置 Adapter；运行时直接按 Agent ID 升序刷新，不再去重"
     class adapterRegistry {
         +Resolve(AgentID, PowerType) (Adapter, error)
-        +Add(AgentID, Adapter)
+        +RefreshInstalled() (AgentSnapshot, error)
     }
 
     note for hermesAdapter "适配 Hermes：按其目录约定写入 Power"
     class hermesAdapter {
+        +DetectAgent() (bool, error)
         +InstallPath(AgentID) string
         +Install(Power, dest string) error
         +Uninstall(Power) error
@@ -28,6 +38,7 @@ classDiagram
 
     note for codexAdapter "适配 Codex：按其目录约定与格式写入 Power"
     class codexAdapter {
+        +DetectAgent() (bool, error)
         +InstallPath(AgentID) string
         +Install(Power, dest string) error
         +Uninstall(Power) error
@@ -35,6 +46,7 @@ classDiagram
 
     note for claudeCodeAdapter "适配 Claude Code：按其 Power 目录与格式写入内容"
     class claudeCodeAdapter {
+        +DetectAgent() (bool, error)
         +InstallPath(AgentID) string
         +Install(Power, dest string) error
         +Uninstall(Power) error
@@ -42,6 +54,7 @@ classDiagram
 
     adapterRegistry ..|> AdapterRegistry
     adapterRegistry --> Adapter : resolves
+    AdapterRegistry --> AgentSnapshot : refreshes
     hermesAdapter ..|> Adapter
     codexAdapter ..|> Adapter
     claudeCodeAdapter ..|> Adapter

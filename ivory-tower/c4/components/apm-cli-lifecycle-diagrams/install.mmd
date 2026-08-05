@@ -2,9 +2,12 @@ flowchart TD
     InstallStart([生命周期入口]) --> InstallRecovery[执行公共 journal 检查/修复；失败或中断在公共图内终止]
     InstallRecovery -->|成功；锁保持| InstallCommand[进入当前命令]
 
-    InstallCommand --> InstallResolve[解析 power 与可选 version；获取云端元数据；省略 type 从云端元数据推断；省略 version 选云端最新；显式版本允许升级或降级]
-    InstallResolve -->|失败| InstallPreflightFail[记录解析失败；全部目标 Agent 标记 unexecuted] --> InstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> InstallBatchError([停止剩余 Agent；释放锁；非零退出])
-    InstallResolve -->|成功| InstallNextAgent{按已支持 Agent ID 升序还有目标 Agent?}
+    InstallCommand --> InstallDiscovery[执行公共 Agent 刷新流程；失败或中断在公共图内终止]
+    InstallDiscovery -->|成功；锁保持| InstallTarget{具体目标在快照中，或 all 快照非空?}
+    InstallTarget -->|否| InstallTargetFail[打印目标 Agent 未受支持或未安装，或没有已支持且已安装的 Agent] --> InstallPreflightFail
+    InstallTarget -->|是| InstallResolve[解析 power 与可选 version；获取云端元数据；省略 type 从云端元数据推断；省略 version 选云端最新；显式版本允许升级或降级]
+    InstallResolve -->|失败| InstallPreflightFail[记录预执行失败；全部目标 Agent 标记 unexecuted] --> InstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> InstallBatchError([停止剩余 Agent；释放锁；非零退出])
+    InstallResolve -->|成功| InstallNextAgent{按快照中已支持且已安装 Agent ID 升序还有目标 Agent?}
     InstallNextAgent -->|否| InstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> InstallOK([释放锁并正常退出])
     InstallNextAgent -->|是| InstallAdapter["Resolve(currentAgent, type) 解析当前 Agent Adapter"]
     InstallAdapter -->|失败| InstallFail[记录当前 Agent failed；其余按确定顺序标记 unexecuted]

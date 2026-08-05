@@ -8,7 +8,7 @@
 
 APM 的 `search`/`list`/`install`/`uninstall` 等命令都需要同时确定两个维度：
 
-- **目标 Agent**：通过 Adapter 适配，是开放、可增添的集合，且需要支持 `all`（对所有已支持目标 Agent 执行）。
+- **目标 Agent**：通过 Adapter 适配，是开放、可增添的集合，且需要支持 `all`；本地 Power 操作仅对当前命令检测到的“已支持且已安装 Agent”执行。
 - **Power 类别**：`skill`/`plugin`/`mcp`，是封闭的小集合，通常可从云端 Power 元数据中获取。
 
 需要决定这两个维度如何映射到 CLI 语法：作为 flag、还是作为子命令命名空间。详见 [project-overview.md](../project-overview.md) 的 Architecture Snapshot（数据与接口）与待决事项「CLI 命令和 Power 类别交织」，以及 [ADR-001](ADR-001-use-go-as-implementation-language.md) 确定的 `cobra` 技术栈。
@@ -35,12 +35,13 @@ apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 
 两个维度均以 flag 承载，不作为子命令命名空间；`verb`（`search`/`list`/`install`/`uninstall`）是唯一的子命令层级。
 
-`--agent=all` 的执行语义见 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md)：install/uninstall 按 Agent 串行且 fail-fast；`list --installed` 继续逐 Agent 读取并汇总失败。
+本地 Power 操作的 Agent 检测与快照语义见 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md)。指定具体 `--agent` 时必须存在于当前快照；`--agent=all` 以快照为目标集合。多 Agent 执行语义见 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md)：install/uninstall 按 Agent 串行且 fail-fast；`list --installed` 继续逐 Agent 读取并汇总失败。
 
 ## Consequences
 
 - 正面影响：
   - Agent 集合可通过 Adapter 持续增添，不影响命令树结构和 `--help` 输出的稳定性，适合脚本化和自动化调用。
+  - 本地 Power 操作在执行前刷新已安装 Agent 快照，能拒绝未安装目标并使 `all` 只覆盖当前可用 Agent。
   - `--type` 保持可选，并由各命令依据云端查询、云端元数据或本地清单采用明确的缺省语义，减少常见场景下的输入负担。
   - 四个动词共用同一套 flag 形式，命令树和 `--help` 保持稳定；生命周期层按命令数据来源实现类别过滤、推断或本地消歧。
 - 代价与风险：
