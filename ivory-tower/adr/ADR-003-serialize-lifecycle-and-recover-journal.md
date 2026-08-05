@@ -20,7 +20,7 @@ install 在原子 staging-to-target rename 前记录 publishing 意图，该 ren
 
 install/uninstall 的 `--agent=all` 按已支持 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 failed、按相同顺序把全部剩余 Agent 记为 unexecuted，停止执行并非零退出；命令结束前统一打印 completed、failed 和 unexecuted 汇总。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent，但最终整体非零退出。
 
-install/uninstall 在即时回滚、提交补全或 journal 清理期间再次发生进程中断时，不尝试在中断路径继续修复；内核释放全局锁，现有 journal 保持可恢复，交由下一条任意命令的公共预检重新判断并恢复。
+install/uninstall 在当前命令内的回滚、清单更新或清理期间再次发生进程中断时，不尝试在中断路径继续修复；内核释放全局锁，现有 journal 保持可恢复，交由下一条任意命令的公共预检重新判断并恢复。提交点后的清单更新或清理失败也不在当前命令中重试：保留 journal、打印失败并非零退出，由下一条命令的公共预检完成遗留事务。
 
 恢复日志至少包含原操作、Agent、Power、版本、原阶段、回滚或完成提交、修复内容和结果。
 

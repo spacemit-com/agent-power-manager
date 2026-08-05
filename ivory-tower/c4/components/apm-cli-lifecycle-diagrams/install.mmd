@@ -33,21 +33,17 @@ flowchart TD
         InstallRollbackOK -->|否| InstallKeepRollback[保留 journal；打印回滚失败]
     end
 
-    subgraph InstallPostCommit["提交点后事务阶段（失败时完成提交）"]
+    subgraph InstallPostCommit["提交点后事务阶段（失败时保留 journal，由下次预检完成提交）"]
         InstallPublish -->|已越过提交点| InstallManifest[原子更新安装清单]
-        InstallManifest -->|失败| InstallFinishCommit[完成清单更新与清理]
-        InstallManifest -->|成功| InstallCleanup[清理备份、临时文件与 journal]
-        InstallCleanup -->|失败| InstallFinishCommit
+        InstallManifest -->|失败| InstallKeepCommit[保留 journal；打印清单更新失败]
+        InstallManifest -->|成功| InstallCleanup[清理备份与临时文件；最后删除 journal]
+        InstallCleanup -->|失败| InstallKeepCommit
         InstallCleanup -->|成功| InstallInstalled[打印首次安装、升级或降级成功；记录当前 Agent completed]
-        InstallFinishCommit --> InstallCommitOK{提交补全成功?}
-        InstallCommitOK -->|是| InstallCommitted[删除 journal；打印完成提交内容]
-        InstallCommitOK -->|否| InstallKeepCommit[保留 journal；打印提交补全失败]
     end
 
     InstallInstalled --> InstallNextAgent
     InstallRolledBack --> InstallFail
     InstallKeepRollback --> InstallFail
-    InstallCommitted --> InstallFail
     InstallKeepCommit --> InstallFail
     InstallFail --> InstallPrintFailureSummary
 
@@ -64,8 +60,6 @@ flowchart TD
     InstallCleanup -.进程中断；保留 journal.-> InstallInterrupted
     InstallRollback -.进程中断；保留 journal.-> InstallInterrupted
     InstallRolledBack -.清理 journal 时中断；保留 journal.-> InstallInterrupted
-    InstallFinishCommit -.进程中断；保留 journal.-> InstallInterrupted
-    InstallCommitted -.清理 journal 时中断；保留 journal.-> InstallInterrupted
 
     style InstallPreCommit fill:#fff4e5,stroke:#d97706,stroke-width:2px
     style InstallPostCommit fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px

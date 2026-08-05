@@ -22,21 +22,17 @@ flowchart TD
         UninstallRollbackOK -->|否| UninstallKeepRollback[保留 journal；打印回滚失败]
     end
 
-    subgraph UninstallPostCommit["提交点后事务阶段（失败时完成提交）"]
+    subgraph UninstallPostCommit["提交点后事务阶段（失败时保留 journal，由下次预检完成提交）"]
         UninstallQuarantine -->|已越过提交点| UninstallManifest[原子删除安装清单记录]
-        UninstallManifest -->|失败| UninstallFinishCommit[完成清单删除与清理]
-        UninstallManifest -->|成功| UninstallCleanup[清理隔离内容与 journal]
-        UninstallCleanup -->|失败| UninstallFinishCommit
+        UninstallManifest -->|失败| UninstallKeepCommit[保留 journal；打印清单删除失败]
+        UninstallManifest -->|成功| UninstallCleanup[清理隔离内容；最后删除 journal]
+        UninstallCleanup -->|失败| UninstallKeepCommit
         UninstallCleanup -->|成功| UninstallRemoved[打印卸载成功；记录当前 Agent completed]
-        UninstallFinishCommit --> UninstallCommitOK{提交补全成功?}
-        UninstallCommitOK -->|是| UninstallCommitted[删除 journal；打印完成提交内容]
-        UninstallCommitOK -->|否| UninstallKeepCommit[保留 journal；打印提交补全失败]
     end
 
     UninstallRemoved --> UninstallNextAgent
     UninstallRolledBack --> UninstallFail
     UninstallKeepRollback --> UninstallFail
-    UninstallCommitted --> UninstallFail
     UninstallKeepCommit --> UninstallFail
     UninstallFail --> UninstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> UninstallBatchError([停止剩余 Agent；释放锁；非零退出])
 
@@ -49,8 +45,6 @@ flowchart TD
     UninstallCleanup -.进程中断；保留 journal.-> UninstallInterrupted
     UninstallRollback -.进程中断；保留 journal.-> UninstallInterrupted
     UninstallRolledBack -.清理 journal 时中断；保留 journal.-> UninstallInterrupted
-    UninstallFinishCommit -.进程中断；保留 journal.-> UninstallInterrupted
-    UninstallCommitted -.清理 journal 时中断；保留 journal.-> UninstallInterrupted
 
     style UninstallPreCommit fill:#fff4e5,stroke:#d97706,stroke-width:2px
     style UninstallPostCommit fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
