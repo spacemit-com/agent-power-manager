@@ -41,7 +41,7 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 
 ## Test Filesystem Isolation
 
-APM 支持仅供测试使用的 `APM_HOME` 环境变量，使测试能在临时目录中模拟 Agent 安装状态和完整的本地 Power 生命周期，不读写用户目录。
+APM 支持仅供测试使用的 `APM_HOME` 环境变量，使测试能在临时目录中模拟 Agent 安装状态和完整的本地 Power 生命周期，不读写用户目录。该路径决策详见 [ADR-005](adr/ADR-005-isolate-test-filesystem-with-apm-home.md)。
 
 ### 路径解析
 
