@@ -120,16 +120,19 @@ func TestCachePathUsesXDGWithoutAPMHome(t *testing.T) {
 }
 
 func TestCachePathUsesDefaultWithoutOverrides(t *testing.T) {
-	home := t.TempDir()
 	t.Setenv("APM_HOME", "")
 	t.Setenv("XDG_CACHE_HOME", "")
-	t.Setenv("HOME", home)
+
+	cacheHome, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := paths.CachePath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(home, ".cache", "apm"); got != want {
+	if want := filepath.Join(cacheHome, "apm"); got != want {
 		t.Fatalf("CachePath() = %q, want %q", got, want)
 	}
 }
