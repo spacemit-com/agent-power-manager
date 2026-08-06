@@ -39,6 +39,35 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 - 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)；生命周期恢复详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)；Agent 安装检测与命令内快照详见 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md)。本地 Power 操作中，`--agent` 的具体值必须存在于“已支持且已安装 Agent”快照，`all` 对快照中的全部 Agent 执行。应用侧通过`list`获取云端服务Power资源列表、`get`获取特定Power资源。
 - 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单，安装过程采用 staging 目录 + 原子 rename + journal 实现中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md)。
 
+## Test Filesystem Isolation
+
+APM 支持仅供测试使用的 `APM_HOME` 环境变量，使测试能在临时目录中模拟 Agent 安装状态和完整的本地 Power 生命周期，不读写用户目录。
+
+### 路径解析
+
+- `internal/paths` 是有效 HOME 和所有本地文件路径的唯一解析入口。
+- `APM_HOME` 非空时，其值取代 HOME；`APM_HOME` 未定义或为空字符串时，使用 `os.UserHomeDir()` 解析真实 HOME。HOME 无法解析或结果为空时返回错误。
+- `APM_HOME` 指向的目录不需要预先存在；由实际写入组件按既有规则创建所需子目录，并返回带上下文的底层文件系统错误。
+- `APM_HOME` 的值由测试保证合法且规范；APM 不额外校验相对路径、符号链接、权限或目录逃逸，也不将路径转换为绝对路径。
+- 不修改进程的 `HOME` 或 `XDG_CACHE_HOME`，也不维护可变的全局路径状态。CLI 和其他模块不直接读取 `APM_HOME`，只使用 `internal/paths` 返回的路径。
+
+### 隔离边界
+
+`APM_HOME` 非空时，所有本地读写都必须位于该测试目录：
+
+- APM 状态位于 `$APM_HOME/.apm`，包括 lock、清单与配置、journal、staging、backup 和 quarantine。
+- 各 Adapter 从有效 HOME 派生 Agent 根目录、Agent 安装状态检测路径以及 Power 安装和卸载目标；Adapter 不直接读取 HOME 类环境变量或拼接 `~`。
+- 缓存固定位于 `$APM_HOME/.cache/apm`，即使进程设置了 `XDG_CACHE_HOME` 也不越出 `APM_HOME`。
+
+`APM_HOME` 未定义或为空时，APM 继续使用正常 HOME 和既有 XDG 缓存规则。`APM_HOME` 只改变本地文件系统边界，不改变 Agent ID、Power 元数据、云端 API、CLI 参数或日志语义；不增加 CLI flag，也不在 `apm --help` 中公开为普通用户功能。
+
+### 测试与验收
+
+- 路径单元测试覆盖 `APM_HOME` 未设置、空值回退、非空值优先于 HOME，以及隔离模式下 lock 和缓存的确切路径。
+- 修改环境变量的测试不得使用 `t.Parallel()`，避免共享进程环境互相污染。
+- 在临时 `APM_HOME` 中创建伪 Agent 根目录，可分别模拟 Agent 已安装和未安装状态。后续生命周期测试在其中执行 Power 安装、卸载、清单读写、锁竞争、事务与恢复。
+- 验收时必须证明上述操作的所有变化都位于临时 `APM_HOME`，真实 HOME 和真实 XDG 缓存目录中没有本次测试创建或修改的文件。
+
 ## Constraints and Quality
 
 | 项目 | 要求或约束 |
