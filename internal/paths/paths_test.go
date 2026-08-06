@@ -59,10 +59,11 @@ func TestHomeDirReturnsErrorWhenHomeIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestIsolatedStateLockAndCachePaths(t *testing.T) {
+func TestStateAndLockUseAPMHomeWhileCacheUsesXDG(t *testing.T) {
 	home := t.TempDir()
+	cacheHome := t.TempDir()
 	t.Setenv("APM_HOME", home)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 	state, err := paths.StateDir()
 	if err != nil {
@@ -84,8 +85,22 @@ func TestIsolatedStateLockAndCachePaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(home, ".cache", "apm"); cache != want {
+	if want := filepath.Join(cacheHome, "apm"); cache != want {
 		t.Fatalf("CachePath() = %q, want %q", cache, want)
+	}
+}
+
+func TestCachePathUsesAPMHomeWhenXDGCacheHomeIsEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", "")
+
+	got, err := paths.CachePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".cache", "apm"); got != want {
+		t.Fatalf("CachePath() = %q, want %q", got, want)
 	}
 }
 
@@ -100,6 +115,21 @@ func TestCachePathUsesXDGWithoutAPMHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := filepath.Join(cacheHome, "apm"); got != want {
+		t.Fatalf("CachePath() = %q, want %q", got, want)
+	}
+}
+
+func TestCachePathUsesDefaultWithoutOverrides(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("HOME", home)
+
+	got, err := paths.CachePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".cache", "apm"); got != want {
 		t.Fatalf("CachePath() = %q, want %q", got, want)
 	}
 }

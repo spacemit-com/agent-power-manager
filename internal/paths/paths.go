@@ -10,7 +10,10 @@ import (
 	"apm/internal/domain"
 )
 
-const apmHomeEnv = "APM_HOME"
+const (
+	apmHomeEnv      = "APM_HOME"
+	xdgCacheHomeEnv = "XDG_CACHE_HOME"
+)
 
 // HomeDir 返回 APM 使用的有效用户主目录。
 func HomeDir() (string, error) {
@@ -47,6 +50,9 @@ func ManifestPath(domain.AgentID) string { return "" }
 
 // CachePath 返回 APM 下载缓存目录。
 func CachePath() (string, error) {
+	if cache := os.Getenv(xdgCacheHomeEnv); cache != "" {
+		return filepath.Join(cache, "apm"), nil
+	}
 	if home := os.Getenv(apmHomeEnv); home != "" {
 		return filepath.Join(home, ".cache", "apm"), nil
 	}
