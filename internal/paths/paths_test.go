@@ -137,6 +137,37 @@ func TestCachePathUsesDefaultWithoutOverrides(t *testing.T) {
 	}
 }
 
+func TestCacheAndStagingTemporaryPathsStayWithTheirTargets(t *testing.T) {
+	stateHome := t.TempDir()
+	cacheHome := t.TempDir()
+	t.Setenv("APM_HOME", stateHome)
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+	cacheTemp, err := paths.CacheTempPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(cacheHome, "apm", ".tmp"); cacheTemp != want {
+		t.Fatalf("CacheTempPath() = %q, want %q", cacheTemp, want)
+	}
+
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(stateHome, ".apm", "staging"); staging != want {
+		t.Fatalf("StagingPath() = %q, want %q", staging, want)
+	}
+
+	stagingTemp, err := paths.StagingTempPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(stateHome, ".apm", ".tmp", "staging"); stagingTemp != want {
+		t.Fatalf("StagingTempPath() = %q, want %q", stagingTemp, want)
+	}
+}
+
 func unsetEnv(t *testing.T, name string) {
 	t.Helper()
 	old, existed := os.LookupEnv(name)

@@ -67,6 +67,33 @@ func CachePath() (string, error) {
 	return filepath.Join(cache, "apm"), nil
 }
 
+// CacheTempPath 返回 Cloud 获取资源时使用的缓存临时目录。
+func CacheTempPath() (string, error) {
+	cache, err := CachePath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, ".tmp"), nil
+}
+
+// StagingPath 返回当前 Power 的 staging 根目录。
+func StagingPath() (string, error) {
+	state, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(state, "staging"), nil
+}
+
+// StagingTempPath 返回构建 staging 时使用的临时目录。
+func StagingTempPath() (string, error) {
+	state, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(state, ".tmp", "staging"), nil
+}
+
 // TransactionPath 返回事务记录路径。
 //
 // 当前为零值占位实现。
