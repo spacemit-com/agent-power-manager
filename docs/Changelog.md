@@ -21,6 +21,7 @@
 - `6214b92 fix(cloud): preserve local client contract`
 - `2e24422 feat(cache): add versioned filesystem cache`
 - `6a9ebc4 test: cover local cloud cache flow`
+- `c07d8ac test: assert versionless local staging`
 
 解决方案或完成结果：
 
