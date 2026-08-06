@@ -2,9 +2,13 @@ package cloud_test
 
 import (
 	"errors"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"syscall"
 	"testing"
 
 	"apm/internal/cloud"
@@ -75,6 +79,76 @@ func TestLocalClientListSortsAndIgnoresInvalidSkillDirectories(t *testing.T) {
 	}
 }
 
+func TestLocalClientListSkipsSymlinkSkillMarker(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	version := filepath.Join(root, "skills", "demo", "1.0.0")
+	if err := os.MkdirAll(version, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realMarker := filepath.Join(root, "real-SKILL.md")
+	if err := os.WriteFile(realMarker, []byte("skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realMarker, filepath.Join(version, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := cloud.NewLocalClient(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("List() = %#v, want symlink marker skipped", got)
+	}
+}
+
+func TestLocalClientListPreservesSkillMarkerFilesystemError(t *testing.T) {
+	if root := os.Getenv("APM_TEST_UNREADABLE_MARKER_ROOT"); root != "" {
+		assertListMarkerFilesystemError(t, root)
+		return
+	}
+
+	root, err := os.MkdirTemp("", "apm-cloud-marker-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(filepath.Join(root, "skills", "demo", "1.0.0"), 0o700); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Error(err)
+		}
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	version := filepath.Join(root, "skills", "demo", "1.0.0")
+	if err := os.MkdirAll(version, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(version, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if os.Geteuid() != 0 {
+		assertListMarkerFilesystemError(t, root)
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestLocalClientListPreservesSkillMarkerFilesystemError$")
+	cmd.Env = append(os.Environ(), "APM_TEST_UNREADABLE_MARKER_ROOT="+root)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("unprivileged marker-error check failed: %v\n%s", err, output)
+	}
+}
+
 func TestLocalClientListRequiresReadableResourceRoot(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "missing")
@@ -142,6 +216,31 @@ func TestLocalClientGetMapsInvalidSourceLayoutToNotFound(t *testing.T) {
 	}
 }
 
+func TestLocalClientGetMapsSymlinkSkillMarkerToNotFound(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	version := filepath.Join(root, "skills", "demo", "1.0.0")
+	if err := os.MkdirAll(version, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realMarker := filepath.Join(root, "real-SKILL.md")
+	if err := os.WriteFile(realMarker, []byte("skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realMarker, filepath.Join(version, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	client, err := cloud.NewLocalClient(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = client.Get(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"})
+	if !errors.Is(err, cloud.ErrNotFound) {
+		t.Fatalf("Get() error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestLocalClientGetCopiesAtomicallyAndIsIdempotent(t *testing.T) {
 	root := t.TempDir()
 	cacheHome := t.TempDir()
@@ -178,5 +277,28 @@ func TestLocalClientGetCopiesAtomicallyAndIsIdempotent(t *testing.T) {
 	}
 	if err = client.Get(ref); err != nil {
 		t.Fatalf("idempotent Get() error = %v", err)
+	}
+}
+
+func assertListMarkerFilesystemError(t *testing.T, root string) {
+	t.Helper()
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	client, err := cloud.NewLocalClient(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.List()
+	marker := filepath.Join(root, "skills", "demo", "1.0.0", "SKILL.md")
+	if err == nil {
+		t.Fatal("List() error = nil, want marker filesystem error")
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("List() error = %v, want non-ENOENT marker error", err)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("List() error = %v, want permission error", err)
+	}
+	if !strings.Contains(err.Error(), marker) {
+		t.Fatalf("List() error = %q, want marker path %q", err, marker)
 	}
 }

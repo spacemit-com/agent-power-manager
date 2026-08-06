@@ -39,7 +39,7 @@ func NewFilesystem() (*FilesystemCache, error) {
 	}, nil
 }
 
-// Fetch copies a cached skill version into the versionless staging directory.
+// Fetch 将指定版本的缓存 Skill 复制到无版本层级的 staging 目录。
 func (c *FilesystemCache) Fetch(ref domain.PowerRef) (content Content, resultErr error) {
 	if ref.Version == "" {
 		return Content{}, errors.New("power version is required")

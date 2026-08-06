@@ -67,8 +67,15 @@ func (c *LocalClient) List() ([]domain.PowerRef, error) {
 			if !version.IsDir() {
 				continue
 			}
-			marker, err := os.Stat(filepath.Join(skillsRoot, skill.Name(), version.Name(), "SKILL.md"))
-			if err != nil || !marker.Mode().IsRegular() {
+			markerPath := filepath.Join(skillsRoot, skill.Name(), version.Name(), "SKILL.md")
+			marker, err := os.Lstat(markerPath)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("stat skill marker %q: %w", markerPath, err)
+			}
+			if !marker.Mode().IsRegular() {
 				continue
 			}
 			refs = append(refs, domain.PowerRef{Name: skill.Name(), Type: domain.PowerTypeSkill, Version: version.Name()})
@@ -119,12 +126,13 @@ func (c *LocalClient) Get(ref domain.PowerRef) (resultErr error) {
 	if err != nil {
 		return fmt.Errorf("stat source skill %q: %w", source, err)
 	}
-	marker, err := os.Stat(filepath.Join(source, "SKILL.md"))
+	markerPath := filepath.Join(source, "SKILL.md")
+	marker, err := os.Lstat(markerPath)
 	if errors.Is(err, fs.ErrNotExist) || (err == nil && !marker.Mode().IsRegular()) {
 		return ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("stat source skill marker %q: %w", source, err)
+		return fmt.Errorf("stat source skill marker %q: %w", markerPath, err)
 	}
 	if err = filesystem.CopyDir(source, temporary); err != nil {
 		return fmt.Errorf("copy source skill %q: %w", source, err)
