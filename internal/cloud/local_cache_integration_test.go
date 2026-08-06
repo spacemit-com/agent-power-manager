@@ -48,6 +48,10 @@ func TestLocalCloudAndCacheFetchGetFetch(t *testing.T) {
 	if content.Path != stagingPath {
 		t.Fatalf("Content.Path = %q, want %q", content.Path, stagingPath)
 	}
+	versionedStagingPath := filepath.Join(stagingPath, ref.Version)
+	if _, err = os.Stat(versionedStagingPath); !os.IsNotExist(err) {
+		t.Fatalf("versioned staging path %q error = %v, want not exist", versionedStagingPath, err)
+	}
 	for _, root := range []string{cachePath, stagingPath} {
 		for _, name := range []string{"SKILL.md", "skill-card.md"} {
 			if _, err = os.Stat(filepath.Join(root, name)); err != nil {
