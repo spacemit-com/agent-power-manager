@@ -23,7 +23,7 @@
 
 验证结果或限制：
 
-- `rg -n 'UserHomeDir|UserCacheDir|Getenv\("APM_HOME"\)|LookupEnv\("APM_HOME"\)' internal --glob '*.go'` 确认生产环境的 HOME/缓存访问仅位于 `internal/paths/paths.go`。
+- `rg -n 'os\.(UserHomeDir|UserCacheDir|Getenv|LookupEnv)\(' internal --glob '*.go'` 确认与该功能相关的生产 HOME、缓存和环境访问集中于 `internal/paths/paths.go`；测试辅助环境访问可见于 `paths_test.go`。
 - `test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均以退出码 0 完成；测试包全部报告 `ok`，无测试包报告 `[no test files]`。
 - 当前仅集成路径和既有全局锁；Agent 检测、安装/卸载、配置、缓存写入及事务恢复仍由各自功能负责。
 
