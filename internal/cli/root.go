@@ -11,21 +11,20 @@ import (
 
 // CLIEntry 是 APM 命令行的执行入口。
 type CLIEntry struct {
-	root   *cobra.Command
 	logger *logging.Logger
 }
 
 // New 使用统一日志输出创建只解析命令的 CLI 入口。
 func New(logger *logging.Logger) *CLIEntry {
-	return &CLIEntry{root: newRootCommand(logger), logger: logger}
+	return &CLIEntry{logger: logger}
 }
 
 // Execute 解析并校验参数，不执行 Power 生命周期业务。
 func (entry *CLIEntry) Execute(args []string) error {
 	// Cobra 的 flag value 会保留上次解析结果；每次重建命令树以隔离重复执行。
-	entry.root = newRootCommand(entry.logger)
-	entry.root.SetArgs(args)
-	executed, err := entry.root.ExecuteC()
+	root := newRootCommand(entry.logger)
+	root.SetArgs(args)
+	executed, err := root.ExecuteC()
 	if err != nil {
 		executed.PrintErrln(executed.ErrPrefix(), err.Error())
 		executed.PrintErr(executed.UsageString())
