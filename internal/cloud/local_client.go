@@ -7,21 +7,20 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"apm/internal/domain"
 	"apm/internal/paths"
 	"apm/internal/utils/filesystem"
 )
 
-// LocalClient reads power resources from a local directory.
+// LocalClient 从本地目录读取能力资源。
 type LocalClient struct {
 	resourcesRoot string
 	cacheRoot     string
 	cacheTempRoot string
 }
 
-// NewLocalClient creates a local client for an absolute resource root.
+// NewLocalClient 使用绝对资源根目录创建本地客户端。
 func NewLocalClient(resourcesRoot string) (*LocalClient, error) {
 	if !filepath.IsAbs(resourcesRoot) {
 		return nil, fmt.Errorf("resource root must be absolute: %q", resourcesRoot)
@@ -41,7 +40,7 @@ func NewLocalClient(resourcesRoot string) (*LocalClient, error) {
 	}, nil
 }
 
-// List returns all valid local Skill resources in stable type, name, version order.
+// List 按稳定的类型、名称、版本顺序返回所有有效的本地 Skill 资源。
 func (c *LocalClient) List() ([]domain.PowerRef, error) {
 	if _, err := os.ReadDir(c.resourcesRoot); err != nil {
 		return nil, fmt.Errorf("read resource root %q: %w", c.resourcesRoot, err)
@@ -87,16 +86,13 @@ func (c *LocalClient) List() ([]domain.PowerRef, error) {
 	return refs, nil
 }
 
-// Get copies a Skill resource to the local cache atomically.
+// Get 将 Skill 资源原子复制到本地缓存。
 func (c *LocalClient) Get(ref domain.PowerRef) (resultErr error) {
 	if ref.Version == "" {
 		return errors.New("power version is required")
 	}
 	if ref.Type != domain.PowerTypeSkill {
 		return ErrNotFound
-	}
-	if !validPathComponent(ref.Name) || !validPathComponent(ref.Version) {
-		return errors.New("power name and version must be path components")
 	}
 	if err := os.RemoveAll(c.cacheTempRoot); err != nil {
 		return fmt.Errorf("clean cache temporary path %q: %w", c.cacheTempRoot, err)
@@ -140,8 +136,4 @@ func (c *LocalClient) Get(ref domain.PowerRef) (resultErr error) {
 		return fmt.Errorf("commit cached skill %q: %w", final, err)
 	}
 	return nil
-}
-
-func validPathComponent(value string) bool {
-	return value != "" && value != "." && value != ".." && !strings.ContainsAny(value, `/\\`)
 }

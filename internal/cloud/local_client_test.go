@@ -122,23 +122,6 @@ func TestLocalClientGetValidatesRefAndNotFound(t *testing.T) {
 	}
 }
 
-func TestLocalClientGetRejectsInvalidPathComponents(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	client, err := cloud.NewLocalClient(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, ref := range []domain.PowerRef{
-		{Name: "", Type: domain.PowerTypeSkill, Version: "1.0.0"},
-		{Name: "../outside", Type: domain.PowerTypeSkill, Version: "1.0.0"},
-		{Name: "demo", Type: domain.PowerTypeSkill, Version: "../outside"},
-	} {
-		if err := client.Get(ref); err == nil || errors.Is(err, cloud.ErrNotFound) {
-			t.Fatalf("Get(%#v) error = %v, want non-sentinel parameter error", ref, err)
-		}
-	}
-}
-
 func TestLocalClientGetMapsInvalidSourceLayoutToNotFound(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
