@@ -43,25 +43,6 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 
 APM 支持仅供测试使用的 `APM_HOME` 环境变量，使测试能在临时目录中模拟 Agent 安装状态和完整的本地 Power 生命周期，不读写用户目录。该路径决策详见 [ADR-005](adr/ADR-005-isolate-test-filesystem-with-apm-home.md)。
 
-### 路径解析
-
-- `internal/paths` 是有效 HOME 和所有本地文件路径的唯一解析入口。
-- `APM_HOME` 非空时，其值取代 HOME；`APM_HOME` 未定义或为空字符串时，使用 `os.UserHomeDir()` 解析真实 HOME。HOME 无法解析或结果为空时返回错误。
-- 缓存目录按 `XDG_CACHE_HOME` 非空值、`APM_HOME` 非空值、系统默认缓存目录的顺序解析；高优先级变量未定义或为空时才进入下一级。
-- `APM_HOME` 指向的目录不需要预先存在；由实际写入组件按既有规则创建所需子目录，并返回带上下文的底层文件系统错误。
-- `APM_HOME` 的值由测试保证合法且规范；APM 不额外校验相对路径、符号链接、权限或目录逃逸，也不将路径转换为绝对路径。
-- 不修改进程的 `HOME` 或 `XDG_CACHE_HOME`，也不维护可变的全局路径状态。CLI 和其他模块不直接读取 `APM_HOME`，只使用 `internal/paths` 返回的路径。
-
-### 隔离边界
-
-`APM_HOME` 非空时，除 `XDG_CACHE_HOME` 显式覆盖的缓存外，所有 HOME 派生的本地读写都必须位于该测试目录：
-
-- APM 状态位于 `$APM_HOME/.apm`，包括 lock、清单与配置、journal、staging、backup 和 quarantine。
-- 各 Adapter 从有效 HOME 派生 Agent 根目录、Agent 安装状态检测路径以及 Power 安装和卸载目标；Adapter 不直接读取 HOME 类环境变量或拼接 `~`。
-- `XDG_CACHE_HOME` 非空时缓存位于 `$XDG_CACHE_HOME/apm`；否则，`APM_HOME` 非空时缓存位于 `$APM_HOME/.cache/apm`；两者均为空或未设置时使用系统默认缓存目录下的 `apm`。
-
-`APM_HOME` 未定义或为空时，APM 继续使用正常 HOME 和既有 XDG 缓存规则。`APM_HOME` 只改变本地文件系统边界，不改变 Agent ID、Power 元数据、云端 API、CLI 参数或日志语义；不增加 CLI flag，也不在 `apm --help` 中公开为普通用户功能。
-
 ### 测试与验收
 
 - 路径单元测试覆盖 `APM_HOME` 未设置、空值回退、非空值优先于 HOME，lock 的隔离路径，以及缓存的 `XDG_CACHE_HOME > APM_HOME > 系统默认` 优先级。
