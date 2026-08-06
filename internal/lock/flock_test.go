@@ -39,3 +39,29 @@ func TestFlockContendsAndCanBeReacquired(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDefaultLockUsesAPMHomeWithoutTouchingHome(t *testing.T) {
+	realHome := t.TempDir()
+	isolationHome := filepath.Join(t.TempDir(), "sandbox")
+	t.Setenv("HOME", realHome)
+	t.Setenv("APM_HOME", isolationHome)
+
+	locker, err := lock.NewDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := locker.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = unlock.Release(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = os.Stat(filepath.Join(isolationHome, ".apm", "apm.lock")); err != nil {
+		t.Fatalf("stat isolated lock: %v", err)
+	}
+	if _, err = os.Stat(filepath.Join(realHome, ".apm")); !os.IsNotExist(err) {
+		t.Fatalf("real HOME was touched: %v", err)
+	}
+}
