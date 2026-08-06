@@ -112,8 +112,8 @@ StagingTempPath = <state-root>/.tmp/staging
 `Fetch(ref)` 执行以下步骤：
 
 1. `ref.Version` 为空时返回参数错误，不映射为 `ErrMiss`。
-2. 非 Skill 类型或 `cache/skills/<name>/<version>` 不存在时，返回可通过 `errors.Is(err, cache.ErrMiss)` 判断的错误。
-3. 每次调用都删除旧 `StagingPath` 和 `StagingTempPath`。
+2. 每次有效调用都删除旧 `StagingPath` 和 `StagingTempPath`。
+3. 非 Skill 类型或 `cache/skills/<name>/<version>` 不存在时，返回可通过 `errors.Is(err, cache.ErrMiss)` 判断的错误；此时旧 staging 已清理。
 4. 将版本化缓存目录复制到临时 staging 的 `skills/<name>`，在此去掉版本层级。
 5. 原子 rename 临时 staging 为最终 staging。
 6. 返回 `Content{Path: "<state-root>/staging/skills/<name>"}`。
