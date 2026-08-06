@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-06
+
+分类：功能变更
+
+用户需求：
+
+集中解析 APM 的有效主目录，使 APM_HOME 可隔离本地状态、锁和缓存路径，并让默认文件锁使用该解析结果。
+
+相关提交：
+
+- `fa73e56 feat(paths): isolate test filesystem with APM_HOME`
+
+解决方案或完成结果：
+
+新增 APM_HOME 优先的 HomeDir、StateDir、LockPath 和 CachePath；未设置 APM_HOME 时，主目录和缓存目录分别保留 Go 标准库的 UserHomeDir 与 UserCacheDir 语义。默认锁路径随之写入隔离目录。
+
+验证结果或限制：
+
+- `go test -count=1 ./internal/paths ./internal/lock` 与 `go test ./...` 均以退出码 0 完成。
+
 ## 2026-08-05
 
 分类：新增功能
