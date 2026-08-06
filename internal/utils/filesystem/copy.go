@@ -17,8 +17,12 @@ func CopyDir(source, destination string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("source %q is not a directory", source)
 	}
-	if err = os.MkdirAll(destination, info.Mode().Perm()); err != nil {
+	temporaryMode := info.Mode().Perm() | 0o700
+	if err = os.MkdirAll(destination, temporaryMode); err != nil {
 		return fmt.Errorf("create destination directory %q: %w", destination, err)
+	}
+	if err = os.Chmod(destination, temporaryMode); err != nil {
+		return fmt.Errorf("prepare destination directory %q: %w", destination, err)
 	}
 
 	entries, err := os.ReadDir(source)
