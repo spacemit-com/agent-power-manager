@@ -142,6 +142,7 @@ func TestIsolatedStateLockAndCachePaths(t *testing.T) {
 func TestCachePathUsesXDGWithoutAPMHome(t *testing.T) {
 	cacheHome := t.TempDir()
 	t.Setenv("APM_HOME", "")
+	t.Setenv("HOME", "")
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 	got, err := paths.CachePath()
@@ -234,8 +235,7 @@ const apmHomeEnv = "APM_HOME"
 
 // HomeDir 返回 APM 使用的有效用户主目录。
 func HomeDir() (string, error) {
-	home, _, err := resolveHome()
-	return home, err
+	return resolveHome()
 }
 
 // StateDir 返回 APM 本地状态根目录。
@@ -268,11 +268,7 @@ func ManifestPath(domain.AgentID) string { return "" }
 
 // CachePath 返回 APM 下载缓存目录。
 func CachePath() (string, error) {
-	home, isolated, err := resolveHome()
-	if err != nil {
-		return "", err
-	}
-	if isolated {
+	if home := os.Getenv(apmHomeEnv); home != "" {
 		return filepath.Join(home, ".cache", "apm"), nil
 	}
 
@@ -291,18 +287,18 @@ func CachePath() (string, error) {
 // 当前为零值占位实现。
 func TransactionPath() string { return "" }
 
-func resolveHome() (string, bool, error) {
+func resolveHome() (string, error) {
 	if home := os.Getenv(apmHomeEnv); home != "" {
-		return home, true, nil
+		return home, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", false, fmt.Errorf("resolve home directory: %w", err)
+		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
 	if home == "" {
-		return "", false, errors.New("resolve home directory: empty path")
+		return "", errors.New("resolve home directory: empty path")
 	}
-	return home, false, nil
+	return home, nil
 }
 ```
 
