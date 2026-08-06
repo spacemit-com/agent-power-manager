@@ -14,22 +14,18 @@ const (
 	PowerTypeMCP PowerType = "mcp"
 )
 
-// PowerRef 表示能力的名称和类别。
+// PowerRef 表示能力的类别、名称和可选版本。
 type PowerRef struct {
-	Name string
-	Type PowerType
+	Name    string
+	Type    PowerType
+	Version string
 }
 
-// Power 表示可分发的能力及其数据。
-type Power struct {
-	Ref     PowerRef
-	Version string
-	Data    []byte
-}
+// Power 是后续 Adapter 安装参数的占位类型。
+type Power struct{}
 
 // InstalledPower 表示已安装能力的元数据。
 type InstalledPower struct {
 	Ref         PowerRef
-	Version     string
 	InstalledAt time.Time
 }
