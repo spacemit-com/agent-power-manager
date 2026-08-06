@@ -5,7 +5,7 @@
 
 **Goal:** 让 APM 在 `APM_HOME` 非空时将已实现的本地路径和默认文件锁隔离到测试目录，为后续 Agent 和 Power 生命周期测试提供唯一的路径入口。
 
-**Architecture:** `internal/paths` 在每次解析时优先读取非空 `APM_HOME`，否则保留 `os.UserHomeDir` 和 `os.UserCacheDir` 的生产语义。APM 状态根统一为 `<effective-home>/.apm`；隔离模式缓存固定为 `$APM_HOME/.cache/apm`。现有 `lock.NewDefault` 继续只消费 `paths.LockPath`。
+**Architecture:** `internal/paths` 在每次 HOME 解析时优先读取非空 `APM_HOME`，否则保留 `os.UserHomeDir` 的生产语义。APM 状态根统一为 `<effective-home>/.apm`；缓存独立按 `XDG_CACHE_HOME > APM_HOME > os.UserCacheDir()` 解析。现有 `lock.NewDefault` 继续只消费 `paths.LockPath`。
 
 **Tech Stack:** Go 1.26.5、标准库 `os`/`path/filepath`/`testing`、`gofrs/flock`。
 
@@ -15,7 +15,7 @@
 - `APM_HOME` 非空时直接使用；空字符串视为未定义并回退 HOME。
 - 不校验、清理、绝对化或解析 `APM_HOME`；测试负责提供规范目录。
 - 不修改进程的 `HOME` 或 `XDG_CACHE_HOME`，不缓存环境解析结果。
-- 隔离模式的状态根为 `$APM_HOME/.apm`，缓存为 `$APM_HOME/.cache/apm` 且忽略 `XDG_CACHE_HOME`。
+- 隔离模式的状态根为 `$APM_HOME/.apm`；缓存的优先级为 `XDG_CACHE_HOME > APM_HOME > 系统默认`。
 - 本 feature 不实现 Adapter、Config、Cache、Transaction 或 Lifecycle 的占位业务方法。
 - 修改环境变量的测试不得调用 `t.Parallel()`。
 - 路径决策以 [ADR-005](../../adr/ADR-005-isolate-test-filesystem-with-apm-home.md) 为准，设计语义见 [Project Overview](../../project-overview.md#test-filesystem-isolation)。
@@ -39,7 +39,7 @@
 - Modify: `internal/lock/flock_test.go`
 
 **Interfaces:**
-- Consumes: `os.Getenv("APM_HOME")`, `os.UserHomeDir()`, `os.UserCacheDir()` and `lock.NewDefault() (Locker, error)`.
+- Consumes: `os.Getenv("XDG_CACHE_HOME")`, `os.Getenv("APM_HOME")`, `os.UserHomeDir()`, `os.UserCacheDir()` and `lock.NewDefault() (Locker, error)`.
 - Produces: `paths.HomeDir() (string, error)`, `paths.StateDir() (string, error)`, `paths.LockPath() (string, error)` and `paths.CachePath() (string, error)`.
 - Preserves: `paths.JournalPath() string`, `paths.ManifestPath(domain.AgentID) string` and `paths.TransactionPath() string` as zero-value placeholders.
 
@@ -109,10 +109,11 @@ func TestHomeDirReturnsErrorWhenHomeIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestIsolatedStateLockAndCachePaths(t *testing.T) {
+func TestStateAndLockUseAPMHomeWhileCacheUsesXDG(t *testing.T) {
 	home := t.TempDir()
+	cacheHome := t.TempDir()
 	t.Setenv("APM_HOME", home)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 	state, err := paths.StateDir()
 	if err != nil {
@@ -134,8 +135,22 @@ func TestIsolatedStateLockAndCachePaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(home, ".cache", "apm"); cache != want {
+	if want := filepath.Join(cacheHome, "apm"); cache != want {
 		t.Fatalf("CachePath() = %q, want %q", cache, want)
+	}
+}
+
+func TestCachePathUsesAPMHomeWhenXDGCacheHomeIsEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", "")
+
+	got, err := paths.CachePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".cache", "apm"); got != want {
+		t.Fatalf("CachePath() = %q, want %q", got, want)
 	}
 }
 
@@ -144,6 +159,24 @@ func TestCachePathUsesXDGWithoutAPMHome(t *testing.T) {
 	t.Setenv("APM_HOME", "")
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+	got, err := paths.CachePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(cacheHome, "apm"); got != want {
+		t.Fatalf("CachePath() = %q, want %q", got, want)
+	}
+}
+
+func TestCachePathUsesDefaultWithoutOverrides(t *testing.T) {
+	t.Setenv("APM_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+
+	cacheHome, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := paths.CachePath()
 	if err != nil {
@@ -231,7 +264,10 @@ import (
 	"apm/internal/domain"
 )
 
-const apmHomeEnv = "APM_HOME"
+const (
+	apmHomeEnv      = "APM_HOME"
+	xdgCacheHomeEnv = "XDG_CACHE_HOME"
+)
 
 // HomeDir 返回 APM 使用的有效用户主目录。
 func HomeDir() (string, error) {
@@ -268,6 +304,9 @@ func ManifestPath(domain.AgentID) string { return "" }
 
 // CachePath 返回 APM 下载缓存目录。
 func CachePath() (string, error) {
+	if cache := os.Getenv(xdgCacheHomeEnv); cache != "" {
+		return filepath.Join(cache, "apm"), nil
+	}
 	if home := os.Getenv(apmHomeEnv); home != "" {
 		return filepath.Join(home, ".cache", "apm"), nil
 	}
@@ -336,7 +375,7 @@ git commit -m "feat(paths): isolate test filesystem with APM_HOME"
 Run:
 
 ```bash
-rg -n 'UserHomeDir|UserCacheDir|Getenv\("APM_HOME"\)|LookupEnv\("APM_HOME"\)' internal --glob '*.go'
+rg -n 'os\.(UserHomeDir|UserCacheDir|Getenv|LookupEnv)\(' internal --glob '*.go'
 ```
 
 Expected: production matches occur only in `internal/paths/paths.go`; test matches may occur in `internal/paths/paths_test.go`.
@@ -366,7 +405,7 @@ Add a new `2026-08-06` entry immediately below `# Changelog` using the template 
 - 分类：`新增功能`
 - 用户需求：增加仅供测试使用的 `APM_HOME`，使 APM 可在临时目录模拟 Agent 和 Power 状态而不影响用户目录。
 - 相关提交：copy the exact lines printed by the command above.
-- 完成结果：record effective HOME, `$APM_HOME/.apm`, `$APM_HOME/.cache/apm`, XDG override, and default-lock isolation.
+- 完成结果：record effective HOME, `$APM_HOME/.apm`, cache precedence `XDG_CACHE_HOME > APM_HOME > system default`, and default-lock isolation.
 - 验证：record the commands and actual successful results from Step 2.
 - 限制：only paths and the existing lock are integrated now; Agent detection, install/uninstall, config, cache writes and transaction recovery remain with their owning features.
 

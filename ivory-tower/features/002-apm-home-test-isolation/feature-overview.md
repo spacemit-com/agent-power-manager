@@ -8,7 +8,7 @@
 
 ## Scope
 
-- 包含：`APM_HOME` 非空优先级；空值或未设置时回退 HOME；`$APM_HOME/.apm` 状态根；`$APM_HOME/.cache/apm` 隔离缓存；默认 lock 的隔离路径；路径优先级与不越界测试。
+- 包含：`APM_HOME` 非空优先级；空值或未设置时回退 HOME；`$APM_HOME/.apm` 状态根；`XDG_CACHE_HOME > APM_HOME > 系统默认` 的缓存优先级；默认 lock 的隔离路径；路径优先级与不越界测试。
 - 不包含：CLI flag 或 help 变更；`APM_HOME` 路径校验；尚未实现的 Adapter、Config、Cache、Transaction 或 Lifecycle 业务逻辑；完整 Power 安装卸载集成测试。
 
 ## Implementation Context
@@ -19,5 +19,5 @@
 
 ## Acceptance
 
-- 验收条件：设置临时 `APM_HOME` 后，有效 HOME、APM 状态、缓存和默认 lock 全部位于临时根目录，并且已设置的 `XDG_CACHE_HOME` 与真实 HOME 未被写入；`APM_HOME` 为空或未设置时保持既有生产语义。
+- 验收条件：设置临时 `APM_HOME` 后，有效 HOME、APM 状态和默认 lock 位于临时根目录；缓存分别验证 `XDG_CACHE_HOME`、`APM_HOME` 和系统默认三级优先顺序；`APM_HOME` 为空或未设置时保持既有生产语义。
 - 已知风险或待决问题：修改进程环境的测试不得并行；完整 Agent 和 Power 生命周期隔离验收需在对应业务组件实现后执行。

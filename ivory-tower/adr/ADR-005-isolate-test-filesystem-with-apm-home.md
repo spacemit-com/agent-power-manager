@@ -16,15 +16,15 @@ APM 引入仅供测试使用的 `APM_HOME` 环境变量，并由 `internal/paths
 
 - `APM_HOME` 非空时直接作为有效 HOME；未定义或为空时回退到 `os.UserHomeDir()`。
 - APM 不对 `APM_HOME` 增加路径合法性、绝对路径、符号链接、权限或逃逸校验；测试负责传入规范目录。
-- 隔离模式下，APM 状态位于 `$APM_HOME/.apm`，Agent 根目录和 Power 目标从该有效 HOME 派生，缓存固定位于 `$APM_HOME/.cache/apm` 且忽略 `XDG_CACHE_HOME`。
-- 非隔离模式保持真实 HOME 和既有 XDG 缓存语义。
+- 隔离模式下，APM 状态位于 `$APM_HOME/.apm`，Agent 根目录和 Power 目标从该有效 HOME 派生。
+- 缓存路径的优先级固定为 `XDG_CACHE_HOME > APM_HOME > 系统默认`：非空 `XDG_CACHE_HOME` 使用 `$XDG_CACHE_HOME/apm`；否则非空 `APM_HOME` 使用 `$APM_HOME/.cache/apm`；两者均为空或未设置时，在 `os.UserCacheDir()` 返回的系统默认目录下使用 `apm`。
 - APM 不改写进程环境；CLI、Adapter、Config、Lock、Cache 和 Transaction 均不直接读取 HOME 类环境变量，只消费 `internal/paths` 生成的路径。
 - 不增加 CLI flag 或 help 文本，也不将 `APM_HOME` 定义为普通用户的数据迁移或多配置目录功能。
 
 ## Consequences
 
-- 正面影响：测试可以在单个临时根目录中构造 Agent 和 APM 状态，安全验证 Power 安装、卸载、锁竞争、配置、事务和恢复；生产默认语义不变。
-- 代价与风险：进程环境是全局状态，修改 `APM_HOME` 的测试不能并行；`APM_HOME` 仅靠测试规范保证安全，错误值不会被 APM 额外拒绝。
+- 正面影响：测试可以在临时根目录中构造 Agent 和 APM 状态，安全验证 Power 安装、卸载、锁竞争、配置、事务和恢复；同时保留 XDG 对缓存位置的标准覆盖能力。
+- 代价与风险：进程环境是全局状态，修改 `APM_HOME` 或 `XDG_CACHE_HOME` 的测试不能并行；若测试要求缓存也位于 `APM_HOME`，必须清空 `XDG_CACHE_HOME`；`APM_HOME` 仅靠测试规范保证安全，错误值不会被 APM 额外拒绝。
 - 后续动作：先实现有效 HOME、APM 状态根和缓存路径，并将现有默认锁接入；后续 Adapter、Config、Cache 和 Transaction feature 必须复用该路径边界。
 
 ## Alternatives Considered

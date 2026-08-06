@@ -2,6 +2,28 @@
 
 ## 2026-08-06
 
+分类：缺陷修复
+
+用户需求：
+
+修复缓存目录环境变量的覆盖顺序，使其符合 `XDG_CACHE_HOME > APM_HOME > 系统默认`。
+
+相关提交：
+
+- `2f46cba fix(paths): honor XDG cache precedence`
+- `7cdf98f test(paths): use system cache directory expectation`
+
+解决方案或完成结果：
+
+`CachePath()` 现在优先使用非空 `$XDG_CACHE_HOME/apm`，其次使用非空 `$APM_HOME/.cache/apm`，两者均为空或未设置时使用系统默认缓存目录下的 `apm`，并取代上一条记录中“`APM_HOME` 覆盖 XDG 缓存”的旧语义。`APM_HOME` 对状态、Agent、Power 和默认 lock 等 HOME 派生路径的作用保持不变。ADR-005、Project Overview 和 feature 文档已同步新的优先级。
+
+验证结果或限制：
+
+- 单元测试分别覆盖 XDG 覆盖 APM、XDG 为空时回退 APM，以及两者均为空时使用系统默认缓存目录。
+- `test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均以退出码 0 完成。
+
+## 2026-08-06
+
 分类：新增功能
 
 用户需求：

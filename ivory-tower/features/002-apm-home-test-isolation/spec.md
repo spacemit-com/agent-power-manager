@@ -2,7 +2,7 @@
 
 ## 目标
 
-建立 APM 本地文件路径的测试隔离入口。测试设置非空 `APM_HOME` 后，已实现的 APM 状态、缓存和默认 lock 必须位于该目录，为后续 Agent 检测、Power 安装卸载、配置和事务恢复提供同一路径边界。
+建立 APM 本地文件路径的测试隔离入口。测试设置非空 `APM_HOME` 后，已实现的 APM 状态和默认 lock 必须位于该目录；缓存遵循 `XDG_CACHE_HOME > APM_HOME > 系统默认` 的独立优先顺序。
 
 项目级设计见 [Project Overview](../../project-overview.md#test-filesystem-isolation)，决策记录见 [ADR-005](../../adr/ADR-005-isolate-test-filesystem-with-apm-home.md)。
 
@@ -13,8 +13,9 @@
 - `APM_HOME` 未设置或为空字符串时，使用 `os.UserHomeDir()`。
 - 有效 HOME 无法解析或为空时返回带上下文的错误。
 - APM 状态根为 `<effective-home>/.apm`，默认 lock 为 `<effective-home>/.apm/apm.lock`。
-- `APM_HOME` 非空时，缓存为 `$APM_HOME/.cache/apm` 并忽略 `XDG_CACHE_HOME`。
-- `APM_HOME` 为空或未设置时，缓存使用 `os.UserCacheDir()` 的既有规则并追加 `apm`。
+- `XDG_CACHE_HOME` 非空时，缓存为 `$XDG_CACHE_HOME/apm`，不再读取 `APM_HOME` 或系统默认缓存目录。
+- `XDG_CACHE_HOME` 为空或未设置且 `APM_HOME` 非空时，缓存为 `$APM_HOME/.cache/apm`。
+- `XDG_CACHE_HOME` 和 `APM_HOME` 均为空或未设置时，缓存使用 `os.UserCacheDir()` 的系统默认结果并追加 `apm`。
 
 ## 组件边界
 
@@ -33,7 +34,7 @@
 ## 测试与验收
 
 - 单元测试覆盖 `APM_HOME` 非空优先、空值回退、未设置回退，以及 HOME 无法解析时返回错误。
-- 单元测试覆盖隔离模式的状态根、lock 和缓存确切路径，并验证缓存不受 `XDG_CACHE_HOME` 影响。
+- 单元测试覆盖隔离模式的状态根和 lock，并分别验证 `XDG_CACHE_HOME`、`APM_HOME` 和系统默认缓存目录三个分支。
 - 默认 lock 集成测试必须在不存在的隔离根下创建 `$APM_HOME/.apm/apm.lock`，并证明测试 HOME 下未创建 `.apm`。
 - 修改环境变量的测试不使用 `t.Parallel()`。
 - `go test ./...`、`go vet ./...` 和 `go build -o /dev/null ./cmd/apm` 全部成功。
