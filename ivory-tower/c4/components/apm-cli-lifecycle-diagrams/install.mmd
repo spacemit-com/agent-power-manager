@@ -5,7 +5,7 @@ flowchart TD
     InstallCommand --> InstallDiscovery[执行公共 Agent 刷新流程；失败或中断在公共图内终止]
     InstallDiscovery -->|成功；锁保持| InstallTarget{具体目标在快照中，或 all 快照非空?}
     InstallTarget -->|否| InstallTargetFail[打印目标 Agent 未受支持或未安装，或没有已支持且已安装的 Agent] --> InstallPreflightFail
-    InstallTarget -->|是| InstallResolve[解析 power 与可选 version；获取云端元数据；省略 type 从云端元数据推断；省略 version 选云端最新；显式版本允许升级或降级]
+    InstallTarget -->|是| InstallResolve[调用 Cloud List 获取带版本的全部 PowerRef；按 power、可选 type/version 筛选；省略 version 选最新版；得到版本已确定的 PowerRef]
     InstallResolve -->|失败| InstallPreflightFail[记录预执行失败；全部目标 Agent 标记 unexecuted] --> InstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> InstallBatchError([停止剩余 Agent；释放锁；非零退出])
     InstallResolve -->|成功| InstallNextAgent{按快照中已支持且已安装 Agent ID 升序还有目标 Agent?}
     InstallNextAgent -->|否| InstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> InstallOK([释放锁并正常退出])
@@ -19,9 +19,14 @@ flowchart TD
     subgraph InstallPreCommit["提交点前事务阶段（失败时回滚）"]
         InstallSame -->|否| InstallCreateJournal[创建 install journal]
         InstallCreateJournal -->|失败| InstallFail
-        InstallCreateJournal -->|成功| InstallCache[校验缓存；缺失则临时下载、校验并原子入缓存]
-        InstallCache -->|失败| InstallRollback[提交点前回滚临时文件、staging 与旧版本]
-        InstallCache -->|成功| InstallStage[在 staging 中转换并准备安装内容]
+        InstallCreateJournal -->|成功| InstallFetch[Cache Fetch 版本已确定的 PowerRef；先清理并重建 staging]
+        InstallFetch -->|非 miss 失败| InstallRollback[提交点前回滚临时文件、staging 与旧版本]
+        InstallFetch -->|缓存命中| InstallStage[Adapter 在无版本层 staging 中转换并准备安装内容]
+        InstallFetch -->|cache miss| InstallGet[Cloud Get 经缓存根临时目录原子写入目标 Power]
+        InstallGet -->|失败| InstallRollback
+        InstallGet -->|成功| InstallRefetch[再次 Cache Fetch 同一 PowerRef]
+        InstallRefetch -->|失败| InstallRollback
+        InstallRefetch -->|成功| InstallStage
         InstallStage -->|失败| InstallRollback
         InstallStage -->|成功| InstallExisting{存在旧版本?}
         InstallExisting -->|是| InstallBackup[原子移动旧版本到事务备份]
@@ -54,7 +59,9 @@ flowchart TD
     InstallAdapter -.进程中断.-> InstallInterrupted
     InstallReadManifest -.进程中断.-> InstallInterrupted
     InstallCreateJournal -.进程中断；保留 journal.-> InstallInterrupted
-    InstallCache -.进程中断；保留 journal.-> InstallInterrupted
+    InstallFetch -.进程中断；保留 journal.-> InstallInterrupted
+    InstallGet -.进程中断；保留 journal.-> InstallInterrupted
+    InstallRefetch -.进程中断；保留 journal.-> InstallInterrupted
     InstallStage -.进程中断；保留 journal.-> InstallInterrupted
     InstallBackup -.进程中断；保留 journal.-> InstallInterrupted
     InstallIntent -.进程中断；保留 journal.-> InstallInterrupted

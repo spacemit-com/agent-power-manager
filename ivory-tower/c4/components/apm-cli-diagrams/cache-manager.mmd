@@ -1,22 +1,20 @@
 classDiagram
-    note for PowerCache "缓存接口：Fetch 未命中时由调用方下载后 Put"
+    note for PowerCache "版本化缓存接口：Fetch 清理 staging，并将版本已确定的 PowerRef 物化为无版本层目录"
     class PowerCache {
         <<interface>>
         +Fetch(PowerRef) (Content, error)
-        +Put(PowerRef, data []byte) error
     }
 
-    note for Content "缓存条目：本地路径与校验和，供安装与完整性校验使用"
+    note for Content "已物化的 staging 内容位置"
     class Content {
         +Path string
-        +Checksum string
     }
 
-    note for contentAddressedCache "内容寻址实现：按 name@version 或 sha256 分桶存储，天然去重"
-    class contentAddressedCache {
+    note for FilesystemCache "按 type/name/version 读取缓存；经状态根内临时目录原子发布干净 staging"
+    class FilesystemCache {
         +Fetch(PowerRef) (Content, error)
-        +Put(PowerRef, []byte) error
     }
 
-    contentAddressedCache ..|> PowerCache
+    FilesystemCache ..|> PowerCache
+    PowerCache --> PowerRef
     PowerCache --> Content : returns

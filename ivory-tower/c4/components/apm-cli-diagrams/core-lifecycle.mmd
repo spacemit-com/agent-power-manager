@@ -49,17 +49,17 @@ classDiagram
         +Acquire() (Unlock, error)
     }
 
-    note for PowerCache "下载内容的本地缓存"
+    note for PowerCache "将版本已确定的 PowerRef 从版本化缓存物化到干净 staging"
     class PowerCache {
         <<interface>>
         +Fetch(PowerRef) (Content, error)
     }
 
-    note for CloudClient "云端 Power 资源的 list/get"
+    note for CloudClient "List 返回带版本的全部 PowerRef；Get 将版本已确定的 PowerRef 原子写入缓存"
     class CloudClient {
         <<interface>>
-        +List(Query) ([]PowerRef, error)
-        +Get(PowerRef) (PowerMeta, error)
+        +List() ([]PowerRef, error)
+        +Get(PowerRef) error
     }
 
     lifecycleService ..|> Lifecycle

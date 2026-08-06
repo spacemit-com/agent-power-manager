@@ -27,8 +27,8 @@ APM 使用 **Go** 实现，作为覆盖 CLI、Adapter、生命周期与配置治
 | CLI 框架 | `spf13/cobra` | `search/list/install/uninstall` 子命令、自动补全、help 生成 |
 | 文件锁 | `gofrs/flock` | 基于 `flock(2)`，进程崩溃后内核自动释放，满足防重入 + 可恢复 |
 | 安装记录/配置 | 每个 Agent 一份 JSON 清单（`encoding/json`） | 对应「各 Agent 单独维护安装列表」的要求 |
-| 云端 API 客户端 | 标准库 `net/http` | 仅需 `list`/`get` 两个接口，不引入重框架 |
-| 下载缓存 | 内容寻址目录（按 name@version 或 sha256 分桶） | 遵循 XDG 缓存目录约定，便于去重与清理 |
+| Cloud 客户端 | 开发期本地文件系统实现 | 以绝对路径指定 `internal/cloud/resources`；`list` 返回带版本的全部 `PowerRef`，`get` 将版本已确定的 `PowerRef` 原子写入缓存；真实 HTTP 服务后续设计 |
+| 下载缓存 | 按 `type/name/version` 分层的版本化文件系统目录 | 遵循 XDG 缓存目录约定；fetch 时去掉版本层并物化到干净 staging |
 | 中断恢复 | staging 目录 + 原子 rename + 操作 journal | 启动时检测残留 staging/journal 即可识别并纠正 |
 | 日志/输出 | 基于标准库 `log/slog` 的统一 `logging` 模块 | 所有打印统一管理；默认输出稳定的 CLI 信息，内部诊断通过全局 `--verbose` 开启 |
 | 测试 | 标准 `testing` + `rogpeppe/go-internal/testscript` | testscript 便于端到端验证 CLI 的装/断/修复行为 |
@@ -93,11 +93,11 @@ apm/
 │   │   └── flock.go                # 全局 APM flock 实现
 │   ├── cache/
 │   │   ├── cache.go                # PowerCache 接口及缓存条目
-│   │   └── content_addressed.go    # 内容寻址缓存实现
+│   │   └── filesystem.go           # 版本化文件系统缓存及 staging 物化
 │   ├── cloud/
 │   │   ├── client.go               # CloudClient 接口
-│   │   ├── http_client.go          # list/get 的 net/http 实现
-│   │   └── model.go                # 查询参数和云端响应模型
+│   │   ├── local_client.go         # 开发期本地资源 list/get 实现
+│   │   └── resources/              # 开发期云端资源 fixture
 │   ├── logging/
 │   │   ├── logger.go               # 统一输出器及 --verbose 配置
 │   │   ├── output.go               # 稳定的 CLI 正常、恢复、警告和错误输出
@@ -110,7 +110,7 @@ apm/
 │   ├── version/
 │   │   └── selector.go             # 最新版、指定版本及版本比较规则
 │   └── paths/
-│       └── paths.go                # 锁、journal、清单、缓存及事务目录约定
+│       └── paths.go                # 锁、journal、清单、缓存、临时目录及事务目录约定
 ├── ivory-tower/                    # 架构、ADR、C4 和 lifecycle 设计文档
 ├── go.mod
 └── go.sum
@@ -124,10 +124,11 @@ apm/
 4. `transaction/path_state.go` 集中处理“原子文件操作已经完成、journal 阶段尚未更新”的中断窗口，使正常事务与恢复事务采用相同的路径状态判断。
 5. `adapter` 展开首批 `codex`、`claude_code`、`hermes` 内置实现。Registry 在编译期保证 Agent ID 唯一；每个 Adapter 除目标安装位置与格式转换外，还按 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md) 检查对应 Agent 根目录是否存在。APM 不负责 Agent 安装、卸载、实时监控、运行时感知或更新通知；新增 Agent 遵循 `internal/adapter/<agent>/` 约定。
 6. `config` 独立管理各 Agent 的 JSON 安装清单。`atomic_write.go` 保证清单不会暴露半写入状态，事务完成与 journal 删除顺序仍由 `transaction` 控制。
-7. 所有用户输出和内部诊断统一经过 `logging`，其他 package 不直接调用 `fmt.Print*` 或自行创建 logger。稳定的资源数据和成功结果写入 `stdout`；journal 恢复过程、警告和失败写入 `stderr`；内部执行步骤、HTTP 请求细节和事务路径状态仅在全局 `--verbose` 开启后写入 `stderr`。默认 CLI 输出格式保持稳定，便于用户阅读和脚本处理。
+7. 所有用户输出和内部诊断统一经过 `logging`，其他 package 不直接调用 `fmt.Print*` 或自行创建 logger。稳定的资源数据和成功结果写入 `stdout`；journal 恢复过程、警告和失败写入 `stderr`；内部执行步骤、Cloud 资源读取细节和事务路径状态仅在全局 `--verbose` 开启后写入 `stderr`。默认 CLI 输出格式保持稳定，便于用户阅读和脚本处理。
 8. `domain` 保存跨组件共享的 Agent、Power 和执行结果类型，避免相同概念分别在 CLI、Cloud、Config 和 Lifecycle 中重复定义。
-9. `paths` 是所有本地状态路径的唯一来源，保证 lock、journal、manifest、cache、staging、backup 和 quarantine 在正常执行与恢复时使用同一套位置规则。
-10. 目录树只描述生产代码和主要文件，不展开测试布局，也不增加 APM 职责之外的 Agent runtime、daemon 或动态插件机制。
+9. `paths` 是所有本地状态路径的唯一来源，保证 lock、journal、manifest、cache、staging、各目标文件系统内的临时目录、backup 和 quarantine 在正常执行与恢复时使用同一套位置规则。Cloud get 使用缓存根内的临时目录，Cache fetch 使用状态根内的临时目录，避免原子 rename 跨文件系统。
+10. Cloud Client 当前只提供开发期本地实现。`PowerRef` 同时保存类别、名称和版本；解析最新版前版本可为空，lifecycle 从 `List()` 结果选择目标后版本必须非空。`Get(ref)` 成功即表示目标 Power 已原子写入 `type/name/version` 缓存。Cache 不提供 `Put`，`Fetch(ref)` 在每次调用开头清理 staging，并把缓存内容物化为不含版本层的 staging 路径。
+11. 目录树只描述生产代码和主要文件，不展开测试布局，也不增加 APM 职责之外的 Agent runtime、daemon 或动态插件机制。
 
 ## Consequences
 
@@ -147,11 +148,12 @@ apm/
   - 在 `apm` 工程根目录下按上述目录结构初始化 Go module。
   - CLI 和各内部模块接收同一个 logging 实例，禁止绕过 logging 直接打印；在根命令中配置全局 `--verbose`。
   - 后续 feature 设计（CLI 命令与 Power 类别交织、配置格式、冲突处理等）在此技术栈约束下展开。
+  - 真实 Cloud HTTP 协议、资源校验、checksum 和内容寻址策略在本地 Cloud/Cache 流程验证后另行设计。
 
 ## Alternatives Considered
 
 | 方案 | 未选择原因 |
 | --- | --- |
-| Rust | 可靠性上限更高（uv、cargo 等先例），RISC-V 支持也好，但开发迭代慢、团队门槛高；APM 的复杂度（文件操作 + HTTP + JSON）用不到 Rust 的优势，MVP 阶段性价比低。 |
+| Rust | 可靠性上限更高（uv、cargo 等先例），RISC-V 支持也好，但开发迭代慢、团队门槛高；APM 的复杂度（文件操作 + JSON + 后续网络访问）用不到 Rust 的优势，MVP 阶段性价比低。 |
 | TypeScript/Node | 与 Agent 生态（MCP 配置、Skill 多为 JSON/Markdown）贴近，npm 分发方便，但引入 Node 运行时依赖，与「类 apt 工具」的定位冲突，RISC-V 上 Node 可用性/性能不如原生二进制。 |
 | Python | 开发最快，但分发是硬伤（依赖解释器和打包工具），包管理器自身依赖另一个包管理器不合适。 |

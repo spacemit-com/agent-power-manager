@@ -4,10 +4,11 @@ flowchart TD
 
     SearchCommand --> SearchValidate[校验必填 keyword、agent 与可选 type]
     SearchValidate -->|失败| SearchFail[打印参数或 Agent/Adapter 错误] --> SearchExitError
-    SearchValidate -->|成功| SearchCloudSearch[调用云端列表接口按 keyword 搜索；仅显式 type 才过滤]
-    SearchCloudSearch -->|请求或解析失败| SearchFail
-    SearchCloudSearch -->|成功| SearchPrint[打印匹配的云端 Power]
+    SearchValidate -->|成功| SearchCloudList[调用 Cloud List 获取带版本的全部 PowerRef]
+    SearchCloudList -->|读取或解析失败| SearchFail
+    SearchCloudList -->|成功| SearchFilter[在 lifecycle 中按 keyword 与可选 type 筛选]
+    SearchFilter --> SearchPrint[打印匹配的云端 Power]
     SearchPrint --> SearchExitOK([释放锁并正常退出])
     SearchValidate -.进程中断.-> SearchInterrupted
-    SearchCloudSearch -.进程中断.-> SearchInterrupted
+    SearchCloudList -.进程中断.-> SearchInterrupted
     SearchPrint -.进程中断.-> SearchInterrupted

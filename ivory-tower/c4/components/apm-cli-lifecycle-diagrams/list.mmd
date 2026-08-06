@@ -5,9 +5,10 @@ flowchart TD
     ListCommand --> ListValidate[校验 agent、可选 type 与 installed flag]
     ListValidate -->|失败| ListFail[打印参数或 Agent 错误] --> ListExitError
     ListValidate -->|成功| ListInstalled{指定 --installed?}
-    ListInstalled -->|否| ListCloudList[调用云端接口列出资源；仅显式 type 才过滤]
+    ListInstalled -->|否| ListCloudList[调用 Cloud List 获取带版本的全部 PowerRef]
     ListCloudList -->|失败| ListFail
-    ListCloudList -->|成功| ListPrintCloud[打印云端 Power] --> ListExitOK([释放锁并正常退出])
+    ListCloudList -->|成功| ListFilterCloud[按可选 type 在 lifecycle 中筛选]
+    ListFilterCloud --> ListPrintCloud[打印云端 Power] --> ListExitOK([释放锁并正常退出])
     ListInstalled -->|是| ListDiscovery[执行公共 Agent 刷新流程；失败或中断在公共图内终止]
     ListDiscovery -->|成功；锁保持| ListAll{agent 等于 all?}
     ListAll -->|否| ListTarget{目标 Agent 在已支持且已安装快照中?}

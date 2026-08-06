@@ -31,12 +31,12 @@ lockManager = component "Lock Manager" "基于 flock 实现防重入的文件锁
         "classDiagram" "apm-cli-diagrams/lock-manager.mmd"
     }
 }
-cacheManager = component "Cache Manager" "管理下载 Power 的本地缓存。" "Go" {
+cacheManager = component "Cache Manager" "从 type/name/version 版本化缓存向干净 staging 物化版本已确定的 PowerRef。" "Go" {
     properties {
         "classDiagram" "apm-cli-diagrams/cache-manager.mmd"
     }
 }
-cloudClient = component "Cloud Client" "调用云端 Power 服务的 list/get 接口。" "Go (net/http)" {
+cloudClient = component "Cloud Client" "开发期扫描本地 Power fixture，并将 Get 的版本已确定 PowerRef 原子写入缓存。" "Go (local filesystem)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cloud-client.mmd"
     }
@@ -46,9 +46,10 @@ cliEntry -> lifecycle "调用生命周期用例"
 lifecycle -> adapterRegistry "刷新已安装 Agent 快照；按目标 Agent 与 Power 类型获取适配实现"
 lifecycle -> configModel "读写安装记录"
 lifecycle -> lockManager "获取/释放锁，防重入"
-lifecycle -> cacheManager "读写下载缓存"
-lifecycle -> cloudClient "list/get Power 资源"
+lifecycle -> cacheManager "fetch 版本已确定的 PowerRef 到 staging"
+lifecycle -> cloudClient "list 全量 PowerRef；缓存 miss 时 get"
 adapterRegistry -> targetAgent "检查 Agent 根目录；安装/卸载 Power 到目标位置" "本地文件系统"
 configModel -> apm.installedPower "读写 JSON 清单"
-cacheManager -> apm.powerCache "读写缓存内容"
-cloudClient -> cloudRegistry "list/get Power 资源" "HTTPS"
+cacheManager -> apm.powerCache "读取版本化缓存"
+cloudClient -> apm.powerCache "经临时目录原子写入目标 Power"
+cloudClient -> cloudRegistry "扫描/get 开发期 Power fixture" "本地文件系统"
