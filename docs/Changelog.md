@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-06
+
+分类：新增功能
+
+用户需求：
+
+增加仅供测试使用的 `APM_HOME`，使 APM 可在临时目录模拟 Agent 和 Power 状态而不影响用户目录。
+
+相关提交：
+
+- `3320f3a docs: design APM_HOME test isolation`
+- `37a7181 docs(feature): plan APM_HOME test isolation`
+- `b46ec74 docs(plan): preserve XDG cache fallback`
+- `fa73e56 feat(paths): isolate test filesystem with APM_HOME`
+- `67e9f3d docs: record APM home path isolation`
+- `5e4fdfd fix: defer APM home changelog entry`
+
+解决方案或完成结果：
+
+当 `APM_HOME` 为非空值时，APM 的有效 HOME 为该目录；状态目录为 `$APM_HOME/.apm`，缓存目录为 `$APM_HOME/.cache/apm`，默认全局锁也随之隔离在 `$APM_HOME/.apm/apm.lock`。未设置或设置为空时，HOME 仍使用系统默认解析，缓存仍遵循 XDG 缓存目录覆盖。
+
+验证结果或限制：
+
+- `rg -n 'UserHomeDir|UserCacheDir|Getenv\("APM_HOME"\)|LookupEnv\("APM_HOME"\)' internal --glob '*.go'` 确认生产环境的 HOME/缓存访问仅位于 `internal/paths/paths.go`。
+- `test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均以退出码 0 完成；测试包全部报告 `ok`，无测试包报告 `[no test files]`。
+- 当前仅集成路径和既有全局锁；Agent 检测、安装/卸载、配置、缓存写入及事务恢复仍由各自功能负责。
+
 ## 2026-08-05
 
 分类：新增功能
