@@ -2,6 +2,36 @@
 
 ## 2026-08-06
 
+分类：新增功能
+
+用户需求：
+
+实现本地 Cloud/Cache 能力，并以端到端测试验证本地资源目录到版本化缓存、再到无版本 staging 的完整链路。
+
+相关提交：
+
+- `56d9c84 docs: specify local cloud cache behavior`
+- `ebe9832 docs: clarify cache fetch cleanup order`
+- `323cf4b docs: plan local cloud cache implementation`
+- `8ef8092 refactor(domain): consolidate power version metadata`
+- `0ec72a7 feat(paths): add cache and staging paths`
+- `bdb37ee feat(utils): add recursive directory copy`
+- `cda38e9 fix(utils): populate read-only directory copies`
+- `6a035be feat(cloud): add local resource client`
+- `6214b92 fix(cloud): preserve local client contract`
+- `2e24422 feat(cache): add versioned filesystem cache`
+- `6a9ebc4 test: cover local cloud cache flow`
+
+解决方案或完成结果：
+
+提供本地 Skill 资源目录，按版本原子写入缓存，并将命中的版本复制为无版本 staging；空版本会返回防御性错误。功能边界仅覆盖本地 Cloud/Cache，不包含 CLI、lifecycle、Adapter 或 HTTP。
+
+验证结果或限制：
+
+`go test ./internal/cloud -run TestLocalCloudAndCacheFetchGetFetch -count=1` 通过，验证 `Fetch → ErrMiss → Get → Fetch`、缓存与 staging 文件以及 HOME 未被写入。`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均通过。
+
+## 2026-08-06
+
 分类：缺陷修复
 
 用户需求：
