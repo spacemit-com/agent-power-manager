@@ -3,11 +3,13 @@ package adapter
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"apm/internal/domain"
+	"apm/internal/logging"
 	"apm/internal/paths"
 	"apm/internal/utils/filesystem"
 )
@@ -42,8 +44,9 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 		return err
 	}
 	defer func() {
+		a.debugInstall(ref, "cleanup", stagingRoot)
 		if err := a.removeAll(stagingRoot); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging path %q: %w", stagingRoot, err))
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove agent %q skill %q staging path %q: %w", a.config.id, ref.Name, stagingRoot, err))
 		}
 	}()
 
@@ -68,12 +71,14 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 	}
 
 	target := filepath.Join(root, "skills", ref.Name)
+	a.debugInstall(ref, "detection", target)
 	if err := ensureTargetAbsent(target); err != nil {
 		return err
 	}
 	if err := validateSkillFrontmatter(filepath.Join(sourceDir, "SKILL.md"), ref.Name); err != nil {
 		return err
 	}
+	a.debugInstall(ref, "adaptation", sourceDir)
 	if err := a.config.adapt(ref, sourceDir); err != nil {
 		return fmt.Errorf("adapt agent %q skill %q: %w", a.config.id, ref.Name, err)
 	}
@@ -82,30 +87,43 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 	if err := ensureSkillsRoot(skillsRoot); err != nil {
 		return err
 	}
-	temporary, err := os.MkdirTemp(skillsRoot, ".apm-"+ref.Name+"-*")
+	tempDir, err := os.MkdirTemp(skillsRoot, ".apm-"+ref.Name+"-*")
 	if err != nil {
-		return fmt.Errorf("create temporary skill directory in %q: %w", skillsRoot, err)
+		return fmt.Errorf("create temporary skill directory for agent %q skill %q in %q: %w", a.config.id, ref.Name, skillsRoot, err)
 	}
-	published := false
 	defer func() {
-		if !published {
-			if err := a.removeAll(temporary); err != nil {
-				resultErr = errors.Join(resultErr, fmt.Errorf("remove temporary skill directory %q: %w", temporary, err))
+		if tempDir != "" {
+			a.debugInstall(ref, "cleanup", tempDir)
+			if err := a.removeAll(tempDir); err != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("remove agent %q skill %q temporary path %q: %w", a.config.id, ref.Name, tempDir, err))
 			}
 		}
 	}()
 
-	if err := a.copyDir(sourceDir, temporary); err != nil {
-		return fmt.Errorf("copy skill staging path %q to %q: %w", sourceDir, temporary, err)
+	a.debugInstall(ref, "copy", tempDir)
+	if err := a.copyDir(sourceDir, tempDir); err != nil {
+		return fmt.Errorf("copy agent %q skill %q staging path %q to %q: %w", a.config.id, ref.Name, sourceDir, tempDir, err)
 	}
+	a.debugInstall(ref, "publication", target)
 	if err := ensureTargetAbsent(target); err != nil {
 		return err
 	}
-	if err := a.rename(temporary, target); err != nil {
-		return fmt.Errorf("publish skill %q to %q: %w", ref.Name, target, err)
+	if err := a.rename(tempDir, target); err != nil {
+		return fmt.Errorf("publish agent %q skill %q to %q: %w", a.config.id, ref.Name, target, err)
 	}
-	published = true
+	tempDir = ""
 	return nil
+}
+
+func (a *skillAdapter) debugInstall(ref domain.PowerRef, phase, path string) {
+	slog.Debug(
+		"install skill",
+		logging.Agent(a.config.id),
+		logging.Power(ref.Name),
+		logging.Version(ref.Version),
+		logging.Phase(phase),
+		slog.String("path", path),
+	)
 }
 
 func validateStagingIdentity(staging string) (string, error) {

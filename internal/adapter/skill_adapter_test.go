@@ -1,12 +1,17 @@
 package adapter
 
 import (
+	"bytes"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"apm/internal/domain"
+	"apm/internal/logging"
 	"apm/internal/paths"
 	"apm/internal/utils/filesystem"
 )
@@ -270,6 +275,136 @@ func TestSkillAdapterInstallRejectsMalformedFrontmatterAndCleansStaging(t *testi
 	assertMissing(t, staging)
 }
 
+func TestSkillAdapterFailureJoinsRenameAndStagingCleanupErrors(t *testing.T) {
+	config, root, staging, ref := skillAdapterFixture(t, true)
+	subject := newSkillAdapter(config)
+	primaryErr := errors.New("rename failed")
+	cleanupErr := errors.New("staging cleanup failed")
+	subject.rename = func(string, string) error { return primaryErr }
+	subject.removeAll = func(path string) error {
+		if path == staging {
+			return cleanupErr
+		}
+		return os.RemoveAll(path)
+	}
+
+	err := subject.Install(ref, staging)
+	if !errors.Is(err, primaryErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("Install() error = %v, want both causes", err)
+	}
+	assertMissing(t, filepath.Join(root, "skills", ref.Name))
+	assertNoTemporarySkills(t, root, ref.Name)
+}
+
+func TestSkillAdapterFailureCleansTemporaryAndStagingAfterCopyError(t *testing.T) {
+	config, root, staging, ref := skillAdapterFixture(t, true)
+	subject := newSkillAdapter(config)
+	copyErr := errors.New("copy failed")
+	subject.copyDir = func(string, string) error { return copyErr }
+
+	err := subject.Install(ref, staging)
+	if !errors.Is(err, copyErr) {
+		t.Fatalf("Install() error = %v, want copy error", err)
+	}
+	assertMissing(t, staging)
+	assertNoTemporarySkills(t, root, ref.Name)
+}
+
+func TestSkillAdapterSecondConflictCreatedByAdaptationPreservesTarget(t *testing.T) {
+	config, root, staging, ref := skillAdapterFixture(t, true)
+	target := filepath.Join(root, "skills", ref.Name)
+	config.adapt = func(domain.PowerRef, string) error {
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(target, "sentinel"), []byte("created during adaptation"), 0o600)
+	}
+	subject := newSkillAdapter(config)
+
+	err := subject.Install(ref, staging)
+	if !errors.Is(err, ErrTargetConflict) {
+		t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
+	}
+	assertFile(t, filepath.Join(target, "sentinel"), "created during adaptation", 0o600)
+	assertMissing(t, staging)
+	assertNoTemporarySkills(t, root, ref.Name)
+}
+
+func TestSkillAdapterCleanupReturnsStagingErrorAfterPublication(t *testing.T) {
+	config, root, staging, ref := skillAdapterFixture(t, true)
+	subject := newSkillAdapter(config)
+	cleanupErr := errors.New("staging cleanup failed")
+	subject.removeAll = func(path string) error {
+		if path == staging {
+			return cleanupErr
+		}
+		return os.RemoveAll(path)
+	}
+
+	err := subject.Install(ref, staging)
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("Install() error = %v, want staging cleanup error", err)
+	}
+	assertFile(t, filepath.Join(root, "skills", ref.Name, "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
+	assertNoTemporarySkills(t, root, ref.Name)
+}
+
+func TestSkillAdapterFailureJoinsTemporaryAndStagingCleanupErrors(t *testing.T) {
+	config, _, staging, ref := skillAdapterFixture(t, true)
+	subject := newSkillAdapter(config)
+	copyErr := errors.New("copy failed")
+	temporaryCleanupErr := errors.New("temporary cleanup failed")
+	stagingCleanupErr := errors.New("staging cleanup failed")
+	subject.copyDir = func(string, string) error { return copyErr }
+	subject.removeAll = func(path string) error {
+		switch {
+		case path == staging:
+			return stagingCleanupErr
+		case strings.HasPrefix(filepath.Base(path), ".apm-"+ref.Name+"-"):
+			return temporaryCleanupErr
+		default:
+			return os.RemoveAll(path)
+		}
+	}
+
+	err := subject.Install(ref, staging)
+	for _, want := range []error{copyErr, temporaryCleanupErr, stagingCleanupErr} {
+		if !errors.Is(err, want) {
+			t.Fatalf("Install() error = %v, want cause %v", err, want)
+		}
+	}
+}
+
+func TestSkillAdapterFailureDebugLogsInstallPhases(t *testing.T) {
+	config, _, staging, ref := skillAdapterFixture(t, true)
+	subject := newSkillAdapter(config)
+	var stderr bytes.Buffer
+	originalLogger := slog.Default()
+	slog.SetDefault(logging.NewLogger(io.Discard, &stderr, true))
+	t.Cleanup(func() { slog.SetDefault(originalLogger) })
+
+	if err := subject.Install(ref, staging); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"agent=codex",
+		"power=demo",
+		"version=1.0.0",
+		"path=",
+		"phase=detection",
+		"phase=adaptation",
+		"phase=copy",
+		"phase=publication",
+		"phase=cleanup",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log = %q, want %q", output, want)
+		}
+	}
+}
+
 func skillAdapterFixture(t *testing.T, makeRoot bool) (agentConfig, string, string, domain.PowerRef) {
 	t.Helper()
 	home := t.TempDir()
@@ -346,5 +481,16 @@ func assertMissing(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("path %q remains: %v", path, err)
+	}
+}
+
+func assertNoTemporarySkills(t *testing.T, root, name string) {
+	t.Helper()
+	temporary, err := filepath.Glob(filepath.Join(root, "skills", ".apm-"+name+"-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temporary) != 0 {
+		t.Fatalf("unpublished temporary directories remain: %v", temporary)
 	}
 }
