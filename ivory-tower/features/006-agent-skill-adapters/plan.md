@@ -381,6 +381,7 @@ create/check skills root with one-level Mkdir
 MkdirTemp(skillsRoot, ".apm-"+name+"-*")
 defer unpublished temp cleanup
 copyDir(sourceDir, tempDir)
+Lstat final target again; classify any new entry as ErrTargetConflict
 rename(tempDir, target)
 mark temp as published
 ```
@@ -410,7 +411,7 @@ git commit -m "feat(adapter): install skills from staging"
 
 **Interfaces:**
 - Consumes: injectable `copyDir`, `rename`, `removeAll` from Task 5.
-- Produces: second no-clobber check, deterministic failure cleanup, and preserved primary/cleanup chains.
+- Produces: deterministic failure cleanup, preserved primary/cleanup chains, and direct tests of the Task 5 second no-clobber check.
 
 - [ ] **Step 1: Add failing failure-path tests**
 
@@ -436,11 +437,11 @@ Add cases for injected copy failure; an adapt hook that creates a non-empty targ
 
 Run: `go test ./internal/adapter -run 'TestSkillAdapter(Failure|SecondConflict|Cleanup)' -count=1 -v`
 
-Expected: FAIL because second-check classification and full joined cleanup behavior are absent.
+Expected: FAIL because full injected-failure and joined cleanup behavior are absent.
 
-- [ ] **Step 3: Add the second check and robust defers**
+- [ ] **Step 3: Verify the second check and add robust defers**
 
-Immediately before rename, call `ensureTargetAbsent` again. Never overwrite the primary error:
+Keep the Task 5 `ensureTargetAbsent` call immediately before rename and make its `ErrTargetConflict` path explicit in the new test. Never overwrite the primary error:
 
 ```go
 defer func() {
