@@ -10,6 +10,6 @@ import (
 type Installer struct{}
 
 // Install 安装能力。
-func (i *Installer) Install(context.Context, domain.Power) error {
+func (i *Installer) Install(context.Context, domain.PowerRef) error {
 	return nil
 }
