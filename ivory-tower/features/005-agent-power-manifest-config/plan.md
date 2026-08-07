@@ -553,12 +553,12 @@ Expected: first two commands无输出并退出 0；最后一条只显示 JSONRep
 
 ```bash
 go run ./cmd/apm --help >/tmp/apm-feature005-help.txt
-go run ./cmd/apm search demo >/tmp/apm-feature005-stdout.txt 2>/tmp/apm-feature005-stderr.txt
+go run ./cmd/apm search demo --agent all >/tmp/apm-feature005-stdout.txt 2>/tmp/apm-feature005-stderr.txt
 test ! -s /tmp/apm-feature005-stdout.txt
 test ! -s /tmp/apm-feature005-stderr.txt
 ```
 
-Expected: commands exit 0；help 含 search/list/install/uninstall；普通 search 无业务输出。检查后删除三个明确的 `/tmp/apm-feature005-*` 文件。
+Expected: commands exit 0；help 含 search/list/install/uninstall；提供现有必填 `--agent` 的普通 search 无业务输出。检查后删除三个明确的 `/tmp/apm-feature005-*` 文件。
 
 - [ ] **Step 5: Record the completed behavior**
 
