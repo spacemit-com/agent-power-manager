@@ -1,7 +1,5 @@
 package domain
 
-import "time"
-
 // PowerType 表示能力的类别。
 type PowerType string
 
@@ -26,9 +24,3 @@ type PowerGroups map[PowerType][]PowerRef
 
 // Power 是后续 Adapter 安装参数的占位类型。
 type Power struct{}
-
-// InstalledPower 表示已安装能力的元数据。
-type InstalledPower struct {
-	Ref         PowerRef
-	InstalledAt time.Time
-}

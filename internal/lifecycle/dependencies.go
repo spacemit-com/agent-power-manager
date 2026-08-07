@@ -16,11 +16,8 @@ type AdapterRegistry interface {
 	RefreshInstalled() (domain.AgentSnapshot, error)
 }
 
-// ConfigStore 定义配置清单存储所需的操作。
-type ConfigStore interface {
-	Read(domain.AgentID) (config.Manifest, error)
-	Write(domain.AgentID, config.Manifest) error
-}
+// ConfigRepository 是配置清单 Repository 的别名。
+type ConfigRepository = config.Repository
 
 // JournalStore 定义事务日志存储所需的操作。
 type JournalStore interface {

@@ -9,7 +9,7 @@ import (
 // ListResult 表示能力列表查询的聚合结果。
 type ListResult struct {
 	CloudPowers      []domain.PowerRef
-	InstalledByAgent map[domain.AgentID][]domain.InstalledPower
+	InstalledByAgent map[domain.AgentID]domain.PowerGroups
 	Failures         map[domain.AgentID]error
 }
 
