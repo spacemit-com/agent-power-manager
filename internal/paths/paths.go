@@ -43,10 +43,14 @@ func LockPath() (string, error) {
 // 当前为零值占位实现。
 func JournalPath() string { return "" }
 
-// ManifestPath 返回指定智能体的清单路径。
-//
-// 当前为零值占位实现。
-func ManifestPath(domain.AgentID) string { return "" }
+// ManifestPath 返回指定智能体的安装清单路径。
+func ManifestPath(agent domain.AgentID) (string, error) {
+	state, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(state, "manifests", string(agent)+".json"), nil
+}
 
 // CachePath 返回 APM 下载缓存目录。
 func CachePath() (string, error) {

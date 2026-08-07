@@ -21,6 +21,9 @@ type PowerRef struct {
 	Version string
 }
 
+// PowerGroups 表示按能力类别组织的能力引用集合。
+type PowerGroups map[PowerType][]PowerRef
+
 // Power 是后续 Adapter 安装参数的占位类型。
 type Power struct{}
 

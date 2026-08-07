@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"apm/internal/domain"
 	"apm/internal/paths"
 )
 
@@ -87,6 +88,44 @@ func TestStateAndLockUseAPMHomeWhileCacheUsesXDG(t *testing.T) {
 	}
 	if want := filepath.Join(cacheHome, "apm"); cache != want {
 		t.Fatalf("CachePath() = %q, want %q", cache, want)
+	}
+}
+
+func TestManifestPathUsesAPMHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+
+	got, err := paths.ManifestPath(domain.AgentID("codex"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".apm", "manifests", "codex.json")
+	if got != want {
+		t.Fatalf("ManifestPath() = %q, want %q", got, want)
+	}
+}
+
+func TestManifestPathFallsBackToHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", "")
+	t.Setenv("HOME", home)
+
+	got, err := paths.ManifestPath(domain.AgentID("claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".apm", "manifests", "claude.json")
+	if got != want {
+		t.Fatalf("ManifestPath() = %q, want %q", got, want)
+	}
+}
+
+func TestManifestPathPropagatesHomeResolutionError(t *testing.T) {
+	t.Setenv("APM_HOME", "")
+	t.Setenv("HOME", "")
+
+	if _, err := paths.ManifestPath(domain.AgentID("claude")); err == nil {
+		t.Fatal("ManifestPath() error = nil, want home resolution error")
 	}
 }
 
