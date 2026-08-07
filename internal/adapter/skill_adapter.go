@@ -37,19 +37,20 @@ func (a *skillAdapter) TargetPath(ref domain.PowerRef) (string, error) {
 }
 
 func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr error) {
-	stagingPath, err := validateStagingIdentity(ref, staging)
+	stagingRoot, err := validateStagingIdentity(staging)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if err := a.removeAll(stagingPath); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging path %q: %w", stagingPath, err))
+		if err := a.removeAll(stagingRoot); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging path %q: %w", stagingRoot, err))
 		}
 	}()
 
 	if err := validateVersionedSkillRef(ref); err != nil {
 		return err
 	}
+	sourceDir := filepath.Join(stagingRoot, "skills", ref.Name)
 
 	root, err := a.config.rootPath()
 	if err != nil {
@@ -70,10 +71,10 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 	if err := ensureTargetAbsent(target); err != nil {
 		return err
 	}
-	if err := validateSkillFrontmatter(filepath.Join(stagingPath, "SKILL.md"), ref.Name); err != nil {
+	if err := validateSkillFrontmatter(filepath.Join(sourceDir, "SKILL.md"), ref.Name); err != nil {
 		return err
 	}
-	if err := a.config.adapt(ref, stagingPath); err != nil {
+	if err := a.config.adapt(ref, sourceDir); err != nil {
 		return fmt.Errorf("adapt agent %q skill %q: %w", a.config.id, ref.Name, err)
 	}
 
@@ -94,8 +95,8 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 		}
 	}()
 
-	if err := a.copyDir(stagingPath, temporary); err != nil {
-		return fmt.Errorf("copy skill staging path %q to %q: %w", stagingPath, temporary, err)
+	if err := a.copyDir(sourceDir, temporary); err != nil {
+		return fmt.Errorf("copy skill staging path %q to %q: %w", sourceDir, temporary, err)
 	}
 	if err := ensureTargetAbsent(target); err != nil {
 		return err
@@ -107,28 +108,17 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 	return nil
 }
 
-func validateStagingIdentity(ref domain.PowerRef, staging string) (string, error) {
+func validateStagingIdentity(staging string) (string, error) {
 	if staging == "" {
 		return "", fmt.Errorf("staging path is empty: %w", ErrInvalidSkill)
 	}
-	stagingRoot, err := paths.StagingPath()
+	expected, err := paths.StagingPath()
 	if err != nil {
 		return "", fmt.Errorf("resolve staging path: %w", err)
 	}
-	skillsRoot, err := filepath.Abs(filepath.Clean(filepath.Join(stagingRoot, "skills")))
-	if err != nil {
-		return "", fmt.Errorf("resolve staging skills path: %w", err)
-	}
-	expected, err := filepath.Abs(filepath.Clean(filepath.Join(skillsRoot, ref.Name)))
+	expected, err = filepath.Abs(filepath.Clean(expected))
 	if err != nil {
 		return "", fmt.Errorf("resolve expected staging path: %w", err)
-	}
-	relative, err := filepath.Rel(skillsRoot, expected)
-	if err != nil {
-		return "", fmt.Errorf("relativize expected staging path: %w", err)
-	}
-	if relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) || filepath.Dir(relative) != "." {
-		return "", fmt.Errorf("staging path %q: %w", staging, ErrInvalidSkill)
 	}
 	actual, err := filepath.Abs(filepath.Clean(staging))
 	if err != nil {
