@@ -8,6 +8,10 @@
 
 **Tech Stack:** Go 1.26.5, standard library filesystem APIs, `go.yaml.in/yaml/v3`, existing `internal/utils/filesystem.CopyDir`, package-level `slog`, Go `testing`.
 
+**Status:** Completed and merged into `main` on 2026-08-07. The acceptance,
+repository verification, and scope/safety commands in Task 8 pass with the
+Adapter-only `Uninstall` scan corrected below.
+
 ## Global Constraints
 
 - Supported IDs are exactly `codex`, `claude-code`, and `hermes-agent`; Registry order is exactly that order.
@@ -568,7 +572,8 @@ Expected: every command exits 0.
 
 ```bash
 ! rg -n 'fmt\.Print|log\.Print|slog\.(Info|Warn|Error)|slog\.New' internal/adapter --glob '*.go'
-! rg -n 'InstallPath|domain\.Power\b|Uninstall\(' internal/adapter internal/domain internal/lifecycle --glob '*.go'
+! rg -n 'InstallPath|domain\.Power\b' internal/adapter internal/domain internal/lifecycle --glob '*.go'
+! rg -n 'Uninstall\(' internal/adapter --glob '*.go'
 rg -n 'TargetPath|DetectAgent|Install\(' internal/adapter --glob '*.go'
 git status --short
 ```
