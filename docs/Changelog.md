@@ -6,6 +6,26 @@
 
 用户需求：
 
+为 Agent domain 固化受支持的 Agent ID，并定义快照包含判断及安全的有序访问语义。
+
+相关提交：
+
+- `c578390 feat(domain): define supported agent snapshots`
+
+解决方案或完成结果：
+
+新增 Codex、Claude Code 与 Hermes 的稳定 AgentID；AgentSnapshot 可查询成员，Ordered 返回底层切片的防御性副本，保持快照原始顺序且不暴露内部存储。
+
+验证结果或限制：
+
+`go test ./internal/domain -run 'TestAgent(IDs|Snapshot)' -count=1 -v` 和 `go test ./internal/domain -count=1` 均通过。范围仅覆盖 domain 语义，不包含 Agent Adapter 或 Registry。
+
+## 2026-08-07
+
+分类：新增功能
+
+用户需求：
+
 定义 Agent Power 安装清单格式并实现 config 接口，使 lifecycle 后续只调用无状态 Repository 的 List、Find、Set、Remove。
 
 相关提交：
