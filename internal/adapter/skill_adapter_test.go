@@ -291,19 +291,19 @@ func TestSkillAdapterAdaptFailureIncludesInstallContext(t *testing.T) {
 	assertInstallErrorContext(t, err, "adaptation", source)
 }
 
-func TestSkillAdapterDetectionFailureIncludesInstallContext(t *testing.T) {
+func TestSkillAdapterSkillsRootFailureIncludesInstallContext(t *testing.T) {
 	config, root, staging, ref := skillAdapterFixture(t, true)
 	skillsRoot := filepath.Join(root, "skills")
-	if err := os.WriteFile(skillsRoot, []byte("not a directory"), 0o600); err != nil {
-		t.Fatal(err)
+	config.adapt = func(domain.PowerRef, string) error {
+		return os.WriteFile(skillsRoot, []byte("not a directory"), 0o600)
 	}
 	subject := newSkillAdapter(config)
 
 	err := subject.Install(ref, staging)
 	if err == nil {
-		t.Fatal("Install() error = nil, want detection error")
+		t.Fatal("Install() error = nil, want skills-root error")
 	}
-	assertInstallErrorContext(t, err, "detection", filepath.Join(skillsRoot, ref.Name))
+	assertInstallErrorContext(t, err, "skills-root", skillsRoot)
 }
 
 func TestSkillAdapterFailureJoinsRenameAndStagingCleanupErrors(t *testing.T) {
@@ -338,6 +338,7 @@ func TestSkillAdapterFailureCleansTemporaryAndStagingAfterCopyError(t *testing.T
 	if !errors.Is(err, copyErr) {
 		t.Fatalf("Install() error = %v, want copy error", err)
 	}
+	assertInstallErrorContext(t, err, "copy", skillSource(staging, ref))
 	assertMissing(t, staging)
 	assertNoTemporarySkills(t, root, ref.Name)
 }
@@ -378,6 +379,7 @@ func TestSkillAdapterCleanupReturnsStagingErrorAfterPublication(t *testing.T) {
 	if !errors.Is(err, cleanupErr) {
 		t.Fatalf("Install() error = %v, want staging cleanup error", err)
 	}
+	assertInstallErrorContext(t, err, "cleanup", staging)
 	assertFile(t, filepath.Join(root, "skills", ref.Name, "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
 	assertNoTemporarySkills(t, root, ref.Name)
 }
