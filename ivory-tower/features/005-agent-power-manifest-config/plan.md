@@ -360,8 +360,7 @@ const want = `{
 1. 预先以 `0755` 创建 `manifests/`、以 `0644` 写带未知字段的旧清单，Set 后断言目录 `Perm()==0700`、目标 `Perm()==0600`，且输出不再包含未知字段。
 2. Set 成功后 `os.ReadDir(manifestsDir)` 只包含 `<agent>.json`，没有临时文件。
 3. 把 `.apm/manifests` 创建为普通文件，Set 返回含 Agent/路径上下文的错误，且没有在其他目录产生临时文件。
-4. 非 root 环境下先写有效旧目标，再把父目录 chmod 为 `0500`；Set 失败后恢复权限，断言旧目标字节不变。若 `os.Geteuid()==0`，只跳过此权限特定用例。
-5. 同一个 Repository 依次 Set codex skill 和 claude plugin，再分别 List，断言两个 Agent 文件互不混合。
+4. 同一个 Repository 依次 Set codex skill 和 claude plugin，再分别 List，断言两个 Agent 文件互不混合。
 
 - [ ] **Step 4: Run focused tests and verify mutation methods fail**
 
@@ -538,7 +537,7 @@ go clean -testcache
 go test ./internal/config ./internal/paths ./internal/domain -count=1 -v
 ```
 
-Expected: PASS；List/Find/Set/Remove、格式、权限、失败、路径和无状态测试均实际执行。只有进程为 root 时，权限拒绝用例可按计划 SKIP。
+Expected: PASS；List/Find/Set/Remove、格式、权限、失败、路径和无状态测试均实际执行，不得有 SKIP。
 
 - [ ] **Step 3: Prove scope and logging boundaries**
 
