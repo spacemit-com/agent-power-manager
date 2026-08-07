@@ -262,7 +262,8 @@ func TestSkillAdapterInstallRejectsTargetCreatedAfterCopy(t *testing.T) {
 func TestSkillAdapterInstallRejectsMalformedFrontmatterAndCleansStaging(t *testing.T) {
 	config, root, staging, ref := skillAdapterFixture(t, true)
 	source := skillSource(staging, ref)
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# missing frontmatter\n"), 0o640); err != nil {
+	frontmatterPath := filepath.Join(source, "SKILL.md")
+	if err := os.WriteFile(frontmatterPath, []byte("# missing frontmatter\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	adapter := newSkillAdapter(config)
@@ -271,8 +272,38 @@ func TestSkillAdapterInstallRejectsMalformedFrontmatterAndCleansStaging(t *testi
 	if !errors.Is(err, ErrInvalidSkill) {
 		t.Fatalf("Install() error = %v, want ErrInvalidSkill", err)
 	}
+	assertInstallErrorContext(t, err, "frontmatter", frontmatterPath)
 	assertMissing(t, filepath.Join(root, "skills", ref.Name))
 	assertMissing(t, staging)
+}
+
+func TestSkillAdapterAdaptFailureIncludesInstallContext(t *testing.T) {
+	config, _, staging, ref := skillAdapterFixture(t, true)
+	source := skillSource(staging, ref)
+	adaptErr := errors.New("adapt failed")
+	config.adapt = func(domain.PowerRef, string) error { return adaptErr }
+	subject := newSkillAdapter(config)
+
+	err := subject.Install(ref, staging)
+	if !errors.Is(err, adaptErr) {
+		t.Fatalf("Install() error = %v, want adapt error", err)
+	}
+	assertInstallErrorContext(t, err, "adaptation", source)
+}
+
+func TestSkillAdapterDetectionFailureIncludesInstallContext(t *testing.T) {
+	config, root, staging, ref := skillAdapterFixture(t, true)
+	skillsRoot := filepath.Join(root, "skills")
+	if err := os.WriteFile(skillsRoot, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	subject := newSkillAdapter(config)
+
+	err := subject.Install(ref, staging)
+	if err == nil {
+		t.Fatal("Install() error = nil, want detection error")
+	}
+	assertInstallErrorContext(t, err, "detection", filepath.Join(skillsRoot, ref.Name))
 }
 
 func TestSkillAdapterFailureJoinsRenameAndStagingCleanupErrors(t *testing.T) {
@@ -292,6 +323,7 @@ func TestSkillAdapterFailureJoinsRenameAndStagingCleanupErrors(t *testing.T) {
 	if !errors.Is(err, primaryErr) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("Install() error = %v, want both causes", err)
 	}
+	assertInstallErrorContext(t, err, "publication", filepath.Join(root, "skills", ref.Name))
 	assertMissing(t, filepath.Join(root, "skills", ref.Name))
 	assertNoTemporarySkills(t, root, ref.Name)
 }
@@ -325,6 +357,7 @@ func TestSkillAdapterSecondConflictCreatedByAdaptationPreservesTarget(t *testing
 	if !errors.Is(err, ErrTargetConflict) {
 		t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
 	}
+	assertInstallErrorContext(t, err, "publication", target)
 	assertFile(t, filepath.Join(target, "sentinel"), "created during adaptation", 0o600)
 	assertMissing(t, staging)
 	assertNoTemporarySkills(t, root, ref.Name)
@@ -492,5 +525,19 @@ func assertNoTemporarySkills(t *testing.T, root, name string) {
 	}
 	if len(temporary) != 0 {
 		t.Fatalf("unpublished temporary directories remain: %v", temporary)
+	}
+}
+
+func assertInstallErrorContext(t *testing.T, err error, phase, path string) {
+	t.Helper()
+	for _, want := range []string{
+		`agent "codex"`,
+		`power "demo"`,
+		`phase "` + phase + `"`,
+		`path "` + path + `"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Install() error = %q, want context %q", err, want)
+		}
 	}
 }
