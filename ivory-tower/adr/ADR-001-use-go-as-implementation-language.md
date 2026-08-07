@@ -124,7 +124,7 @@ apm/
 4. `transaction/path_state.go` 集中处理“原子文件操作已经完成、journal 阶段尚未更新”的中断窗口，使正常事务与恢复事务采用相同的路径状态判断。
 5. `adapter` 展开首批 `codex`、`claude_code`、`hermes` 内置实现。Registry 在编译期保证 Agent ID 唯一；每个 Adapter 除目标安装位置与格式转换外，还按 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md) 检查对应 Agent 根目录是否存在。APM 不负责 Agent 安装、卸载、实时监控、运行时感知或更新通知；新增 Agent 遵循 `internal/adapter/<agent>/` 约定。
 6. `config` 独立管理各 Agent 的 JSON 安装清单。`atomic_write.go` 保证清单不会暴露半写入状态，事务完成与 journal 删除顺序仍由 `transaction` 控制。
-7. 所有用户输出和内部诊断统一经过 `logging`，其他 package 不直接调用 `fmt.Print*` 或自行创建 logger。稳定的资源数据和成功结果写入 `stdout`；journal 恢复过程、警告和失败写入 `stderr`；内部执行步骤、Cloud 资源读取细节和事务路径状态仅在全局 `--verbose` 开启后写入 `stderr`。默认 CLI 输出格式保持稳定，便于用户阅读和脚本处理。
+7. 所有用户输出和内部诊断统一经过 `logging`，其他 package 不直接调用 `fmt.Print*` 或自行创建 logger。稳定的资源数据和成功结果写入 `stdout`；journal 恢复过程、警告和失败写入 `stderr`；内部执行步骤、Cloud 资源读取细节和事务路径状态仅在全局 `--verbose` 开启后写入 `stderr`。默认 CLI 输出格式保持稳定，便于用户阅读和脚本处理。logger 的装配方式已由 [ADR-006](ADR-006-use-global-slog-with-level-routing.md) 调整为预解析 verbose 后安装全局 `slog`，不再向各模块注入自定义 logging 实例。
 8. `domain` 保存跨组件共享的 Agent、Power 和执行结果类型，避免相同概念分别在 CLI、Cloud、Config 和 Lifecycle 中重复定义。
 9. `paths` 是所有本地状态路径的唯一来源，保证 lock、journal、manifest、cache、staging、各目标文件系统内的临时目录、backup 和 quarantine 在正常执行与恢复时使用同一套位置规则。Cloud get 使用缓存根内的临时目录，Cache fetch 使用状态根内的临时目录，避免原子 rename 跨文件系统。
 10. Cloud Client 当前只提供开发期本地实现。`PowerRef` 同时保存类别、名称和版本；解析最新版前版本可为空，lifecycle 从 `List()` 结果选择目标后版本必须非空。`Get(ref)` 成功即表示目标 Power 已原子写入 `type/name/version` 缓存。Cache 不提供 `Put`，`Fetch(ref)` 在每次调用开头清理 staging，并把缓存内容物化为不含版本层的 staging 路径。
@@ -146,7 +146,7 @@ apm/
   - 若未来需要支持第三方在不重新编译 APM 的情况下动态注册 Adapter，当前「编译期注册表」方案需要重新评估（例如引入插件机制或子进程协议）。
 - 后续动作：
   - 在 `apm` 工程根目录下按上述目录结构初始化 Go module。
-  - CLI 和各内部模块接收同一个 logging 实例，禁止绕过 logging 直接打印；在根命令中配置全局 `--verbose`。
+  - CLI 和各内部模块统一使用 [ADR-006](ADR-006-use-global-slog-with-level-routing.md) 配置的全局 `slog`，禁止绕过 logging 直接打印；在根命令中配置全局 `--verbose`。
   - 后续 feature 设计（CLI 命令与 Power 类别交织、配置格式、冲突处理等）在此技术栈约束下展开。
   - 真实 Cloud HTTP 协议、资源校验、checksum 和内容寻址策略在本地 Cloud/Cache 流程验证后另行设计。
 

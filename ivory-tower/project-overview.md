@@ -37,7 +37,7 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
     - Adapter：承接不同 Power 类型和目标 Agent 的格式转换与安装位置差异，并检查已注册 Agent 的根目录是否存在；不负责 Agent 安装、卸载、实时监控、运行时感知或更新通知。
     - CLI：提供入口。
 - 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)；生命周期恢复详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)；Agent 安装检测与命令内快照详见 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md)。本地 Power 操作中，`--agent` 的具体值必须存在于“已支持且已安装 Agent”快照，`all` 对快照中的全部 Agent 执行。Cloud `list` 返回带版本的全部 `PowerRef`，由 lifecycle 完成列表或搜索筛选；Cloud `get` 将版本已确定的 `PowerRef` 原子写入版本化缓存。
-- 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单。开发阶段以 `internal/cloud/resources` 的本地资源模拟云端服务；安装先将版本已确定的 `PowerRef` 从缓存 fetch 到干净 staging，缓存未命中时执行 Cloud get 后再次 fetch。缓存写入和 staging 物化均通过同文件系统内的临时目录原子 rename，后续安装仍由 staging + journal 保证中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md)。
+- 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，日志在预解析 `--verbose` 后通过分级 Handler 安装为全局 `slog`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单。开发阶段以 `internal/cloud/resources` 的本地资源模拟云端服务；安装先将版本已确定的 `PowerRef` 从缓存 fetch 到干净 staging，缓存未命中时执行 Cloud get 后再次 fetch。缓存写入和 staging 物化均通过同文件系统内的临时目录原子 rename，后续安装仍由 staging + journal 保证中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md) 与 [ADR-006](adr/ADR-006-use-global-slog-with-level-routing.md)。
 
 ## Test Filesystem Isolation
 
