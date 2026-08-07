@@ -16,18 +16,18 @@ func TestNewLoggerRoutesLevels(t *testing.T) {
 		name       string
 		verbose    bool
 		level      slog.Level
-		wantStdout bool
-		wantStderr bool
+		wantLevel  string
+		wantWriter string
 	}{
 		{name: "debug disabled", level: slog.LevelDebug},
-		{name: "debug enabled", verbose: true, level: slog.LevelDebug, wantStderr: true},
-		{name: "custom debug", verbose: true, level: slog.Level(-2), wantStderr: true},
-		{name: "info", level: slog.LevelInfo, wantStdout: true},
-		{name: "custom info", level: slog.Level(2), wantStdout: true},
-		{name: "warn", level: slog.LevelWarn, wantStderr: true},
-		{name: "custom warn", level: slog.Level(6), wantStderr: true},
-		{name: "error", level: slog.LevelError, wantStderr: true},
-		{name: "custom error", level: slog.Level(12), wantStderr: true},
+		{name: "debug enabled", verbose: true, level: slog.LevelDebug, wantLevel: "DEBUG", wantWriter: "stderr"},
+		{name: "custom debug", verbose: true, level: slog.Level(-2), wantLevel: "DEBUG+2", wantWriter: "stderr"},
+		{name: "info", level: slog.LevelInfo, wantLevel: "INFO", wantWriter: "stdout"},
+		{name: "custom info", level: slog.Level(2), wantLevel: "INFO+2", wantWriter: "stdout"},
+		{name: "warn", level: slog.LevelWarn, wantLevel: "WARN", wantWriter: "stderr"},
+		{name: "custom warn", level: slog.Level(6), wantLevel: "WARN+2", wantWriter: "stderr"},
+		{name: "error", level: slog.LevelError, wantLevel: "ERROR", wantWriter: "stderr"},
+		{name: "custom error", level: slog.Level(12), wantLevel: "ERROR+4", wantWriter: "stderr"},
 	}
 
 	for _, tt := range tests {
@@ -36,19 +36,38 @@ func TestNewLoggerRoutesLevels(t *testing.T) {
 			logger := logging.NewLogger(&stdout, &stderr, tt.verbose)
 			logger.LogAttrs(context.Background(), tt.level, "event", slog.String("key", "value"))
 
-			if got := stdout.Len() > 0; got != tt.wantStdout {
-				t.Fatalf("stdout = %q, want output %v", stdout.String(), tt.wantStdout)
-			}
-			if got := stderr.Len() > 0; got != tt.wantStderr {
-				t.Fatalf("stderr = %q, want output %v", stderr.String(), tt.wantStderr)
-			}
-			combined := stdout.String() + stderr.String()
-			if combined != "" {
-				if strings.Contains(combined, "time=") {
-					t.Fatalf("log = %q, want no timestamp", combined)
+			if tt.wantWriter == "" {
+				if stdout.Len() != 0 || stderr.Len() != 0 {
+					t.Fatalf("stdout = %q, stderr = %q, want both empty", stdout.String(), stderr.String())
 				}
-				if !strings.Contains(combined, "msg=event") || !strings.Contains(combined, "key=value") {
-					t.Fatalf("log = %q, want message and attribute", combined)
+				return
+			}
+
+			var output string
+			switch tt.wantWriter {
+			case "stdout":
+				output = stdout.String()
+				if stderr.Len() != 0 {
+					t.Fatalf("stderr = %q, want empty", stderr.String())
+				}
+			case "stderr":
+				output = stderr.String()
+				if stdout.Len() != 0 {
+					t.Fatalf("stdout = %q, want empty", stdout.String())
+				}
+			default:
+				t.Fatalf("unknown writer %q", tt.wantWriter)
+			}
+
+			if strings.Count(output, "\n") != 1 {
+				t.Fatalf("log = %q, want exactly one line", output)
+			}
+			if strings.Contains(output, "time=") {
+				t.Fatalf("log = %q, want no timestamp", output)
+			}
+			for _, want := range []string{"level=" + tt.wantLevel, "msg=event", "key=value"} {
+				if !strings.Contains(output, want) {
+					t.Fatalf("log = %q, want %q", output, want)
 				}
 			}
 		})
@@ -56,17 +75,57 @@ func TestNewLoggerRoutesLevels(t *testing.T) {
 }
 
 func TestNewLoggerPreservesAttrsAndGroups(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	logger := logging.NewLogger(&stdout, &stderr, true).
-		With(slog.String("component", "cli")).
-		WithGroup("request")
-
-	logger.Info("parsed", slog.String("command", "search"))
-	if got := stdout.String(); !strings.Contains(got, "component=cli") || !strings.Contains(got, "request.command=search") {
-		t.Fatalf("stdout = %q, want inherited attr and group", got)
+	tests := []struct {
+		name       string
+		level      slog.Level
+		wantLevel  string
+		wantWriter string
+	}{
+		{name: "debug", level: slog.LevelDebug, wantLevel: "DEBUG", wantWriter: "stderr"},
+		{name: "info", level: slog.LevelInfo, wantLevel: "INFO", wantWriter: "stdout"},
+		{name: "warn", level: slog.LevelWarn, wantLevel: "WARN", wantWriter: "stderr"},
+		{name: "error", level: slog.LevelError, wantLevel: "ERROR", wantWriter: "stderr"},
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			logger := logging.NewLogger(&stdout, &stderr, true).
+				With(slog.String("component", "cli")).
+				WithGroup("request")
+
+			logger.LogAttrs(context.Background(), tt.level, "parsed", slog.String("command", "search"))
+
+			var output string
+			switch tt.wantWriter {
+			case "stdout":
+				output = stdout.String()
+				if stderr.Len() != 0 {
+					t.Fatalf("stderr = %q, want empty", stderr.String())
+				}
+			case "stderr":
+				output = stderr.String()
+				if stdout.Len() != 0 {
+					t.Fatalf("stdout = %q, want empty", stdout.String())
+				}
+			default:
+				t.Fatalf("unknown writer %q", tt.wantWriter)
+			}
+
+			if strings.Count(output, "\n") != 1 {
+				t.Fatalf("log = %q, want exactly one line", output)
+			}
+			for _, want := range []string{
+				"level=" + tt.wantLevel,
+				"msg=parsed",
+				"component=cli",
+				"request.command=search",
+			} {
+				if !strings.Contains(output, want) {
+					t.Fatalf("log = %q, want %q", output, want)
+				}
+			}
+		})
 	}
 }
 
