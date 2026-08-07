@@ -1,21 +1,54 @@
 package adapter
 
-import "apm/internal/domain"
+import (
+	"fmt"
 
-// Registry 是适配器注册表的零值占位实现。
-type Registry struct{}
+	"apm/internal/domain"
+)
 
-// NewRegistry 创建零值适配器注册表。
+// Registry 按内置配置顺序保存 Skill 适配器。
+type Registry struct {
+	ordered []domain.AgentID
+	byAgent map[domain.AgentID]Adapter
+}
+
+// NewRegistry 创建内置 Skill 适配器注册表。
 func NewRegistry() *Registry {
-	return &Registry{}
+	registry := &Registry{
+		ordered: make([]domain.AgentID, 0, len(builtInAgentConfigs)),
+		byAgent: make(map[domain.AgentID]Adapter, len(builtInAgentConfigs)),
+	}
+	for _, config := range builtInAgentConfigs {
+		registry.ordered = append(registry.ordered, config.id)
+		registry.byAgent[config.id] = newSkillAdapter(config)
+	}
+	return registry
 }
 
 // Resolve 解析指定智能体和能力类别的适配器。
-func (r *Registry) Resolve(domain.AgentID, domain.PowerType) (Adapter, error) {
-	return nil, nil
+func (r *Registry) Resolve(agent domain.AgentID, power domain.PowerType) (Adapter, error) {
+	if power != domain.PowerTypeSkill {
+		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, power, ErrUnsupportedAdapter)
+	}
+	adapter, ok := r.byAgent[agent]
+	if !ok {
+		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, power, ErrUnsupportedAdapter)
+	}
+	return adapter, nil
 }
 
 // RefreshInstalled 刷新已安装智能体的快照。
 func (r *Registry) RefreshInstalled() (domain.AgentSnapshot, error) {
-	return domain.AgentSnapshot{}, nil
+	installed := make([]domain.AgentID, 0, len(r.ordered))
+	for _, agent := range r.ordered {
+		adapter := r.byAgent[agent]
+		found, err := adapter.DetectAgent()
+		if err != nil {
+			return domain.AgentSnapshot{}, err
+		}
+		if found {
+			installed = append(installed, agent)
+		}
+	}
+	return domain.AgentSnapshot{Agents: installed}, nil
 }
