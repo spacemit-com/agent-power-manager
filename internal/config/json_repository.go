@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"apm/internal/domain"
 	"apm/internal/logging"
@@ -47,6 +48,90 @@ func (r *JSONRepository) Find(agent domain.AgentID, powerType domain.PowerType, 
 	return domain.PowerRef{}, false, nil
 }
 
+// Set 新增或替换指定智能体的能力引用。
+func (r *JSONRepository) Set(agent domain.AgentID, power domain.PowerRef) error {
+	if !validPowerType(power.Type) || power.Name == "" || power.Version == "" {
+		return ErrInvalidPower
+	}
+
+	groups, err := r.read(agent)
+	if err != nil {
+		return err
+	}
+	powers := groups[power.Type]
+	firstMatch := -1
+	matchCount := 0
+	for index, candidate := range powers {
+		if candidate.Name != power.Name {
+			continue
+		}
+		if firstMatch == -1 {
+			firstMatch = index
+		}
+		matchCount++
+	}
+	if matchCount == 1 && powers[firstMatch] == power {
+		slog.Debug(
+			"power already set",
+			logging.Agent(agent),
+			logging.Power(power.Name),
+			logging.Version(power.Version),
+		)
+		return nil
+	}
+
+	if firstMatch == -1 {
+		groups[power.Type] = append(powers, power)
+	} else {
+		updated := make([]domain.PowerRef, 0, len(powers)-matchCount+1)
+		for index, candidate := range powers {
+			switch {
+			case index == firstMatch:
+				updated = append(updated, power)
+			case candidate.Name != power.Name:
+				updated = append(updated, candidate)
+			}
+		}
+		groups[power.Type] = updated
+	}
+	return r.write(agent, groups)
+}
+
+// Remove 删除指定智能体目标类别中的全部同名能力引用。
+func (r *JSONRepository) Remove(agent domain.AgentID, powerType domain.PowerType, name string) error {
+	if !validPowerType(powerType) || name == "" {
+		return ErrInvalidPower
+	}
+
+	groups, err := r.read(agent)
+	if err != nil {
+		return err
+	}
+	powers := groups[powerType]
+	filtered := make([]domain.PowerRef, 0, len(powers))
+	found := false
+	for _, power := range powers {
+		if power.Name == name {
+			found = true
+			continue
+		}
+		filtered = append(filtered, power)
+	}
+	if !found {
+		slog.Debug(
+			"power already absent",
+			logging.Agent(agent),
+			logging.Power(name),
+		)
+		return nil
+	}
+
+	groups[powerType] = filtered
+	return r.write(agent, groups)
+}
+
+var _ Repository = (*JSONRepository)(nil)
+
 func (r *JSONRepository) read(agent domain.AgentID) (domain.PowerGroups, error) {
 	path, err := paths.ManifestPath(agent)
 	if err != nil {
@@ -73,6 +158,88 @@ func (r *JSONRepository) read(agent domain.AgentID) (domain.PowerGroups, error) 
 		return nil, fmt.Errorf("decode manifest %q: agent %q does not match %q", path, document.Agent, agent)
 	}
 	return manifestToPowerGroups(document), nil
+}
+
+func (r *JSONRepository) write(agent domain.AgentID, groups domain.PowerGroups) (resultErr error) {
+	document := powerGroupsToManifest(agent, groups)
+	data, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode manifest for agent %q: %w", agent, err)
+	}
+	data = append(data, '\n')
+
+	target, err := paths.ManifestPath(agent)
+	if err != nil {
+		return fmt.Errorf("resolve manifest path for agent %q: %w", agent, err)
+	}
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return fmt.Errorf("create manifest directory %q for agent %q: %w", parent, agent, err)
+	}
+	if err := os.Chmod(parent, 0o700); err != nil {
+		return fmt.Errorf("set manifest directory permissions %q for agent %q: %w", parent, agent, err)
+	}
+
+	temp, err := os.CreateTemp(parent, "."+filepath.Base(target)+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary manifest for agent %q at %q: %w", agent, target, err)
+	}
+	tempName := temp.Name()
+	defer func() {
+		cleanupErr := os.Remove(tempName)
+		if cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("remove temporary manifest %q for agent %q: %w", tempName, agent, cleanupErr),
+			)
+		}
+	}()
+	closeAfterError := func(operationErr error) error {
+		if closeErr := temp.Close(); closeErr != nil {
+			return errors.Join(
+				operationErr,
+				fmt.Errorf("close temporary manifest %q for agent %q: %w", tempName, agent, closeErr),
+			)
+		}
+		return operationErr
+	}
+
+	if err := temp.Chmod(0o600); err != nil {
+		return closeAfterError(fmt.Errorf("set temporary manifest permissions %q for agent %q: %w", tempName, agent, err))
+	}
+	if _, err := temp.Write(data); err != nil {
+		return closeAfterError(fmt.Errorf("write temporary manifest %q for agent %q: %w", tempName, agent, err))
+	}
+	if err := temp.Sync(); err != nil {
+		return closeAfterError(fmt.Errorf("sync temporary manifest %q for agent %q: %w", tempName, agent, err))
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close temporary manifest %q for agent %q: %w", tempName, agent, err)
+	}
+	if err := os.Rename(tempName, target); err != nil {
+		return fmt.Errorf("replace manifest %q for agent %q: %w", target, agent, err)
+	}
+
+	parentDirectory, err := os.Open(parent)
+	if err != nil {
+		return fmt.Errorf("open manifest directory %q for agent %q: %w", parent, agent, err)
+	}
+	if err := parentDirectory.Sync(); err != nil {
+		syncErr := fmt.Errorf("sync manifest directory %q for agent %q: %w", parent, agent, err)
+		if closeErr := parentDirectory.Close(); closeErr != nil {
+			return errors.Join(
+				syncErr,
+				fmt.Errorf("close manifest directory %q for agent %q: %w", parent, agent, closeErr),
+			)
+		}
+		return syncErr
+	}
+	if err := parentDirectory.Close(); err != nil {
+		return fmt.Errorf("close manifest directory %q for agent %q: %w", parent, agent, err)
+	}
+
+	slog.Debug("wrote manifest", logging.Agent(agent), slog.String("path", target))
+	return nil
 }
 
 func validPowerType(powerType domain.PowerType) bool {

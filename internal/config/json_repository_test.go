@@ -37,6 +37,15 @@ func writeManifest(t *testing.T, agent domain.AgentID, content string) string {
 	return path
 }
 
+func readManifest(t *testing.T, path string) string {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(contents)
+}
+
 func assertEmptyGroups(t *testing.T, groups domain.PowerGroups) {
 	t.Helper()
 	for _, powerType := range []domain.PowerType{
@@ -227,5 +236,489 @@ func TestJSONRepositoryLogsVerboseRead(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("verbose read log = %q, want to contain %q", output, want)
 		}
+	}
+}
+
+func TestJSONRepositorySetCreatesManifestWithFixedSchema(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+
+	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
+		Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "0.0.1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const want = `{
+  "agent": "codex",
+  "skills": [
+    {
+      "name": "foo-before-summary",
+      "version": "0.0.1"
+    }
+  ],
+  "plugins": [],
+  "mcps": []
+}
+`
+	path := manifestPath(t, "codex")
+	if got := readManifest(t, path); got != want {
+		t.Fatalf("manifest = %q, want %q", got, want)
+	}
+}
+
+func TestJSONRepositorySetAppendsNewNameAndPreservesOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	path := writeManifest(t, "codex", `{
+  "agent": "codex",
+  "skills": [
+    {"name": "first", "version": "1"},
+    {"name": "", "version": "invalid-but-preserved"}
+  ],
+  "plugins": [{"name": "plugin-a", "version": "2"}],
+  "mcps": [{"name": "mcp-a", "version": "3"}]
+}`)
+
+	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
+		Name: "last", Type: domain.PowerTypeSkill, Version: "4",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const want = `{
+  "agent": "codex",
+  "skills": [
+    {
+      "name": "first",
+      "version": "1"
+    },
+    {
+      "name": "",
+      "version": "invalid-but-preserved"
+    },
+    {
+      "name": "last",
+      "version": "4"
+    }
+  ],
+  "plugins": [
+    {
+      "name": "plugin-a",
+      "version": "2"
+    }
+  ],
+  "mcps": [
+    {
+      "name": "mcp-a",
+      "version": "3"
+    }
+  ]
+}
+`
+	if got := readManifest(t, path); got != want {
+		t.Fatalf("manifest = %q, want %q", got, want)
+	}
+}
+
+func TestJSONRepositorySetReplacesFirstMatchAndRemovesDuplicates(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	path := writeManifest(t, "codex", `{
+  "agent": "codex",
+  "skills": [
+    {"name": "before", "version": "1"},
+    {"name": "duplicate", "version": "old-first"},
+    {"name": "", "version": "invalid-but-preserved"},
+    {"name": "duplicate", "version": "old-second"},
+    {"name": "after", "version": "2"}
+  ],
+  "plugins": [{"name": "plugin-a", "version": "3"}],
+  "mcps": []
+}`)
+
+	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
+		Name: "duplicate", Type: domain.PowerTypeSkill, Version: "new",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const want = `{
+  "agent": "codex",
+  "skills": [
+    {
+      "name": "before",
+      "version": "1"
+    },
+    {
+      "name": "duplicate",
+      "version": "new"
+    },
+    {
+      "name": "",
+      "version": "invalid-but-preserved"
+    },
+    {
+      "name": "after",
+      "version": "2"
+    }
+  ],
+  "plugins": [
+    {
+      "name": "plugin-a",
+      "version": "3"
+    }
+  ],
+  "mcps": []
+}
+`
+	if got := readManifest(t, path); got != want {
+		t.Fatalf("manifest = %q, want %q", got, want)
+	}
+}
+
+func TestJSONRepositorySetIdenticalSingleMatchDoesNotReplaceFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	path := writeManifest(t, "codex", `{
+  "agent": "codex",
+  "skills": [{"name": "same", "version": "1"}],
+  "plugins": [],
+  "mcps": []
+}`)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	previous := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	slog.SetDefault(logging.NewLogger(io.Discard, &stderr, true))
+
+	err = config.NewJSONRepository().Set("codex", domain.PowerRef{
+		Name: "same", Type: domain.PowerTypeSkill, Version: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("Set() replaced the manifest for an identical single match")
+	}
+	for _, want := range []string{"agent=codex", "power=same", "version=1"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("Set() no-op log = %q, want field %q", stderr.String(), want)
+		}
+	}
+}
+
+func TestJSONRepositorySetRejectsInvalidPowerBeforeIO(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		power domain.PowerRef
+	}{
+		{name: "unknown type", power: domain.PowerRef{Name: "power", Type: "unknown", Version: "1"}},
+		{name: "empty name", power: domain.PowerRef{Type: domain.PowerTypeSkill, Version: "1"}},
+		{name: "empty version", power: domain.PowerRef{Name: "power", Type: domain.PowerTypeSkill}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("APM_HOME", home)
+			statePath := filepath.Join(home, ".apm")
+			if err := os.WriteFile(statePath, []byte("blocking file"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := config.NewJSONRepository().Set("codex", tt.power)
+			if !errors.Is(err, config.ErrInvalidPower) {
+				t.Fatalf("Set() error = %v, want ErrInvalidPower before I/O", err)
+			}
+			if got := readManifest(t, statePath); got != "blocking file" {
+				t.Fatalf("invalid Set() changed blocking state file to %q", got)
+			}
+		})
+	}
+}
+
+func TestJSONRepositoryRemoveDeletesAllMatchesAndPreservesOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	path := writeManifest(t, "codex", `{
+  "agent": "codex",
+  "skills": [
+    {"name": "before", "version": "1"},
+    {"name": "remove", "version": "old-first"},
+    {"name": "", "version": "invalid-but-preserved"},
+    {"name": "remove", "version": "old-second"},
+    {"name": "after", "version": "2"}
+  ],
+  "plugins": [{"name": "plugin-a", "version": "3"}],
+  "mcps": []
+}`)
+
+	if err := config.NewJSONRepository().Remove("codex", domain.PowerTypeSkill, "remove"); err != nil {
+		t.Fatal(err)
+	}
+
+	const want = `{
+  "agent": "codex",
+  "skills": [
+    {
+      "name": "before",
+      "version": "1"
+    },
+    {
+      "name": "",
+      "version": "invalid-but-preserved"
+    },
+    {
+      "name": "after",
+      "version": "2"
+    }
+  ],
+  "plugins": [
+    {
+      "name": "plugin-a",
+      "version": "3"
+    }
+  ],
+  "mcps": []
+}
+`
+	if got := readManifest(t, path); got != want {
+		t.Fatalf("manifest = %q, want %q", got, want)
+	}
+}
+
+func TestJSONRepositoryRemoveMissingNameDoesNotReplaceFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	path := writeManifest(t, "codex", `{"agent":"codex","skills":[{"name":"present","version":"1"}]}`)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	previous := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	slog.SetDefault(logging.NewLogger(io.Discard, &stderr, true))
+
+	if err := config.NewJSONRepository().Remove("codex", domain.PowerTypeSkill, "missing"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("Remove() replaced the manifest when the name was absent")
+	}
+	for _, want := range []string{"agent=codex", "power=missing"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("Remove() no-op log = %q, want field %q", stderr.String(), want)
+		}
+	}
+}
+
+func TestJSONRepositoryRemoveMissingManifestDoesNotCreateState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+
+	if err := config.NewJSONRepository().Remove("codex", domain.PowerTypeSkill, "missing"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".apm")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Remove() created state for a missing manifest: %v", err)
+	}
+}
+
+func TestJSONRepositoryRemoveRejectsInvalidPowerBeforeIO(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		powerType domain.PowerType
+		powerName string
+	}{
+		{name: "unknown type", powerType: "unknown", powerName: "power"},
+		{name: "empty name", powerType: domain.PowerTypeSkill},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("APM_HOME", home)
+			statePath := filepath.Join(home, ".apm")
+			if err := os.WriteFile(statePath, []byte("blocking file"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Stat(statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = config.NewJSONRepository().Remove("codex", tt.powerType, tt.powerName)
+			if !errors.Is(err, config.ErrInvalidPower) {
+				t.Fatalf("Remove() error = %v, want ErrInvalidPower before I/O", err)
+			}
+			after, err := os.Stat(statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !os.SameFile(before, after) || readManifest(t, statePath) != "blocking file" {
+				t.Fatal("invalid Remove() touched the blocking state file")
+			}
+		})
+	}
+}
+
+func TestJSONRepositoryWriteNormalizesPermissionsAndDropsUnknownFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	path := manifestPath(t, "codex")
+	manifestDir := filepath.Dir(path)
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(manifestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{
+  "agent": "codex",
+  "unknown_top_level": true,
+  "skills": [{"name": "old", "version": "1", "unknown_entry": true}],
+  "plugins": [],
+  "mcps": []
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
+		Name: "new", Type: domain.PowerTypeSkill, Version: "2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirInfo, err := os.Stat(manifestDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("manifest directory permissions = %04o, want 0700", got)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("manifest permissions = %04o, want 0600", got)
+	}
+	contents := readManifest(t, path)
+	if strings.Contains(contents, "unknown_") {
+		t.Fatalf("rewritten manifest retained unknown fields: %s", contents)
+	}
+}
+
+func TestJSONRepositoryWriteCleansUpTemporaryFileAfterSuccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+
+	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
+		Name: "power", Type: domain.PowerTypePlugin, Version: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Dir(manifestPath(t, "codex"))
+	entries, err := os.ReadDir(manifestDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "codex.json" {
+		t.Fatalf("manifest directory entries = %#v, want only codex.json", entries)
+	}
+}
+
+func TestJSONRepositoryWriteReturnsContextWhenManifestDirectoryIsAFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	fallbackTempDir := t.TempDir()
+	t.Setenv("TMPDIR", fallbackTempDir)
+	stateDir := filepath.Join(home, ".apm")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Join(stateDir, "manifests")
+	if err := os.WriteFile(manifestDir, []byte("blocking file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
+		Name: "power", Type: domain.PowerTypeSkill, Version: "1",
+	})
+	if err == nil {
+		t.Fatal("Set() error = nil, want manifest directory error")
+	}
+	for _, want := range []string{"codex", manifestDir} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Set() error = %q, want context %q", err, want)
+		}
+	}
+	entries, readErr := os.ReadDir(stateDir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 1 || entries[0].Name() != "manifests" {
+		t.Fatalf("state directory entries = %#v, want only blocking manifests file", entries)
+	}
+	fallbackEntries, readErr := os.ReadDir(fallbackTempDir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(fallbackEntries) != 0 {
+		t.Fatalf("fallback temp directory entries = %#v, want none", fallbackEntries)
+	}
+}
+
+func TestJSONRepositoryIsStatelessAcrossAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	repository := config.NewJSONRepository()
+
+	if err := repository.Set("codex", domain.PowerRef{
+		Name: "codex-skill", Type: domain.PowerTypeSkill, Version: "1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Set("claude", domain.PowerRef{
+		Name: "claude-plugin", Type: domain.PowerTypePlugin, Version: "2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	codex, err := repository.List("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude, err := repository.List("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := codex[domain.PowerTypeSkill]; len(got) != 1 || got[0].Name != "codex-skill" {
+		t.Fatalf("codex skills = %#v, want only codex-skill", got)
+	}
+	if got := codex[domain.PowerTypePlugin]; len(got) != 0 {
+		t.Fatalf("codex plugins = %#v, want empty", got)
+	}
+	if got := claude[domain.PowerTypePlugin]; len(got) != 1 || got[0].Name != "claude-plugin" {
+		t.Fatalf("claude plugins = %#v, want only claude-plugin", got)
+	}
+	if got := claude[domain.PowerTypeSkill]; len(got) != 0 {
+		t.Fatalf("claude skills = %#v, want empty", got)
 	}
 }
