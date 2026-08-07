@@ -29,11 +29,13 @@ classDiagram
         +Ordered() []AgentID
     }
 
-    note for ConfigStore "各 Agent 独立的已安装 Power 清单读写"
-    class ConfigStore {
+    note for ConfigRepository "无状态封装各 Agent 清单的查询和原子读改写；调用时全局锁已由 lifecycle 持有"
+    class ConfigRepository {
         <<interface>>
-        +Read(AgentID) (Manifest, error)
-        +Write(AgentID, Manifest) error
+        +List(AgentID) (PowerGroups, error)
+        +Find(AgentID, PowerType, name) (PowerRef, bool, error)
+        +Set(AgentID, PowerRef) error
+        +Remove(AgentID, PowerType, name) error
     }
 
     class JournalStore {
@@ -65,7 +67,7 @@ classDiagram
     lifecycleService ..|> Lifecycle
     lifecycleService --> AdapterRegistry
     AdapterRegistry --> AgentSnapshot : returns
-    lifecycleService --> ConfigStore
+    lifecycleService --> ConfigRepository
     lifecycleService --> JournalStore
     lifecycleService --> Locker
     lifecycleService --> PowerCache

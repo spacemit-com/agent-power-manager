@@ -11,9 +11,9 @@ flowchart TD
     InstallNextAgent -->|否| InstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> InstallOK([释放锁并正常退出])
     InstallNextAgent -->|是| InstallAdapter["Resolve(currentAgent, type) 解析当前 Agent Adapter"]
     InstallAdapter -->|失败| InstallFail[记录当前 Agent failed；其余按确定顺序标记 unexecuted]
-    InstallAdapter -->|成功| InstallReadManifest[读取当前 Agent 安装清单]
-    InstallReadManifest -->|失败| InstallFail
-    InstallReadManifest -->|成功| InstallSame{已安装目标版本?}
+    InstallAdapter -->|成功| InstallFindManifest[调用 ConfigRepository.Find 查询当前 Agent 的同类型同名 Power]
+    InstallFindManifest -->|失败| InstallFail
+    InstallFindManifest -->|成功| InstallSame{已安装目标版本?}
     InstallSame -->|是| InstallSkip[打印相同版本，记录当前 Agent completed] --> InstallNextAgent
 
     subgraph InstallPreCommit["提交点前事务阶段（失败时回滚）"]
@@ -42,7 +42,7 @@ flowchart TD
     end
 
     subgraph InstallPostCommit["提交点后事务阶段（失败时保留 journal，由下次预检完成提交）"]
-        InstallPublish -->|已越过提交点| InstallManifest[原子更新安装清单]
+        InstallPublish -->|已越过提交点| InstallManifest[调用 ConfigRepository.Set 原子更新安装清单]
         InstallManifest -->|失败| InstallKeepCommit[保留 journal；打印清单更新失败]
         InstallManifest -->|成功| InstallCleanup[清理备份与临时文件；最后删除 journal]
         InstallCleanup -->|失败| InstallKeepCommit
@@ -57,7 +57,7 @@ flowchart TD
 
     InstallResolve -.进程中断.-> InstallInterrupted
     InstallAdapter -.进程中断.-> InstallInterrupted
-    InstallReadManifest -.进程中断.-> InstallInterrupted
+    InstallFindManifest -.进程中断.-> InstallInterrupted
     InstallCreateJournal -.进程中断；保留 journal.-> InstallInterrupted
     InstallFetch -.进程中断；保留 journal.-> InstallInterrupted
     InstallGet -.进程中断；保留 journal.-> InstallInterrupted

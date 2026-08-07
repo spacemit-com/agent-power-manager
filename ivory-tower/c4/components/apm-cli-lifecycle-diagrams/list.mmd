@@ -13,16 +13,14 @@ flowchart TD
     ListDiscovery -->|成功；锁保持| ListAll{agent 等于 all?}
     ListAll -->|否| ListTarget{目标 Agent 在已支持且已安装快照中?}
     ListTarget -->|否| ListUnavailable[打印目标 Agent 未受支持或未安装] --> ListExitError
-    ListTarget -->|是| ListLocalType[从本地清单按可选 type 定位；仅本地同名跨类型歧义时要求显式 type]
-    ListLocalType --> ListReadOne[读取目标 Agent 安装清单]
-    ListReadOne -->|文件不存在| ListEmptyOne[打印空列表] --> ListExitOK
+    ListTarget -->|是| ListReadOne[调用 ConfigRepository.List 获取目标 Agent 的全部 PowerGroups]
     ListReadOne -->|读取或解析失败| ListFail
-    ListReadOne -->|成功| ListPrintOne[打印已安装 Power] --> ListExitOK
+    ListReadOne -->|成功；缺失文件视为空分组| ListLocalType[由 lifecycle 按可选 type 筛选]
+    ListLocalType --> ListPrintOne[打印已安装 Power] --> ListExitOK
     ListAll -->|是| ListNextAgent{按快照中已支持且已安装 Agent ID 升序还有目标 Agent?}
-    ListNextAgent -->|是| ListReadAgent[读取该 Agent 安装清单]
-    ListReadAgent -->|文件不存在| ListRecordEmpty[记录该 Agent 空列表] --> ListNextAgent
+    ListNextAgent -->|是| ListReadAgent[调用 ConfigRepository.List 获取该 Agent 的全部 PowerGroups]
     ListReadAgent -->|读取或解析失败| ListRecordFailure[记录该 Agent 失败] --> ListNextAgent
-    ListReadAgent -->|成功| ListRecordList[记录该 Agent 已安装列表] --> ListNextAgent
+    ListReadAgent -->|成功；缺失文件视为空分组| ListRecordList[记录该 Agent 已安装列表] --> ListNextAgent
     ListNextAgent -->|否| ListAnyFailure{存在读取失败?}
     ListAnyFailure -->|否| ListPrintAll[按 Agent 分组打印结果] --> ListExitOK
     ListAnyFailure -->|是| ListPrintPartial[打印分组结果与失败汇总] --> ListExitError

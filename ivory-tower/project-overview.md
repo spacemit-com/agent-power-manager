@@ -33,10 +33,10 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 - 系统边界与外部依赖：Agent Power Manager 位于能力提供方、能力使用方与目标 Agent 之间；对外依赖目标 Agent的Power接入方式。目标 Agent 自身的运行时位于 Agent Power Manager 边界之外。
 - 模块边界与职责：
     - 核心生命周期：定义 Power 的发现、安装、卸载、打印、配置读写和版本管理。
-    - 配置模型：维护各类 Agent 上各类 Power 的安装列表。
+    - 配置模型：通过无状态 Repository 维护每个 Agent 按 Skill、Plugin、MCP 分组的 Power 安装清单。
     - Adapter：承接不同 Power 类型和目标 Agent 的格式转换与安装位置差异，并检查已注册 Agent 的根目录是否存在；不负责 Agent 安装、卸载、实时监控、运行时感知或更新通知。
     - CLI：提供入口。
-- 数据与接口：各类Agent单独维护一个Power安装列表，其中按照Power类别分类。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)；生命周期恢复详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)；Agent 安装检测与命令内快照详见 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md)。本地 Power 操作中，`--agent` 的具体值必须存在于“已支持且已安装 Agent”快照，`all` 对快照中的全部 Agent 执行。Cloud `list` 返回带版本的全部 `PowerRef`，由 lifecycle 完成列表或搜索筛选；Cloud `get` 将版本已确定的 `PowerRef` 原子写入版本化缓存。
+- 数据与接口：每个 Agent 单独维护一份固定 `skills`、`plugins`、`mcps` 分组的 JSON 安装清单，条目统一为版本已确定的 `PowerRef`。Config Repository 在 `List/Find/Set/Remove` 内封装读取和原子读改写，lifecycle 不直接管理 JSON Manifest，详见 [ADR-007](adr/ADR-007-use-stateless-config-repository.md)。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)；生命周期恢复详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)；Agent 安装检测与命令内快照详见 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md)。本地 Power 操作中，`--agent` 的具体值必须存在于“已支持且已安装 Agent”快照，`all` 对快照中的全部 Agent 执行。Cloud `list` 返回带版本的全部 `PowerRef`，由 lifecycle 完成列表或搜索筛选；Cloud `get` 将版本已确定的 `PowerRef` 原子写入版本化缓存。
 - 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，日志在预解析 `--verbose` 后通过分级 Handler 安装为全局 `slog`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单。开发阶段以 `internal/cloud/resources` 的本地资源模拟云端服务；安装先将版本已确定的 `PowerRef` 从缓存 fetch 到干净 staging，缓存未命中时执行 Cloud get 后再次 fetch。缓存写入和 staging 物化均通过同文件系统内的临时目录原子 rename，后续安装仍由 staging + journal 保证中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md) 与 [ADR-006](adr/ADR-006-use-global-slog-with-level-routing.md)。
 
 ## Test Filesystem Isolation
@@ -63,6 +63,6 @@ APM 支持仅供测试使用的 `APM_HOME` 环境变量，使测试能在临时�
 - 主要风险：
     - 不同目标 Agent 的安装位置与 Power 格式差异较大，Adapter 的支持范围和一致性可能受限。
     - Power 兼容性约束与兼容版本求解规则尚未确定，可能影响跨版本依赖与配置重建的可靠性；最新版选择、显式版本、升级/降级和相同版本幂等语义已由 ADR-002 确定。
-    - 配置格式、冲突处理和权限控制未确定。
+    - 清单格式和本地文件权限已确定；跨来源内容冲突和更细粒度的权限策略尚未确定。
 - 待决事项：
     - 确定 MVP 之后的框架、部署、安全校验与审计方案。

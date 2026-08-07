@@ -11,7 +11,7 @@ classDiagram
 
     class ListResult {
         +CloudPowers []PowerRef
-        +InstalledByAgent map~AgentID, []InstalledPower~
+        +InstalledByAgent map~AgentID, PowerGroups~
         +Failures map~AgentID, error~
     }
 

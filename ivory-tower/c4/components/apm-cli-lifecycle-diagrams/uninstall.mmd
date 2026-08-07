@@ -7,7 +7,7 @@ flowchart TD
     UninstallTarget -->|否| UninstallTargetFail[打印目标 Agent 未受支持或未安装，或没有已支持且已安装的 Agent] --> UninstallPreflightFail[记录预执行失败；全部目标 Agent 标记 unexecuted] --> UninstallPrintFailureSummary
     UninstallTarget -->|是| UninstallNextAgent{按快照中已支持且已安装 Agent ID 升序还有目标 Agent?}
     UninstallNextAgent -->|否| UninstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> UninstallOK([释放锁并正常退出])
-    UninstallNextAgent -->|是| UninstallFind[从当前 Agent 本地清单按 power 与可选 type 定位；仅同名跨类型歧义时要求显式 type]
+    UninstallNextAgent -->|是| UninstallFind[调用 ConfigRepository.List 获取分组；由 lifecycle 按 power 与可选 type 定位并处理跨类型歧义]
     UninstallFind -->|读取失败或类型歧义| UninstallFail[记录当前 Agent failed；其余按确定顺序标记 unexecuted]
     UninstallFind -->|未安装| UninstallSkip[打印未安装、无需处理；记录当前 Agent completed] --> UninstallNextAgent
     UninstallFind -->|已安装| UninstallAdapter["Resolve(currentAgent, type) 解析 Adapter"]
@@ -26,7 +26,7 @@ flowchart TD
     end
 
     subgraph UninstallPostCommit["提交点后事务阶段（失败时保留 journal，由下次预检完成提交）"]
-        UninstallQuarantine -->|已越过提交点| UninstallManifest[原子删除安装清单记录]
+        UninstallQuarantine -->|已越过提交点| UninstallManifest[调用 ConfigRepository.Remove 原子删除安装清单记录]
         UninstallManifest -->|失败| UninstallKeepCommit[保留 journal；打印清单删除失败]
         UninstallManifest -->|成功| UninstallCleanup[清理隔离内容；最后删除 journal]
         UninstallCleanup -->|失败| UninstallKeepCommit
