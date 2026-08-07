@@ -16,6 +16,7 @@
 - `30607ae refactor(cli): install global slog before execution`
 - `b615d3c docs: record global slog CLI migration`
 - `5479fc0 fix(docs): defer global slog changelog entry`
+- `efc073c test(logging): strengthen handler acceptance coverage`
 
 解决方案或完成结果：
 
