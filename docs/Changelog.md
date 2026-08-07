@@ -6,19 +6,31 @@
 
 用户需求：
 
-为 Agent domain 固化受支持的 Agent ID，并定义快照包含判断及安全的有序访问语义。
+为 Codex、Claude Code 和 Hermes Agent 实现全局 Skill Adapter：定义稳定的 Agent 快照和精简 Adapter 契约，解析 Agent 路径和安装检测，校验 `SKILL.md` frontmatter，并安全地从公共 staging 复制、原子发布与清理 Skill。
 
 相关提交：
 
+- `543ad83 docs: design agent skill adapters`
+- `328c996 docs: plan agent skill adapters`
+- `8f3085e docs: enforce pre-rename conflict check`
 - `c578390 feat(domain): define supported agent snapshots`
+- `b8e53a9 refactor(adapter): define skill installation contract`
+- `43efb07 feat(adapter): resolve agent skill targets`
+- `bfa3da9 feat(adapter): validate skill frontmatter`
+- `b8c0d46 feat(adapter): install skills from staging`
+- `cca68f7 fix(adapter): validate staging root`
+- `9b515c5 fix(adapter): preserve atomic install failures`
+- `a714018 fix(adapter): add install error context`
+- `de2fcb9 test(adapter): cover install error phases`
+- `e9e849c feat(adapter): register built-in skill adapters`
 
 解决方案或完成结果：
 
-新增 Codex、Claude Code 与 Hermes 的稳定 AgentID；AgentSnapshot 可查询成员，Ordered 返回底层切片的防御性副本，保持快照原始顺序且不暴露内部存储。
+新增 `codex`、`claude-code` 和 `hermes-agent` 三个稳定 Agent ID；Registry 只解析这三者的 Skill Adapter，并以固定顺序刷新不可变快照。三个 Agent 共享一条全局、仅复制的安装管线：先按 Agent 根目录解析目标，拒绝任意未纳管的既有目标，再校验公共 staging 中 `SKILL.md` 的首字节 YAML frontmatter（精确名称、非空字符串 `name`/`description`，允许未知字段以及 LF/CRLF），复制完整目录到同一 Skill 根内的隐藏临时目录，并以 rename 原子发布；不创建指向 staging 的 symlink。有效 staging 在成功或失败后都会清理，临时目录和 staging 清理错误保留路径、阶段、Agent/Power 上下文并与主错误合并。
 
 验证结果或限制：
 
-`go test ./internal/domain -run 'TestAgent(IDs|Snapshot)' -count=1 -v` 和 `go test ./internal/domain -count=1` 均通过。范围仅覆盖 domain 语义，不包含 Agent Adapter 或 Registry。
+无缓存聚焦测试 `go test ./internal/adapter ./internal/domain ./internal/lifecycle -count=1 -v` 通过，Adapter 与 domain 测试无 SKIP；lifecycle 以 `[no test files]` 编译通过。`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均以退出码 0 完成。Adapter 直接输出/非 Debug 日志扫描无匹配，`TargetPath`、`DetectAgent` 和 `Install` 新契约均可见；旧符号扫描未发现 `InstallPath` 或 `domain.Power`，但匹配到既有 `internal/lifecycle/service.go` 的 lifecycle `Uninstall` 接口和方法，未在本功能中改动。APM 全局锁仅串行 APM 自身；外部进程仍可在发布前第二次目标检查与 rename 之间创建目标，因而不提供无竞态的 no-replace 保证。
 
 ## 2026-08-07
 
