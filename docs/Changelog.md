@@ -14,6 +14,7 @@
 - `328c996 docs: plan agent skill adapters`
 - `8f3085e docs: enforce pre-rename conflict check`
 - `c578390 feat(domain): define supported agent snapshots`
+- `13058ae docs: record agent snapshot domain changes`
 - `b8e53a9 refactor(adapter): define skill installation contract`
 - `43efb07 feat(adapter): resolve agent skill targets`
 - `bfa3da9 feat(adapter): validate skill frontmatter`
@@ -23,14 +24,15 @@
 - `a714018 fix(adapter): add install error context`
 - `de2fcb9 test(adapter): cover install error phases`
 - `e9e849c feat(adapter): register built-in skill adapters`
+- `d8e787e fix(adapter): reject overlapping install roots`
 
 解决方案或完成结果：
 
-新增 `codex`、`claude-code` 和 `hermes-agent` 三个稳定 Agent ID；Registry 只解析这三者的 Skill Adapter，并以固定顺序刷新不可变快照。三个 Agent 共享一条全局、仅复制的安装管线：先按 Agent 根目录解析目标，拒绝任意未纳管的既有目标，再校验公共 staging 中 `SKILL.md` 的首字节 YAML frontmatter（精确名称、非空字符串 `name`/`description`，允许未知字段以及 LF/CRLF），复制完整目录到同一 Skill 根内的隐藏临时目录，并以 rename 原子发布；不创建指向 staging 的 symlink。有效 staging 在成功或失败后都会清理，临时目录和 staging 清理错误保留路径、阶段、Agent/Power 上下文并与主错误合并。
+新增 `codex`、`claude-code` 和 `hermes-agent` 三个稳定 Agent ID；Registry 只解析这三者的 Skill Adapter，并以固定顺序刷新不可变快照。三个 Agent 共享一条全局、仅复制的安装管线：先按 Agent 根目录解析目标，拒绝任意未纳管的既有目标，再校验公共 staging 中 `SKILL.md` 的首字节 YAML frontmatter（精确名称、非空字符串 `name`/`description`，允许未知字段以及 LF/CRLF），复制完整目录到同一 Skill 根内的隐藏临时目录，并以 rename 原子发布；不创建指向 staging 的 symlink。安装在注册 staging 清理和创建目标临时目录前解析 staging、Agent 根与 Skill 根的物理路径，以分隔符感知的包含检查拒绝 Skill 根等于或位于 staging 下的布局；重叠错误不会复制、发布或清理重叠树。物理根不重叠后，有效 staging 在成功或失败时都会清理，临时目录和 staging 清理错误保留路径、阶段、Agent/Power 上下文并与主错误合并。
 
 验证结果或限制：
 
-无缓存聚焦测试 `go test ./internal/adapter ./internal/domain ./internal/lifecycle -count=1 -v` 通过，Adapter 与 domain 测试无 SKIP；lifecycle 以 `[no test files]` 编译通过。`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均以退出码 0 完成。Adapter 直接输出/非 Debug 日志扫描无匹配，`TargetPath`、`DetectAgent` 和 `Install` 新契约均可见；旧符号扫描未发现 `InstallPath` 或 `domain.Power`，但匹配到既有 `internal/lifecycle/service.go` 的 lifecycle `Uninstall` 接口和方法，未在本功能中改动。APM 全局锁仅串行 APM 自身；外部进程仍可在发布前第二次目标检查与 rename 之间创建目标，因而不提供无竞态的 no-replace 保证。
+无缓存聚焦测试 `go test ./internal/adapter ./internal/domain ./internal/lifecycle -count=1 -v` 通过，Adapter 与 domain 测试无 SKIP；lifecycle 以 `[no test files]` 编译通过。重叠回归覆盖物理子目录、staging/Agent 根/Skill 根 symlink、递归复制输出、既有目标保留和相邻前缀非重叠安装。`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均以退出码 0 完成。Adapter 直接输出/非 Debug 日志扫描无匹配；正确限定在 `internal/adapter` 的旧符号扫描未发现 `InstallPath`、`domain.Power` 或 Adapter `Uninstall`，`TargetPath`、`DetectAgent` 和 `Install` 新契约均可见。APM 全局锁仅串行 APM 自身；外部进程仍可在物理根检查后改变 symlink，或在发布前第二次目标检查与 rename 之间创建目标，因而不提供无竞态的 no-replace 保证。
 
 ## 2026-08-07
 
