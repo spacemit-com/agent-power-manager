@@ -19,6 +19,7 @@
 - `1845e71 feat(config): atomically set and remove powers`
 - `f2e652c refactor(config): replace manifest store with repository`
 - `97d80d3 docs: fix config CLI smoke command`
+- `a9df144 fix(config): preserve repository error context`
 
 解决方案或完成结果：
 
