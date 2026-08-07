@@ -25,20 +25,23 @@ func NewJSONRepository() *JSONRepository {
 func (r *JSONRepository) List(agent domain.AgentID) (domain.PowerGroups, error) {
 	groups, err := r.read(agent)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("List agent %q: %w", agent, err)
 	}
 	return clonePowerGroups(groups), nil
 }
 
 // Find 返回指定智能体中第一个匹配的能力引用。
 func (r *JSONRepository) Find(agent domain.AgentID, powerType domain.PowerType, name string) (domain.PowerRef, bool, error) {
-	if !validPowerType(powerType) || name == "" {
-		return domain.PowerRef{}, false, ErrInvalidPower
+	if !validPowerType(powerType) {
+		return domain.PowerRef{}, false, fmt.Errorf("Find agent %q: invalid power type %q: %w", agent, powerType, ErrInvalidPower)
+	}
+	if name == "" {
+		return domain.PowerRef{}, false, fmt.Errorf("Find agent %q: empty power name: %w", agent, ErrInvalidPower)
 	}
 
 	groups, err := r.read(agent)
 	if err != nil {
-		return domain.PowerRef{}, false, err
+		return domain.PowerRef{}, false, fmt.Errorf("Find agent %q: %w", agent, err)
 	}
 	for _, power := range groups[powerType] {
 		if power.Name == name {
@@ -50,13 +53,19 @@ func (r *JSONRepository) Find(agent domain.AgentID, powerType domain.PowerType, 
 
 // Set 新增或替换指定智能体的能力引用。
 func (r *JSONRepository) Set(agent domain.AgentID, power domain.PowerRef) error {
-	if !validPowerType(power.Type) || power.Name == "" || power.Version == "" {
-		return ErrInvalidPower
+	if !validPowerType(power.Type) {
+		return fmt.Errorf("Set agent %q: invalid power type %q: %w", agent, power.Type, ErrInvalidPower)
+	}
+	if power.Name == "" {
+		return fmt.Errorf("Set agent %q: empty power name: %w", agent, ErrInvalidPower)
+	}
+	if power.Version == "" {
+		return fmt.Errorf("Set agent %q: empty power version: %w", agent, ErrInvalidPower)
 	}
 
 	groups, err := r.read(agent)
 	if err != nil {
-		return err
+		return fmt.Errorf("Set agent %q: %w", agent, err)
 	}
 	powers := groups[power.Type]
 	firstMatch := -1
@@ -94,18 +103,24 @@ func (r *JSONRepository) Set(agent domain.AgentID, power domain.PowerRef) error 
 		}
 		groups[power.Type] = updated
 	}
-	return r.write(agent, groups)
+	if err := r.write(agent, groups); err != nil {
+		return fmt.Errorf("Set agent %q: %w", agent, err)
+	}
+	return nil
 }
 
 // Remove 删除指定智能体目标类别中的全部同名能力引用。
 func (r *JSONRepository) Remove(agent domain.AgentID, powerType domain.PowerType, name string) error {
-	if !validPowerType(powerType) || name == "" {
-		return ErrInvalidPower
+	if !validPowerType(powerType) {
+		return fmt.Errorf("Remove agent %q: invalid power type %q: %w", agent, powerType, ErrInvalidPower)
+	}
+	if name == "" {
+		return fmt.Errorf("Remove agent %q: empty power name: %w", agent, ErrInvalidPower)
 	}
 
 	groups, err := r.read(agent)
 	if err != nil {
-		return err
+		return fmt.Errorf("Remove agent %q: %w", agent, err)
 	}
 	powers := groups[powerType]
 	filtered := make([]domain.PowerRef, 0, len(powers))
@@ -127,7 +142,10 @@ func (r *JSONRepository) Remove(agent domain.AgentID, powerType domain.PowerType
 	}
 
 	groups[powerType] = filtered
-	return r.write(agent, groups)
+	if err := r.write(agent, groups); err != nil {
+		return fmt.Errorf("Remove agent %q: %w", agent, err)
+	}
+	return nil
 }
 
 var _ Repository = (*JSONRepository)(nil)
@@ -135,7 +153,7 @@ var _ Repository = (*JSONRepository)(nil)
 func (r *JSONRepository) read(agent domain.AgentID) (domain.PowerGroups, error) {
 	path, err := paths.ManifestPath(agent)
 	if err != nil {
-		return nil, fmt.Errorf("resolve manifest path: %w", err)
+		return nil, fmt.Errorf("resolve manifest path for agent %q: %w", agent, err)
 	}
 	slog.Debug("read manifest", logging.Agent(agent), slog.String("path", path))
 
@@ -144,18 +162,18 @@ func (r *JSONRepository) read(agent domain.AgentID) (domain.PowerGroups, error) 
 		return emptyPowerGroups(), nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read manifest %q: %w", path, err)
+		return nil, fmt.Errorf("read manifest %q for agent %q: %w", path, agent, err)
 	}
 
 	var document manifestDocument
 	if err := json.Unmarshal(contents, &document); err != nil {
-		return nil, fmt.Errorf("decode manifest %q: %w", path, err)
+		return nil, fmt.Errorf("decode manifest %q for agent %q: %w", path, agent, err)
 	}
 	if document.Agent == "" {
-		return nil, fmt.Errorf("decode manifest %q: missing agent", path)
+		return nil, fmt.Errorf("decode manifest %q for agent %q: missing agent", path, agent)
 	}
 	if document.Agent != agent {
-		return nil, fmt.Errorf("decode manifest %q: agent %q does not match %q", path, document.Agent, agent)
+		return nil, fmt.Errorf("decode manifest %q for agent %q: document agent %q does not match", path, agent, document.Agent)
 	}
 	return manifestToPowerGroups(document), nil
 }

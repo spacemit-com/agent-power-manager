@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -205,14 +206,18 @@ func TestJSONRepositoryFindRejectsInvalidPowerBeforeIO(t *testing.T) {
 		name      string
 		powerType domain.PowerType
 		nameValue string
+		wantField string
 	}{
-		{name: "unknown type", powerType: "unknown", nameValue: "power"},
-		{name: "empty name", powerType: domain.PowerTypeSkill, nameValue: ""},
+		{name: "unknown type", powerType: "unknown", nameValue: "power", wantField: "type"},
+		{name: "empty name", powerType: domain.PowerTypeSkill, nameValue: "", wantField: "name"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, err := config.NewJSONRepository().Find("codex", tt.powerType, tt.nameValue)
 			if !errors.Is(err, config.ErrInvalidPower) {
 				t.Fatalf("Find() error = %v, want ErrInvalidPower before I/O", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantField) {
+				t.Fatalf("Find() error = %q, want field context %q", err, tt.wantField)
 			}
 		})
 	}
@@ -420,12 +425,13 @@ func TestJSONRepositorySetIdenticalSingleMatchDoesNotReplaceFile(t *testing.T) {
 
 func TestJSONRepositorySetRejectsInvalidPowerBeforeIO(t *testing.T) {
 	for _, tt := range []struct {
-		name  string
-		power domain.PowerRef
+		name      string
+		power     domain.PowerRef
+		wantField string
 	}{
-		{name: "unknown type", power: domain.PowerRef{Name: "power", Type: "unknown", Version: "1"}},
-		{name: "empty name", power: domain.PowerRef{Type: domain.PowerTypeSkill, Version: "1"}},
-		{name: "empty version", power: domain.PowerRef{Name: "power", Type: domain.PowerTypeSkill}},
+		{name: "unknown type", power: domain.PowerRef{Name: "power", Type: "unknown", Version: "1"}, wantField: "type"},
+		{name: "empty name", power: domain.PowerRef{Type: domain.PowerTypeSkill, Version: "1"}, wantField: "name"},
+		{name: "empty version", power: domain.PowerRef{Name: "power", Type: domain.PowerTypeSkill}, wantField: "version"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -438,6 +444,9 @@ func TestJSONRepositorySetRejectsInvalidPowerBeforeIO(t *testing.T) {
 			err := config.NewJSONRepository().Set("codex", tt.power)
 			if !errors.Is(err, config.ErrInvalidPower) {
 				t.Fatalf("Set() error = %v, want ErrInvalidPower before I/O", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantField) {
+				t.Fatalf("Set() error = %q, want field context %q", err, tt.wantField)
 			}
 			if got := readManifest(t, statePath); got != "blocking file" {
 				t.Fatalf("invalid Set() changed blocking state file to %q", got)
@@ -543,9 +552,10 @@ func TestJSONRepositoryRemoveRejectsInvalidPowerBeforeIO(t *testing.T) {
 		name      string
 		powerType domain.PowerType
 		powerName string
+		wantField string
 	}{
-		{name: "unknown type", powerType: "unknown", powerName: "power"},
-		{name: "empty name", powerType: domain.PowerTypeSkill},
+		{name: "unknown type", powerType: "unknown", powerName: "power", wantField: "type"},
+		{name: "empty name", powerType: domain.PowerTypeSkill, wantField: "name"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -562,6 +572,9 @@ func TestJSONRepositoryRemoveRejectsInvalidPowerBeforeIO(t *testing.T) {
 			err = config.NewJSONRepository().Remove("codex", tt.powerType, tt.powerName)
 			if !errors.Is(err, config.ErrInvalidPower) {
 				t.Fatalf("Remove() error = %v, want ErrInvalidPower before I/O", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantField) {
+				t.Fatalf("Remove() error = %q, want field context %q", err, tt.wantField)
 			}
 			after, err := os.Stat(statePath)
 			if err != nil {
@@ -644,44 +657,71 @@ func TestJSONRepositoryWriteCleansUpTemporaryFileAfterSuccess(t *testing.T) {
 	}
 }
 
-func TestJSONRepositoryWriteReturnsContextWhenManifestDirectoryIsAFile(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("APM_HOME", home)
-	fallbackTempDir := t.TempDir()
-	t.Setenv("TMPDIR", fallbackTempDir)
-	stateDir := filepath.Join(home, ".apm")
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	manifestDir := filepath.Join(stateDir, "manifests")
-	if err := os.WriteFile(manifestDir, []byte("blocking file"), 0o600); err != nil {
-		t.Fatal(err)
+func TestJSONRepositoryPublicMethodsWrapManifestReadAndDecodeErrors(t *testing.T) {
+	methods := []struct {
+		name string
+		call func(*config.JSONRepository) error
+	}{
+		{name: "List", call: func(r *config.JSONRepository) error { _, err := r.List("codex"); return err }},
+		{name: "Find", call: func(r *config.JSONRepository) error {
+			_, _, err := r.Find("codex", domain.PowerTypeSkill, "power")
+			return err
+		}},
+		{name: "Set", call: func(r *config.JSONRepository) error {
+			return r.Set("codex", domain.PowerRef{Name: "power", Type: domain.PowerTypeSkill, Version: "1"})
+		}},
+		{name: "Remove", call: func(r *config.JSONRepository) error { return r.Remove("codex", domain.PowerTypeSkill, "power") }},
 	}
 
-	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
-		Name: "power", Type: domain.PowerTypeSkill, Version: "1",
-	})
-	if err == nil {
-		t.Fatal("Set() error = nil, want manifest directory error")
-	}
-	for _, want := range []string{"codex", manifestDir} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("Set() error = %q, want context %q", err, want)
+	for _, method := range methods {
+		for _, failure := range []struct {
+			name        string
+			prepare     func(*testing.T) string
+			assertCause func(*testing.T, error)
+		}{
+			{
+				name: "read",
+				prepare: func(t *testing.T) string {
+					path := manifestPath(t, "codex")
+					if err := os.MkdirAll(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					return path
+				},
+				assertCause: func(t *testing.T, err error) {
+					var pathErr *os.PathError
+					if !errors.As(err, &pathErr) {
+						t.Fatalf("error = %v, want wrapped *os.PathError", err)
+					}
+				},
+			},
+			{
+				name:    "decode",
+				prepare: func(t *testing.T) string { return writeManifest(t, "codex", `{`) },
+				assertCause: func(t *testing.T, err error) {
+					var syntaxErr *json.SyntaxError
+					if !errors.As(err, &syntaxErr) {
+						t.Fatalf("error = %v, want wrapped *json.SyntaxError", err)
+					}
+				},
+			},
+		} {
+			t.Run(method.name+"/"+failure.name, func(t *testing.T) {
+				home := t.TempDir()
+				t.Setenv("APM_HOME", home)
+				path := failure.prepare(t)
+				err := method.call(config.NewJSONRepository())
+				if err == nil {
+					t.Fatal("error = nil, want failure")
+				}
+				for _, want := range []string{method.name, "codex", path} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("error = %q, want context %q", err, want)
+					}
+				}
+				failure.assertCause(t, err)
+			})
 		}
-	}
-	entries, readErr := os.ReadDir(stateDir)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if len(entries) != 1 || entries[0].Name() != "manifests" {
-		t.Fatalf("state directory entries = %#v, want only blocking manifests file", entries)
-	}
-	fallbackEntries, readErr := os.ReadDir(fallbackTempDir)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if len(fallbackEntries) != 0 {
-		t.Fatalf("fallback temp directory entries = %#v, want none", fallbackEntries)
 	}
 }
 
