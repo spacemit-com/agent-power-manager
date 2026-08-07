@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-08-07
+
+分类：功能变更
+
+用户需求：
+
+参考 Helm，把 APM 改为预解析 verbose、安装全局 slog，并为四级日志配置独立 Handler。
+
+相关提交：
+
+- `6fa452d docs: design global slog logging`
+- `4433d3a docs: plan global slog logging`
+- `cf5d1a1 refactor(logging): add global level routing`
+- `30607ae refactor(cli): install global slog before execution`
+- `b615d3c docs: record global slog CLI migration`
+- `5479fc0 fix(docs): defer global slog changelog entry`
+
+解决方案或完成结果：
+
+删除自定义 Logger 门面；Debug 由 verbose Handler 控制；Info 输出到 stdout，Warn/Error 输出到 stderr；错误只在 CLI 外层记录一次；Cobra help/usage 保持原生。
+
+验证结果或限制：
+
+直接打印及独立 logger 静态扫描均无匹配。日志和 CLI 聚焦测试通过且无跳过测试；`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均以退出码 0 完成。不实现自定义格式，也不支持并发使用不同配置的 CLI Entry。
+
 ## 2026-08-06
 
 分类：新增功能
