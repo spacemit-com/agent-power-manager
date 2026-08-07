@@ -4,12 +4,10 @@ import (
 	"errors"
 	"strings"
 
-	"apm/internal/logging"
-
 	"github.com/spf13/cobra"
 )
 
-func newUninstallCommand(logger *logging.Logger) *cobra.Command {
+func newUninstallCommand() *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
 		Use:   "uninstall <power>",
@@ -23,7 +21,7 @@ func newUninstallCommand(logger *logging.Logger) *cobra.Command {
 			if strings.TrimSpace(flags.Name) == "" {
 				return errors.New("power name must not be empty")
 			}
-			logParsedCommand(command, logger, flags, args)
+			logParsedCommand(command, flags, args)
 			return nil
 		},
 	}

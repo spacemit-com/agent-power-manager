@@ -1,12 +1,8 @@
 package cli
 
-import (
-	"apm/internal/logging"
+import "github.com/spf13/cobra"
 
-	"github.com/spf13/cobra"
-)
-
-func newListCommand(logger *logging.Logger) *cobra.Command {
+func newListCommand() *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
 		Use:   "list",
@@ -16,7 +12,7 @@ func newListCommand(logger *logging.Logger) *cobra.Command {
 			if err := validateCommon(flags); err != nil {
 				return err
 			}
-			logParsedCommand(command, logger, flags, args)
+			logParsedCommand(command, flags, args)
 			return nil
 		},
 	}

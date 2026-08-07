@@ -1,12 +1,8 @@
 package cli
 
-import (
-	"apm/internal/logging"
+import "github.com/spf13/cobra"
 
-	"github.com/spf13/cobra"
-)
-
-func newInstallCommand(logger *logging.Logger) *cobra.Command {
+func newInstallCommand() *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
 		Use:   "install <power>[=<version>]",
@@ -22,7 +18,7 @@ func newInstallCommand(logger *logging.Logger) *cobra.Command {
 			}
 			flags.Name = name
 			flags.Version = version
-			logParsedCommand(command, logger, flags, args)
+			logParsedCommand(command, flags, args)
 			return nil
 		},
 	}

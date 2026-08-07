@@ -8,8 +8,8 @@ import (
 )
 
 func main() {
-	logger := logging.NewDefault(false)
-	if err := cli.New(logger).Execute(os.Args[1:]); err != nil {
+	entry := cli.New(os.Stdout, os.Stderr, logging.SetupLogging)
+	if err := entry.Execute(os.Args[1:]); err != nil {
 		os.Exit(1)
 	}
 }

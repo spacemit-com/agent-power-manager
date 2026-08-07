@@ -4,12 +4,10 @@ import (
 	"errors"
 	"strings"
 
-	"apm/internal/logging"
-
 	"github.com/spf13/cobra"
 )
 
-func newSearchCommand(logger *logging.Logger) *cobra.Command {
+func newSearchCommand() *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
 		Use:   "search <keyword>",
@@ -23,7 +21,7 @@ func newSearchCommand(logger *logging.Logger) *cobra.Command {
 			if strings.TrimSpace(flags.Keyword) == "" {
 				return errors.New("keyword must not be empty")
 			}
-			logParsedCommand(command, logger, flags, args)
+			logParsedCommand(command, flags, args)
 			return nil
 		},
 	}

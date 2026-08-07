@@ -2,51 +2,63 @@
 package cli
 
 import (
+	"io"
 	"log/slog"
-
-	"apm/internal/logging"
 
 	"github.com/spf13/cobra"
 )
 
+// SetupLoggingFunc 安装与 verbose 设置匹配的默认日志器。
+type SetupLoggingFunc func(verbose bool)
+
 // CLIEntry 是 APM 命令行的执行入口。
 type CLIEntry struct {
-	logger *logging.Logger
+	stdout       io.Writer
+	stderr       io.Writer
+	setupLogging SetupLoggingFunc
 }
 
-// New 使用统一日志输出创建只解析命令的 CLI 入口。
-func New(logger *logging.Logger) *CLIEntry {
-	return &CLIEntry{logger: logger}
+// New 使用指定输出和日志初始化函数创建 CLI 入口。
+func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc) *CLIEntry {
+	return &CLIEntry{stdout: stdout, stderr: stderr, setupLogging: setupLogging}
 }
 
 // Execute 解析并校验参数，不执行 Power 生命周期业务。
 func (entry *CLIEntry) Execute(args []string) error {
-	// Cobra 的 flag value 会保留上次解析结果；每次重建命令树以隔离重复执行。
-	root := newRootCommand(entry.logger)
+	root := newRootCommand(entry.stdout, entry.stderr)
+	preparseLogging(root, args, entry.setupLogging)
 	root.SetArgs(args)
 	executed, err := root.ExecuteC()
 	if err != nil {
-		executed.PrintErrln(executed.ErrPrefix(), err.Error())
+		slog.Error("command failed", slog.Any("error", err))
 		executed.PrintErr(executed.UsageString())
 	}
 	return err
 }
 
-func newRootCommand(logger *logging.Logger) *cobra.Command {
+func preparseLogging(root *cobra.Command, args []string, setupLogging SetupLoggingFunc) {
+	flags := root.PersistentFlags()
+	flags.ParseErrorsAllowlist.UnknownFlags = true
+	_ = flags.Parse(args)
+	verbose, _ := flags.GetBool("verbose")
+	setupLogging(verbose)
+}
+
+func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "apm",
 		Short:         "Agent Power Manager",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
-	root.SetOut(logger.Stdout())
-	root.SetErr(logger.Stderr())
+	root.SetOut(stdout)
+	root.SetErr(stderr)
 	root.PersistentFlags().Bool("verbose", false, "enable verbose diagnostics")
 	root.AddCommand(
-		newSearchCommand(logger),
-		newListCommand(logger),
-		newInstallCommand(logger),
-		newUninstallCommand(logger),
+		newSearchCommand(),
+		newListCommand(),
+		newInstallCommand(),
+		newUninstallCommand(),
 	)
 	return root
 }
@@ -55,13 +67,8 @@ func bindCommonFlags(command *cobra.Command, flags *Flags) {
 	command.Flags().StringVar(&flags.Type, "type", "", "power type: skill, plugin, or mcp")
 }
 
-func logParsedCommand(command *cobra.Command, logger *logging.Logger, flags Flags, args []string) {
-	verbose, _ := command.Flags().GetBool("verbose")
-	logger.SetVerbose(verbose)
-	if !verbose {
-		return
-	}
-	logger.Verbose(
+func logParsedCommand(command *cobra.Command, flags Flags, args []string) {
+	slog.Debug(
 		"command parsed",
 		slog.String("command", command.Name()),
 		slog.String("agent", flags.Agent),

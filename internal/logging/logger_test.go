@@ -3,9 +3,7 @@ package logging_test
 import (
 	"bytes"
 	"context"
-	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 
@@ -83,74 +81,6 @@ func TestSetupLoggingReplacesDefaultLogger(t *testing.T) {
 	logging.SetupLogging(false)
 	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
 		t.Fatal("debug enabled after SetupLogging(false)")
-	}
-}
-
-func TestNewDefaultUsesProcessWriters(t *testing.T) {
-	logger := logging.NewDefault(false)
-	if logger == nil {
-		t.Fatal("NewDefault returned nil")
-	}
-	if logger.Stdout() != os.Stdout {
-		t.Fatalf("Stdout() = %v, want os.Stdout", logger.Stdout())
-	}
-	if logger.Stderr() != os.Stderr {
-		t.Fatalf("Stderr() = %v, want os.Stderr", logger.Stderr())
-	}
-}
-
-// TestRoutesAndVerbose catches regressions that route normal output or diagnostics
-// to the wrong stream, or emit verbose diagnostics while verbose mode is disabled.
-func TestRoutesAndVerbose(t *testing.T) {
-	var out, errOut bytes.Buffer
-	logger := logging.New(&out, &errOut, false)
-	if err := logger.Output("result"); err != nil {
-		t.Fatal(err)
-	}
-	if err := logger.Warning("warning"); err != nil {
-		t.Fatal(err)
-	}
-	logger.Verbose("parsed", slog.String("command", "search"))
-
-	if out.String() != "result\n" {
-		t.Fatalf("stdout = %q, want result followed by newline", out.String())
-	}
-	if !strings.Contains(errOut.String(), "warning") {
-		t.Fatalf("stderr = %q, want warning", errOut.String())
-	}
-	if strings.Contains(errOut.String(), "parsed") {
-		t.Fatalf("stderr = %q, verbose diagnostic emitted while disabled", errOut.String())
-	}
-
-	errOut.Reset()
-	logger = logging.New(io.Discard, &errOut, false)
-	logger.SetVerbose(true)
-	logger.Verbose("parsed", slog.String("command", "search"))
-	if !strings.Contains(errOut.String(), "parsed") || !strings.Contains(errOut.String(), "search") {
-		t.Fatalf("stderr = %q, want verbose diagnostic and attributes", errOut.String())
-	}
-}
-
-// TestDiagnosticOutputsAndWriters catches regressions that route diagnostics to
-// stdout or stop exposing the writers supplied by callers.
-func TestDiagnosticOutputsAndWriters(t *testing.T) {
-	var out, errOut bytes.Buffer
-	logger := logging.New(&out, &errOut, false)
-
-	if logger.Stdout() != &out || logger.Stderr() != &errOut {
-		t.Fatal("writer accessors did not return injected writers")
-	}
-	if err := logger.Error("failed"); err != nil {
-		t.Fatal(err)
-	}
-	if err := logger.Recovery("recovered"); err != nil {
-		t.Fatal(err)
-	}
-	if out.Len() != 0 {
-		t.Fatalf("stdout = %q, want no diagnostic output", out.String())
-	}
-	if got := errOut.String(); !strings.Contains(got, "failed") || !strings.Contains(got, "recovered") {
-		t.Fatalf("stderr = %q, want error and recovery messages", got)
 	}
 }
 

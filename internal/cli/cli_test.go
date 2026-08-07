@@ -10,6 +10,15 @@ import (
 	"apm/internal/logging"
 )
 
+func newTestEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
+	t.Helper()
+	original := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(original) })
+	return cli.New(stdout, stderr, func(verbose bool) {
+		slog.SetDefault(logging.NewLogger(stdout, stderr, verbose))
+	})
+}
+
 func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -34,12 +43,13 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 		{name: "extra list arg", args: []string{"list", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 0 arg(s), received 1"},
 		{name: "extra install arg", args: []string{"install", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
 		{name: "extra uninstall arg", args: []string{"uninstall", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
+		{name: "invalid verbose", args: []string{"search", "foo", "--agent=all", "--verbose=invalid"}, wantErr: true, wantMessage: "invalid argument \"invalid\" for \"--verbose\" flag"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			entry := cli.New(logging.New(&stdout, &stderr, false))
+			entry := newTestEntry(t, &stdout, &stderr)
 
 			err := entry.Execute(tt.args)
 			if (err != nil) != tt.wantErr {
@@ -54,8 +64,14 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 			if stdout.Len() != 0 {
 				t.Fatalf("invalid command stdout = %q, want empty", stdout.String())
 			}
-			if got := stderr.String(); !strings.Contains(got, tt.wantMessage) || !strings.Contains(got, "Usage:") {
-				t.Fatalf("invalid command stderr = %q, want error %q and Cobra usage", got, tt.wantMessage)
+			if !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("Execute(%q) error = %q, want %q", tt.args, err, tt.wantMessage)
+			}
+			if got := stderr.String(); !strings.Contains(got, "Usage:") {
+				t.Fatalf("invalid command stderr = %q, want Cobra usage", got)
+			}
+			if count := strings.Count(stderr.String(), "level=ERROR"); count != 1 {
+				t.Fatalf("stderr = %q, want exactly one error log, got %d", stderr.String(), count)
 			}
 		})
 	}
@@ -74,7 +90,7 @@ func TestCLIHelpFormsWriteGeneratedHelpToStdout(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			entry := cli.New(logging.New(&stdout, &stderr, false))
+			entry := newTestEntry(t, &stdout, &stderr)
 
 			if err := entry.Execute(tt.args); err != nil {
 				t.Fatalf("Execute(%q) error = %v", tt.args, err)
@@ -97,22 +113,30 @@ func TestCLIExecutionErrorsWriteErrorAndGeneratedUsageToStderr(t *testing.T) {
 	}{
 		{name: "unknown command", args: []string{"unknown"}, wantText: "unknown command \"unknown\""},
 		{name: "invalid flag before help", args: []string{"--bad", "--help"}, wantText: "unknown flag: --bad"},
+		{name: "invalid verbose", args: []string{"search", "foo", "--agent=all", "--verbose=invalid"}, wantText: "invalid argument \"invalid\" for \"--verbose\" flag"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			entry := cli.New(logging.New(&stdout, &stderr, false))
+			entry := newTestEntry(t, &stdout, &stderr)
 
-			if err := entry.Execute(tt.args); err == nil {
+			err := entry.Execute(tt.args)
+			if err == nil {
 				t.Fatalf("Execute(%q) error = nil, want error", tt.args)
+			}
+			if !strings.Contains(err.Error(), tt.wantText) {
+				t.Fatalf("Execute(%q) error = %q, want %q", tt.args, err, tt.wantText)
 			}
 			if stdout.Len() != 0 {
 				t.Fatalf("error stdout = %q, want empty", stdout.String())
 			}
 			got := stderr.String()
-			if !strings.Contains(got, tt.wantText) || !strings.Contains(got, "Usage:") {
-				t.Fatalf("error stderr = %q, want %q and Cobra usage", got, tt.wantText)
+			if !strings.Contains(got, "Usage:") {
+				t.Fatalf("error stderr = %q, want Cobra usage", got)
+			}
+			if count := strings.Count(stderr.String(), "level=ERROR"); count != 1 {
+				t.Fatalf("stderr = %q, want exactly one error log, got %d", stderr.String(), count)
 			}
 		})
 	}
@@ -120,7 +144,7 @@ func TestCLIExecutionErrorsWriteErrorAndGeneratedUsageToStderr(t *testing.T) {
 
 func TestCLIHelpListsCommandsOnStdout(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	entry := cli.New(logging.New(&stdout, &stderr, false))
+	entry := newTestEntry(t, &stdout, &stderr)
 
 	if err := entry.Execute([]string{"--help"}); err != nil {
 		t.Fatalf("Execute(--help) error = %v", err)
@@ -137,7 +161,7 @@ func TestCLIHelpListsCommandsOnStdout(t *testing.T) {
 
 func TestCLIVerboseWritesOnlyDiagnosticsToStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	entry := cli.New(logging.New(&stdout, &stderr, false))
+	entry := newTestEntry(t, &stdout, &stderr)
 
 	if err := entry.Execute([]string{"search", "foo", "--agent=all", "--type=plugin", "--verbose"}); err != nil {
 		t.Fatalf("Execute(verbose search) error = %v", err)
@@ -146,6 +170,12 @@ func TestCLIVerboseWritesOnlyDiagnosticsToStderr(t *testing.T) {
 		t.Fatalf("verbose stdout = %q, want empty", stdout.String())
 	}
 	got := stderr.String()
+	if !strings.Contains(got, "level=DEBUG") {
+		t.Fatalf("verbose stderr = %q, want debug level", got)
+	}
+	if strings.Contains(got, "time=") {
+		t.Fatalf("verbose stderr = %q, want no timestamp", got)
+	}
 	for _, attribute := range []string{"command=search", "agent=all", "type=plugin", "args=[foo]"} {
 		if !strings.Contains(got, attribute) {
 			t.Fatalf("verbose stderr = %q, want attribute %q", got, attribute)
@@ -153,13 +183,15 @@ func TestCLIVerboseWritesOnlyDiagnosticsToStderr(t *testing.T) {
 	}
 }
 
-func TestCLIRepeatedExecutionDoesNotLeakFlags(t *testing.T) {
+func TestCLIRepeatedExecutionDoesNotLeakFlagsOrLogging(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	logger := logging.New(&stdout, &stderr, false)
-	entry := cli.New(logger)
+	entry := newTestEntry(t, &stdout, &stderr)
 
 	if err := entry.Execute([]string{"search", "first", "--agent=all", "--verbose"}); err != nil {
 		t.Fatalf("first Execute error = %v", err)
+	}
+	if !strings.Contains(stderr.String(), "level=DEBUG") {
+		t.Fatalf("first stderr = %q, want debug log", stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
@@ -167,12 +199,9 @@ func TestCLIRepeatedExecutionDoesNotLeakFlags(t *testing.T) {
 	if err := entry.Execute([]string{"search", "second", "--agent=codex"}); err != nil {
 		t.Fatalf("second Execute error = %v", err)
 	}
+	slog.Debug("after non-verbose execution", slog.String("command", "search"))
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("second Execute output = stdout %q, stderr %q; want no leaked verbose state", stdout.String(), stderr.String())
-	}
-	logger.Verbose("after non-verbose execution", slog.String("command", "search"))
-	if stderr.Len() != 0 {
-		t.Fatalf("logger stderr after second Execute = %q, want verbose disabled", stderr.String())
 	}
 
 	if err := entry.Execute([]string{"search", "third"}); err == nil {
