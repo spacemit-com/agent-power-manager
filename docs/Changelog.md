@@ -2,6 +2,34 @@
 
 ## 2026-08-07
 
+分类：新增功能
+
+用户需求：
+
+定义 Agent Power 安装清单格式并实现 config 接口，使 lifecycle 后续只调用无状态 Repository 的 List、Find、Set、Remove。
+
+相关提交：
+
+- `4ca8df6 docs: design agent power config repository`
+- `27d4143 docs: plan agent power config repository`
+- `27d65b6 docs: keep config log test behavior-focused`
+- `6b5daff feat(config): add power groups and manifest paths`
+- `546d9ad feat(config): add manifest list and find`
+- `46a98db docs: align config permission test with spec`
+- `1845e71 feat(config): atomically set and remove powers`
+- `f2e652c refactor(config): replace manifest store with repository`
+- `97d80d3 docs: fix config CLI smoke command`
+
+解决方案或完成结果：
+
+每个 Agent 使用固定 skills/plugins/mcps 分组 JSON；清单条目统一为版本已确定的 PowerRef。JSONRepository 在四个业务接口内部封装读取和原子读改写，不保留跨调用状态，也不获取全局锁；缺失文件、幂等 Set/Remove、重复项归并和输入错误按 Feature 005 规格处理。
+
+验证结果或限制：
+
+`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 和 `git diff --check` 均以退出码 0 完成。无缓存聚焦测试 `go test ./internal/config ./internal/paths ./internal/domain -count=1 -v` 全部通过且无 SKIP；旧 config 符号和直接输出/独立 logger 静态扫描均无匹配，JSONRepository 仅保留 Debug 调用。CLI help 包含 search/list/install/uninstall，提供必填 `--agent all` 的普通 search 无业务输出。lifecycle/CLI 尚未串联，Repository 写入依赖调用方持有全局 APM 锁。
+
+## 2026-08-07
+
 分类：功能变更
 
 用户需求：
