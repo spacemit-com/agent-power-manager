@@ -1,25 +1,5 @@
 # Changelog
 
-## 2026-08-07
-
-分类：功能变更
-
-用户需求：
-
-迁移 CLI 与 main 到全局 `slog`，并删除旧 Logger 门面。
-
-相关提交：
-
-- `30607ae refactor(cli): install global slog before execution`
-
-解决方案或完成结果：
-
-CLI 在每次执行前预解析 `--verbose` 并安装新的全局 `slog` 默认日志器；错误由 `CLIEntry.Execute` 记录一次并输出 Cobra usage。命令构造函数不再依赖旧 Logger，main 负责注入进程输出和 `logging.SetupLogging`，旧 Logger 门面已删除。
-
-验证结果或限制：
-
-聚焦 logging/CLI 测试、全量 Go 测试和旧 API 扫描均通过。全局默认日志器是进程级状态，相关 CLI 测试不使用 `t.Parallel()` 并在结束时恢复原 logger。
-
 ## 2026-08-06
 
 分类：新增功能
