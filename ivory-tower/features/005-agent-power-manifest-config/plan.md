@@ -295,7 +295,7 @@ Expected: all PASS；缺失文件用例确认 `.apm` 不存在。
 
 - [ ] **Step 6: Add and verify verbose Debug coverage**
 
-保存并恢复 `slog.Default()`，安装 `logging.NewLogger(io.Discard, &stderr, true)`，调用缺失清单的 List，断言 stderr 含 `level=DEBUG`、`msg="manifest missing"` 和 `agent=codex`。测试不得并行：
+保存并恢复 `slog.Default()`，安装 `logging.NewLogger(io.Discard, &stderr, true)`，调用缺失清单的 List，断言 stderr 含 `level=DEBUG`、`agent=codex` 和清单路径；不固定内部诊断文案。测试不得并行：
 
 ```go
 previous := slog.Default()
