@@ -18,12 +18,14 @@ Adapter 暴露只读的目标路径解析能力，使 lifecycle/transaction 可�
 
 公共 staging 是单次 Agent 安装的独占可变工作区。多 Agent 流程必须串行，并在每个 Agent 调用 Adapter 前重新 fetch staging；不允许多个 Adapter 并行修改或复用同一次 fetch 的内容。
 
+公共 staging 和 Agent Skill 根在物理文件系统中必须不重叠。Adapter 在注册 staging 递归清理或创建目标临时目录之前，解析已经存在的 staging、Agent 根和 Skill 根 symlink；Skill 根缺失时从已解析的 Agent 根推导其物理位置，再用路径分隔符感知的包含判断拒绝“Skill 根等于 staging”或“Skill 根位于 staging 下”的布局。此类重叠返回安装错误，且不清理 staging、不复制、不发布，因为任何递归清理或目标临时目录操作都可能删除输入与目标，或让递归复制进入自身输出。通过该检查后的有效 staging 则继续遵守所有后续成功和失败出口必清理的契约。
+
 首版仅覆盖 Codex、Claude Code 和 Hermes Agent 的全局 Skill。三者共用安装管线，通过 Agent 配置和内部适配 hook 表达差异；首版 hook 均为 no-op。
 
 ## Consequences
 
 - 正面影响：Agent 格式与路径差异集中在 Adapter；冲突防护、原子发布和清理只有一份共享实现；transaction 可通过 Adapter 获取目标而不复制路径规则；未来格式转换不会污染其他 Agent 的 staging。
-- 代价与风险：多 Agent 安装必须为每个 Agent 重新 fetch，不能并行复用 staging；发布成功但 staging 清理失败会形成需 journal 判定的中间结果；Adapter 的单次安装职责比只返回路径的薄 Adapter 更重；外部进程仍可能在检查与 rename 之间竞争。
+- 代价与风险：多 Agent 安装必须为每个 Agent 重新 fetch，不能并行复用 staging；物理根重叠时会故意保留 staging 供调用方诊断或安全处置；发布成功但 staging 清理失败会形成需 journal 判定的中间结果；Adapter 的单次安装职责比只返回路径的薄 Adapter 更重；外部进程仍可能在物理根检查后改变 symlink，或在最终目标检查与 rename 之间竞争。
 - 后续动作：Feature 006 实现三种 Skill Adapter 与 Registry；后续 lifecycle/transaction feature 按“先处理已纳管旧目标，再调用 Adapter”的契约串联，并为发布后清理失败提供恢复路径；Plugin/MCP 和卸载分别设计其 Adapter 契约。
 
 ## Alternatives Considered

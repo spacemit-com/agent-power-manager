@@ -76,22 +76,25 @@ Registry 不缓存跨命令检测结果。lifecycle 仍按 [ADR-004](../../adr/A
 
 Adapter 不静默清洗或重命名 Skill。非法名称返回 `ErrInvalidSkill`，避免 Power 引用、`SKILL.md` 自声明名称、staging 路径、目标目录和安装清单产生不同名称。
 
+公共 staging 与 Agent Skill 根还必须在物理文件系统中不重叠。Adapter 跟随已经存在的 staging、Agent 根和 Skill 根 symlink；Skill 根尚不存在时，先解析其已经存在的 Agent 根父目录，再拼接 `skills`。解析后的 Skill 根不得等于公共 staging，也不得位于公共 staging 之下。包含判断必须按路径分隔符识别真正的父子关系，不能用字符串前缀把 `staging-agent` 误判为 `staging` 的子目录。
+
 ## 安装流程
 
 `Install(ref, stagingRoot)` 严格按以下顺序执行：
 
 1. 校验 staging 根路径参数。将调用方路径和 `paths.StagingPath()` 都转换为绝对 clean 路径后，两者必须相等，且不得是文件系统根；无效参数直接返回且不得执行递归删除。
-2. 为已经确认的公共 `stagingRoot` 注册延迟清理，使后续所有成功和失败出口都会递归删除整个 staging；随后校验 `ref`，并计算源、Agent 根、Skill 根和最终目标路径。
-3. 检查 Agent 根目录存在且是目录；不存在或不是目录时返回 `ErrAgentNotInstalled`，不得创建 Agent 根目录。
-4. 对最终目标执行 `Lstat`。目录、普通文件、symlink 或其他任意已有条目都返回 `ErrTargetConflict`。除“不存在”以外的状态错误保留底层错误。此步骤发生在读取或适配 staging 之前。
-5. 进入共享适配流程，读取 `<staging-root>/skills/<name>/SKILL.md` 并校验 YAML frontmatter，然后调用 Agent hook。fetch 已保证 staging 的目录和 marker 结构，Adapter 不在适配前重复做独立的目录/marker `Stat` 合规检查；实际读取失败仍按 I/O 错误返回。
-6. 以单层 `Mkdir(0755)` 创建缺失的 `<agent-root>/skills`，不得使用会顺带重建父级的递归创建；若 Agent 根在检测后消失，创建因此失败而不能重建 Agent 根。已有 Skill 根必须最终指向目录。
-7. 在 Skill 根内创建唯一的隐藏临时目录，把 staging Skill 完整复制到临时目录。复制包含 dotfiles，并保留源文件与目录权限位；安装模式固定为 copy，不创建指向 staging 的 symlink。
-8. 发布前再次 `Lstat` 最终目标。若外部变化使其出现，返回 `ErrTargetConflict`，不覆盖目标。
-9. 将同一 Skill 根内的临时目录 rename 为 `<name>`，使正常观察者只看到不存在或完整目录。APM 全局锁保证 APM 自身串行，但本 feature 不承诺消除外部进程在二次检查与 rename 之间的竞态。
-10. 延迟清理任何尚存的目标临时目录和整个公共 staging。
+2. 计算 Agent 根和 Skill 根，解析 staging 与 Skill 根的物理路径并执行分隔符感知的包含检查。若物理 Skill 根等于或位于物理 staging 之下，返回包装 `ErrInvalidSkill` 的安全错误；此时不得注册 staging 清理、创建临时目录、复制或发布，也不得改变重叠树中的 staging 和目标内容。
+3. 物理根确认不重叠后，为公共 `stagingRoot` 注册延迟清理，使此后的所有成功和失败出口都会递归删除整个 staging；随后校验 `ref`，并计算源和最终目标路径。
+4. 检查 Agent 根目录存在且是目录；不存在或不是目录时返回 `ErrAgentNotInstalled`，不得创建 Agent 根目录。
+5. 对最终目标执行 `Lstat`。目录、普通文件、symlink 或其他任意已有条目都返回 `ErrTargetConflict`。除“不存在”以外的状态错误保留底层错误。此步骤发生在读取或适配 staging 之前。
+6. 进入共享适配流程，读取 `<staging-root>/skills/<name>/SKILL.md` 并校验 YAML frontmatter，然后调用 Agent hook。fetch 已保证 staging 的目录和 marker 结构，Adapter 不在适配前重复做独立的目录/marker `Stat` 合规检查；实际读取失败仍按 I/O 错误返回。
+7. 以单层 `Mkdir(0755)` 创建缺失的 `<agent-root>/skills`，不得使用会顺带重建父级的递归创建；若 Agent 根在检测后消失，创建因此失败而不能重建 Agent 根。已有 Skill 根必须最终指向目录。
+8. 在 Skill 根内创建唯一的隐藏临时目录，把 staging Skill 完整复制到临时目录。复制包含 dotfiles，并保留源文件与目录权限位；安装模式固定为 copy，不创建指向 staging 的 symlink。
+9. 发布前再次 `Lstat` 最终目标。若外部变化使其出现，返回 `ErrTargetConflict`，不覆盖目标。
+10. 将同一 Skill 根内的临时目录 rename 为 `<name>`，使正常观察者只看到不存在或完整目录。APM 全局锁保证 APM 自身串行，但本 feature 不承诺消除外部进程在二次检查与 rename 之间的竞态。
+11. 延迟清理任何尚存的目标临时目录和整个公共 staging。
 
-成功和失败都清理 staging，因此多 Agent 安装必须串行执行：每个 Agent 在调用其 Adapter 前重新 fetch 一份干净的公共 staging，不能让多个 Adapter 共享同一次 fetch 的存续内容。
+物理根确认不重叠后，成功和失败都清理 staging，因此多 Agent 安装必须串行执行：每个 Agent 在调用其 Adapter 前重新 fetch 一份干净的公共 staging，不能让多个 Adapter 共享同一次 fetch 的存续内容。物理重叠是唯一的有效 staging 身份清理例外：因为此时递归清理本身可能删除 Agent 根、目标或 publication 工作区，Adapter 必须在注册清理前拒绝安装并完整保留该重叠树。
 
 ## `SKILL.md` frontmatter
 
@@ -127,7 +130,7 @@ description: Run checks before producing the final summary.
 1. 清理尚未 rename 的目标临时目录；
 2. 清理整个公共 staging 根目录。
 
-所有清理错误均增加操作和路径上下文，并用 `errors.Join` 与主错误合并。没有主错误但清理失败时，`Install` 仍返回错误。如果目标已经 rename 成功，返回的错误表示“目标可能已发布但收尾失败”；后续 lifecycle/transaction 必须依据 journal 和实际路径状态完成提交或回滚，不能假设安装未发生。只有通过 `paths.StagingPath()` 身份校验的路径才进入这套必清理语义，错误或越界路径永远不会交给 `RemoveAll`。
+所有清理错误均增加操作和路径上下文，并用 `errors.Join` 与主错误合并。没有主错误但清理失败时，`Install` 仍返回错误。如果目标已经 rename 成功，返回的错误表示“目标可能已发布但收尾失败”；后续 lifecycle/transaction 必须依据 journal 和实际路径状态完成提交或回滚，不能假设安装未发生。只有通过 `paths.StagingPath()` 身份校验且通过物理根不重叠检查的路径才进入这套必清理语义，错误、越界或物理重叠路径永远不会交给 `RemoveAll`。
 
 Adapter 不管理 backup、quarantine、journal 或清单。升级/降级中已纳管旧目录的移走与恢复属于 transaction；当流程到达 Adapter 时，任何残留最终目标都按清单外冲突处理。
 
@@ -155,6 +158,7 @@ Adapter 不直接打印，不记录 Info、Warn 或 Error，避免 lifecycle/CLI
 - 三个 Agent 的环境变量覆盖默认根目录；空白覆盖值回退到有效 HOME。
 - 默认根目录遵守 `APM_HOME`，测试不访问真实 HOME。
 - staging 参数只接受与 `paths.StagingPath()` 相同的绝对 clean 路径；空路径、根路径和其他目录被拒绝且内容不变。
+- 物理 Skill 根直接位于 staging 下，或通过 staging、Agent 根、Skill 根 symlink 解析到 staging 内时，在复制、发布和清理前拒绝，staging、symlink 与目标内容均保持不变；名称仅共享字符串前缀但物理不包含的相邻目录正常安装并清理 staging。
 - 根目录存在且为目录时检测成功；缺失或非目录时不创建路径并按契约返回。
 - 缺失的 `skills` 子目录不影响 Agent 检测。
 - `TargetPath` 返回 Agent 特有路径且不修改文件系统。

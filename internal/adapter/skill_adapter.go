@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"apm/internal/domain"
 	"apm/internal/logging"
@@ -43,6 +44,14 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 	if err != nil {
 		return a.installError(ref, "staging", staging, err)
 	}
+	root, err := a.config.rootPath()
+	if err != nil {
+		return a.installError(ref, "safety", stagingRoot, err)
+	}
+	skillsRoot := filepath.Join(root, "skills")
+	if err := ensurePhysicalInstallRootsDisjoint(stagingRoot, skillsRoot); err != nil {
+		return a.installError(ref, "safety", skillsRoot, err)
+	}
 	defer func() {
 		a.debugInstall(ref, "cleanup", stagingRoot)
 		if err := a.removeAll(stagingRoot); err != nil {
@@ -55,10 +64,6 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 	}
 	sourceDir := filepath.Join(stagingRoot, "skills", ref.Name)
 
-	root, err := a.config.rootPath()
-	if err != nil {
-		return a.installError(ref, "detection", stagingRoot, err)
-	}
 	info, err := os.Stat(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return a.installError(ref, "detection", root, ErrAgentNotInstalled)
@@ -84,7 +89,6 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 		return a.installError(ref, "adaptation", sourceDir, err)
 	}
 
-	skillsRoot := filepath.Join(root, "skills")
 	if err := ensureSkillsRoot(skillsRoot); err != nil {
 		return a.installError(ref, "skills-root", skillsRoot, err)
 	}
@@ -155,6 +159,97 @@ func validateStagingIdentity(staging string) (string, error) {
 
 func filesystemVolumeRoot(path string) string {
 	return filepath.VolumeName(path) + string(filepath.Separator)
+}
+
+func ensurePhysicalInstallRootsDisjoint(stagingRoot, skillsRoot string) error {
+	physicalStaging, err := resolvePhysicalPath(stagingRoot)
+	if err != nil {
+		return fmt.Errorf("resolve physical staging root %q: %w", stagingRoot, err)
+	}
+	physicalSkills, err := resolvePhysicalPath(skillsRoot)
+	if err != nil {
+		return fmt.Errorf("resolve physical skill root %q: %w", skillsRoot, err)
+	}
+
+	contained, err := pathEqualOrWithin(physicalStaging, physicalSkills)
+	if err != nil {
+		return fmt.Errorf("compare physical staging root %q and skill root %q: %w", physicalStaging, physicalSkills, err)
+	}
+	if contained {
+		return fmt.Errorf(
+			"physical skill root %q overlaps staging root %q: %w",
+			physicalSkills,
+			physicalStaging,
+			ErrInvalidSkill,
+		)
+	}
+	return nil
+}
+
+func resolvePhysicalPath(path string) (string, error) {
+	return resolvePhysicalPathDepth(path, 0)
+}
+
+func resolvePhysicalPathDepth(path string, depth int) (string, error) {
+	if depth > 255 {
+		return "", fmt.Errorf("resolve path %q: too many symbolic links", path)
+	}
+	absolute, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute path %q: %w", path, err)
+	}
+
+	current := absolute
+	var missing []string
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for index := len(missing) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, missing[index])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+			return "", fmt.Errorf("evaluate symlinks for %q: %w", current, err)
+		}
+
+		info, lstatErr := os.Lstat(current)
+		if lstatErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			target, readlinkErr := os.Readlink(current)
+			if readlinkErr != nil {
+				return "", fmt.Errorf("read symlink %q: %w", current, readlinkErr)
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(current), target)
+			}
+			resolved, resolveErr := resolvePhysicalPathDepth(target, depth+1)
+			if resolveErr != nil {
+				return "", resolveErr
+			}
+			for index := len(missing) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, missing[index])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if lstatErr != nil && !errors.Is(lstatErr, os.ErrNotExist) && !errors.Is(lstatErr, syscall.ENOTDIR) {
+			return "", fmt.Errorf("inspect path %q: %w", current, lstatErr)
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("resolve existing path prefix for %q: %w", absolute, err)
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+}
+
+func pathEqualOrWithin(parent, path string) (bool, error) {
+	relative, err := filepath.Rel(parent, path)
+	if err != nil {
+		return false, err
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))), nil
 }
 
 func validateVersionedSkillRef(ref domain.PowerRef) error {

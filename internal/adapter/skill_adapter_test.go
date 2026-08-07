@@ -159,6 +159,125 @@ func TestSkillAdapterInstallRejectsEmptyStagingWhenWorkingDirectoryMatchesExpect
 	assertFile(t, filepath.Join(source, "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
 }
 
+func TestSkillAdapterInstallRejectsPhysicalSkillRootWithinStagingWithoutMutation(t *testing.T) {
+	config, _, staging, ref := skillAdapterFixture(t, true)
+	root := filepath.Join(staging, "agent-root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(root, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.homeEnv, root)
+
+	skillsRoot := filepath.Join(root, "skills")
+	assertOverlapRejectedWithoutMutation(t, config, staging, ref, skillsRoot)
+	assertMissing(t, filepath.Join(skillsRoot, ref.Name))
+	assertFile(t, sentinel, "keep", 0o600)
+}
+
+func TestSkillAdapterInstallRejectsPhysicalOverlapThroughAgentRootSymlinkWithoutMutation(t *testing.T) {
+	config, _, staging, ref := skillAdapterFixture(t, true)
+	physicalRoot := filepath.Join(staging, "agent-root")
+	if err := os.Mkdir(physicalRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(physicalRoot, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "agent-link")
+	if err := os.Symlink(physicalRoot, root); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.homeEnv, root)
+
+	skillsRoot := filepath.Join(root, "skills")
+	assertOverlapRejectedWithoutMutation(t, config, staging, ref, skillsRoot)
+	assertMissing(t, filepath.Join(skillsRoot, ref.Name))
+	assertFile(t, sentinel, "keep", 0o600)
+	assertSymlink(t, root)
+}
+
+func TestSkillAdapterInstallRejectsPhysicalOverlapThroughSkillsRootSymlinkWithoutMutation(t *testing.T) {
+	for _, scenario := range []string{"equal-staging", "recursive-output", "existing-target"} {
+		t.Run(scenario, func(t *testing.T) {
+			config, root, staging, ref := skillAdapterFixture(t, true)
+			physicalSkillsRoot := staging
+			switch scenario {
+			case "recursive-output":
+				physicalSkillsRoot = skillSource(staging, ref)
+			case "existing-target":
+				physicalSkillsRoot = filepath.Join(staging, "skills")
+			}
+			skillsRoot := filepath.Join(root, "skills")
+			if err := os.Symlink(physicalSkillsRoot, skillsRoot); err != nil {
+				t.Fatal(err)
+			}
+
+			assertOverlapRejectedWithoutMutation(t, config, staging, ref, skillsRoot)
+			target := filepath.Join(skillsRoot, ref.Name)
+			if scenario == "existing-target" {
+				assertFile(t, filepath.Join(target, "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
+			} else {
+				assertMissing(t, target)
+			}
+			assertSymlink(t, skillsRoot)
+		})
+	}
+}
+
+func TestSkillAdapterInstallRejectsPhysicalOverlapThroughStagingSymlinkWithoutMutation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	config := configForAgent(t, domain.AgentCodex)
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(staging), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	physicalStaging := filepath.Join(t.TempDir(), "physical-staging")
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	writeSkillTree(t, skillSource(physicalStaging, ref), ref.Name)
+	if err := os.Symlink(physicalStaging, staging); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(physicalStaging, "agent-root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(root, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.homeEnv, root)
+
+	skillsRoot := filepath.Join(root, "skills")
+	assertOverlapRejectedWithoutMutation(t, config, staging, ref, skillsRoot)
+	assertMissing(t, filepath.Join(skillsRoot, ref.Name))
+	assertFile(t, sentinel, "keep", 0o600)
+	assertSymlink(t, staging)
+}
+
+func TestSkillAdapterInstallAllowsPhysicalSiblingOfStaging(t *testing.T) {
+	config, _, staging, ref := skillAdapterFixture(t, true)
+	root := staging + "-agent"
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.homeEnv, root)
+	adapter := newSkillAdapter(config)
+
+	if err := adapter.Install(ref, staging); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	assertFile(t, filepath.Join(root, "skills", ref.Name, "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
+	assertMissing(t, staging)
+}
+
 func TestSkillAdapterInstallCleansStagingForEscapingRef(t *testing.T) {
 	config, _, staging, _ := skillAdapterFixture(t, true)
 	ref := domain.PowerRef{Name: "../../outside", Type: domain.PowerTypeSkill, Version: "1.0.0"}
@@ -339,6 +458,7 @@ func TestSkillAdapterFailureCleansTemporaryAndStagingAfterCopyError(t *testing.T
 		t.Fatalf("Install() error = %v, want copy error", err)
 	}
 	assertInstallErrorContext(t, err, "copy", skillSource(staging, ref))
+	assertMissing(t, filepath.Join(root, "skills", ref.Name))
 	assertMissing(t, staging)
 	assertNoTemporarySkills(t, root, ref.Name)
 }
@@ -516,6 +636,61 @@ func assertMissing(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("path %q remains: %v", path, err)
+	}
+}
+
+func assertSymlink(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("path %q is not a symlink", path)
+	}
+}
+
+func assertOverlapRejectedWithoutMutation(t *testing.T, config agentConfig, staging string, ref domain.PowerRef, skillsRoot string) {
+	t.Helper()
+	adapted := false
+	config.adapt = func(domain.PowerRef, string) error {
+		adapted = true
+		return nil
+	}
+	subject := newSkillAdapter(config)
+	var operations []string
+	subject.copyDir = func(string, string) error {
+		operations = append(operations, "copy")
+		return nil
+	}
+	subject.rename = func(from, to string) error {
+		operations = append(operations, "rename")
+		return os.Rename(from, to)
+	}
+	subject.removeAll = func(path string) error {
+		operations = append(operations, "cleanup:"+path)
+		return nil
+	}
+
+	err := subject.Install(ref, staging)
+	if !errors.Is(err, ErrInvalidSkill) {
+		t.Errorf("Install() error = %v, want ErrInvalidSkill", err)
+	} else {
+		assertInstallErrorContext(t, err, "safety", skillsRoot)
+	}
+	if len(operations) != 0 {
+		t.Errorf("Install() operations = %v, want no copy, publication, or cleanup", operations)
+	}
+	if adapted {
+		t.Error("Install() adapted staging for overlapping roots")
+	}
+	assertFile(t, filepath.Join(skillSource(staging, ref), "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
+	temporary, err := filepath.Glob(filepath.Join(skillsRoot, ".apm-"+ref.Name+"-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temporary) != 0 {
+		t.Fatalf("overlap check left temporary directories: %v", temporary)
 	}
 }
 
