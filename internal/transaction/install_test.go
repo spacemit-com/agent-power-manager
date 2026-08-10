@@ -14,10 +14,12 @@ import (
 )
 
 type recordingJournalStore struct {
-	journal Journal
-	found   bool
-	events  *[]string
-	fail    map[string]error
+	journal  Journal
+	found    bool
+	events   *[]string
+	fail     map[string]error
+	onCreate func(Journal)
+	onUpdate func(Journal)
 }
 
 func (s *recordingJournalStore) Inspect() (Journal, bool, error) {
@@ -35,6 +37,9 @@ func (s *recordingJournalStore) Create(journal Journal) error {
 		return ErrActiveTransaction
 	}
 	s.journal, s.found = journal, true
+	if s.onCreate != nil {
+		s.onCreate(journal)
+	}
 	return nil
 }
 func (s *recordingJournalStore) Update(journal Journal) error {
@@ -43,6 +48,9 @@ func (s *recordingJournalStore) Update(journal Journal) error {
 		return err
 	}
 	s.journal, s.found = journal, true
+	if s.onUpdate != nil {
+		s.onUpdate(journal)
+	}
 	return nil
 }
 func (s *recordingJournalStore) Delete(id string) error {
