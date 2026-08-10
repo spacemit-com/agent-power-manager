@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"context"
+	"os"
 
 	"apm/internal/adapter"
 	"apm/internal/domain"
@@ -40,8 +41,37 @@ type ManifestWriter interface {
 type Service struct {
 	manifests ManifestWriter
 	journals  JournalStore
+	files     fileOps
+	newID     func() (string, error)
 }
 
 func newService(manifests ManifestWriter, journals JournalStore) *Service {
-	return &Service{manifests: manifests, journals: journals}
+	return &Service{
+		manifests: manifests,
+		journals:  journals,
+		files:     defaultFileOps(),
+		newID:     newTransactionID,
+	}
+}
+
+type fileOps struct {
+	lstat     func(string) (os.FileInfo, error)
+	mkdir     func(string, os.FileMode) error
+	chmod     func(string, os.FileMode) error
+	rename    func(string, string) error
+	remove    func(string) error
+	removeAll func(string) error
+	readDir   func(string) ([]os.DirEntry, error)
+}
+
+func defaultFileOps() fileOps {
+	return fileOps{
+		lstat:     os.Lstat,
+		mkdir:     os.Mkdir,
+		chmod:     os.Chmod,
+		rename:    os.Rename,
+		remove:    os.Remove,
+		removeAll: os.RemoveAll,
+		readDir:   os.ReadDir,
+	}
 }
