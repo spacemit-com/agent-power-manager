@@ -15,6 +15,7 @@ import (
 	"apm/internal/utils/filesystem"
 )
 
+// skillAdapter 实现从公共 staging 到 Agent 全局目录的 Skill 安装流程。
 type skillAdapter struct {
 	config    agentConfig
 	copyDir   func(string, string) error
@@ -22,6 +23,7 @@ type skillAdapter struct {
 	removeAll func(string) error
 }
 
+// newSkillAdapter 使用指定 Agent 配置创建 Skill Adapter。
 func newSkillAdapter(config agentConfig) *skillAdapter {
 	return &skillAdapter{
 		config:    config,
@@ -31,14 +33,17 @@ func newSkillAdapter(config agentConfig) *skillAdapter {
 	}
 }
 
+// DetectAgent 报告目标 Agent 是否已安装。
 func (a *skillAdapter) DetectAgent() (bool, error) {
 	return a.config.detectAgent()
 }
 
+// TargetPath 返回指定 Skill 的最终安装路径。
 func (a *skillAdapter) TargetPath(ref domain.PowerRef) (string, error) {
 	return a.config.targetPath(ref)
 }
 
+// Install 从公共 staging 复制并原子发布指定 Skill，随后清理 staging。
 func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr error) {
 	stagingRoot, err := validateStagingIdentity(staging)
 	if err != nil {
@@ -135,6 +140,7 @@ func (a *skillAdapter) debugInstall(ref domain.PowerRef, phase, path string) {
 	)
 }
 
+// validateStagingIdentity 校验并返回允许清理的公共 staging 绝对路径。
 func validateStagingIdentity(staging string) (string, error) {
 	if staging == "" {
 		return "", fmt.Errorf("staging path is empty: %w", ErrInvalidSkill)
@@ -161,6 +167,7 @@ func filesystemVolumeRoot(path string) string {
 	return filepath.VolumeName(path) + string(filepath.Separator)
 }
 
+// ensurePhysicalInstallRootsDisjoint 拒绝物理 Skill 根等于或位于 staging 内的布局。
 func ensurePhysicalInstallRootsDisjoint(stagingRoot, skillsRoot string) error {
 	physicalStaging, err := resolvePhysicalPath(stagingRoot)
 	if err != nil {
@@ -186,6 +193,7 @@ func ensurePhysicalInstallRootsDisjoint(stagingRoot, skillsRoot string) error {
 	return nil
 }
 
+// resolvePhysicalPath 解析已有 symlink，并保留尚不存在的路径后缀。
 func resolvePhysicalPath(path string) (string, error) {
 	return resolvePhysicalPathDepth(path, 0)
 }
@@ -244,6 +252,7 @@ func resolvePhysicalPathDepth(path string, depth int) (string, error) {
 	}
 }
 
+// pathEqualOrWithin 报告 path 是否等于或位于 parent 目录内。
 func pathEqualOrWithin(parent, path string) (bool, error) {
 	relative, err := filepath.Rel(parent, path)
 	if err != nil {
@@ -252,6 +261,7 @@ func pathEqualOrWithin(parent, path string) (bool, error) {
 	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))), nil
 }
 
+// validateVersionedSkillRef 校验版本已确定且名称安全的 Skill 引用。
 func validateVersionedSkillRef(ref domain.PowerRef) error {
 	if ref.Type != domain.PowerTypeSkill || !isSafeSkillName(ref.Name) || strings.TrimSpace(ref.Version) == "" {
 		return fmt.Errorf("skill reference %+v: %w", ref, ErrInvalidSkill)
@@ -259,6 +269,7 @@ func validateVersionedSkillRef(ref domain.PowerRef) error {
 	return nil
 }
 
+// ensureTargetAbsent 确保最终目标不存在任何文件系统条目。
 func ensureTargetAbsent(target string) error {
 	_, err := os.Lstat(target)
 	if err == nil {
@@ -270,6 +281,7 @@ func ensureTargetAbsent(target string) error {
 	return fmt.Errorf("lstat skill target %q: %w", target, err)
 }
 
+// ensureSkillsRoot 创建缺失的单层 Skill 根目录，或校验已有目录。
 func ensureSkillsRoot(skillsRoot string) error {
 	if err := os.Mkdir(skillsRoot, 0o755); err == nil {
 		return nil

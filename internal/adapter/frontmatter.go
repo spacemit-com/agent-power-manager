@@ -10,6 +10,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// validateSkillFrontmatter 校验 SKILL.md 的 YAML frontmatter 与预期名称。
 func validateSkillFrontmatter(path, expectedName string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -26,6 +27,7 @@ func validateSkillFrontmatter(path, expectedName string) error {
 	return nil
 }
 
+// extractYAMLFrontmatter 提取从文件首字节开始且换行风格一致的 YAML 区段。
 func extractYAMLFrontmatter(raw []byte) ([]byte, error) {
 	var newline []byte
 	switch {
@@ -53,6 +55,7 @@ func extractYAMLFrontmatter(raw []byte) ([]byte, error) {
 	return nil, errors.New("skill frontmatter must end with a matching closing delimiter")
 }
 
+// validateFrontmatterNode 校验 frontmatter mapping 中的 name 和 description。
 func validateFrontmatterNode(yamlBytes []byte, expectedName string) error {
 	var document yaml.Node
 	if err := yaml.Unmarshal(yamlBytes, &document); err != nil {
@@ -85,6 +88,7 @@ func validateFrontmatterNode(yamlBytes []byte, expectedName string) error {
 	return err
 }
 
+// frontmatterString 返回指定的非空字符串字段。
 func frontmatterString(fields map[string]*yaml.Node, field string) (string, error) {
 	value, exists := fields[field]
 	if !exists {
