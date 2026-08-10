@@ -20,8 +20,12 @@ func TestSkillAdapterInstallPublishesSkillAndCleansStaging(t *testing.T) {
 	config, root, staging, ref := skillAdapterFixture(t, true)
 	adapter := newSkillAdapter(config)
 
-	if err := adapter.Install(ref, staging); err != nil {
+	result, err := adapter.Install(ref, staging)
+	if err != nil {
 		t.Fatalf("Install() error = %v", err)
+	}
+	if !result.Published {
+		t.Fatal("Install() Published = false, want true")
 	}
 
 	target := filepath.Join(root, "skills", ref.Name)
@@ -56,9 +60,12 @@ func TestSkillAdapterInstallReturnsNotInstalledWithoutCreatingAgentRoot(t *testi
 	config, root, staging, ref := skillAdapterFixture(t, false)
 	adapter := newSkillAdapter(config)
 
-	err := adapter.Install(ref, staging)
+	result, err := adapter.Install(ref, staging)
 	if !errors.Is(err, ErrAgentNotInstalled) {
 		t.Fatalf("Install() error = %v, want ErrAgentNotInstalled", err)
+	}
+	if result.Published {
+		t.Fatal("Install() Published = true, want false")
 	}
 	assertMissing(t, root)
 	assertMissing(t, staging)
@@ -68,8 +75,12 @@ func TestSkillAdapterInstallCreatesMissingSkillsDirectory(t *testing.T) {
 	config, root, staging, ref := skillAdapterFixture(t, true)
 	adapter := newSkillAdapter(config)
 
-	if err := adapter.Install(ref, staging); err != nil {
+	result, err := adapter.Install(ref, staging)
+	if err != nil {
 		t.Fatalf("Install() error = %v", err)
+	}
+	if !result.Published {
+		t.Fatal("Install() Published = false, want true")
 	}
 	info, err := os.Stat(filepath.Join(root, "skills"))
 	if err != nil {
@@ -90,7 +101,7 @@ func TestSkillAdapterInstallCleansValidStagingForInvalidRef(t *testing.T) {
 			config, _, staging, _ := skillAdapterFixture(t, true)
 			adapter := newSkillAdapter(config)
 
-			err := adapter.Install(ref, staging)
+			_, err := adapter.Install(ref, staging)
 			if !errors.Is(err, ErrInvalidSkill) {
 				t.Fatalf("Install() error = %v, want ErrInvalidSkill", err)
 			}
@@ -114,7 +125,7 @@ func TestSkillAdapterInstallRejectsUnsafeStagingWithoutCleaningIt(t *testing.T) 
 				return nil
 			}
 
-			err := adapter.Install(ref, stagingPath)
+			_, err := adapter.Install(ref, stagingPath)
 			if !errors.Is(err, ErrInvalidSkill) {
 				t.Fatalf("Install() error = %v, want ErrInvalidSkill", err)
 			}
@@ -149,7 +160,7 @@ func TestSkillAdapterInstallRejectsEmptyStagingWhenWorkingDirectoryMatchesExpect
 		return nil
 	}
 
-	err = adapter.Install(ref, "")
+	_, err = adapter.Install(ref, "")
 	if !errors.Is(err, ErrInvalidSkill) {
 		t.Fatalf("Install() error = %v, want ErrInvalidSkill", err)
 	}
@@ -271,7 +282,7 @@ func TestSkillAdapterInstallAllowsPhysicalSiblingOfStaging(t *testing.T) {
 	t.Setenv(config.homeEnv, root)
 	adapter := newSkillAdapter(config)
 
-	if err := adapter.Install(ref, staging); err != nil {
+	if _, err := adapter.Install(ref, staging); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
 	assertFile(t, filepath.Join(root, "skills", ref.Name, "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
@@ -283,7 +294,7 @@ func TestSkillAdapterInstallCleansStagingForEscapingRef(t *testing.T) {
 	ref := domain.PowerRef{Name: "../../outside", Type: domain.PowerTypeSkill, Version: "1.0.0"}
 	adapter := newSkillAdapter(config)
 
-	err := adapter.Install(ref, staging)
+	_, err := adapter.Install(ref, staging)
 	if !errors.Is(err, ErrInvalidSkill) {
 		t.Fatalf("Install() error = %v, want ErrInvalidSkill", err)
 	}
@@ -328,7 +339,7 @@ func TestSkillAdapterConflictPreservesExistingTargetAndSkipsAdaptation(t *testin
 			}
 			adapter := newSkillAdapter(config)
 
-			err := adapter.Install(ref, staging)
+			_, err := adapter.Install(ref, staging)
 			if !errors.Is(err, ErrTargetConflict) {
 				t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
 			}
@@ -363,7 +374,7 @@ func TestSkillAdapterInstallRejectsTargetCreatedAfterCopy(t *testing.T) {
 		return os.WriteFile(target, []byte("created during copy"), 0o600)
 	}
 
-	err := adapter.Install(ref, staging)
+	_, err := adapter.Install(ref, staging)
 	if !errors.Is(err, ErrTargetConflict) {
 		t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
 	}
@@ -387,7 +398,7 @@ func TestSkillAdapterInstallRejectsMalformedFrontmatterAndCleansStaging(t *testi
 	}
 	adapter := newSkillAdapter(config)
 
-	err := adapter.Install(ref, staging)
+	_, err := adapter.Install(ref, staging)
 	if !errors.Is(err, ErrInvalidSkill) {
 		t.Fatalf("Install() error = %v, want ErrInvalidSkill", err)
 	}
@@ -403,7 +414,7 @@ func TestSkillAdapterAdaptFailureIncludesInstallContext(t *testing.T) {
 	config.adapt = func(domain.PowerRef, string) error { return adaptErr }
 	subject := newSkillAdapter(config)
 
-	err := subject.Install(ref, staging)
+	_, err := subject.Install(ref, staging)
 	if !errors.Is(err, adaptErr) {
 		t.Fatalf("Install() error = %v, want adapt error", err)
 	}
@@ -418,7 +429,7 @@ func TestSkillAdapterSkillsRootFailureIncludesInstallContext(t *testing.T) {
 	}
 	subject := newSkillAdapter(config)
 
-	err := subject.Install(ref, staging)
+	_, err := subject.Install(ref, staging)
 	if err == nil {
 		t.Fatal("Install() error = nil, want skills-root error")
 	}
@@ -438,9 +449,12 @@ func TestSkillAdapterFailureJoinsRenameAndStagingCleanupErrors(t *testing.T) {
 		return os.RemoveAll(path)
 	}
 
-	err := subject.Install(ref, staging)
+	result, err := subject.Install(ref, staging)
 	if !errors.Is(err, primaryErr) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("Install() error = %v, want both causes", err)
+	}
+	if result.Published {
+		t.Fatal("Install() Published = true, want false")
 	}
 	assertInstallErrorContext(t, err, "publication", filepath.Join(root, "skills", ref.Name))
 	assertMissing(t, filepath.Join(root, "skills", ref.Name))
@@ -453,7 +467,7 @@ func TestSkillAdapterFailureCleansTemporaryAndStagingAfterCopyError(t *testing.T
 	copyErr := errors.New("copy failed")
 	subject.copyDir = func(string, string) error { return copyErr }
 
-	err := subject.Install(ref, staging)
+	_, err := subject.Install(ref, staging)
 	if !errors.Is(err, copyErr) {
 		t.Fatalf("Install() error = %v, want copy error", err)
 	}
@@ -474,7 +488,7 @@ func TestSkillAdapterSecondConflictCreatedByAdaptationPreservesTarget(t *testing
 	}
 	subject := newSkillAdapter(config)
 
-	err := subject.Install(ref, staging)
+	_, err := subject.Install(ref, staging)
 	if !errors.Is(err, ErrTargetConflict) {
 		t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
 	}
@@ -495,9 +509,12 @@ func TestSkillAdapterCleanupReturnsStagingErrorAfterPublication(t *testing.T) {
 		return os.RemoveAll(path)
 	}
 
-	err := subject.Install(ref, staging)
+	result, err := subject.Install(ref, staging)
 	if !errors.Is(err, cleanupErr) {
 		t.Fatalf("Install() error = %v, want staging cleanup error", err)
+	}
+	if !result.Published {
+		t.Fatal("Install() Published = false, want true")
 	}
 	assertInstallErrorContext(t, err, "cleanup", staging)
 	assertFile(t, filepath.Join(root, "skills", ref.Name, "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
@@ -522,7 +539,7 @@ func TestSkillAdapterFailureJoinsTemporaryAndStagingCleanupErrors(t *testing.T) 
 		}
 	}
 
-	err := subject.Install(ref, staging)
+	_, err := subject.Install(ref, staging)
 	for _, want := range []error{copyErr, temporaryCleanupErr, stagingCleanupErr} {
 		if !errors.Is(err, want) {
 			t.Fatalf("Install() error = %v, want cause %v", err, want)
@@ -538,7 +555,7 @@ func TestSkillAdapterFailureDebugLogsInstallPhases(t *testing.T) {
 	slog.SetDefault(logging.NewLogger(io.Discard, &stderr, true))
 	t.Cleanup(func() { slog.SetDefault(originalLogger) })
 
-	if err := subject.Install(ref, staging); err != nil {
+	if _, err := subject.Install(ref, staging); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
 
@@ -672,7 +689,7 @@ func assertOverlapRejectedWithoutMutation(t *testing.T, config agentConfig, stag
 		return nil
 	}
 
-	err := subject.Install(ref, staging)
+	_, err := subject.Install(ref, staging)
 	if !errors.Is(err, ErrInvalidSkill) {
 		t.Errorf("Install() error = %v, want ErrInvalidSkill", err)
 	} else {

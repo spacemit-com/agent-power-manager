@@ -44,18 +44,18 @@ func (a *skillAdapter) TargetPath(ref domain.PowerRef) (string, error) {
 }
 
 // Install 从公共 staging 复制并原子发布指定 Skill，随后清理 staging。
-func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr error) {
+func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (result InstallResult, resultErr error) {
 	stagingRoot, err := validateStagingIdentity(staging)
 	if err != nil {
-		return a.installError(ref, "staging", staging, err)
+		return result, a.installError(ref, "staging", staging, err)
 	}
 	root, err := a.config.rootPath()
 	if err != nil {
-		return a.installError(ref, "safety", stagingRoot, err)
+		return result, a.installError(ref, "safety", stagingRoot, err)
 	}
 	skillsRoot := filepath.Join(root, "skills")
 	if err := ensurePhysicalInstallRootsDisjoint(stagingRoot, skillsRoot); err != nil {
-		return a.installError(ref, "safety", skillsRoot, err)
+		return result, a.installError(ref, "safety", skillsRoot, err)
 	}
 	defer func() {
 		a.debugInstall(ref, "cleanup", stagingRoot)
@@ -65,41 +65,41 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 	}()
 
 	if err := validateVersionedSkillRef(ref); err != nil {
-		return a.installError(ref, "validation", stagingRoot, err)
+		return result, a.installError(ref, "validation", stagingRoot, err)
 	}
 	sourceDir := filepath.Join(stagingRoot, "skills", ref.Name)
 
 	info, err := os.Stat(root)
 	if errors.Is(err, os.ErrNotExist) {
-		return a.installError(ref, "detection", root, ErrAgentNotInstalled)
+		return result, a.installError(ref, "detection", root, ErrAgentNotInstalled)
 	}
 	if err != nil {
-		return a.installError(ref, "detection", root, err)
+		return result, a.installError(ref, "detection", root, err)
 	}
 	if !info.IsDir() {
-		return a.installError(ref, "detection", root, ErrAgentNotInstalled)
+		return result, a.installError(ref, "detection", root, ErrAgentNotInstalled)
 	}
 
 	target := filepath.Join(root, "skills", ref.Name)
 	a.debugInstall(ref, "detection", target)
 	if err := ensureTargetAbsent(target); err != nil {
-		return a.installError(ref, "detection", target, err)
+		return result, a.installError(ref, "detection", target, err)
 	}
 	frontmatterPath := filepath.Join(sourceDir, "SKILL.md")
 	if err := validateSkillFrontmatter(frontmatterPath, ref.Name); err != nil {
-		return a.installError(ref, "frontmatter", frontmatterPath, err)
+		return result, a.installError(ref, "frontmatter", frontmatterPath, err)
 	}
 	a.debugInstall(ref, "adaptation", sourceDir)
 	if err := a.config.adapt(ref, sourceDir); err != nil {
-		return a.installError(ref, "adaptation", sourceDir, err)
+		return result, a.installError(ref, "adaptation", sourceDir, err)
 	}
 
 	if err := ensureSkillsRoot(skillsRoot); err != nil {
-		return a.installError(ref, "skills-root", skillsRoot, err)
+		return result, a.installError(ref, "skills-root", skillsRoot, err)
 	}
 	tempDir, err := os.MkdirTemp(skillsRoot, ".apm-"+ref.Name+"-*")
 	if err != nil {
-		return a.installError(ref, "temporary", skillsRoot, err)
+		return result, a.installError(ref, "temporary", skillsRoot, err)
 	}
 	defer func() {
 		if tempDir != "" {
@@ -112,17 +112,18 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (resultErr e
 
 	a.debugInstall(ref, "copy", tempDir)
 	if err := a.copyDir(sourceDir, tempDir); err != nil {
-		return a.installError(ref, "copy", sourceDir, fmt.Errorf("copy to %q: %w", tempDir, err))
+		return result, a.installError(ref, "copy", sourceDir, fmt.Errorf("copy to %q: %w", tempDir, err))
 	}
 	a.debugInstall(ref, "publication", target)
 	if err := ensureTargetAbsent(target); err != nil {
-		return a.installError(ref, "publication", target, err)
+		return result, a.installError(ref, "publication", target, err)
 	}
 	if err := a.rename(tempDir, target); err != nil {
-		return a.installError(ref, "publication", target, err)
+		return result, a.installError(ref, "publication", target, err)
 	}
+	result.Published = true
 	tempDir = ""
-	return nil
+	return result, nil
 }
 
 func (a *skillAdapter) installError(ref domain.PowerRef, phase, path string, err error) error {

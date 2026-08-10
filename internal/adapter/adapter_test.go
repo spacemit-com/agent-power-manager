@@ -13,7 +13,9 @@ func (contractAdapter) DetectAgent() (bool, error) { return true, nil }
 
 func (contractAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
 
-func (contractAdapter) Install(domain.PowerRef, string) error { return nil }
+func (contractAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
+	return adapter.InstallResult{Published: true}, nil
+}
 
 func TestAdapterContractAndErrors(t *testing.T) {
 	var _ adapter.Adapter = contractAdapter{}
