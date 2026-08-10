@@ -98,6 +98,7 @@ func (s *Service) Uninstall(ctx context.Context, request UninstallRequest) error
 	return nil
 }
 
+// rollbackUninstall 在持久化回滚方向后恢复卸载前状态。
 func (s *Service) rollbackUninstall(journal Journal, originalErr error) error {
 	journal.Phase = PhaseRollingBack
 	if err := s.journals.Update(journal); err != nil {

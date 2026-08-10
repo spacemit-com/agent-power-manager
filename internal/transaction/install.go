@@ -20,7 +20,7 @@ func (s *Service) Install(ctx context.Context, request InstallRequest) error {
 	if err := validateInstallRequest(request); err != nil {
 		return err
 	}
-	if s.manifests == nil || s.journals == nil {
+	if isNilInterface(s.manifests) || isNilInterface(s.journals) {
 		return fmt.Errorf("install transaction dependencies are nil: %w", ErrInvalidRequest)
 	}
 	if _, found, err := s.journals.Inspect(); err != nil {
@@ -130,6 +130,7 @@ func (s *Service) Install(ctx context.Context, request InstallRequest) error {
 	return nil
 }
 
+// rollbackInstall 在持久化回滚方向后恢复安装前状态。
 func (s *Service) rollbackInstall(journal Journal, originalErr error) error {
 	journal.Phase = PhaseRollingBack
 	if err := s.journals.Update(journal); err != nil {

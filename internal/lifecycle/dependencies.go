@@ -19,12 +19,8 @@ type AdapterRegistry interface {
 // ConfigRepository 是配置清单 Repository 的别名。
 type ConfigRepository = config.Repository
 
-// JournalStore 定义事务日志存储所需的操作。
-type JournalStore interface {
-	Inspect() (transaction.Journal, error)
-	Write(transaction.Journal) error
-	Delete() error
-}
+// TransactionManager 是 lifecycle 调用的高层事务管理接口别名。
+type TransactionManager = transaction.Manager
 
 // Locker 是进程间锁的别名。
 type Locker = lock.Locker
