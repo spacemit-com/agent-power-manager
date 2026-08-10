@@ -1,19 +1,8 @@
 flowchart TD
     RecoveryStart([生命周期入口]) --> RecoveryLock[获取全局 APM 锁]
     RecoveryLock -->|失败| RecoveryLockFail[打印锁错误] --> RecoveryLockExit([未获得锁；非零退出])
-    RecoveryLock -->|成功| RecoveryJournal{存在未完成 journal?}
-    RecoveryJournal -->|检查失败| RecoveryJournalFail[打印 journal 检查错误] --> RecoveryExitError([释放锁并非零退出])
-    RecoveryJournal -->|否| RecoveryResume([进入调用方命令流程；锁保持])
-    RecoveryJournal -->|是| RecoveryDecide{根据阶段与路径状态判断提交点}
-    RecoveryDecide -->|提交点前| RecoveryRollback[回滚上次事务]
-    RecoveryDecide -->|提交点后| RecoveryCommit[完成上次事务提交]
-    RecoveryRollback --> RecoveryResult{修复成功?}
-    RecoveryCommit --> RecoveryResult
-    RecoveryResult -->|否| RecoveryFail[保留 journal 并打印修复失败] --> RecoveryExitError
-    RecoveryResult -->|是| RecoveryDelete[删除已恢复 journal]
-    RecoveryDelete -->|失败| RecoveryDeleteFail[保留 journal 并打印删除失败] --> RecoveryExitError
-    RecoveryDelete -->|成功| RecoveryLog[打印回滚或提交及修复内容] --> RecoveryResume
-    RecoveryJournal -.进程中断.-> RecoveryInterrupted([内核释放锁；保留 journal；下次命令重新预检])
-    RecoveryRollback -.进程中断.-> RecoveryInterrupted
-    RecoveryCommit -.进程中断.-> RecoveryInterrupted
-    RecoveryDelete -.进程中断.-> RecoveryInterrupted
+    RecoveryLock -->|成功| RecoveryManager[调用 TransactionManager.Recover 检查集中 active journal]
+    RecoveryManager -->|无活动 journal| RecoveryResume([进入调用方命令流程；锁保持])
+    RecoveryManager -->|恢复成功| RecoveryLog[根据 RecoveryResult 打印原操作、阶段、方向和修复内容] --> RecoveryResume
+    RecoveryManager -->|journal 非法或恢复失败| RecoveryFail[保留 journal 与现场；打印恢复错误] --> RecoveryExitError([释放锁并非零退出])
+    RecoveryManager -.进程中断.-> RecoveryInterrupted([内核释放锁；集中 journal 保留；下次任意命令重新预检])

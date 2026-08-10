@@ -14,8 +14,8 @@
 ## Implementation Context
 
 - 关联模块或服务：`internal/adapter`、`internal/domain`、`internal/paths`、`internal/utils/filesystem`，以及只依赖 Adapter Registry 的 lifecycle 接口边界。
-- 数据、接口或依赖变化：正式定义三个 `AgentID`；Adapter 暴露 `DetectAgent`、`TargetPath` 和 `Install`；Registry 只解析 Skill；引入 `go.yaml.in/yaml/v3` 校验 `SKILL.md` frontmatter；不改变 cache 的 fetch 语义。
-- 关联 C4 文档或 ADR：[ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-004](../../adr/ADR-004-discover-installed-agents-before-local-operations.md)、[ADR-005](../../adr/ADR-005-isolate-test-filesystem-with-apm-home.md)、[ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md)。
+- 数据、接口或依赖变化：正式定义三个 `AgentID`；Adapter 暴露 `DetectAgent`、`TargetPath` 和 `Install`，其中 Feature 007 追加显式发布结果供 transaction 判断提交点；Registry 只解析 Skill；引入 `go.yaml.in/yaml/v3` 校验 `SKILL.md` frontmatter；不改变 cache 的 fetch 语义。
+- 关联 C4 文档或 ADR：[ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-004](../../adr/ADR-004-discover-installed-agents-before-local-operations.md)、[ADR-005](../../adr/ADR-005-isolate-test-filesystem-with-apm-home.md)、[ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md)、[ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。
 
 ## Acceptance
 

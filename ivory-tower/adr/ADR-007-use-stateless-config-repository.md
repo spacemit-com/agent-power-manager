@@ -14,6 +14,8 @@ APM 需要为每个 Agent 持久化已安装 Power，并让 lifecycle 在 list�
 
 APM 使用无状态 Config Repository。lifecycle 只调用 `List(agent)`、`Find(agent, type, name)`、`Set(agent, ref)` 和 `Remove(agent, type, name)`；Repository 在每次调用内部完成所需的 JSON 读取，以及 Set/Remove 的单次原子读改写，不暴露 `Read`、`Write`、`Manifest`、加载状态或 `Release`。
 
+> [ADR-009](ADR-009-centralize-lifecycle-transactions.md) 进一步划分调用者：lifecycle 直接调用 `List/Find` 完成业务判断；TransactionManager 在文件提交点后调用 `Set/Remove`，以固定清单写入、事务清理和 journal 删除顺序。Repository 的无状态与原子读改写语义不变。
+
 每个 Agent 的 JSON 使用固定 `skills`、`plugins`、`mcps` 分组。清单条目统一为版本已确定的 `PowerRef`，磁盘组内不重复保存 type；读取后由 Repository 根据分组补全。系统删除 `InstalledPower` 和 `InstalledAt`，并以共享 `PowerGroups` 表达三类已安装 Power。
 
 Repository 不获取全局锁，也不保证并发写安全。lifecycle 按 ADR-003 在调用本地清单操作时持有全局 APM 锁。Repository 只实施目标状态；版本选择、升级/降级判断、卸载许可、跨类型消歧、筛选和用户输出仍由 lifecycle 负责。

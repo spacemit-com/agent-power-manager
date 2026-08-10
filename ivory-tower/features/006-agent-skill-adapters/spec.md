@@ -26,9 +26,15 @@ APM 为 Codex、Claude Code 和 Hermes Agent 提供首批可用 Adapter。Adapte
 type Adapter interface {
     DetectAgent() (bool, error)
     TargetPath(domain.PowerRef) (string, error)
-    Install(domain.PowerRef, string) error
+    Install(domain.PowerRef, string) (InstallResult, error)
+}
+
+type InstallResult struct {
+    Published bool
 }
 ```
+
+Feature 007 根据 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 为 Install 增加显式发布结果：目标 rename 未成功时为 false；一旦 rename 成功，即使后续 staging 清理失败也为 true。该调整只向 transaction 暴露提交点结果，不改变 Adapter 的安装职责。
 
 第二个 `Install` 参数是当前 Power 的公共 staging 根目录，而不是其中的 Skill 目录。对 `ref`，源目录固定为：
 

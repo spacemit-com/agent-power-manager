@@ -8,7 +8,7 @@ classDiagram
         +List(Flags) (ListResult, error)
     }
 
-    note for lifecycleService "四个命令先取全局锁并修复唯一活动 journal；本地 Power 操作刷新已安装 Agent 快照；install/uninstall 以原子文件操作为提交点"
+    note for lifecycleService "四个命令先取全局锁并调用集中 TransactionManager 恢复；本地 Power 操作刷新 Agent 快照；业务预检后把单 Agent 文件与清单一致性交给 transaction"
     class lifecycleService {
         +Search(...)
         +Install(...)
@@ -21,6 +21,12 @@ classDiagram
         <<interface>>
         +Resolve(AgentID, PowerType) (Adapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
+    }
+
+    class Adapter {
+        <<interface>>
+        +TargetPath(PowerRef) (string, error)
+        +Install(PowerRef, stagingRoot) (InstallResult, error)
     }
 
     class AgentSnapshot {
@@ -38,11 +44,12 @@ classDiagram
         +Remove(AgentID, PowerType, name) error
     }
 
-    class JournalStore {
+    note for TransactionManager "集中封装唯一活动 journal、同盘 backup/quarantine、Adapter 发布结果、清单写入、回滚和跨命令恢复"
+    class TransactionManager {
         <<interface>>
-        +Inspect() (Journal, error)
-        +Write(Journal) error
-        +Delete() error
+        +Recover(Context) (RecoveryResult, error)
+        +Install(Context, InstallRequest) error
+        +Uninstall(Context, UninstallRequest) error
     }
 
     note for Locker "四个生命周期命令从启动预检到结束全程持有的全局 APM 文件锁"
@@ -66,9 +73,12 @@ classDiagram
 
     lifecycleService ..|> Lifecycle
     lifecycleService --> AdapterRegistry
+    AdapterRegistry --> Adapter : resolves
     AdapterRegistry --> AgentSnapshot : returns
-    lifecycleService --> ConfigRepository
-    lifecycleService --> JournalStore
+    lifecycleService --> ConfigRepository : List/Find
+    lifecycleService --> TransactionManager
+    TransactionManager --> Adapter : TargetPath/Install
+    TransactionManager --> ConfigRepository : Set/Remove
     lifecycleService --> Locker
     lifecycleService --> PowerCache
     lifecycleService --> CloudClient

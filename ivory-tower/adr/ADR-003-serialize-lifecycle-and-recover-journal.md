@@ -18,6 +18,8 @@ APM 要求任意命令启动时都能识别并纠正上一次 install/uninstall 
 
 install 在原子 staging-to-target rename 前记录 publishing 意图，该 rename 是提交点。uninstall 在原子 target-to-quarantine move 前记录 removing 意图，该 move 是提交点。恢复时结合 journal 阶段和 staging、target、backup/quarantine 路径状态覆盖“原子操作完成但阶段尚未更新”的中断窗口。
 
+> [ADR-009](ADR-009-centralize-lifecycle-transactions.md) 修订了 Install 的实现边界：Adapter 把 staging 复制到目标同目录临时目录，并以临时目录到 target 的原子 rename 作为同一提交点；transaction 在调用 Adapter 前持久化 publishing，并通过显式 `Published` 结果或中断后的 target 状态固定恢复方向。
+
 install/uninstall 的 `--agent=all` 按当前快照中已支持且已安装 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 failed、按相同顺序把全部剩余 Agent 记为 unexecuted，停止执行并非零退出；命令结束前统一打印 completed、failed 和 unexecuted 汇总。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent，但最终整体非零退出。
 
 install/uninstall 在当前命令内的回滚、清单更新或清理期间再次发生进程中断时，不尝试在中断路径继续修复；内核释放全局锁，现有 journal 保持可恢复，交由下一条任意命令的公共预检重新判断并恢复。提交点后的清单更新或清理失败也不在当前命令中重试：保留 journal、打印失败并非零退出，由下一条命令的公共预检完成遗留事务。

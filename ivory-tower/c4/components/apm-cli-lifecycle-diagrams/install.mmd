@@ -1,75 +1,60 @@
 flowchart TD
-    InstallStart([生命周期入口]) --> InstallRecovery[执行公共 journal 检查/修复；失败或中断在公共图内终止]
+    InstallStart([生命周期入口]) --> InstallRecovery[执行公共 TransactionManager 恢复；失败或中断在公共图内终止]
     InstallRecovery -->|成功；锁保持| InstallCommand[进入当前命令]
 
     InstallCommand --> InstallDiscovery[执行公共 Agent 刷新流程；失败或中断在公共图内终止]
     InstallDiscovery -->|成功；锁保持| InstallTarget{具体目标在快照中，或 all 快照非空?}
     InstallTarget -->|否| InstallTargetFail[打印目标 Agent 未受支持或未安装，或没有已支持且已安装的 Agent] --> InstallPreflightFail
-    InstallTarget -->|是| InstallResolve[调用 Cloud List 获取带版本的全部 PowerRef；按 power、可选 type/version 筛选；省略 version 选最新版；得到版本已确定的 PowerRef]
+    InstallTarget -->|是| InstallResolve[Cloud List 获取候选；由 lifecycle 解析类型与版本，得到版本已确定的 PowerRef]
     InstallResolve -->|失败| InstallPreflightFail[记录预执行失败；全部目标 Agent 标记 unexecuted] --> InstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> InstallBatchError([停止剩余 Agent；释放锁；非零退出])
-    InstallResolve -->|成功| InstallNextAgent{按快照中已支持且已安装 Agent ID 升序还有目标 Agent?}
+    InstallResolve -->|成功| InstallNextAgent{按快照顺序还有目标 Agent?}
     InstallNextAgent -->|否| InstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> InstallOK([释放锁并正常退出])
-    InstallNextAgent -->|是| InstallAdapter["Resolve(currentAgent, type) 解析当前 Agent Adapter"]
-    InstallAdapter -->|失败| InstallFail[记录当前 Agent failed；其余按确定顺序标记 unexecuted]
-    InstallAdapter -->|成功| InstallFindManifest[调用 ConfigRepository.Find 查询当前 Agent 的同类型同名 Power]
+    InstallNextAgent -->|是| InstallAdapter[Resolve 当前 Agent Skill Adapter]
+    InstallAdapter -->|失败| InstallFail[记录当前 Agent failed；其余标记 unexecuted]
+    InstallAdapter -->|成功| InstallFindManifest[ConfigRepository.Find 查询同类型同名 Power]
     InstallFindManifest -->|失败| InstallFail
     InstallFindManifest -->|成功| InstallSame{已安装目标版本?}
-    InstallSame -->|是| InstallSkip[打印相同版本，记录当前 Agent completed] --> InstallNextAgent
+    InstallSame -->|是| InstallSkip[打印相同版本；记录 completed] --> InstallNextAgent
+    InstallSame -->|否| InstallFetch[事务外 Cache Fetch；miss 时 Cloud Get 后再次 Fetch]
+    InstallFetch -->|失败| InstallFail
+    InstallFetch -->|成功| InstallTransaction[调用 TransactionManager.Install；传入旧引用、Adapter 和公共 staging 根]
 
-    subgraph InstallPreCommit["提交点前事务阶段（失败时回滚）"]
-        InstallSame -->|否| InstallCreateJournal[创建 install journal]
-        InstallCreateJournal -->|失败| InstallFail
-        InstallCreateJournal -->|成功| InstallFetch[Cache Fetch 版本已确定的 PowerRef；先清理并重建 staging]
-        InstallFetch -->|非 miss 失败| InstallRollback[提交点前回滚临时文件、staging 与旧版本]
-        InstallFetch -->|缓存命中| InstallStage[Adapter 在无版本层 staging 中转换并准备安装内容]
-        InstallFetch -->|cache miss| InstallGet[Cloud Get 经缓存根临时目录原子写入目标 Power]
-        InstallGet -->|失败| InstallRollback
-        InstallGet -->|成功| InstallRefetch[再次 Cache Fetch 同一 PowerRef]
-        InstallRefetch -->|失败| InstallRollback
-        InstallRefetch -->|成功| InstallStage
-        InstallStage -->|失败| InstallRollback
-        InstallStage -->|成功| InstallExisting{存在旧版本?}
-        InstallExisting -->|是| InstallBackup[原子移动旧版本到事务备份]
-        InstallBackup -->|失败| InstallRollback
-        InstallExisting -->|否| InstallIntent[持久化 publishing 意图]
-        InstallBackup -->|成功| InstallIntent
-        InstallIntent -->|失败| InstallRollback
-        InstallIntent -->|成功| InstallPublish[[原子 rename staging 到正式路径：提交点]]
-        InstallPublish -->|未越过提交点| InstallRollback
-        InstallRollback --> InstallRollbackOK{回滚成功?}
-        InstallRollbackOK -->|是| InstallRolledBack[删除 journal；打印回滚内容]
-        InstallRollbackOK -->|否| InstallKeepRollback[保留 journal；打印回滚失败]
-    end
-
-    subgraph InstallPostCommit["提交点后事务阶段（失败时保留 journal，由下次预检完成提交）"]
-        InstallPublish -->|已越过提交点| InstallManifest[调用 ConfigRepository.Set 原子更新安装清单]
-        InstallManifest -->|失败| InstallKeepCommit[保留 journal；打印清单更新失败]
-        InstallManifest -->|成功| InstallCleanup[清理备份与临时文件；最后删除 journal]
+    subgraph InstallTx[TransactionManager 内部]
+        InstallTransaction --> InstallTargetState{事务前 target 状态与旧清单一致?}
+        InstallTargetState -->|无旧清单但 target 已存在| InstallTxError
+        InstallTargetState -->|有旧清单，或 target 缺失| InstallCreateJournal[创建集中 preparing journal]
+        InstallCreateJournal -->|失败| InstallTxError[返回事务错误]
+        InstallCreateJournal -->|成功；旧 target 存在| InstallBackup[原子移动旧 target 到同盘 backup]
+        InstallCreateJournal -->|成功；首次安装或旧 target 已缺失| InstallPublishing[更新 journal 为 publishing]
+        InstallBackup -->|失败| InstallRollbackIntent[更新 journal 为 rolling-back]
+        InstallBackup -->|成功| InstallPublishing
+        InstallPublishing -->|失败| InstallRollbackIntent
+        InstallPublishing -->|成功| InstallPublish[调用 Adapter 适配、复制并原子发布]
+        InstallPublish -->|Published=false| InstallRollbackIntent
+        InstallRollbackIntent --> InstallRollback[恢复 backup；安全清理事务残留]
+        InstallRollback -->|成功| InstallDeleteRolledBack[删除 journal；返回原始错误] --> InstallTxError
+        InstallRollback -->|失败| InstallKeepRollback[保留 journal；返回回滚错误] --> InstallTxError
+        InstallPublish -->|Published=true| InstallCommitIntent[更新 journal 为 committing]
+        InstallCommitIntent -->|阶段更新失败，或 Adapter 同时返回错误| InstallKeepCommit[保留 journal；返回提交后错误] --> InstallTxError
+        InstallCommitIntent -->|Adapter 成功| InstallManifest[ConfigRepository.Set 新 PowerRef]
+        InstallManifest -->|失败| InstallKeepCommit
+        InstallManifest -->|成功| InstallCleanup[删除 backup、重试安全 staging 清理并清理同盘事务目录]
         InstallCleanup -->|失败| InstallKeepCommit
-        InstallCleanup -->|成功| InstallInstalled[打印首次安装、升级或降级成功；记录当前 Agent completed]
+        InstallCleanup -->|成功| InstallDeleteJournal[最后删除集中 journal]
+        InstallDeleteJournal -->|失败| InstallKeepCommit
+        InstallDeleteJournal -->|成功| InstallTxSuccess[返回成功]
     end
 
-    InstallInstalled --> InstallNextAgent
-    InstallRolledBack --> InstallFail
-    InstallKeepRollback --> InstallFail
-    InstallKeepCommit --> InstallFail
+    InstallTxSuccess --> InstallInstalled[打印首次安装、升级或降级成功；记录 completed] --> InstallNextAgent
+    InstallTxError --> InstallFail
     InstallFail --> InstallPrintFailureSummary
 
-    InstallResolve -.进程中断.-> InstallInterrupted
-    InstallAdapter -.进程中断.-> InstallInterrupted
-    InstallFindManifest -.进程中断.-> InstallInterrupted
-    InstallCreateJournal -.进程中断；保留 journal.-> InstallInterrupted
-    InstallFetch -.进程中断；保留 journal.-> InstallInterrupted
-    InstallGet -.进程中断；保留 journal.-> InstallInterrupted
-    InstallRefetch -.进程中断；保留 journal.-> InstallInterrupted
-    InstallStage -.进程中断；保留 journal.-> InstallInterrupted
-    InstallBackup -.进程中断；保留 journal.-> InstallInterrupted
-    InstallIntent -.进程中断；保留 journal.-> InstallInterrupted
-    InstallPublish -.进程中断；保留 journal.-> InstallInterrupted
-    InstallManifest -.进程中断；保留 journal.-> InstallInterrupted
-    InstallCleanup -.进程中断；保留 journal.-> InstallInterrupted
-    InstallRollback -.进程中断；保留 journal.-> InstallInterrupted
-    InstallRolledBack -.清理 journal 时中断；保留 journal.-> InstallInterrupted
+    InstallFetch -.进程中断；staging 可由下次 Fetch 覆盖.-> InstallInterrupted
+    InstallCreateJournal -.进程中断；保留集中 journal.-> InstallInterrupted
+    InstallBackup -.进程中断；保留集中 journal.-> InstallInterrupted
+    InstallPublish -.进程中断；恢复器结合 publishing 与 target 状态判定方向.-> InstallInterrupted
+    InstallRollback -.进程中断；rolling-back 固定回滚方向.-> InstallInterrupted
+    InstallManifest -.进程中断；committing 固定提交方向.-> InstallInterrupted
+    InstallCleanup -.进程中断；保留集中 journal.-> InstallInterrupted
 
-    style InstallPreCommit fill:#fff4e5,stroke:#d97706,stroke-width:2px
-    style InstallPostCommit fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style InstallTx fill:#fff4e5,stroke:#d97706,stroke-width:2px

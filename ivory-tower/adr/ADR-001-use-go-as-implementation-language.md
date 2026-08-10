@@ -122,7 +122,7 @@ apm/
 3. `transaction` 单独承载 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 的 journal、提交点、回滚和完成提交规则。当前命令在提交点后的清单更新或清理失败时保留 journal 并退出，由下一条命令的 `recovery.go` 完成遗留事务，不在当前命令中重复更新清单或清理。
 4. `transaction/path_state.go` 集中处理“原子文件操作已经完成、journal 阶段尚未更新”的中断窗口，使正常事务与恢复事务采用相同的路径状态判断。
 5. `adapter` 展开首批 `codex`、`claude_code`、`hermes` 内置实现。Registry 在编译期保证 Agent ID 唯一；每个 Adapter 除目标安装位置与格式转换外，还按 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md) 检查对应 Agent 根目录是否存在。APM 不负责 Agent 安装、卸载、实时监控、运行时感知或更新通知；新增 Agent 遵循 `internal/adapter/<agent>/` 约定。
-6. `config` 以 [ADR-007](ADR-007-use-stateless-config-repository.md) 的无状态 Repository 管理各 Agent 的固定分组 JSON 安装清单。lifecycle 只调用 `List/Find/Set/Remove`，Repository 内部直接完成读取和同目录临时文件的原子替换；事务完成与 journal 删除顺序仍由 `transaction` 控制。
+6. `config` 以 [ADR-007](ADR-007-use-stateless-config-repository.md) 的无状态 Repository 管理各 Agent 的固定分组 JSON 安装清单。按 [ADR-009](ADR-009-centralize-lifecycle-transactions.md)，lifecycle 调用 `List/Find`，transaction 在提交点后调用 `Set/Remove`；Repository 内部直接完成读取和同目录临时文件的原子替换，事务完成与 journal 删除顺序由 `transaction` 控制。
 7. 所有用户输出和内部诊断统一经过 `logging`，其他 package 不直接调用 `fmt.Print*` 或自行创建 logger。稳定的资源数据和成功结果写入 `stdout`；journal 恢复过程、警告和失败写入 `stderr`；内部执行步骤、Cloud 资源读取细节和事务路径状态仅在全局 `--verbose` 开启后写入 `stderr`。默认 CLI 输出格式保持稳定，便于用户阅读和脚本处理。logger 的装配方式已由 [ADR-006](ADR-006-use-global-slog-with-level-routing.md) 调整为预解析 verbose 后安装全局 `slog`，不再向各模块注入自定义 logging 实例。
 8. `domain` 保存跨组件共享的 Agent、Power、按类型组织的 `PowerGroups` 和执行结果类型。清单条目统一使用版本已确定的 `PowerRef`，不再定义 `InstalledPower` 或安装时间。
 9. `paths` 是所有本地状态路径的唯一来源，保证 lock、journal、manifest、cache、staging、各目标文件系统内的临时目录、backup 和 quarantine 在正常执行与恢复时使用同一套位置规则。Cloud get 使用缓存根内的临时目录，Cache fetch 使用状态根内的临时目录，避免原子 rename 跨文件系统。
