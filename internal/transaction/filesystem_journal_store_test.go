@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,6 +116,82 @@ func TestFilesystemJournalStoreRenameFailureCleansTemporaryFile(t *testing.T) {
 	}
 }
 
+func TestFilesystemJournalStoreWriteFailureCleansTemporaryFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transactions", "active.json")
+	store := newFilesystemJournalStore(path)
+	writeErr := errors.New("write failed")
+	store.write = func(*os.File, []byte) (int, error) { return 0, writeErr }
+
+	if err := store.Create(validInstallJournal(t)); !errors.Is(err, writeErr) {
+		t.Fatalf("Create() error = %v, want write error", err)
+	}
+	assertNoTemporaryJournals(t, path)
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("active journal after write failure: %v", err)
+	}
+}
+
+func TestFilesystemJournalStoreShortWriteFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transactions", "active.json")
+	store := newFilesystemJournalStore(path)
+	store.write = func(_ *os.File, contents []byte) (int, error) { return len(contents) - 1, nil }
+
+	if err := store.Create(validInstallJournal(t)); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("Create() error = %v, want io.ErrShortWrite", err)
+	}
+	assertNoTemporaryJournals(t, path)
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("active journal after short write: %v", err)
+	}
+}
+
+func TestFilesystemJournalStoreFileSyncFailureCleansTemporaryFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transactions", "active.json")
+	store := newFilesystemJournalStore(path)
+	syncErr := errors.New("file sync failed")
+	store.syncFile = func(*os.File) error { return syncErr }
+
+	if err := store.Create(validInstallJournal(t)); !errors.Is(err, syncErr) {
+		t.Fatalf("Create() error = %v, want sync error", err)
+	}
+	assertNoTemporaryJournals(t, path)
+}
+
+func TestFilesystemJournalStoreCreateDirectorySyncFailureLeavesInspectableJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transactions", "active.json")
+	store := newFilesystemJournalStore(path)
+	syncErr := errors.New("directory sync failed")
+	store.syncDir = func(string) error { return syncErr }
+	journal := validInstallJournal(t)
+
+	if err := store.Create(journal); !errors.Is(err, syncErr) {
+		t.Fatalf("Create() error = %v, want sync error", err)
+	}
+	got, found, err := store.Inspect()
+	if err != nil || !found || got.TransactionID != journal.TransactionID {
+		t.Fatalf("Inspect() = %+v, %v, %v", got, found, err)
+	}
+	assertNoTemporaryJournals(t, path)
+}
+
+func TestFilesystemJournalStoreRemoveFailurePreservesJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transactions", "active.json")
+	store := newFilesystemJournalStore(path)
+	journal := validInstallJournal(t)
+	if err := store.Create(journal); err != nil {
+		t.Fatal(err)
+	}
+	removeErr := errors.New("remove failed")
+	store.remove = func(string) error { return removeErr }
+
+	if err := store.Delete(journal.TransactionID); !errors.Is(err, removeErr) {
+		t.Fatalf("Delete() error = %v, want remove error", err)
+	}
+	if _, found, err := store.Inspect(); err != nil || !found {
+		t.Fatalf("Inspect() after failed remove = %v, %v", found, err)
+	}
+}
+
 func TestFilesystemJournalStoreDeleteSyncFailureRestoresJournal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transactions", "active.json")
 	store := newFilesystemJournalStore(path)
@@ -138,6 +215,36 @@ func TestFilesystemJournalStoreDeleteSyncFailureRestoresJournal(t *testing.T) {
 	got, found, err := store.Inspect()
 	if err != nil || !found || got.TransactionID != journal.TransactionID {
 		t.Fatalf("Inspect() after failed Delete = %+v, %v, %v", got, found, err)
+	}
+}
+
+func TestFilesystemJournalStoreDeleteSyncAndRestoreFailureReturnsBoth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transactions", "active.json")
+	store := newFilesystemJournalStore(path)
+	journal := validInstallJournal(t)
+	if err := store.Create(journal); err != nil {
+		t.Fatal(err)
+	}
+	syncErr := errors.New("directory sync failed")
+	store.syncDir = func(string) error { return syncErr }
+
+	err := store.Delete(journal.TransactionID)
+	if !errors.Is(err, syncErr) || !strings.Contains(err.Error(), "restore journal") {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, found, inspectErr := store.Inspect(); inspectErr != nil || !found {
+		t.Fatalf("Inspect() after restore failure = %v, %v", found, inspectErr)
+	}
+}
+
+func assertNoTemporaryJournals(t *testing.T, activePath string) {
+	t.Helper()
+	temporary, err := filepath.Glob(filepath.Join(filepath.Dir(activePath), ".active-*.tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temporary) != 0 {
+		t.Fatalf("temporary journals remain: %v", temporary)
 	}
 }
 

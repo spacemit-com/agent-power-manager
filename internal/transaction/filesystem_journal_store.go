@@ -14,6 +14,7 @@ type filesystemJournalStore struct {
 	path     string
 	rename   func(string, string) error
 	remove   func(string) error
+	write    func(*os.File, []byte) (int, error)
 	syncFile func(*os.File) error
 	syncDir  func(string) error
 }
@@ -24,6 +25,7 @@ func newFilesystemJournalStore(path string) *filesystemJournalStore {
 		path:     path,
 		rename:   os.Rename,
 		remove:   os.Remove,
+		write:    func(file *os.File, contents []byte) (int, error) { return file.Write(contents) },
 		syncFile: func(file *os.File) error { return file.Sync() },
 		syncDir:  syncDirectory,
 	}
@@ -137,7 +139,11 @@ func (s *filesystemJournalStore) writeAtomic(journal Journal) (resultErr error) 
 	if err := temporary.Chmod(0o600); err != nil {
 		return closeWithError(fmt.Errorf("set temporary journal permissions %q: %w", temporaryPath, err))
 	}
-	if _, err := temporary.Write(contents); err != nil {
+	written, err := s.write(temporary, contents)
+	if err == nil && written != len(contents) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
 		return closeWithError(fmt.Errorf("write temporary journal %q: %w", temporaryPath, err))
 	}
 	if err := s.syncFile(temporary); err != nil {

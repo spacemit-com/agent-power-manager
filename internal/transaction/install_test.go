@@ -194,6 +194,18 @@ func TestInstallUpgradeBacksUpOldTargetBeforePublishing(t *testing.T) {
 	}
 }
 
+func TestInstallManagedMissingTargetSelfHeals(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "3.0.0"}
+	fixture.request.Previous = &old
+	if err := fixture.service.Install(context.Background(), fixture.request); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.manifests.setRef != fixture.request.Power {
+		t.Fatalf("manifest Set = %+v", fixture.manifests.setRef)
+	}
+}
+
 func TestInstallRejectsUnmanagedTargetBeforeJournal(t *testing.T) {
 	fixture := newInstallFixture(t)
 	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
@@ -319,6 +331,209 @@ func TestInstallCommittingUpdateFailurePreservesPublishingEvidence(t *testing.T)
 	}
 	if fixture.journals.journal.Phase != PhasePublishing {
 		t.Fatalf("persisted phase = %q, want publishing", fixture.journals.journal.Phase)
+	}
+	if _, statErr := os.Stat(fixture.target); statErr != nil {
+		t.Fatalf("published target missing: %v", statErr)
+	}
+}
+
+func TestInstallCreateFailureDoesNotTouchManagedTarget(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	fixture.request.Previous = &old
+	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createErr := errors.New("create failed")
+	fixture.journals.fail["create"] = createErr
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, createErr) {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if _, statErr := os.Stat(fixture.target); statErr != nil {
+		t.Fatalf("target changed: %v", statErr)
+	}
+}
+
+func TestInstallBackupRenameFailureRollsBack(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	fixture.request.Previous = &old
+	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	renameErr := errors.New("backup rename failed")
+	fixture.service.files.rename = func(string, string) error { return renameErr }
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, renameErr) || fixture.journals.found {
+		t.Fatalf("Install() error/journal = %v, %v", err, fixture.journals.found)
+	}
+	if _, statErr := os.Stat(fixture.target); statErr != nil {
+		t.Fatalf("target changed: %v", statErr)
+	}
+}
+
+func TestInstallPublishingUpdateFailureRestoresBackup(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	fixture.request.Previous = &old
+	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	phaseErr := errors.New("publishing update failed")
+	fixture.journals.fail["update:publishing"] = phaseErr
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, phaseErr) || fixture.journals.found {
+		t.Fatalf("Install() error/journal = %v, %v", err, fixture.journals.found)
+	}
+	if _, statErr := os.Stat(fixture.target); statErr != nil {
+		t.Fatalf("target not restored: %v", statErr)
+	}
+}
+
+func TestInstallRestoreFailurePreservesRollingBackJournal(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	fixture.request.Previous = &old
+	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	adapterErr := errors.New("adapter failed")
+	fixture.adapter.result = adapter.InstallResult{}
+	fixture.adapter.err = adapterErr
+	fixture.adapter.onInstall = nil
+	restoreErr := errors.New("restore failed")
+	renames := 0
+	fixture.service.files.rename = func(oldPath, newPath string) error {
+		renames++
+		if renames == 2 {
+			return restoreErr
+		}
+		return os.Rename(oldPath, newPath)
+	}
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, adapterErr) || !errors.Is(err, restoreErr) {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if !fixture.journals.found || fixture.journals.journal.Phase != PhaseRollingBack {
+		t.Fatalf("journal = %+v", fixture.journals.journal)
+	}
+	if _, statErr := os.Stat(fixture.journals.journal.BackupPath); statErr != nil {
+		t.Fatalf("backup missing: %v", statErr)
+	}
+}
+
+func TestInstallBackupCleanupFailurePreservesCommittingJournal(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	fixture.request.Previous = &old
+	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cleanupErr := errors.New("backup cleanup failed")
+	fixture.service.files.removeAll = func(path string) error {
+		if path == fixture.journals.journal.BackupPath {
+			return cleanupErr
+		}
+		return os.RemoveAll(path)
+	}
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, cleanupErr) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
+		t.Fatalf("Install() error/journal = %v, %+v", err, fixture.journals.journal)
+	}
+}
+
+func TestInstallStagingCleanupFailurePreservesCommittingJournal(t *testing.T) {
+	fixture := newInstallFixture(t)
+	if err := os.MkdirAll(fixture.staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cleanupErr := errors.New("staging cleanup failed")
+	fixture.service.files.removeAll = func(path string) error {
+		if path == fixture.staging {
+			return cleanupErr
+		}
+		return os.RemoveAll(path)
+	}
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, cleanupErr) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
+		t.Fatalf("Install() error/journal = %v, %+v", err, fixture.journals.journal)
+	}
+}
+
+func TestInstallJournalDeleteFailurePreservesCommittingJournal(t *testing.T) {
+	fixture := newInstallFixture(t)
+	deleteErr := errors.New("delete failed")
+	fixture.journals.fail["delete"] = deleteErr
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, deleteErr) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
+		t.Fatalf("Install() error/journal = %v, %+v", err, fixture.journals.journal)
+	}
+}
+
+func TestInstallCancellationBeforeBackupRollsBack(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	fixture.request.Previous = &old
+	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture.journals.onCreate = func(Journal) { cancel() }
+
+	err := fixture.service.Install(ctx, fixture.request)
+	if !errors.Is(err, context.Canceled) || fixture.journals.found {
+		t.Fatalf("Install() error/journal = %v, %v", err, fixture.journals.found)
+	}
+	if _, statErr := os.Stat(fixture.target); statErr != nil {
+		t.Fatalf("target changed: %v", statErr)
+	}
+}
+
+func TestInstallCancellationBeforeAdapterRestoresBackup(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	fixture.request.Previous = &old
+	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture.journals.onUpdate = func(journal Journal) {
+		if journal.Phase == PhasePublishing {
+			cancel()
+		}
+	}
+
+	err := fixture.service.Install(ctx, fixture.request)
+	if !errors.Is(err, context.Canceled) || fixture.journals.found {
+		t.Fatalf("Install() error/journal = %v, %v", err, fixture.journals.found)
+	}
+	if _, statErr := os.Stat(fixture.target); statErr != nil {
+		t.Fatalf("target not restored: %v", statErr)
+	}
+}
+
+func TestInstallCancellationAfterPublicationPreservesCommittingJournal(t *testing.T) {
+	fixture := newInstallFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture.adapter.onInstall = func() error {
+		if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+			return err
+		}
+		cancel()
+		return nil
+	}
+
+	err := fixture.service.Install(ctx, fixture.request)
+	if !errors.Is(err, context.Canceled) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
+		t.Fatalf("Install() error/journal = %v, %+v", err, fixture.journals.journal)
 	}
 	if _, statErr := os.Stat(fixture.target); statErr != nil {
 		t.Fatalf("published target missing: %v", statErr)

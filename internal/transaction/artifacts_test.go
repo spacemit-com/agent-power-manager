@@ -74,6 +74,47 @@ func TestEnsureTransactionDirRejectsSymlinkRoot(t *testing.T) {
 	}
 }
 
+func TestEnsureTransactionDirRejectsNonDirectoryRoot(t *testing.T) {
+	targetParent := filepath.Join(t.TempDir(), "skills")
+	if err := os.Mkdir(targetParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(targetParent, ".apm-transactions")
+	if err := os.WriteFile(root, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := artifactPaths(filepath.Join(targetParent, "demo"), "00112233445566778899aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureTransactionDir(artifacts); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("ensureTransactionDir() error = %v, want ErrUnsafePath", err)
+	}
+}
+
+func TestCleanupTransactionDirRejectsSymlinkTransactionID(t *testing.T) {
+	journal := validInstallJournal(t)
+	root := filepath.Dir(journal.TransactionDir)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	external := t.TempDir()
+	sentinel := filepath.Join(external, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, journal.TransactionDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanupTransactionDir(journal); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("cleanupTransactionDir() error = %v, want ErrUnsafePath", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("external path changed: %v", err)
+	}
+}
+
 func TestCleanupTransactionDirPreservesNonemptySharedRoot(t *testing.T) {
 	journal := validInstallJournal(t)
 	if err := os.MkdirAll(journal.TransactionDir, 0o700); err != nil {
@@ -122,6 +163,29 @@ func TestCleanupCommittedStagingRejectsPhysicalTargetOverlap(t *testing.T) {
 	journal.TransactionDir = dir
 	journal.BackupPath = filepath.Join(dir, "backup")
 	if err := os.MkdirAll(journal.TargetPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(journal.StagingRoot, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanupCommittedStaging(journal); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("cleanupCommittedStaging() error = %v, want ErrUnsafePath", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("unsafe cleanup changed staging: %v", err)
+	}
+}
+
+func TestCleanupCommittedStagingRejectsStagingWithinTarget(t *testing.T) {
+	journal := validInstallJournal(t)
+	target := filepath.Dir(filepath.Dir(journal.StagingRoot))
+	journal.TargetPath = target
+	dir := filepath.Join(filepath.Dir(target), ".apm-transactions", journal.TransactionID)
+	journal.TransactionDir = dir
+	journal.BackupPath = filepath.Join(dir, "backup")
+	if err := os.MkdirAll(journal.StagingRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sentinel := filepath.Join(journal.StagingRoot, "sentinel")

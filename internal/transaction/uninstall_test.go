@@ -240,6 +240,28 @@ func TestUninstallQuarantineCleanupFailurePreservesCommittingJournal(t *testing.
 	}
 }
 
+func TestUninstallTransactionDirectoryCleanupFailurePreservesCommittingJournal(t *testing.T) {
+	fixture := newUninstallFixture(t)
+	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cleanupErr := errors.New("transaction directory cleanup failed")
+	fixture.service.files.removeAll = func(path string) error {
+		if path == fixture.journals.journal.TransactionDir {
+			return cleanupErr
+		}
+		return os.RemoveAll(path)
+	}
+
+	err := fixture.service.Uninstall(context.Background(), fixture.request)
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("Uninstall() error = %v", err)
+	}
+	if !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
+		t.Fatalf("journal = %+v", fixture.journals.journal)
+	}
+}
+
 func TestUninstallJournalDeleteFailurePreservesCommittingJournal(t *testing.T) {
 	fixture := newUninstallFixture(t)
 	fixture.journals.fail["delete"] = errors.New("delete failed")
