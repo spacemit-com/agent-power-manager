@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-08-10
+
+分类：新增功能
+
+用户需求：
+
+实现集中式 lifecycle transaction 接口，使 APM 任意后续运行都能恢复上次失败的单 Agent 安装或卸载，而无需再次执行相同目标；同时明确 transaction、lifecycle 与 Adapter 的交互时序和实现边界，并为重要接口添加简要中文用途注释。
+
+相关提交：
+
+- `73487d5 docs(transaction): define centralized recovery design`
+- `89464d8 docs(transaction): add implementation plan`
+- `d8692a4 refactor(adapter): report publication outcome`
+- `764c81a refactor(filesystem): share physical path safety`
+- `aa760ec feat(transaction): define recovery contracts`
+- `64da617 feat(transaction): persist atomic journal`
+- `f17ed8d feat(transaction): guard transaction artifacts`
+- `5583593 feat(transaction): implement install transaction`
+- `0b141b1 feat(transaction): implement uninstall transaction`
+- `0c1c8a0 feat(transaction): recover centralized transactions`
+- `1fa2630 fix(transaction): reject short journal writes`
+
+解决方案或完成结果：
+
+新增唯一活动的集中 journal、严格 schema 校验和原子持久化，并在目标同文件系统中管理随机事务 ID 隔离的 backup/quarantine。Adapter 以 `InstallResult.Published` 明确发布点；transaction 在目标变更前记录意图、在提交点后幂等写入清单，并处理首次安装、升级、目标漂移、卸载 quarantine、提交前回滚及提交后续提交。`NewManager` 可在新进程中仅依赖集中 journal 和清单 Repository，按记录的精确路径恢复任意上次事务；损坏 journal、矛盾路径、符号链接事务目录和物理 staging/target 重叠均 fail closed 并保留证据。lifecycle 仅新增 `TransactionManager` 高层依赖边界，本 feature 不接入 lifecycle 或 CLI 命令编排。
+
+验证结果或限制：
+
+`test -z "$(gofmt -l cmd internal)"`、`git diff --check`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、无缓存聚焦测试 `go test -count=1 ./internal/adapter ./internal/utils/filesystem ./internal/paths ./internal/transaction ./internal/lifecycle` 和全量测试 `go test -count=1 ./...` 均以退出码 0 完成。恢复测试覆盖全新 Manager、安装与卸载方向表、损坏或矛盾状态、取消、部分动作结果、符号链接目录，以及 journal 删除失败后的重复恢复。调用方仍须持有全局 APM 锁；实际 lifecycle/CLI 恢复预检、Cloud/Cache、版本选择、多 Agent 调度、Plugin 和 MCP 不在本 feature 范围内。
+
 ## 2026-08-07
 
 分类：新增功能
