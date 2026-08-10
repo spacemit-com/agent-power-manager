@@ -1,8 +1,9 @@
 package transaction
 
-// JournalStore 定义事务日志的存储操作。
+// JournalStore 定义唯一活动事务日志的原子存储操作。
 type JournalStore interface {
-	Inspect() (Journal, error)
-	Write(Journal) error
-	Delete() error
+	Inspect() (Journal, bool, error)
+	Create(Journal) error
+	Update(Journal) error
+	Delete(transactionID string) error
 }

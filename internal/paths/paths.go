@@ -38,10 +38,14 @@ func LockPath() (string, error) {
 	return filepath.Join(state, "apm.lock"), nil
 }
 
-// JournalPath 返回操作日志路径。
-//
-// 当前为零值占位实现。
-func JournalPath() string { return "" }
+// JournalPath 返回唯一活动事务日志路径。
+func JournalPath() (string, error) {
+	root, err := TransactionPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "active.json"), nil
+}
 
 // ManifestPath 返回指定智能体的安装清单路径。
 func ManifestPath(agent domain.AgentID) (string, error) {
@@ -98,10 +102,14 @@ func StagingTempPath() (string, error) {
 	return filepath.Join(state, ".tmp", "staging"), nil
 }
 
-// TransactionPath 返回事务记录路径。
-//
-// 当前为零值占位实现。
-func TransactionPath() string { return "" }
+// TransactionPath 返回集中事务状态根目录。
+func TransactionPath() (string, error) {
+	state, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(state, "transactions"), nil
+}
 
 func resolveHome() (string, error) {
 	if home := os.Getenv(apmHomeEnv); home != "" {

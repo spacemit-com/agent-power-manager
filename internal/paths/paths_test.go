@@ -91,6 +91,39 @@ func TestStateAndLockUseAPMHomeWhileCacheUsesXDG(t *testing.T) {
 	}
 }
 
+func TestTransactionPathsUseAPMState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+
+	root, err := paths.TransactionPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := paths.JournalPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRoot := filepath.Join(home, ".apm", "transactions")
+	if root != wantRoot {
+		t.Fatalf("TransactionPath() = %q, want %q", root, wantRoot)
+	}
+	if want := filepath.Join(wantRoot, "active.json"); journal != want {
+		t.Fatalf("JournalPath() = %q, want %q", journal, want)
+	}
+}
+
+func TestTransactionPathsPropagateHomeResolutionError(t *testing.T) {
+	t.Setenv("APM_HOME", "")
+	t.Setenv("HOME", "")
+
+	if _, err := paths.TransactionPath(); err == nil {
+		t.Fatal("TransactionPath() error = nil, want home resolution error")
+	}
+	if _, err := paths.JournalPath(); err == nil {
+		t.Fatal("JournalPath() error = nil, want home resolution error")
+	}
+}
+
 func TestManifestPathUsesAPMHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
