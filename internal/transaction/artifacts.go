@@ -139,19 +139,26 @@ func cleanupCommittedStaging(journal Journal) error {
 }
 
 func cleanupCommittedStagingWithOps(journal Journal, files fileOps) error {
-	if journal.Operation != OperationInstall {
-		return fmt.Errorf("cleanup staging for operation %q: %w", journal.Operation, ErrUnsafePath)
-	}
 	if err := validateJournal(journal); err != nil {
 		return err
 	}
-	physicalStaging, err := filesystemutil.ResolvePhysicalPath(journal.StagingRoot)
-	if err != nil {
-		return fmt.Errorf("resolve physical staging %q: %w", journal.StagingRoot, err)
+	if journal.Operation != OperationInstall {
+		return fmt.Errorf("cleanup staging for operation %q: %w", journal.Operation, ErrUnsafePath)
 	}
-	physicalTarget, err := filesystemutil.ResolvePhysicalPath(journal.TargetPath)
+	return cleanupInstallStagingWithOps(journal.StagingRoot, journal.TargetPath, files)
+}
+
+func cleanupInstallStagingWithOps(stagingRoot, targetPath string, files fileOps) error {
+	if err := validateCanonicalStaging(stagingRoot, ErrUnsafePath); err != nil {
+		return err
+	}
+	physicalStaging, err := filesystemutil.ResolvePhysicalPath(stagingRoot)
 	if err != nil {
-		return fmt.Errorf("resolve physical target %q: %w", journal.TargetPath, err)
+		return fmt.Errorf("resolve physical staging %q: %w", stagingRoot, err)
+	}
+	physicalTarget, err := filesystemutil.ResolvePhysicalPath(targetPath)
+	if err != nil {
+		return fmt.Errorf("resolve physical target %q: %w", targetPath, err)
 	}
 	targetWithinStaging, err := filesystemutil.PathEqualOrWithin(physicalStaging, physicalTarget)
 	if err != nil {
@@ -164,8 +171,8 @@ func cleanupCommittedStagingWithOps(journal Journal, files fileOps) error {
 	if targetWithinStaging || stagingWithinTarget {
 		return fmt.Errorf("physical staging %q overlaps target %q: %w", physicalStaging, physicalTarget, ErrUnsafePath)
 	}
-	if err := files.removeAll(journal.StagingRoot); err != nil {
-		return fmt.Errorf("remove committed staging %q: %w", journal.StagingRoot, err)
+	if err := files.removeAll(stagingRoot); err != nil {
+		return fmt.Errorf("remove install staging %q: %w", stagingRoot, err)
 	}
 	return nil
 }

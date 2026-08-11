@@ -15,4 +15,6 @@ var (
 	ErrIndeterminateState = errors.New("indeterminate transaction state")
 	// ErrRecoveryFailed 表示活动事务恢复失败。
 	ErrRecoveryFailed = errors.New("transaction recovery failed")
+	// ErrStaleManifest 表示清单引用的受管安装目标已经缺失。
+	ErrStaleManifest = errors.New("installed power manifest target is missing")
 )

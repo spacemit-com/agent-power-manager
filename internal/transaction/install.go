@@ -43,6 +43,22 @@ func (s *Service) Install(ctx context.Context, request InstallRequest) error {
 	if request.Previous == nil && targetExists {
 		return fmt.Errorf("unmanaged install target %q: %w", target, adapter.ErrTargetConflict)
 	}
+	if request.Previous != nil && !targetExists {
+		staleErr := fmt.Errorf("installed target %q for agent %q power %q is missing: %w", target, request.Agent, request.Power.Name, ErrStaleManifest)
+		removeErr := s.manifests.Remove(request.Agent, request.Previous.Type, request.Previous.Name)
+		cleanupErr := cleanupInstallStagingWithOps(request.StagingRoot, target, s.files)
+		if removeErr != nil {
+			return errors.Join(
+				staleErr,
+				fmt.Errorf("remove stale manifest entry for agent %q power %q: %w", request.Agent, request.Previous.Name, removeErr),
+				cleanupErr,
+			)
+		}
+		return errors.Join(
+			fmt.Errorf("removed stale manifest entry for agent %q power %q after target disappeared: %w", request.Agent, request.Previous.Name, ErrStaleManifest),
+			cleanupErr,
+		)
+	}
 
 	transactionID, err := s.newID()
 	if err != nil {

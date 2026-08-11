@@ -66,11 +66,12 @@ func (s *recordingJournalStore) Delete(id string) error {
 }
 
 type recordingManifestWriter struct {
-	events    *[]string
-	setErr    error
-	removeErr error
-	setRef    domain.PowerRef
-	removed   domain.PowerRef
+	events       *[]string
+	setErr       error
+	removeErr    error
+	setRef       domain.PowerRef
+	removedAgent domain.AgentID
+	removed      domain.PowerRef
 }
 
 func (w *recordingManifestWriter) Set(_ domain.AgentID, ref domain.PowerRef) error {
@@ -81,12 +82,13 @@ func (w *recordingManifestWriter) Set(_ domain.AgentID, ref domain.PowerRef) err
 	w.setRef = ref
 	return nil
 }
-func (w *recordingManifestWriter) Remove(_ domain.AgentID, powerType domain.PowerType, name string) error {
+func (w *recordingManifestWriter) Remove(agent domain.AgentID, powerType domain.PowerType, name string) error {
 	*w.events = append(*w.events, "manifest:remove")
+	w.removedAgent = agent
+	w.removed = domain.PowerRef{Name: name, Type: powerType}
 	if w.removeErr != nil {
 		return w.removeErr
 	}
-	w.removed = domain.PowerRef{Name: name, Type: powerType}
 	return nil
 }
 
@@ -194,15 +196,58 @@ func TestInstallUpgradeBacksUpOldTargetBeforePublishing(t *testing.T) {
 	}
 }
 
-func TestInstallManagedMissingTargetSelfHeals(t *testing.T) {
+func TestInstallManagedMissingTargetRemovesManifestCleansStagingAndStops(t *testing.T) {
 	fixture := newInstallFixture(t)
-	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "3.0.0"}
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 	fixture.request.Previous = &old
-	if err := fixture.service.Install(context.Background(), fixture.request); err != nil {
+	if err := os.MkdirAll(fixture.staging, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.manifests.setRef != fixture.request.Power {
-		t.Fatalf("manifest Set = %+v", fixture.manifests.setRef)
+	if err := os.WriteFile(filepath.Join(fixture.staging, "staged"), []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, ErrStaleManifest) {
+		t.Fatalf("Install() error = %v, want ErrStaleManifest", err)
+	}
+	if fixture.manifests.removedAgent != fixture.request.Agent || fixture.manifests.removed.Name != old.Name || fixture.manifests.removed.Type != old.Type {
+		t.Fatalf("Remove = agent %q ref %+v, want agent %q ref %+v", fixture.manifests.removedAgent, fixture.manifests.removed, fixture.request.Agent, old)
+	}
+	if _, statErr := os.Lstat(fixture.staging); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("staging remains: %v", statErr)
+	}
+	if fixture.journals.found {
+		t.Fatal("stale repair created a journal")
+	}
+	if !reflect.DeepEqual(fixture.events, []string{"manifest:remove"}) {
+		t.Fatalf("events = %v, want only manifest removal", fixture.events)
+	}
+}
+
+func TestInstallManagedMissingTargetJoinsRemoveAndStagingCleanupFailures(t *testing.T) {
+	fixture := newInstallFixture(t)
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
+	fixture.request.Previous = &old
+	removeErr := errors.New("remove stale manifest failed")
+	cleanupErr := errors.New("stale staging cleanup failed")
+	fixture.manifests.removeErr = removeErr
+	fixture.service.files.removeAll = func(path string) error {
+		if path == fixture.staging {
+			return cleanupErr
+		}
+		return os.RemoveAll(path)
+	}
+
+	err := fixture.service.Install(context.Background(), fixture.request)
+	if !errors.Is(err, ErrStaleManifest) || !errors.Is(err, removeErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("Install() error = %v, want stale, remove, and cleanup errors", err)
+	}
+	if fixture.journals.found {
+		t.Fatal("stale repair created a journal")
+	}
+	if !reflect.DeepEqual(fixture.events, []string{"manifest:remove"}) {
+		t.Fatalf("events = %v, want only manifest removal", fixture.events)
 	}
 }
 
