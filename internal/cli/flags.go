@@ -20,6 +20,10 @@ func validateCommon(flags Flags) error {
 	if strings.TrimSpace(flags.Agent) == "" {
 		return errors.New("--agent is required")
 	}
+	return validatePowerType(flags)
+}
+
+func validatePowerType(flags Flags) error {
 	switch flags.Type {
 	case "", "skill", "plugin", "mcp":
 		return nil

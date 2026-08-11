@@ -13,19 +13,25 @@ type SetupLoggingFunc func(verbose bool)
 
 // CLIEntry 是 APM 命令行的执行入口。
 type CLIEntry struct {
-	stdout       io.Writer
-	stderr       io.Writer
-	setupLogging SetupLoggingFunc
+	stdout             io.Writer
+	stderr             io.Writer
+	setupLogging       SetupLoggingFunc
+	newSearchLifecycle SearchLifecycleFactory
 }
 
-// New 使用指定输出和日志初始化函数创建 CLI 入口。
-func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc) *CLIEntry {
-	return &CLIEntry{stdout: stdout, stderr: stderr, setupLogging: setupLogging}
+// New 使用指定输出、日志初始化函数和 Search 生命周期工厂创建 CLI 入口。
+func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory) *CLIEntry {
+	return &CLIEntry{
+		stdout:             stdout,
+		stderr:             stderr,
+		setupLogging:       setupLogging,
+		newSearchLifecycle: newSearchLifecycle,
+	}
 }
 
-// Execute 解析并校验参数，不执行 Power 生命周期业务。
+// Execute 解析参数并执行选定的 CLI 命令。
 func (entry *CLIEntry) Execute(args []string) error {
-	root := newRootCommand(entry.stdout, entry.stderr)
+	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle)
 	preparseLogging(root, args, entry.setupLogging)
 	root.SetArgs(args)
 	executed, err := root.ExecuteC()
@@ -44,7 +50,7 @@ func preparseLogging(root *cobra.Command, args []string, setupLogging SetupLoggi
 	setupLogging(verbose)
 }
 
-func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
+func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "apm",
 		Short:         "Agent Power Manager",
@@ -55,7 +61,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	root.SetErr(stderr)
 	root.PersistentFlags().Bool("verbose", false, "enable verbose diagnostics")
 	root.AddCommand(
-		newSearchCommand(),
+		newSearchCommand(newSearchLifecycle),
 		newListCommand(),
 		newInstallCommand(),
 		newUninstallCommand(),
@@ -64,15 +70,21 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 }
 func bindCommonFlags(command *cobra.Command, flags *Flags) {
 	command.Flags().StringVar(&flags.Agent, "agent", "", "target agent ID or all")
+	bindTypeFlag(command, flags)
+}
+
+func bindTypeFlag(command *cobra.Command, flags *Flags) {
 	command.Flags().StringVar(&flags.Type, "type", "", "power type: skill, plugin, or mcp")
 }
 
 func logParsedCommand(command *cobra.Command, flags Flags, args []string) {
-	slog.Debug(
-		"command parsed",
+	attributes := []slog.Attr{
 		slog.String("command", command.Name()),
-		slog.String("agent", flags.Agent),
 		slog.String("type", flags.Type),
 		slog.Any("args", args),
-	)
+	}
+	if flags.Agent != "" {
+		attributes = append(attributes, slog.String("agent", flags.Agent))
+	}
+	slog.LogAttrs(command.Context(), slog.LevelDebug, "command parsed", attributes...)
 }

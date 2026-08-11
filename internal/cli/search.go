@@ -2,29 +2,55 @@ package cli
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-func newSearchCommand() *cobra.Command {
+func newSearchCommand(newLifecycle SearchLifecycleFactory) *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
 		Use:   "search <keyword>",
 		Short: "Search available powers",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if err := validateCommon(flags); err != nil {
+			if err := validatePowerType(flags); err != nil {
 				return err
 			}
-			flags.Keyword = args[0]
-			if strings.TrimSpace(flags.Keyword) == "" {
+			flags.Keyword = strings.TrimSpace(args[0])
+			if flags.Keyword == "" {
 				return errors.New("keyword must not be empty")
 			}
 			logParsedCommand(command, flags, args)
-			return nil
+			if newLifecycle == nil {
+				return errors.New("search lifecycle factory is required")
+			}
+			service, err := newLifecycle()
+			if err != nil {
+				return fmt.Errorf("create search lifecycle: %w", err)
+			}
+			if service == nil {
+				return errors.New("create search lifecycle: nil service")
+			}
+			result, err := service.Search(command.Context(), flags)
+			if err != nil {
+				return err
+			}
+			return renderSearch(command.OutOrStdout(), result)
 		},
 	}
-	bindCommonFlags(command, &flags)
+	bindTypeFlag(command, &flags)
 	return command
+}
+
+func renderSearch(writer io.Writer, result SearchResult) error {
+	for _, ref := range result.Powers {
+		line := string(ref.Type) + "/" + ref.Name + "@" + ref.Version + "\n"
+		if _, err := io.WriteString(writer, line); err != nil {
+			return fmt.Errorf("write search result: %w", err)
+		}
+	}
+	return nil
 }

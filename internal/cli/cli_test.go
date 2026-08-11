@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -16,7 +17,15 @@ func newTestEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
 	t.Cleanup(func() { slog.SetDefault(original) })
 	return cli.New(stdout, stderr, func(verbose bool) {
 		slog.SetDefault(logging.NewLogger(stdout, stderr, verbose))
+	}, func() (cli.SearchLifecycle, error) {
+		return emptySearchLifecycle{}, nil
 	})
+}
+
+type emptySearchLifecycle struct{}
+
+func (emptySearchLifecycle) Search(context.Context, cli.Flags) (cli.SearchResult, error) {
+	return cli.SearchResult{}, nil
 }
 
 func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
@@ -26,24 +35,24 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 		wantErr     bool
 		wantMessage string
 	}{
-		{name: "search", args: []string{"search", "foo", "--agent=all"}},
+		{name: "search", args: []string{"search", "foo"}},
 		{name: "list", args: []string{"list", "--agent=codex", "--installed"}},
 		{name: "install", args: []string{"install", "demo=1.2.3", "--agent=codex", "--type=skill"}},
 		{name: "uninstall", args: []string{"uninstall", "demo", "--agent=codex"}},
-		{name: "plugin type", args: []string{"search", "foo", "--agent=all", "--type=plugin"}},
+		{name: "plugin type", args: []string{"search", "foo", "--type=plugin"}},
 		{name: "mcp type", args: []string{"list", "--agent=codex", "--type=mcp"}},
-		{name: "missing agent", args: []string{"search", "foo"}, wantErr: true, wantMessage: "--agent is required"},
-		{name: "whitespace agent", args: []string{"search", "foo", "--agent= \t "}, wantErr: true, wantMessage: "--agent is required"},
+		{name: "missing agent", args: []string{"list"}, wantErr: true, wantMessage: "--agent is required"},
+		{name: "whitespace agent", args: []string{"list", "--agent= \t "}, wantErr: true, wantMessage: "--agent is required"},
 		{name: "invalid type", args: []string{"list", "--agent=all", "--type=other"}, wantErr: true, wantMessage: "invalid --type \"other\""},
-		{name: "whitespace keyword", args: []string{"search", " \t ", "--agent=all"}, wantErr: true, wantMessage: "keyword must not be empty"},
+		{name: "whitespace keyword", args: []string{"search", " \t "}, wantErr: true, wantMessage: "keyword must not be empty"},
 		{name: "empty install name", args: []string{"install", "", "--agent=all"}, wantErr: true, wantMessage: "power name must not be empty"},
 		{name: "empty version", args: []string{"install", "demo=", "--agent=all"}, wantErr: true, wantMessage: "power version must not be empty"},
 		{name: "whitespace uninstall name", args: []string{"uninstall", " \t ", "--agent=all"}, wantErr: true, wantMessage: "power name must not be empty"},
-		{name: "extra search arg", args: []string{"search", "foo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
+		{name: "extra search arg", args: []string{"search", "foo", "extra"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
 		{name: "extra list arg", args: []string{"list", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 0 arg(s), received 1"},
 		{name: "extra install arg", args: []string{"install", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
 		{name: "extra uninstall arg", args: []string{"uninstall", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
-		{name: "invalid verbose", args: []string{"search", "foo", "--agent=all", "--verbose=invalid"}, wantErr: true, wantMessage: "invalid argument \"invalid\" for \"--verbose\" flag"},
+		{name: "invalid verbose", args: []string{"search", "foo", "--verbose=invalid"}, wantErr: true, wantMessage: "invalid argument \"invalid\" for \"--verbose\" flag"},
 	}
 
 	for _, tt := range tests {
@@ -113,7 +122,7 @@ func TestCLIExecutionErrorsWriteErrorAndGeneratedUsageToStderr(t *testing.T) {
 	}{
 		{name: "unknown command", args: []string{"unknown"}, wantText: "unknown command \"unknown\""},
 		{name: "invalid flag before help", args: []string{"--bad", "--help"}, wantText: "unknown flag: --bad"},
-		{name: "invalid verbose", args: []string{"search", "foo", "--agent=all", "--verbose=invalid"}, wantText: "invalid argument \"invalid\" for \"--verbose\" flag"},
+		{name: "invalid verbose", args: []string{"search", "foo", "--verbose=invalid"}, wantText: "invalid argument \"invalid\" for \"--verbose\" flag"},
 	}
 
 	for _, tt := range tests {
@@ -163,7 +172,7 @@ func TestCLIVerboseWritesOnlyDiagnosticsToStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	entry := newTestEntry(t, &stdout, &stderr)
 
-	if err := entry.Execute([]string{"search", "foo", "--agent=all", "--type=plugin", "--verbose"}); err != nil {
+	if err := entry.Execute([]string{"search", "foo", "--type=plugin", "--verbose"}); err != nil {
 		t.Fatalf("Execute(verbose search) error = %v", err)
 	}
 	if stdout.Len() != 0 {
@@ -176,10 +185,13 @@ func TestCLIVerboseWritesOnlyDiagnosticsToStderr(t *testing.T) {
 	if strings.Contains(got, "time=") {
 		t.Fatalf("verbose stderr = %q, want no timestamp", got)
 	}
-	for _, attribute := range []string{"command=search", "agent=all", "type=plugin", "args=[foo]"} {
+	for _, attribute := range []string{"command=search", "type=plugin", "args=[foo]"} {
 		if !strings.Contains(got, attribute) {
 			t.Fatalf("verbose stderr = %q, want attribute %q", got, attribute)
 		}
+	}
+	if strings.Contains(got, "agent=") {
+		t.Fatalf("verbose stderr = %q, want no agent attribute", got)
 	}
 }
 
@@ -187,7 +199,7 @@ func TestCLIRepeatedExecutionDoesNotLeakFlagsOrLogging(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	entry := newTestEntry(t, &stdout, &stderr)
 
-	if err := entry.Execute([]string{"search", "first", "--agent=all", "--verbose"}); err != nil {
+	if err := entry.Execute([]string{"search", "first", "--type=plugin", "--verbose"}); err != nil {
 		t.Fatalf("first Execute error = %v", err)
 	}
 	if !strings.Contains(stderr.String(), "level=DEBUG") {
@@ -196,15 +208,20 @@ func TestCLIRepeatedExecutionDoesNotLeakFlagsOrLogging(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 
-	if err := entry.Execute([]string{"search", "second", "--agent=codex"}); err != nil {
+	if err := entry.Execute([]string{"search", "second", "--verbose"}); err != nil {
 		t.Fatalf("second Execute error = %v", err)
+	}
+	if got := stderr.String(); !strings.Contains(got, "level=DEBUG") || strings.Contains(got, "type=plugin") {
+		t.Fatalf("second stderr = %q, want fresh verbose logging and no leaked type", got)
+	}
+	stdout.Reset()
+	stderr.Reset()
+
+	if err := entry.Execute([]string{"search", "third"}); err != nil {
+		t.Fatalf("third Execute error = %v", err)
 	}
 	slog.Debug("after non-verbose execution", slog.String("command", "search"))
 	if stdout.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("second Execute output = stdout %q, stderr %q; want no leaked verbose state", stdout.String(), stderr.String())
-	}
-
-	if err := entry.Execute([]string{"search", "third"}); err == nil {
-		t.Fatal("third Execute error = nil, want missing --agent after prior executions")
+		t.Fatalf("third Execute output = stdout %q, stderr %q; want no leaked verbose state", stdout.String(), stderr.String())
 	}
 }
