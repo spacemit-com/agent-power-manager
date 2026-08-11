@@ -25,6 +25,7 @@
 - `4d7932e test(apm): verify unchanged install cleanup`
 - `feb51b5 test: cover canonical cache and stale repair`
 - `afa8187 docs(install): record lifecycle implementation`
+- `c5f718d docs(install): correct lifecycle boundaries`
 
 解决方案或完成结果：
 
@@ -32,7 +33,7 @@
 
 验证结果或限制：
 
-以下命令均以退出码 0 完成：`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`go mod tidy`、`cmp go.mod /tmp/apm-go.mod.before`、`cmp go.sum /tmp/apm-go.sum.before`、`git diff --check`，以及 lifecycle/transaction/cache/version 的 Error/Print 静态扫描和 `cache.Content`/`Content.Path`/旧 install 签名扫描。隔离 CLI 黑盒验收的首次调用 stdout 精确为 `codex/skill/foo-before-summary@v0.0.1 installed`、stderr 为空；第二次规范版本调用 stdout 精确为 `codex/skill/foo-before-summary@v0.0.1 unchanged`、stderr 为空，并确认目标 `SKILL.md`、manifest 存在且无 active journal。无效 `0.0.1` 以状态 1 退出、stdout 为空、stderr 恰有一条 `level=ERROR`，且包含 `must be vMAJOR.MINOR.PATCH` 和 `Usage:`。
+以下命令均以退出码 0 完成：`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`go mod tidy`、`cmp go.mod /tmp/apm-go.mod.before`、`cmp go.sum /tmp/apm-go.sum.before`、`git diff --check`，以及 lifecycle/transaction/cache/version 的 Error/Print 静态扫描和 `cache.Content`/`Content.Path`/旧 install 签名扫描。文档扫描 `rg -n 'parse-only|自愈|self-heal|Fetch\(.*Content' BUILD.md ivory-tower --glob '*.md' --glob '*.mmd' --glob '*.dsl'` 也以退出码 0 完成：逐行确认当前文档的 parse-only 仅指 Uninstall，Feature 008/009 与计划中的旧 Install 边界均显式标为历史或 superseded，Install 自愈与 `Fetch(...Content...)` 只出现在明确 superseded 的历史文本，剩余自愈仅描述保持不变的 Uninstall target-missing 语义。隔离 CLI 黑盒验收的首次调用 stdout 精确为 `codex/skill/foo-before-summary@v0.0.1 installed`、stderr 为空；第二次规范版本调用 stdout 精确为 `codex/skill/foo-before-summary@v0.0.1 unchanged`、stderr 为空，并确认目标 `SKILL.md`、manifest 存在且无 active journal。无效 `0.0.1` 以状态 1 退出、stdout 为空、stderr 恰有一条 `level=ERROR`，且包含 `must be vMAJOR.MINOR.PATCH` 和 `Usage:`。
 
 ## 2026-08-11
 
