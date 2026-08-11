@@ -42,7 +42,10 @@ func newSearchEntry(t *testing.T, stdout, stderr io.Writer, factory cli.SearchLi
 	t.Cleanup(func() { slog.SetDefault(original) })
 	return cli.New(stdout, stderr, func(verbose bool) {
 		slog.SetDefault(logging.NewLogger(stdout, stderr, verbose))
-	}, factory)
+	}, factory, func() (cli.ListLifecycle, error) {
+		t.Fatal("Search dispatched to List factory")
+		return nil, nil
+	})
 }
 
 func TestSearchInvokesLifecycleWithTrimmedKeywordAndType(t *testing.T) {

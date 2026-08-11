@@ -1,4 +1,4 @@
-// Package cli 提供解析和校验参数、调用 Search 生命周期并渲染业务结果的 APM Cobra 命令树。
+// Package cli 提供解析和校验参数、调用 Search/List 生命周期并渲染业务结果的 APM Cobra 命令树。
 package cli
 
 import (
@@ -17,21 +17,23 @@ type CLIEntry struct {
 	stderr             io.Writer
 	setupLogging       SetupLoggingFunc
 	newSearchLifecycle SearchLifecycleFactory
+	newListLifecycle   ListLifecycleFactory
 }
 
-// New 使用指定输出、日志初始化函数和 Search 生命周期工厂创建 CLI 入口。
-func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory) *CLIEntry {
+// New 使用指定输出、日志初始化函数和相互独立的 Search/List 生命周期工厂创建 CLI 入口。
+func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory) *CLIEntry {
 	return &CLIEntry{
 		stdout:             stdout,
 		stderr:             stderr,
 		setupLogging:       setupLogging,
 		newSearchLifecycle: newSearchLifecycle,
+		newListLifecycle:   newListLifecycle,
 	}
 }
 
 // Execute 解析参数并执行选定的 CLI 命令。
 func (entry *CLIEntry) Execute(args []string) error {
-	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle)
+	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle, entry.newListLifecycle)
 	preparseLogging(root, args, entry.setupLogging)
 	root.SetArgs(args)
 	executed, err := root.ExecuteC()
@@ -50,7 +52,7 @@ func preparseLogging(root *cobra.Command, args []string, setupLogging SetupLoggi
 	setupLogging(verbose)
 }
 
-func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory) *cobra.Command {
+func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "apm",
 		Short:         "Agent Power Manager",
@@ -62,7 +64,7 @@ func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycle
 	root.PersistentFlags().Bool("verbose", false, "enable verbose diagnostics")
 	root.AddCommand(
 		newSearchCommand(newSearchLifecycle),
-		newListCommand(),
+		newListCommand(newListLifecycle),
 		newInstallCommand(),
 		newUninstallCommand(),
 	)

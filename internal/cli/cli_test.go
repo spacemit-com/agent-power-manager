@@ -19,6 +19,8 @@ func newTestEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
 		slog.SetDefault(logging.NewLogger(stdout, stderr, verbose))
 	}, func() (cli.SearchLifecycle, error) {
 		return emptySearchLifecycle{}, nil
+	}, func() (cli.ListLifecycle, error) {
+		return emptyListLifecycle{}, nil
 	})
 }
 
@@ -26,6 +28,12 @@ type emptySearchLifecycle struct{}
 
 func (emptySearchLifecycle) Search(context.Context, cli.Flags) (cli.SearchResult, error) {
 	return cli.SearchResult{}, nil
+}
+
+type emptyListLifecycle struct{}
+
+func (emptyListLifecycle) List(context.Context, cli.Flags) (cli.ListResult, error) {
+	return cli.ListResult{}, nil
 }
 
 func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
@@ -36,20 +44,21 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 		wantMessage string
 	}{
 		{name: "search", args: []string{"search", "foo"}},
-		{name: "list", args: []string{"list", "--agent=codex", "--installed"}},
+		{name: "cloud list", args: []string{"list"}},
+		{name: "installed list", args: []string{"list", "--agent=codex", "--installed"}},
 		{name: "install", args: []string{"install", "demo=1.2.3", "--agent=codex", "--type=skill"}},
 		{name: "uninstall", args: []string{"uninstall", "demo", "--agent=codex"}},
 		{name: "plugin type", args: []string{"search", "foo", "--type=plugin"}},
-		{name: "mcp type", args: []string{"list", "--agent=codex", "--type=mcp"}},
-		{name: "missing agent", args: []string{"list"}, wantErr: true, wantMessage: "--agent is required"},
-		{name: "whitespace agent", args: []string{"list", "--agent= \t "}, wantErr: true, wantMessage: "--agent is required"},
-		{name: "invalid type", args: []string{"list", "--agent=all", "--type=other"}, wantErr: true, wantMessage: "invalid --type \"other\""},
+		{name: "mcp type", args: []string{"list", "--type=mcp"}},
+		{name: "missing installed agent", args: []string{"list", "--installed"}, wantErr: true, wantMessage: "--agent is required"},
+		{name: "whitespace installed agent", args: []string{"list", "--installed", "--agent= \t "}, wantErr: true, wantMessage: "--agent is required"},
+		{name: "invalid type", args: []string{"list", "--type=other"}, wantErr: true, wantMessage: "invalid --type \"other\""},
 		{name: "whitespace keyword", args: []string{"search", " \t "}, wantErr: true, wantMessage: "keyword must not be empty"},
 		{name: "empty install name", args: []string{"install", "", "--agent=all"}, wantErr: true, wantMessage: "power name must not be empty"},
 		{name: "empty version", args: []string{"install", "demo=", "--agent=all"}, wantErr: true, wantMessage: "power version must not be empty"},
 		{name: "whitespace uninstall name", args: []string{"uninstall", " \t ", "--agent=all"}, wantErr: true, wantMessage: "power name must not be empty"},
 		{name: "extra search arg", args: []string{"search", "foo", "extra"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
-		{name: "extra list arg", args: []string{"list", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 0 arg(s), received 1"},
+		{name: "extra list arg", args: []string{"list", "extra"}, wantErr: true, wantMessage: "accepts 0 arg(s), received 1"},
 		{name: "extra install arg", args: []string{"install", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
 		{name: "extra uninstall arg", args: []string{"uninstall", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
 		{name: "invalid verbose", args: []string{"search", "foo", "--verbose=invalid"}, wantErr: true, wantMessage: "invalid argument \"invalid\" for \"--verbose\" flag"},
