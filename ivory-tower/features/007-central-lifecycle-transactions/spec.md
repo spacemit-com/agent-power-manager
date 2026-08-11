@@ -6,6 +6,8 @@
 
 本 feature 只实现 transaction 能力及供 lifecycle 后续调用的边界，不实现 lifecycle 或 CLI 编排。未来四个 lifecycle 命令必须在获取全局 APM 锁后、执行用户请求前调用 `Manager.Recover`；恢复不依赖当前命令再次指定原来的 Agent 或 Power。
 
+> **历史 Install 规则已被 Feature 010 supersede（2026-08-11）：** 本文原来允许“已纳管 Install target 缺失时继续安装”的自愈描述不再是当前契约。现在该分支在生成 transaction ID、创建 journal 或调用 Adapter 前，执行 `ManifestWriter.Remove(agent,type,name)`、清理 canonical staging、返回 `ErrStaleManifest` 并中止。本文 Uninstall target 缺失时继续清单删除的语义保持不变。
+
 本设计由 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 记录，并细化 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-007](../../adr/ADR-007-use-stateless-config-repository.md) 和 [ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md)。
 
 ## 职责边界
@@ -226,9 +228,9 @@ Journal 根目录权限固定为 `0700`，文件权限固定为 `0600`。Create/
 ## Install 正常流程
 
 1. 检查 context 和 request，通过 Adapter 获取 target，并确认没有活动 journal。
-2. 检查事务前 target：`Previous == nil` 且 target 已存在时直接返回清单外冲突；有旧清单记录或 target 缺失时继续。
+2. 检查事务前 target：`Previous == nil` 且 target 已存在时直接返回清单外冲突；`Previous != nil` 且 target 已缺失时适用上方标记为已被 Feature 010 supersede 的历史 Install 规则，当前不继续安装。
 3. 生成 transaction ID、本地事务路径和 backup 路径，写入 `preparing` journal。
-4. `Previous != nil` 且 target 存在时，创建本地事务目录并把 target 原子移动到 backup。target 已缺失则按文件侧漂移自愈，继续安装。
+4. `Previous != nil` 且 target 存在时，创建本地事务目录并把 target 原子移动到 backup。target 已缺失的旧自愈安装分支已被 Feature 010 supersede，不进入本流程。
 5. 在更新 `publishing` 前确认 target 为空，再持久化发布意图并调用 Adapter。Adapter 仍执行自己的目标二次检查，以覆盖检查后的外部变化。
 6. Adapter 返回 `Published=false` 时，把 journal 更新为 `rolling-back`。升级场景在 target 为空时原子恢复 backup；首次安装不删除可能由外部创建的 target。回滚成功后删除 journal，再返回原始错误。
 7. Adapter 返回 `Published=true` 时，提交点已经越过。将 journal 更新为 `committing`；若 Adapter 同时返回清理错误，停止当前事务、保留 journal 并返回错误。
@@ -325,7 +327,7 @@ Adapter 与 transaction 应复用同一组物理路径解析和分隔符感知�
 
 ### Install
 
-- 首次安装、升级、降级和清单记录存在但 target 已被手动删除；
+- 首次安装、升级、降级；“清单记录存在但 Install target 已被手动删除后继续安装”是已被 Feature 010 supersede 的历史测试边界；
 - 清单无记录但 target 存在时由 transaction 的发布前检查或 Adapter 的防御性二次检查报告清单外冲突，且不删除该目标；
 - backup、阶段更新、Adapter、Set、staging/backup 清理和 journal 删除的失败注入；
 - `Published=false` 进入回滚，`Published=true` 固定提交方向；

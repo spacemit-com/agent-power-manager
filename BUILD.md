@@ -62,7 +62,9 @@ gofmt -w cmd internal
 ./apm list --type skill
 ./apm list --installed --agent codex
 ./apm list --installed --agent all --type skill
-./apm install example=1.0.0 --agent all
+./apm install foo-before-summary --agent codex
+./apm install foo-before-summary=v0.0.1 --agent codex --type skill
+./apm install foo-before-summary --agent all
 ./apm uninstall example --agent all --type plugin
 ```
 
@@ -88,7 +90,20 @@ Installed List 必须同时提供 `--installed --agent=<agent-id|all>`，在成�
 
 例如 `./apm list --agent all` 是无效组合：它会非零退出，并在 stderr 报告 `--agent requires --installed` 和 usage。`--agent=all` 的 installed 读取若出现部分失败，会输出成功记录后以非零状态报告错误；fatal 或 Release error 不输出业务行。已安装清单版本必须精确为 `vMAJOR.MINOR.PATCH`，APM 不会迁移或清理非法旧清单（[ADR-007](ivory-tower/adr/ADR-007-use-stateless-config-repository.md)）；Agent 刷新顺序见 [ADR-004](ivory-tower/adr/ADR-004-discover-installed-agents-before-local-operations.md)。
 
-`install`、`uninstall` 当前仍仅完成命令解析和参数校验，尚未执行业务生命周期操作。
+Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名 Cloud 候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、Cloud、Cache 和串行 Transaction；只有成功 Release 后 CLI 才渲染。
+
+每个目标 Agent 的 stdout 精确为以下六种 outcome 之一：
+
+```text
+<agent>/<type>/<name>@<version> installed
+<agent>/<type>/<name>@<version> upgraded
+<agent>/<type>/<name>@<version> downgraded
+<agent>/<type>/<name>@<version> unchanged
+<agent>/<type>/<name>@<version> failed
+<agent>/<type>/<name>@<version> unexecuted
+```
+
+`--agent=all` 按 Agent ID 字典序 fail-fast；只有业务失败后又成功 Release 的批处理结果会先渲染 `failed/unexecuted` 行、再非零退出。fatal 或 Release error 不输出业务行。Uninstall 仍是 parse-only，仅完成命令解析和参数校验。
 
 ## 清理本地构建产物
 

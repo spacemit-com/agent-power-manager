@@ -6,6 +6,10 @@
 - 要解决的问题：`install` 当前只解析参数，尚未把既有 Cloud、Cache、Adapter、Config 和 TransactionManager 串成可执行命令；旧流程也没有落实锁外统一渲染、规范显式版本、跨类别重名消歧及陈旧清单项修复边界。
 - 可交付结果：完成 Install 专属 lifecycle 与 CLI 接线；在一次全局锁内恢复、刷新、解析和串行安装，成功 Release 后返回并渲染结构化结果；支持首次安装、升级、显式降级、同版本幂等和多 Agent fail-fast。
 
+## Implementation Status
+
+- 状态：已于 2026-08-11 实现。实际行为满足本 spec 的已批准要求；Uninstall 仍为 parse-only。
+
 ## Scope
 
 - 包含：Install 专属端口、factory、service、结果和 renderer；规范 `vMAJOR.MINOR.PATCH` 参数；Cloud 类别推断和最新版选择；Agent 快照；逐 Agent Config/Cache/Cloud/Adapter/Transaction 编排；陈旧清单项修复；Cache Fetch staging-root 契约；精确 stdout、统一错误出口；ADR/C4/概览/构建文档同步。

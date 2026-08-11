@@ -4,6 +4,8 @@
 
 在真实 Cloud 服务和完整 install lifecycle 尚未实现时，以 `internal/cloud/resources` 中的本地资源验证 Power 的发现、版本化缓存获取和 staging 物化边界。本 feature 实现 Cloud、Cache、共享目录复制工具及必要路径，不串联 CLI、lifecycle、Adapter 或 Transaction。
 
+> **已被后续实现修订（2026-08-11）：** Feature 010 已以公共 staging-root 字符串替代本 feature 的旧叶子 `Content.Path` 返回；Adapter 现在根据 `PowerRef` 从 root 定位 `staging/<type-directory>/<name>` 内容。以下 Cache 接口和流程按这一当前契约阅读。
+
 ## 领域模型
 
 `domain.PowerRef` 统一表示 Power 类别、名称和可选版本：
@@ -41,11 +43,7 @@ type Client interface {
 
 ```go
 type PowerCache interface {
-	Fetch(domain.PowerRef) (Content, error)
-}
-
-type Content struct {
-	Path string
+	Fetch(domain.PowerRef) (stagingRoot string, err error)
 }
 ```
 
@@ -116,7 +114,7 @@ StagingTempPath = <state-root>/.tmp/staging
 3. 非 Skill 类型或 `cache/skills/<name>/<version>` 不存在时，返回可通过 `errors.Is(err, cache.ErrMiss)` 判断的错误；此时旧 staging 已清理。
 4. 将版本化缓存目录复制到临时 staging 的 `skills/<name>`，在此去掉版本层级。
 5. 原子 rename 临时 staging 为最终 staging。
-6. 返回 `Content{Path: "<state-root>/staging/skills/<name>"}`。
+6. 返回公共 staging root 字符串 `"<state-root>/staging"`；叶子内容仍位于 `staging/skills/<name>`，由 Adapter 结合 `PowerRef` 定位。
 
 Fetch 不修改缓存源。复制或 rename 失败时不保留可消费的最终 staging；下一次 Fetch 会先清理残留临时目录和旧 staging。
 
@@ -126,7 +124,7 @@ Fetch 不修改缓存源。复制或 rename 失败时不保留可消费的最终
 
 ```text
 Fetch(ref)
-  ├─ 命中：返回无版本层 staging 内容
+  ├─ 命中：返回公共 staging root（叶子不含版本层）
   └─ ErrMiss：
        Get(ref)
          → resources/skills/<name>/<version>
@@ -159,12 +157,12 @@ Fetch(ref)
 
 ### 集成验收
 
-使用 `internal/cloud/resources/skills/foo-before-summary/0.0.1` 和测试隔离目录验证：
+使用 `internal/cloud/resources/skills/foo-before-summary/v0.0.1` 和测试隔离目录验证：
 
 ```text
-Fetch(skill/foo-before-summary@0.0.1) → ErrMiss
-Get(skill/foo-before-summary@0.0.1)   → cache/skills/foo-before-summary/0.0.1
-Fetch(skill/foo-before-summary@0.0.1) → staging/skills/foo-before-summary
+Fetch(skill/foo-before-summary@v0.0.1) → ErrMiss
+Get(skill/foo-before-summary@v0.0.1)   → cache/skills/foo-before-summary/v0.0.1
+Fetch(skill/foo-before-summary@v0.0.1) → staging/skills/foo-before-summary
 ```
 
 最终缓存与 staging 均包含 `SKILL.md` 和 `skill-card.md`；版本目录只保留在缓存，staging 不含版本层；所有写入位于测试设置的 `APM_HOME`/`XDG_CACHE_HOME` 内。

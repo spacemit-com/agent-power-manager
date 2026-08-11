@@ -1,17 +1,13 @@
 classDiagram
-    note for Locker "全局 APM 锁（ADR-003）：Search 在 Cloud 查询前释放；Cloud List 不获取；installed List 从 Recover、实时 Warn、Refresh 到全部 Config reads 后成功 Release"
+    note for Locker "全局 APM 锁（ADR-003）：Search 在 Cloud 前释放；Cloud List 不获取；installed List 覆盖 Recover→Warn→Refresh→Config reads；Install 一次锁覆盖 Recover→Refresh→Cloud→Cache→Transaction，并在 CLI 渲染前成功 Release"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)
     }
-
-    note for Unlock "锁句柄：持有者负责 Release；进程崩溃时内核自动释放"
     class Unlock {
         <<interface>>
         +Release() error
     }
-
-    note for flockLocker "flock(2) 实现：单一全局锁文件（类似 apt 的 /var/lib/dpkg/lock）"
     class flockLocker {
         +Acquire() (Unlock, error)
     }

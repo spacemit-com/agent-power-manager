@@ -1,64 +1,68 @@
 classDiagram
-    note for SearchLifecycle "Search 专属端口；恢复后解锁，再查询 Cloud 并返回结构化结果"
+    note for SearchLifecycle "Search：Recover 后 Release，再查询 Cloud；返回结构化结果，不打印"
     class SearchLifecycle {
         <<interface>>
         +Search(Context, Flags) (SearchResult, error)
     }
-
     class SearchResult {
         +Powers []PowerRef
     }
-
-    note for searchService "Acquire → Recover → 锁内 Warn → Release → Cloud List → 筛选/排序；不负责 CLI 打印"
     class searchService {
         +Search(...)
     }
 
-    note for ListLifecycle "List 专属端口；Cloud 与 installed 是独立共享状态分支"
+    note for ListLifecycle "List：Cloud 无锁；installed 成功 Release 后才返回可渲染结果"
     class ListLifecycle {
         <<interface>>
         +List(Context, Flags) (ListResult, error)
     }
-
-    class ListedPower {
-        +Agent AgentID
-        +Power PowerRef
-    }
-
     class ListResult {
         +Powers []ListedPower
     }
-
-    note for PartialListError "仅 all 的全部 Config 读取完成且 Release 成功后可携带已成功记录渲染"
     class PartialListError {
         +Failures []AgentFailure
     }
-
-    note for listService "Cloud：无锁、无 Recover，仅 Cloud 查询→计算；installed：Acquire→Recover→Warn→Refresh→全部 Config 读→成功 Release→计算；均不负责 CLI 打印"
     class listService {
         +List(...)
     }
 
-    note for AdapterRegistry "复制注册 Agent 后按字典序 Detect；成功快照保持同一顺序"
+    note for InstallLifecycle "Install 专属端口；只有成功 Release 的 batch error 可保留结果"
+    class InstallLifecycle {
+        <<interface>>
+        +Install(Context, Flags) (InstallResult, error)
+    }
+    class InstallItem {
+        +Agent AgentID
+        +Power PowerRef
+        +Outcome InstallOutcome
+    }
+    class InstallResult {
+        +Items []InstallItem
+    }
+    class InstallBatchError {
+        +Agent AgentID
+        +Err error
+    }
+    note for installService "Acquire → Recover/Warn → Refresh/target validation → Cloud resolve → serial work → successful Release；不负责 CLI 打印"
+    class installService {
+        +Install(...)
+    }
+
     class AdapterRegistry {
         <<interface>>
         +Resolve(AgentID, PowerType) (Adapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
     }
-
     class Adapter {
         <<interface>>
         +TargetPath(PowerRef) (string, error)
         +Install(PowerRef, stagingRoot) (InstallResult, error)
     }
-
     class AgentSnapshot {
         +Agents []AgentID
         +Contains(AgentID) bool
         +Ordered() []AgentID
     }
-
-    note for ConfigRepository "无状态封装完整清单读取与原子读改写；版本只接受 vMAJOR.MINOR.PATCH；调用时 lifecycle 已持锁"
     class ConfigRepository {
         <<interface>>
         +List(AgentID) (PowerGroups, error)
@@ -66,47 +70,51 @@ classDiagram
         +Set(AgentID, PowerRef) error
         +Remove(AgentID, PowerType, name) error
     }
-
-    note for TransactionManager "集中封装唯一活动 journal、同盘 backup/quarantine、Adapter 发布结果、清单写入、回滚和跨命令恢复"
+    note for TransactionManager "集中 journal；Install 陈旧 target 缺失时 Remove 单条清单、清理 staging、ErrStaleManifest 并中止"
     class TransactionManager {
         <<interface>>
         +Recover(Context) (RecoveryResult, error)
         +Install(Context, InstallRequest) error
         +Uninstall(Context, UninstallRequest) error
     }
-
-    note for Locker "仅共享状态区间持有：Search 的恢复、installed List 的恢复/刷新/读取；Cloud List 不获取"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)
     }
-
-    note for PowerCache "将版本已确定的 PowerRef 从版本化缓存物化到干净 staging"
     class PowerCache {
         <<interface>>
-        +Fetch(PowerRef) (Content, error)
+        +Fetch(PowerRef) (stagingRoot string, error)
     }
-
-    note for CloudClient "List 返回带版本的全部 PowerRef；Get 将版本已确定的 PowerRef 原子写入缓存"
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
         +Get(PowerRef) error
     }
+    class VersionSelector {
+        <<interface>>
+        +Select(candidates []string, requested string) (string, error)
+    }
 
     searchService ..|> SearchLifecycle
-    searchService --> SearchResult : returns
     searchService --> TransactionManager
     searchService --> Locker
     searchService --> CloudClient
     listService ..|> ListLifecycle
-    listService --> ListResult : returns
-    listService --> PartialListError : successful Release only
     listService --> AdapterRegistry : installed only
     listService --> ConfigRepository : installed only
     listService --> TransactionManager : installed only
     listService --> Locker : installed only
     listService --> CloudClient : Cloud only
+    installService ..|> InstallLifecycle
+    installService --> InstallResult : returns
+    installService --> InstallBatchError : successful Release only
+    installService --> Locker : 1 lock interval
+    installService --> TransactionManager : Recover/Install
+    installService --> CloudClient : List/Get
+    installService --> PowerCache : Fetch
+    installService --> AdapterRegistry : Refresh/Resolve
+    installService --> ConfigRepository : Find
+    installService --> VersionSelector : resolve version
     AdapterRegistry --> Adapter : resolves
     AdapterRegistry --> AgentSnapshot : returns
     TransactionManager --> Adapter : TargetPath/Install

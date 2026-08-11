@@ -6,6 +6,8 @@
 - 要解决的问题：现有 transaction 仅有占位类型，无法保证 Agent 目标目录与安装清单在安装、卸载、中断和收尾失败后的最终一致性；旧 lifecycle 图还把发布动作放在 transaction，与 Adapter 已拥有发布过程的 ADR-008 冲突。
 - 可交付结果：实现集中 journal、安装与卸载事务、路径状态判定和跨命令恢复接口；任意 lifecycle 命令后续都可在公共预检中恢复上一次失败，而不需要再次执行相同 Agent 或 Power 的命令。
 
+> **历史 Install 规则已被修订（2026-08-11）：** Feature 010 取代“已纳管 Install target 缺失时直接安装”的自愈规则。当前 Install 只移除对应清单项、清理 canonical staging、返回 `ErrStaleManifest` 并中止，且不创建 journal 或调用 Adapter。Uninstall 的 target 缺失语义不变。
+
 ## Scope
 
 - 包含：transaction 高层 Manager；集中且原子持久化的唯一活动 journal；同目标文件系统的 backup/quarantine；Install/Uninstall 正常事务；回滚与完成提交；结构化恢复结果；Adapter 显式发布结果；事务路径；错误分类、debug 日志和单元测试。

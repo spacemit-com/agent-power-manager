@@ -1,5 +1,7 @@
 # Local Cloud and Versioned Cache Implementation Plan
 
+> **历史计划（已被 Feature 010 supersede）：** 本计划中的 `Content`/`Content.Path` 返回值只记录当时的实施步骤；当前 Cache `Fetch` 返回公共 staging-root 字符串，Adapter 根据 `PowerRef` 定位叶子内容。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 实现开发期本地 Cloud、版本化文件系统缓存和 staging 物化，使确定版本的 Skill 支持 `Fetch → miss → Get → Fetch`。

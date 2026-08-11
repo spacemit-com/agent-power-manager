@@ -21,7 +21,8 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
     - 生命周期安全，在任意执行阶段中断，系统都可以识别并纠正。
     - Search 在全局锁内检查并恢复唯一活动 journal，恢复成功后同步记录 Warn；释放锁后查询 Cloud、筛选并返回结构化结果。
     - 默认 `list` 无锁、无 Recover 地列出 Cloud 的全部版本；`list --installed` 在同一全局锁区间完成 Recover、实时 Warn、已安装 Agent 刷新和全部 Config 读取，成功 Release 后才计算并渲染。`--agent=all` 仅在成功 Release 后允许输出成功记录和 partial error。
-    - installed List 在执行本地读取前扫描已注册 Agent 的根目录，生成当前命令内按 Agent ID 字典序的“已支持且已安装 Agent”快照；install/uninstall 当前仍为 parse-only。
+    - installed List 在执行本地读取前扫描已注册 Agent 的根目录，生成当前命令内按 Agent ID 字典序的“已支持且已安装 Agent”快照；Search、List 与 Install 已实现，Uninstall 仍为 parse-only。
+    - Install 在一个锁区间内完成 Recover、Warn、快照刷新、Cloud、Cache 和串行 Transaction；成功 Release 后才返回 CLI 可渲染的六种 outcome，跨 Type 同名必须在版本选择前显式指定 `--type`。
     - 实现类似apt的文件锁，保证软件执行安全。
     - 缓存下载的Power。
     - 可增添的Agent Power Adapters。
@@ -33,13 +34,13 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 
 - 系统边界与外部依赖：Agent Power Manager 位于能力提供方、能力使用方与目标 Agent 之间；对外依赖目标 Agent的Power接入方式。目标 Agent 自身的运行时位于 Agent Power Manager 边界之外。
 - 模块边界与职责：
-    - 核心生命周期：提供独立的 Search 与 List 用例并返回结构化结果，不打印业务输出；Cloud List 不访问共享状态，installed List 的共享状态区间见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。install/uninstall 尚未接线。
+    - 核心生命周期：提供独立的 Search、List 与 Install 用例并返回结构化结果，不打印业务输出；Cloud List 不访问共享状态，installed List 的共享状态区间见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)，Install 在同一 ADR 定义的一个锁区间内完成恢复到串行事务。Uninstall 尚未接线，仍为 parse-only。
     - 配置模型：通过无状态 Repository 维护每个 Agent 按 Skill、Plugin、MCP 分组的 Power 安装清单。
-    - Adapter：承接不同 Power 类型和目标 Agent 的格式转换与安装位置差异，并检查已注册 Agent 的根目录是否存在；单个 Power 安装中，Adapter 从公共 staging 原地适配一直负责到目标旁临时复制、原子发布和 staging 清理，详见 [ADR-008](adr/ADR-008-let-adapters-own-staging-to-installation.md)。Adapter 不负责 Agent 安装、实时监控、运行时感知或更新通知；卸载契约另行设计。
-    - CLI：提供入口，校验并解析命令参数；Search 与 List 成功时由 CLI 分别渲染结构化结果。
+    - Adapter：承接不同 Power 类型和目标 Agent 的格式转换与安装位置差异，并检查已注册 Agent 的根目录是否存在；单个 Power 安装中，Adapter 依据 `PowerRef` 从公共 staging 根定位叶子内容，原地适配直到目标旁临时复制、原子发布和 staging 清理，详见 [ADR-008](adr/ADR-008-let-adapters-own-staging-to-installation.md)。Adapter 不负责 Agent 安装、实时监控、运行时感知或更新通知；卸载契约另行设计。
+    - CLI：提供入口，校验并解析命令参数；Search、List 与 Install 成功时由 CLI 分别渲染结构化结果。
 - 数据与接口：每个 Agent 单独维护一份固定 `skills`、`plugins`、`mcps` 分组的 JSON 安装清单，条目统一为精确 `vMAJOR.MINOR.PATCH` 的 `PowerRef`。Config Repository 在 `List/Find/Set/Remove` 内封装完整 manifest 验证、读取和原子读改写；非法历史版本不会迁移或清理，详见 [ADR-007](adr/ADR-007-use-stateless-config-repository.md)。用户侧 CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)：Search 没有 Agent 维度；默认 List 禁止显式 `--agent`，installed List 必须提供 Agent。本地 Power 操作中，`--agent` 的具体值必须存在于按 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md) 排序的快照，`all` 对快照中的全部 Agent 执行。Search 在锁内恢复后、锁外查询 Cloud；Cloud List 不锁也不恢复，installed List 在 Recover、Warn、刷新和 Config 读取期间持锁，并在成功 Release 后计算与渲染，见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。Cloud `list` 返回带版本的全部 `PowerRef`；Search 选择最新版本，List 保留所有版本。
 
-`install` 与 `uninstall` 当前仍为 parse-only，不复用或耦合 Search/List 的锁边界。
+Install 以独立 factory 和生命周期端口接线，不复用或耦合 Search/List 的锁边界；显式版本必须为规范 `vMAJOR.MINOR.PATCH`，结果行精确为 `<agent>/<type>/<name>@<version> <outcome>`。Uninstall 当前仍为 parse-only。
 - 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，日志在预解析 `--verbose` 后通过分级 Handler 安装为全局 `slog`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单。开发阶段以 `internal/cloud/resources` 的本地资源模拟云端服务；安装先将版本已确定的 `PowerRef` 从缓存 fetch 到干净 staging，缓存未命中时执行 Cloud get 后再次 fetch。缓存写入和 staging 物化均通过同文件系统内的临时目录原子 rename，后续安装仍由 staging + journal 保证中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md) 与 [ADR-006](adr/ADR-006-use-global-slog-with-level-routing.md)。
 
 ## Test Filesystem Isolation
@@ -57,7 +58,7 @@ APM 支持仅供测试使用的 `APM_HOME` 环境变量，使测试能在临时�
 
 | 项目 | 要求或约束 |
 | --- | --- |
-| 性能与可靠性 | 命令执行中失败由 CLI 统一记录。APM 共享状态的恢复与变更由全局锁串行化；Search 的 Cloud 查询和渲染在解锁后执行，Cloud List 不加锁，installed List 仅在成功 Release 后计算和渲染（[ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)）。 |
+| 性能与可靠性 | 命令执行中失败由 CLI 统一记录。APM 共享状态的恢复与变更由全局锁串行化；Search 的 Cloud 查询和渲染在解锁后执行，Cloud List 不加锁，installed List 仅在成功 Release 后计算和渲染，Install 从 Recover 到每个串行 Transaction 均持有一次锁并在成功 Release 后渲染（[ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)）。 |
 | 安全与合规 | 暂无。 |
 | 技术与交付 | APM 仅在相关命令中通过 Agent 根目录是否存在来感知安装状态，不承担目标 Agent 的安装、卸载、实时监控或运行时职责。 |
 

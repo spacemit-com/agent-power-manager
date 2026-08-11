@@ -2,6 +2,7 @@
 
 - Status：Accepted
 - Date：2026-08-10
+- Revised：2026-08-11
 - Decision Makers：liangjunzhao
 
 ## Context
@@ -14,11 +15,11 @@
 
 ## Decision
 
-APM 使用 transaction 高层 Manager 封装 `Recover`、`Install` 和 `Uninstall`。每个 lifecycle 自行定义是否以及何时执行共享状态恢复阶段；选择该阶段时负责持有全局锁并调用 Manager。除该边界外，lifecycle 负责业务预检、版本与 Adapter 解析、Cloud/Cache 和多 Agent 调度；它不直接读写 journal、backup 或 quarantine。transaction 在提交点后调用 Config Repository 的 `Set/Remove`，使清单修改、事务清理和 journal 删除保持固定顺序。
+APM 使用 transaction 高层 Manager 封装 `Recover`、`Install` 和 `Uninstall`。每个 lifecycle 自行定义是否以及何时执行共享状态恢复阶段；选择该阶段时负责持有全局锁并调用 Manager。除该边界外，lifecycle 负责业务预检、版本与 Adapter 解析、Cloud/Cache 和多 Agent 调度；它不直接读写 journal、backup 或 quarantine。transaction 在提交点后调用 Config Repository 的 `Set/Remove`，同时允许 Install 预检在发现陈旧清单时调用单条 `Remove`；该修复不创建 journal。
 
 唯一活动 journal 集中存放在 APM state 的 `transactions/active.json`。它记录 transaction ID、operation、phase、Agent、新旧 PowerRef、staging 和全部实际事务路径。需要恢复的 lifecycle 在其共享状态锁边界内调用 `Recover`，即可修复上一次事务，无需原命令参数、原 Adapter 实例或相同目标。
 
-[Feature 008](../features/008-lifecycle-search/feature-overview.md) 已将 Search 接入 Manager：Search 只在锁内执行恢复并记录同步 Warn，释放锁后才查询 Cloud 并把结构化结果交给 CLI 渲染，符合修订后的 ADR-003。Feature 009 已将 List 独立接线：Cloud List 不访问 Manager，installed List 仅在 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 的锁区间调用 `Recover`，再于成功 Release 后交给 CLI 渲染。install/uninstall 仍是未接线的命令解析入口，未来各自接入 Manager，并选择与自身共享状态业务相符的边界。
+[Feature 008](../features/008-lifecycle-search/feature-overview.md) 已将 Search 接入 Manager：Search 只在锁内执行恢复并记录同步 Warn，释放锁后才查询 Cloud 并把结构化结果交给 CLI 渲染，符合修订后的 ADR-003。Feature 009 已将 List 独立接线：Cloud List 不访问 Manager，installed List 仅在 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 的锁区间调用 `Recover`，再于成功 Release 后交给 CLI 渲染。Feature 010 已将 Install 接入：它在一个锁区间内恢复、刷新、解析、Cache/Cloud 和串行 Transaction，并只在成功 Release 后交给 CLI 渲染。Uninstall 仍为 parse-only，尚未接线。
 
 backup/quarantine 存放在 target 同一父目录的 `.apm-transactions/<transaction-id>`，集中 journal 记录其绝对路径。该布局同时满足集中发现和同文件系统原子 rename；不使用跨文件系统 copy-delete 代替提交点。
 
@@ -28,15 +29,15 @@ Adapter 的 Install 显式返回是否已经发布。目标 rename 成功后，�
 
 Install 使用 `preparing`、`publishing`、`rolling-back` 和 `committing`；Uninstall 使用 `removing`、`rolling-back` 和 `committing`。回滚前必须先持久化 `rolling-back`，避免恢复后的旧 target 被误判为新发布内容。提交点前失败在当前调用中回滚；提交点后失败保留 journal，由下一条命令完成提交。
 
-清单有记录而 target 已被用户删除时采用自愈：Install 直接安装新版本，Uninstall 完成清单删除。清单无记录但 target 存在仍是清单外冲突，不覆盖或删除。
+Install 的清单有记录而 target 已被用户删除时，Transaction 在生成 transaction ID、创建 journal 或调用 Adapter 前执行 `ManifestWriter.Remove(agent,type,name)`，安全清理 canonical staging，返回 `ErrStaleManifest` 并中止本次命令；它不会自动安装新版本。Uninstall 的 target 缺失语义保持既有的完成清单删除。清单无记录但 target 存在仍是清单外冲突，不覆盖或删除。
 
 Journal 和所有待删除路径在使用前严格校验。损坏、未知版本、越界或不可判定状态 fail closed：保留 journal 和现场，不执行用户命令。
 
 ## Consequences
 
 - 正面影响：恢复入口集中且与当前命令解耦；正常事务和恢复共享提交/回滚规则；lifecycle 无法绕过 journal 顺序；Adapter 发布边界明确；目标内容仍使用同盘原子移动。
-- 代价与风险：集中 journal 仍需记录目标文件系统上的分散事务内容；transaction 依赖清单写接口与 Adapter 最小接口；外部进程仍可能在检查与原子操作之间修改路径；install/uninstall 的 Manager 接入仍需各自定义边界。
-- 后续动作：Feature 007 实现 Manager、Journal Store、路径状态和 Adapter 发布结果；Feature 008 已完成 Search 接入与用户恢复日志；Feature 009 已完成 List 接入边界；install/uninstall 在后续 feature 中分别接入 Manager。
+- 代价与风险：集中 journal 仍需记录目标文件系统上的分散事务内容；transaction 依赖清单写接口与 Adapter 最小接口；外部进程仍可能在检查与原子操作之间修改路径；Install 的 Manager 接入已选择一个完整锁边界，Uninstall 仍需定义其接入边界。
+- 后续动作：Feature 007 实现 Manager、Journal Store、路径状态和 Adapter 发布结果；Feature 008 已完成 Search 接入与用户恢复日志；Feature 009 已完成 List 接入边界；Feature 010 已完成 Install 接入和陈旧清单修复；Uninstall 在后续 feature 中接入 Manager。
 
 ## Alternatives Considered
 

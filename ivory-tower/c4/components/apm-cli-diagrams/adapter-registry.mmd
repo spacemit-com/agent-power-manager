@@ -1,38 +1,31 @@
 classDiagram
-    note for AdapterRegistry "仅解析 Skill；RefreshInstalled 复制注册 Agent 并按 Agent ID 字典序探测，返回同序快照（ADR-004）"
+    note for AdapterRegistry "仅解析 Skill；RefreshInstalled 按 Agent ID 字典序探测并返回同序快照（ADR-004）"
     class AdapterRegistry {
         <<interface>>
         +Resolve(AgentID, PowerType) (Adapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
     }
-
-    note for Adapter "安装检测仅检查 Agent 根目录存在且为目录；Adapter 在 Install 后负责清理 stagingRoot"
+    note for Adapter "Install 根据 PowerRef 从 stagingRoot 定位自身叶子内容；完成适配、原子发布和 staging 清理"
     class Adapter {
         <<interface>>
         +DetectAgent() (bool, error)
         +TargetPath(PowerRef) (string, error)
         +Install(PowerRef, stagingRoot string) (InstallResult, error)
     }
-
-    note for AgentSnapshot "当前命令内不可变且不持久化的已支持且已安装 Agent 列表；按 Agent ID 字典序"
     class AgentSnapshot {
         +Agents []AgentID
         +Contains(AgentID) bool
         +Ordered() []AgentID
     }
-
-    note for adapterRegistry "builtInAgentConfigs 的存储顺序不公开；Refresh 对其副本排序，Detect 失败返回零快照"
     class adapterRegistry {
         +Resolve(AgentID, PowerType) (Adapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
     }
-
     class skillAdapter {
         +DetectAgent() (bool, error)
         +TargetPath(PowerRef) (string, error)
         +Install(PowerRef, stagingRoot string) (InstallResult, error)
     }
-
     class codexConfig {
         <<agentConfig>>
         id = codex

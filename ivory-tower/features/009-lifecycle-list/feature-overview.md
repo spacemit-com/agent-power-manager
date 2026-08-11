@@ -9,7 +9,7 @@
 ## Scope
 
 - 包含：List 专属端口、factory 和 service；条件式 `--agent`；Cloud 全版本列表；installed 的恢复、Agent 快照和 Config 读取；精确类型过滤；确定性排序；结构化 partial failure；精确 stdout；统一错误出口；Registry Agent ID 排序；Config `vMAJOR.MINOR.PATCH` 读写校验；聚合 lifecycle 空接口清理；ADR/C4/概览/构建/Changelog 同步。
-- 不包含：install/uninstall lifecycle；通用 runner；Cloud 非法数据降级；本地非法清单迁移或清洗；最新版折叠；关键字搜索；JSON、分页或表格输出；真实 HTTP Cloud。
+- 不包含：install/uninstall lifecycle；通用 runner；Cloud 非法数据降级；本地非法清单迁移或清洗；最新版折叠；关键字搜索；JSON、分页或表格输出；真实 HTTP Cloud。Install/Uninstall 未接线是本 feature 的历史边界；Feature 010 已实现 Install，Uninstall 仍为 parse-only。
 
 ## Implementation Context
 
@@ -19,5 +19,5 @@
 
 ## Acceptance
 
-- 验收条件：默认 List 不要求 Agent且不访问共享状态；installed List 要求 Agent，在同一锁区间 Recover、实时 Warn、刷新和全部 Config reads，成功 Release 后才过滤排序并渲染；Cloud 输出全部版本为 `<type>/<name>@<version>`，installed 始终输出 `<agent>/<type>/<name>@<version>`；Registry 按 Agent ID 升序；Config 只接受规范 `vMAJOR.MINOR.PATCH` 且不迁移；只有成功 Release 后的 `all` 读取失败可作为 partial 输出，fatal/Release error 不输出业务行；Search 不回归，install/uninstall 仍为 parse-only。
+- 验收条件：默认 List 不要求 Agent且不访问共享状态；installed List 要求 Agent，在同一锁区间 Recover、实时 Warn、刷新和全部 Config reads，成功 Release 后才过滤排序并渲染；Cloud 输出全部版本为 `<type>/<name>@<version>`，installed 始终输出 `<agent>/<type>/<name>@<version>`；Registry 按 Agent ID 升序；Config 只接受规范 `vMAJOR.MINOR.PATCH` 且不迁移；只有成功 Release 后的 `all` 读取失败可作为 partial 输出，fatal/Release error 不输出业务行；Search 不回归。Install/Uninstall parse-only 是本 feature 的历史边界；Feature 010 已实现 Install，Uninstall 仍为 parse-only。
 - 已知风险或待决问题：默认 Cloud List 有意不修复活动 journal；非法旧清单不会自动迁移，升级后需外部修正；开发期 Local Cloud 仍依赖仓库资源目录；List 信任 Cloud 的规范 PowerRef 契约。

@@ -23,6 +23,16 @@ Installed List: Acquire → Recover → lock-held Warn → RefreshInstalled → 
                 → successful Release → result computation → CLI render.
 ```
 
+Install 的锁边界固定为：
+
+```text
+Install: Acquire → Recover → lock-held Warn → RefreshInstalled → target validation
+         → Cloud List/version resolution → serial Config/Cache/Cloud/Transaction work
+         → successful Release → CLI render.
+```
+
+Install 在这一个锁区间内完成每个目标 Agent 的 `Resolve`、`Find`、`Fetch`，以及 cache miss 时的 `Get → Fetch` 和 Transaction。相同版本只信任清单，既不检查 target、Fetch，也不调用 Transaction。`all` 按快照字典序 fail-fast：首个业务错误后记录 `failed` 和剩余 `unexecuted`，不再调用其依赖。预执行错误没有可渲染结果；业务失败的 `InstallBatchError` 采用延迟 marker 构造，只能在 Release 成功后构造。Release 失败返回零结果并抑制 renderer，即使此前 Agent 已完成；同时使用 `errors.Join` 保留业务 cause。
+
 因此默认 Cloud List 不观察或修复活动 journal，也不访问 Registry 或 Config。installed List 的 `all` 模式在锁内继续收集逐 Agent Config 读取失败；只有全部读取完成且 Release 成功后，才返回唯一可渲染的 partial marker 和成功记录。Recover、Refresh、具体 Agent 校验、Config 读取或 Release 的 fatal error 均不输出业务结果；Release 失败还必须抑制原本可能的 partial 输出并保留全部 cause。该 List 契约与命令语法见 [ADR-002](ADR-002-cli-agent-and-power-type-as-flags.md)，Agent 排序见 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md)，Config 读取契约见 [ADR-007](ADR-007-use-stateless-config-repository.md)。
 
 已实现的 Search 顺序固定为：获取锁 → `Recover` → 锁内同步记录恢复成功 `Warn` → 释放锁 → Cloud 查询。无活动 journal 时可在锁内记录 `Debug` 后释放锁。恢复错误时，无论如何都在返回前尝试释放锁；CLI 在 lifecycle 返回后只记录一次错误并打印 usage。只有释放成功后，Search 才调用 Cloud。
@@ -33,7 +43,7 @@ install 在原子 staging-to-target rename 前记录 publishing 意图，该 ren
 
 > [ADR-009](ADR-009-centralize-lifecycle-transactions.md) 修订了 Install 的实现边界：Adapter 把 staging 复制到目标同目录临时目录，并以临时目录到 target 的原子 rename 作为同一提交点；transaction 在调用 Adapter 前持久化 publishing，并通过显式 `Published` 结果或中断后的 target 状态固定恢复方向。
 
-当 install/uninstall 在后续 feature 接线时，`--agent=all` 按当前快照中已支持且已安装 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 failed、按相同顺序把全部剩余 Agent 记为 unexecuted，停止执行并非零退出；命令结束前统一打印 completed、failed 和 unexecuted 汇总。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent；成功 Release 后可先渲染成功记录、再以 partial error 非零退出。
+已实现的 Install 在 `--agent=all` 下按当前快照中已支持且已安装 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 `failed`、按相同顺序把全部剩余 Agent 记为 `unexecuted`，停止执行并在成功 Release 后由 CLI 统一渲染结果。Uninstall 仍是 parse-only，尚未接线。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent；成功 Release 后可先渲染成功记录、再以 partial error 非零退出。
 
 未来 install/uninstall 在当前命令内的回滚、清单更新或清理期间再次发生进程中断时，不尝试在中断路径继续修复；内核释放全局锁，现有 journal 保持可恢复，交由下一条需要共享状态业务的命令重新判断并恢复。提交点后的清单更新或清理失败也不在当前命令中重试：保留 journal、由 CLI 记录失败并非零退出，并由下一条命令完成遗留事务。
 

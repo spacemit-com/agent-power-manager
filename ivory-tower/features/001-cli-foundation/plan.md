@@ -1,5 +1,7 @@
 # CLI 基础骨架 Implementation Plan
 
+> **历史计划（已被后续 feature 修订）：** 本计划中的 parse-only CLI 和 `Fetch(... Content ...)` 仅记录当时的实施步骤；Search、List、Install 已分别被 Feature 008、009、010 实现，只有 Uninstall 仍为 parse-only，Cache staging-root 契约已被 Feature 010 supersede。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 建立可编译的 APM Go 工程框架，交付只解析命令的 CLI，以及可独立使用的 logging 和全局 flock。

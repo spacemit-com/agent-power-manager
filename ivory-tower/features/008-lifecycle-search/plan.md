@@ -1,5 +1,7 @@
 # Lifecycle Search Implementation Plan
 
+> **历史计划（已被后续 feature 修订）：** 本计划中的命令 parse-only 状态只记录当时步骤；Feature 009 已实现 List，Feature 010 已实现 Install，只有 Uninstall 仍为 parse-only。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement lifecycle Search with locked transaction recovery, unlock-before-Cloud querying, latest-version selection, and exact CLI rendering.

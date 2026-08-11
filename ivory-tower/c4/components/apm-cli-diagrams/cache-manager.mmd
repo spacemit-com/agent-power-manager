@@ -1,20 +1,14 @@
 classDiagram
-    note for PowerCache "版本化缓存接口：Fetch 清理 staging，并将版本已确定的 PowerRef 物化为无版本层目录"
+    note for PowerCache "版本化缓存接口：每次 Fetch 清理并原子物化公共 staging 根"
     class PowerCache {
         <<interface>>
-        +Fetch(PowerRef) (Content, error)
+        +Fetch(PowerRef) (stagingRoot string, error)
     }
 
-    note for Content "已物化的 staging 内容位置"
-    class Content {
-        +Path string
-    }
-
-    note for FilesystemCache "按 type/name/version 读取缓存；经状态根内临时目录原子发布干净 staging"
+    note for FilesystemCache "按 type/name/version 读取缓存；把叶子复制到 staging/<type-directory>/<name>，返回 staging 根"
     class FilesystemCache {
-        +Fetch(PowerRef) (Content, error)
+        +Fetch(PowerRef) (stagingRoot string, error)
     }
 
     FilesystemCache ..|> PowerCache
-    PowerCache --> PowerRef
-    PowerCache --> Content : returns
+    PowerCache --> PowerRef : consumes

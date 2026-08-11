@@ -1,5 +1,7 @@
 # Lifecycle List Implementation Plan
 
+> **历史计划（Install 状态已被 Feature 010 supersede）：** 本计划中的 Install parse-only 描述只记录 Feature 009 的边界；Feature 010 已实现 Install，只有 Uninstall 仍为 parse-only。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the command-specific List lifecycle so Cloud listings run without shared-state locking, installed listings recover and read manifests under the global lock, and the CLI renders deterministic structured results with well-defined partial failures.

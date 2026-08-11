@@ -6,6 +6,8 @@
 
 本 feature 复用既有 Adapter 发布和集中 transaction 能力，不建立跨 Search、List、Install 的通用 runner。Uninstall 继续保持 parse-only。
 
+> **实现状态（2026-08-11）：** 本 spec 的已批准要求已实现；本状态记录不改变下文的需求、边界或验收标准。Uninstall 继续保持 parse-only。
+
 CLI 语法保持：
 
 ```text
@@ -267,7 +269,7 @@ CLI 解析和校验
 
 ## 陈旧清单项修复
 
-本 feature 修订 ADR-009 的旧自愈语义。
+本 feature 已以陈旧清单项 Remove 并中止的规则 supersede ADR-009 的旧 Install 自愈语义。
 
 Lifecycle 对同版本只信任清单，因此不会发现或修复缺失目标。只有 Previous 与目标版本不同时才 Fetch 并调用 TransactionManager。
 
@@ -460,7 +462,7 @@ Acquire → Recover → Warn/Debug → Refresh → Cloud List
 
 - [ADR-002](../../adr/ADR-002-cli-agent-and-power-type-as-flags.md)：记录规范显式版本、跨类别重名强制 Type、outcome 行和错误汇总。
 - [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)：记录 Install 单锁范围、锁外渲染、fail-fast 和 Release 抑制边界。
-- [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)：以“Remove 陈旧清单项并中止”取代“旧清单但 target 缺失时直接自愈安装”。
+- [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)：已 supersede “旧清单但 Install target 缺失时直接自愈安装”，改为“Remove 陈旧清单项并中止”。
 
 同步更新：
 

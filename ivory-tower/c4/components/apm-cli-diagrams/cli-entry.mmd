@@ -1,5 +1,5 @@
 classDiagram
-    note for Flags "search 解析 Keyword/Type；list 解析 Installed、条件式 Agent 和 Type；install/uninstall 解析各自参数"
+    note for Flags "search/list/install 解析各自参数；Uninstall 仍仅 parse-only"
     class Flags {
         +Agent string
         +Type string
@@ -12,56 +12,70 @@ classDiagram
     class SearchResult {
         +Powers []PowerRef
     }
-
     class ListedPower {
         +Agent AgentID
         +Power PowerRef
     }
-
     class ListResult {
         +Powers []ListedPower
     }
-
     class PartialListError {
         +Failures []AgentFailure
     }
+    class InstallItem {
+        +Agent AgentID
+        +Power PowerRef
+        +Outcome InstallOutcome
+    }
+    class InstallResult {
+        +Items []InstallItem
+    }
+    class InstallBatchError {
+        +Agent AgentID
+        +Err error
+    }
 
-    note for CLIEntry "cobra 命令树根：注册 search/list/install/uninstall 子命令并路由"
+    note for CLIEntry "cobra 命令树根：Search、List、Install 调用专属端口；Uninstall 只解析"
     class CLIEntry {
         +Execute(args []string) error
     }
-
-    note for searchRenderer "CLI 包级私有渲染职责：将 SearchResult 写入 stdout"
-    class searchRenderer {
-        <<package>>
-        -renderSearch(writer, SearchResult) error
-    }
-
-    note for listRenderer "CLI 包级私有渲染职责：仅成功或 PartialListError 时将 ListResult 写入 stdout"
-    class listRenderer {
-        <<package>>
-        -renderList(writer, ListResult) error
-    }
-
-    note for SearchLifecycle "search 命令专属生命周期端口"
     class SearchLifecycle {
         <<interface>>
         +Search(Context, Flags) (SearchResult, error)
     }
-
-    note for ListLifecycle "list 命令专属生命周期端口；仅 successful-Release PartialListError 可同时返回可渲染结果"
     class ListLifecycle {
         <<interface>>
         +List(Context, Flags) (ListResult, error)
     }
+    note for InstallLifecycle "成功 Release 后，InstallBatchError 才能携带可渲染结果"
+    class InstallLifecycle {
+        <<interface>>
+        +Install(Context, Flags) (InstallResult, error)
+    }
+    class searchRenderer {
+        <<package>>
+        -renderSearch(writer, SearchResult) error
+    }
+    class listRenderer {
+        <<package>>
+        -renderList(writer, ListResult) error
+    }
+    note for installRenderer "只在成功或成功 Release 的 InstallBatchError 时写 stdout"
+    class installRenderer {
+        <<package>>
+        -renderInstall(writer, InstallResult) error
+    }
 
     CLIEntry --> Flags : parses
-    CLIEntry --> SearchLifecycle : invokes Search
+    CLIEntry --> SearchLifecycle : invokes
     SearchLifecycle --> SearchResult : returns
     CLIEntry --> searchRenderer : invokes
-    searchRenderer --> SearchResult : renders stdout
-    CLIEntry --> ListLifecycle : invokes List
+    CLIEntry --> ListLifecycle : invokes
     ListLifecycle --> ListResult : returns
     ListLifecycle --> PartialListError : may return with result
     CLIEntry --> listRenderer : invokes
-    listRenderer --> ListResult : renders stdout
+    CLIEntry --> InstallLifecycle : invokes
+    InstallLifecycle --> InstallResult : returns
+    InstallLifecycle --> InstallBatchError : successful Release only
+    CLIEntry --> installRenderer : invokes
+    installRenderer --> InstallResult : renders stdout

@@ -4,7 +4,7 @@
 
 - 特性名称：Codex、Claude Code 与 Hermes Agent Skill Adapter
 - 要解决的问题：现有 Adapter 只有零值占位接口和空 Registry，无法检测目标 Agent、适配公共 staging、阻止覆盖清单外同名 Skill，或把 Skill 安全安装到不同 Agent 的全局目录。
-- 可交付结果：为 `codex`、`claude-code`、`hermes-agent` 提供共享安全安装管线和各自路径配置；Adapter 从原地适配公共 staging 一直负责到原子发布，并在成功或失败后清理 staging。
+- 可交付结果：为 `codex`、`claude-code`、`hermes-agent` 提供共享安全安装管线和各自路径配置；Adapter 依据 `PowerRef` 从公共 staging root 定位叶子内容，从原地适配一直负责到原子发布，并在成功或失败后清理 staging。
 
 ## Scope
 
@@ -14,7 +14,7 @@
 ## Implementation Context
 
 - 关联模块或服务：`internal/adapter`、`internal/domain`、`internal/paths`、`internal/utils/filesystem`，以及只依赖 Adapter Registry 的 lifecycle 接口边界。
-- 数据、接口或依赖变化：正式定义三个 `AgentID`；Adapter 暴露 `DetectAgent`、`TargetPath` 和 `Install`，其中 Feature 007 追加显式发布结果供 transaction 判断提交点；Registry 只解析 Skill；引入 `go.yaml.in/yaml/v3` 校验 `SKILL.md` frontmatter；不改变 cache 的 fetch 语义。
+- 数据、接口或依赖变化：正式定义三个 `AgentID`；Adapter 暴露 `DetectAgent`、`TargetPath` 和 `Install`，其中 Feature 007 追加显式发布结果供 transaction 判断提交点；`Install(PowerRef, stagingRoot)` 依据 PowerRef 定位 `staging/<type-directory>/<name>` 叶子；Registry 只解析 Skill；引入 `go.yaml.in/yaml/v3` 校验 `SKILL.md` frontmatter；Feature 010 已将 cache fetch 的返回值收敛为公共 staging root。
 - 关联 C4 文档或 ADR：[ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-004](../../adr/ADR-004-discover-installed-agents-before-local-operations.md)、[ADR-005](../../adr/ADR-005-isolate-test-filesystem-with-apm-home.md)、[ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md)、[ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。
 
 ## Acceptance

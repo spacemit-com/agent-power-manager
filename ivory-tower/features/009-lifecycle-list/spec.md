@@ -4,7 +4,7 @@
 
 完成 `list` 的 lifecycle 与 CLI 接线，并明确 Cloud 列表与本地已安装列表的不同共享状态边界：默认 Cloud 列表不获取全局锁、不执行 transaction 恢复；`list --installed` 在全局锁内完成恢复、Agent 刷新和清单读取，释放锁后再过滤、排序和渲染。
 
-本 feature 同时把 List 从聚合的 lifecycle 占位接口拆为命令专属端口，清除 Search service 上未实现但静默成功的 List/Install/Uninstall 方法。Install 和 Uninstall CLI 继续保持 parse-only，不在本 feature 接线。
+本 feature 同时把 List 从聚合的 lifecycle 占位接口拆为命令专属端口，清除 Search service 上未实现但静默成功的 List/Install/Uninstall 方法。Install 和 Uninstall CLI 保持 parse-only、不在本 feature 接线，是本 feature 的历史边界；Feature 010 已实现 Install，Uninstall 仍为 parse-only。
 
 List CLI 语法修订为：
 
@@ -31,7 +31,7 @@ apm list --installed --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 
 ### 不包含
 
-- install/uninstall lifecycle 接线或业务实现；
+- install/uninstall lifecycle 接线或业务实现（Install/Uninstall 未接线是本 feature 的历史边界；Feature 010 已实现 Install）；
 - Adapter 卸载能力、Power 安装或 transaction 写流程调整；
 - 通用命令 runner、跨命令回调流水线或共享持锁模板；
 - Cloud 非法类别、名称或版本的校验、跳过、降级排序或错误映射；
@@ -407,7 +407,7 @@ Lifecycle、Registry、Config、Cloud 和 renderer 不提前记录 `slog.Error`�
 - `ivory-tower/project-overview.md`；
 - `BUILD.md`；
 - Feature 005 文档中的后续收紧说明，避免其历史“不验证版本”要求被误读为当前契约；
-- Feature 008 文档中 List 仍为 parse-only 的状态说明；
+- Feature 008 文档中 List 仍为 parse-only 的历史状态说明；
 - 实现完成后的 `docs/Changelog.md` 单条用户请求记录。
 
 Spec 和后续实施计划保存在 `ivory-tower/features/009-lifecycle-list/`。文档、测试和实现必须引用上述 ADR ID，避免另建重复的锁、Agent 或版本决策来源。
@@ -422,5 +422,5 @@ Spec 和后续实施计划保存在 `ivory-tower/features/009-lifecycle-list/`�
 6. Cloud 输出精确为 `<type>/<name>@<version>\n`；installed 输出精确为 `<agent>/<type>/<name>@<version>\n`。
 7. Config Repository 不向调用方返回、也不写入任何非规范 `vMAJOR.MINOR.PATCH`；读取发现非法现有清单时返回错误且不自动修改文件。
 8. 除可渲染 partial error 外，error 不产生业务 stdout；每次失败只由 CLI 记录一条 Error 并打印 usage。
-9. Search 行为不回归；install/uninstall 仍为 parse-only；不存在聚合 lifecycle 接口或静默成功的空业务方法。
+9. Search 行为不回归；Install/Uninstall parse-only 是本 feature 的历史验收边界，已由 Feature 010 supersede 为 Install 已实现、Uninstall 仍为 parse-only；不存在聚合 lifecycle 接口或静默成功的空业务方法。
 10. ADR、C4、项目概览、Feature 文档、BUILD 和 Changelog 与最终实现一致，全量测试、vet、构建和静态检查通过。
