@@ -8,6 +8,8 @@
 
 > **历史 Install 规则已被修订（2026-08-11）：** Feature 010 取代“已纳管 Install target 缺失时直接安装”的自愈规则。当前 Install 只移除对应清单项、清理 canonical staging、返回 `ErrStaleManifest` 并中止，且不创建 journal 或调用 Adapter。Uninstall 的 target 缺失语义不变。
 
+> **Feature 007 的 lifecycle 边界是历史记录：** 本 feature 当时不接线 lifecycle/CLI，并预期四个命令在锁内恢复。该通用预期已被 Feature 008、009、010 取代：Search 只为 Recover 持锁后查询 Cloud，Cloud List 无锁、installed List 使用自己的锁区间，Install 使用一个完整锁区间并由 CLI 渲染结构化结果。Uninstall 仍未接线；本文的 Uninstall transaction 契约保留为其未来接线基础。
+
 ## Scope
 
 - 包含：transaction 高层 Manager；集中且原子持久化的唯一活动 journal；同目标文件系统的 backup/quarantine；Install/Uninstall 正常事务；回滚与完成提交；结构化恢复结果；Adapter 显式发布结果；事务路径；错误分类、debug 日志和单元测试。
@@ -22,4 +24,4 @@
 ## Acceptance
 
 - 验收条件：正常安装/卸载、提交点前回滚、提交点后完成提交和所有已定义中断窗口均可收敛；恢复只依赖集中 journal，不依赖原命令参数或原 Adapter 实例；非法 journal 或危险路径 fail closed；重要接口具有简要中文用途注释；全量测试、vet、构建和静态检查通过。
-- 已知风险或待决问题：外部进程仍可能在原子操作之间修改目标路径；Plugin/MCP 的目标规则和 Adapter 尚未设计；只有后续 lifecycle feature 把 `Recover` 接入四个公共入口后，CLI 才实际启用启动恢复。
+- 已知风险或待决问题：外部进程仍可能在原子操作之间修改目标路径；Plugin/MCP 的目标规则和 Adapter 尚未设计；Search、List 和 Install 已分别在 Feature 008、009、010 中接入各自的恢复/锁/渲染边界，Uninstall 仍待未来 lifecycle 接线。

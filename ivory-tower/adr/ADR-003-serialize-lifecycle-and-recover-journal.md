@@ -45,7 +45,7 @@ install 在原子 staging-to-target rename 前记录 publishing 意图，该 ren
 
 已实现的 Install 在 `--agent=all` 下按当前快照中已支持且已安装 Agent ID 升序串行且 fail-fast：任一 Agent 错误后立即把当前 Agent 记为 `failed`、按相同顺序把全部剩余 Agent 记为 `unexecuted`，停止执行并在成功 Release 后由 CLI 统一渲染结果。Uninstall 仍是 parse-only，尚未接线。`list --installed --agent=all` 是只读汇总，单个 Agent 读取失败不阻止读取其他 Agent；成功 Release 后可先渲染成功记录、再以 partial error 非零退出。
 
-未来 install/uninstall 在当前命令内的回滚、清单更新或清理期间再次发生进程中断时，不尝试在中断路径继续修复；内核释放全局锁，现有 journal 保持可恢复，交由下一条需要共享状态业务的命令重新判断并恢复。提交点后的清单更新或清理失败也不在当前命令中重试：保留 journal、由 CLI 记录失败并非零退出，并由下一条命令完成遗留事务。
+已实现的 Install 与未来接线的 Uninstall 在当前命令内的回滚、清单更新或清理期间再次发生进程中断时，不尝试在中断路径继续修复；内核释放全局锁，现有 journal 保持可恢复，交由下一条需要共享状态业务的命令重新判断并恢复。提交点后的清单更新或清理失败也不在当前命令中重试：保留 journal、由 CLI 记录失败并非零退出，并由下一条命令完成遗留事务。
 
 恢复日志至少包含原操作、Agent、Power、版本、原阶段、回滚或完成提交、修复内容和结果。
 

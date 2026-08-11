@@ -31,6 +31,7 @@ flowchart TD
     Same -->|否| Fetch[Cache.Fetch 当前 Agent 的公共 staging root]
     Fetch -->|命中| TxInstall[TransactionManager.Install]
     Fetch -->|ErrMiss| Get[Cloud.Get 精确 PowerRef]
+    Fetch -->|其他错误| FailFast
     Get -->|失败| FailFast
     Get -->|成功| ReFetch[再次 Cache.Fetch]
     ReFetch -->|失败| FailFast

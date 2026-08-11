@@ -13,7 +13,6 @@ lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install 
         "searchLifecycle" "apm-cli-lifecycle-diagrams/search.mmd"
         "listLifecycle" "apm-cli-lifecycle-diagrams/list.mmd"
         "installLifecycle" "apm-cli-lifecycle-diagrams/install.mmd"
-        "uninstallLifecycle" "apm-cli-lifecycle-diagrams/uninstall.mmd"
     }
 }
 adapterRegistry = component "Adapter Registry" "管理编译期唯一 Agent 注册；RefreshInstalled 对注册副本按 Agent ID 字典序检测并返回同序快照（ADR-004）。Adapter 依据 PowerRef 从公共 staging 根定位叶子内容并处理安装位置差异；不负责 Agent 安装、卸载、实时监控或运行时感知。" "Go" {
