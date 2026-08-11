@@ -62,7 +62,7 @@ config 实施调用方给出的目标清单状态，但不决定首次安装、�
   "skills": [
     {
       "name": "foo-before-summary",
-      "version": "0.0.1"
+      "version": "v0.0.1"
     }
   ],
   "plugins": [],

@@ -52,5 +52,5 @@ install 在原子 staging-to-target rename 前记录 publishing 意图，该 ren
 | 仅 install/uninstall 持锁 | 已实现的 installed List 同样读取共享 Config 状态，必须在恢复、刷新和全部读取期间持锁。 |
 | 仅在修复时临时加锁 | 锁范围分裂，命令状态可能在预检后被另一进程改变。 |
 | 锁一直持有到 CLI 渲染结束 | CLI writer 延迟会无必要地阻塞共享状态业务，且渲染不需要该序列化保证。 |
-| `--agent=all` 单 Agent 失败后继续 | 未解决 journal 存在时无法安全创建下一事务，破坏单 journal 不变量。 |
+| transactional `install/uninstall --agent=all` 单 Agent 失败后继续 | 未解决 journal 存在时无法安全创建下一事务，破坏单 journal 不变量；只读的 installed List 是例外，它不创建事务，可在同一锁内继续收集 Config 读取失败。 |
 | 所有阶段一律回滚或一律继续 | 无法同时保证原子提交点前恢复旧状态和提交点后补全一致性。 |

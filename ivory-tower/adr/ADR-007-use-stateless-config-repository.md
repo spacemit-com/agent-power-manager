@@ -18,7 +18,7 @@ APM 使用无状态 Config Repository。lifecycle 只调用 `List(agent)`、`Fin
 
 每个 Agent 的 JSON 使用固定 `skills`、`plugins`、`mcps` 分组。清单条目统一为版本已确定的 `PowerRef`，磁盘组内不重复保存 type；读取后由 Repository 根据分组补全。系统删除 `InstalledPower` 和 `InstalledAt`，并以共享 `PowerGroups` 表达三类已安装 Power。
 
-版本必须精确匹配 `vMAJOR.MINOR.PATCH`：三个数值分量允许 `0`，其他值不得有前导零；不得缺失 `v`、分量或出现空白、正负号、prerelease、build metadata。Repository 使用相同校验覆盖 `List`、`Find`、`Remove` 的完整 manifest 读取，`Set` 的输入（任何文件 I/O 前）以及私有 write 接收的完整 `PowerGroups`。读取会校验所有分组中的所有条目，即使条目与当前 Find/Remove 目标无关；错误包含操作、Agent、类别、索引、名称和原始版本，并包装 `ErrInvalidPower`。
+版本必须精确匹配 `vMAJOR.MINOR.PATCH`：三个数值分量允许 `0`，其他值不得有前导零；不得缺失 `v`、分量或出现空白、正负号、prerelease、build metadata。Repository 使用相同校验覆盖 `List`、`Find`、`Set`、`Remove` 的完整 manifest 读取，`Set` 的输入（任何文件 I/O 前）以及私有 write 接收的完整 `PowerGroups`。读取会校验所有分组中的所有条目，即使条目与当前 Find/Remove/Set 目标无关；错误包含操作、Agent、类别、索引、名称和原始版本，并包装 `ErrInvalidPower`。
 
 非法既有条目会使读取失败，Repository 不返回部分结果，也不跳过、清洗、重排、自动补 `v`、覆盖或迁移它们；原文件保持不变。该刻意不提供迁移或 cleanup 的契约保证 List 能在成功读取后安全按 SemVer 排序。List 如何持锁读取和呈现错误由 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 决定，CLI 形式由 [ADR-002](ADR-002-cli-agent-and-power-type-as-flags.md) 决定。
 

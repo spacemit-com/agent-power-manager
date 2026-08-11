@@ -35,8 +35,8 @@ Journal 和所有待删除路径在使用前严格校验。损坏、未知版本
 ## Consequences
 
 - 正面影响：恢复入口集中且与当前命令解耦；正常事务和恢复共享提交/回滚规则；lifecycle 无法绕过 journal 顺序；Adapter 发布边界明确；目标内容仍使用同盘原子移动。
-- 代价与风险：集中 journal 仍需记录目标文件系统上的分散事务内容；transaction 依赖清单写接口与 Adapter 最小接口；外部进程仍可能在检查与原子操作之间修改路径；其余命令的 Manager 接入仍需各自定义边界。
-- 后续动作：Feature 007 实现 Manager、Journal Store、路径状态和 Adapter 发布结果；Feature 008 已完成 Search 接入与用户恢复日志；list/install/uninstall 在后续 feature 中分别接入 Manager。
+- 代价与风险：集中 journal 仍需记录目标文件系统上的分散事务内容；transaction 依赖清单写接口与 Adapter 最小接口；外部进程仍可能在检查与原子操作之间修改路径；install/uninstall 的 Manager 接入仍需各自定义边界。
+- 后续动作：Feature 007 实现 Manager、Journal Store、路径状态和 Adapter 发布结果；Feature 008 已完成 Search 接入与用户恢复日志；Feature 009 已完成 List 接入边界；install/uninstall 在后续 feature 中分别接入 Manager。
 
 ## Alternatives Considered
 

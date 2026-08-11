@@ -1,5 +1,5 @@
 classDiagram
-    note for Flags "search 只解析 Keyword 和可选 Type；install 解析 <power>[=<version>]；list 使用 Installed"
+    note for Flags "search 解析 Keyword/Type；list 解析 Installed、条件式 Agent 和 Type；install/uninstall 解析各自参数"
     class Flags {
         +Agent string
         +Type string
@@ -13,6 +13,19 @@ classDiagram
         +Powers []PowerRef
     }
 
+    class ListedPower {
+        +Agent AgentID
+        +Power PowerRef
+    }
+
+    class ListResult {
+        +Powers []ListedPower
+    }
+
+    class PartialListError {
+        +Failures []AgentFailure
+    }
+
     note for CLIEntry "cobra 命令树根：注册 search/list/install/uninstall 子命令并路由"
     class CLIEntry {
         +Execute(args []string) error
@@ -24,10 +37,22 @@ classDiagram
         -renderSearch(writer, SearchResult) error
     }
 
-    note for SearchLifecycle "search 命令专属生命周期端口，是 CLI 入口的唯一下游业务依赖"
+    note for listRenderer "CLI 包级私有渲染职责：仅成功或 PartialListError 时将 ListResult 写入 stdout"
+    class listRenderer {
+        <<package>>
+        -renderList(writer, ListResult) error
+    }
+
+    note for SearchLifecycle "search 命令专属生命周期端口"
     class SearchLifecycle {
         <<interface>>
         +Search(Context, Flags) (SearchResult, error)
+    }
+
+    note for ListLifecycle "list 命令专属生命周期端口；仅 successful-Release PartialListError 可同时返回可渲染结果"
+    class ListLifecycle {
+        <<interface>>
+        +List(Context, Flags) (ListResult, error)
     }
 
     CLIEntry --> Flags : parses
@@ -35,3 +60,8 @@ classDiagram
     SearchLifecycle --> SearchResult : returns
     CLIEntry --> searchRenderer : invokes
     searchRenderer --> SearchResult : renders stdout
+    CLIEntry --> ListLifecycle : invokes List
+    ListLifecycle --> ListResult : returns
+    ListLifecycle --> PartialListError : may return with result
+    CLIEntry --> listRenderer : invokes
+    listRenderer --> ListResult : renders stdout

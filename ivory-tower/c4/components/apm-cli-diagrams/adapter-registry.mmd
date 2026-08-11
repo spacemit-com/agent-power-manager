@@ -11,7 +11,7 @@ classDiagram
         <<interface>>
         +DetectAgent() (bool, error)
         +TargetPath(PowerRef) (string, error)
-        +Install(PowerRef, stagingRoot string) error
+        +Install(PowerRef, stagingRoot string) (InstallResult, error)
     }
 
     note for AgentSnapshot "当前命令内不可变且不持久化的已支持且已安装 Agent 列表；按 Agent ID 字典序"
@@ -30,7 +30,7 @@ classDiagram
     class skillAdapter {
         +DetectAgent() (bool, error)
         +TargetPath(PowerRef) (string, error)
-        +Install(PowerRef, stagingRoot string) error
+        +Install(PowerRef, stagingRoot string) (InstallResult, error)
     }
 
     class codexConfig {

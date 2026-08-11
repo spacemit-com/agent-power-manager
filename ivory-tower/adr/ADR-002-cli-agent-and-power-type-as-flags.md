@@ -28,7 +28,7 @@ apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 ```
 
 - `--agent`：适用于 installed `list`、`install`、`uninstall`；取值为具体 Agent ID 或字面量 `all`。默认 Cloud `list` 显式提供该 flag（包括空值）必须返回 `--agent requires --installed`；installed `list` 必须提供非空 Agent。
-- `--type`：可选，但缺省语义按命令的数据来源确定：`search` 与默认 `list` 不应用类别过滤；`install` 从 Cloud `List()` 返回的带版本 `PowerRef` 推断；`list --installed` 与 `uninstall` 从目标 Agent 的本地安装清单解析，仅当本地同名 Power 跨类别产生歧义时才报错并要求显式指定 `--type`。
+- `--type`：可选，但缺省语义按命令的数据来源确定：`search`、默认 `list` 与 `list --installed` 省略时均不应用类别过滤，提供时仅作精确类别过滤；`install` 从 Cloud `List()` 返回的带版本 `PowerRef` 推断；`uninstall` 从目标 Agent 的本地安装清单解析，仅当本地同名 Power 跨类别产生歧义时才报错并要求显式指定 `--type`。
 - `--help` 顶层展示可用的 Agent/Power 类别枚举。
 
 - `search` 的 keyword 必填，只查询云端资源；省略 `--type` 时不应用类别过滤。
@@ -49,12 +49,12 @@ List 的 Config 清单版本必须遵循 [ADR-007](ADR-007-use-stateless-config-
   - Agent 集合可通过 Adapter 持续增添，不影响命令树结构和 `--help` 输出的稳定性，适合脚本化和自动化调用。
   - 默认 Cloud List 无需选择 Agent；installed List 在执行前刷新已安装 Agent 快照，能拒绝未安装目标并使 `all` 只覆盖当前可用 Agent。
   - `--type` 保持可选，并由各命令依据 Cloud 全量 `PowerRef` 列表或本地清单采用明确的缺省语义，减少常见场景下的输入负担。
-  - Search 的 Cloud 查询不需要 Agent 选择；本地 Power 命令仍以稳定的 Agent flag 形式表达目标集合，生命周期层按命令数据来源实现类别过滤、推断或本地消歧。
+  - Search 的 Cloud 查询不需要 Agent 选择；本地 Power 命令仍以稳定的 Agent flag 形式表达目标集合，生命周期层按命令数据来源实现类别过滤、推断或（仅 uninstall 的）本地消歧。
 - 代价与风险：
   - `--agent=all` 下多 Agent 部分成功、部分失败的场景要求在成功解锁后才输出已成功记录，并以非零退出码报告汇总错误，避免用户误判整体命令是否成功。
 - 后续动作：
   - 在 `internal/lifecycle` 中实现命令特定的 `--type` 缺省语义，以及「按 Agent 汇总结果」的公共逻辑，供 `install`/`uninstall`（及未来可能受影响的动词）复用。
-  - Cloud `list` 接口返回带类别、名称与版本的全部 `PowerRef`，供 install 在 `--type` 缺省时推断并选择版本已确定的引用；本地清单查询需要检测同名跨类别歧义，供 `list --installed` 与 `uninstall` 要求显式消歧。
+  - Cloud `list` 接口返回带类别、名称与版本的全部 `PowerRef`，供 install 在 `--type` 缺省时推断并选择版本已确定的引用；`list --installed` 始终只按可选 `--type` 精确过滤，本地清单同名跨类别歧义仅由 uninstall 要求显式消歧。
 
 ## Alternatives Considered
 
