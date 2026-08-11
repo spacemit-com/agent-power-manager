@@ -99,7 +99,7 @@ func TestSearchRecoversWarnsUnlocksThenListsCloud(t *testing.T) {
 			}
 		},
 	}
-	service, err := New(
+	service, err := NewSearch(
 		&stubLocker{calls: &calls, unlock: unlock},
 		&stubTransactionManager{calls: &calls, result: transaction.RecoveryResult{
 			Recovered:     true,
@@ -181,7 +181,7 @@ func TestSearchNoJournalWritesDebugWhenVerbose(t *testing.T) {
 func TestSearchAcquireFailureStopsBeforeRecovery(t *testing.T) {
 	var calls []string
 	wantErr := errors.New("lock unavailable")
-	service, err := New(
+	service, err := NewSearch(
 		&stubLocker{calls: &calls, err: wantErr},
 		&stubTransactionManager{calls: &calls},
 		&stubCloudClient{calls: &calls},
@@ -256,7 +256,7 @@ func TestSearchCloudFailurePreservesCause(t *testing.T) {
 	}
 }
 
-func TestNewRejectsNilSearchDependencies(t *testing.T) {
+func TestNewSearchRejectsNilDependencies(t *testing.T) {
 	var calls []string
 	locker := &stubLocker{calls: &calls, unlock: &stubUnlock{calls: &calls}}
 	transactions := &stubTransactionManager{calls: &calls}
@@ -264,27 +264,27 @@ func TestNewRejectsNilSearchDependencies(t *testing.T) {
 
 	tests := []struct {
 		name string
-		new  func() (*Service, error)
+		new  func() (*SearchService, error)
 		want string
 	}{
-		{name: "locker", new: func() (*Service, error) { return New(nil, transactions, cloud) }, want: "create lifecycle service with nil locker"},
-		{name: "transaction manager", new: func() (*Service, error) { return New(locker, nil, cloud) }, want: "create lifecycle service with nil transaction manager"},
-		{name: "Cloud client", new: func() (*Service, error) { return New(locker, transactions, nil) }, want: "create lifecycle service with nil cloud client"},
+		{name: "locker", new: func() (*SearchService, error) { return NewSearch(nil, transactions, cloud) }, want: "create Search lifecycle with nil locker"},
+		{name: "transaction manager", new: func() (*SearchService, error) { return NewSearch(locker, nil, cloud) }, want: "create Search lifecycle with nil transaction manager"},
+		{name: "Cloud client", new: func() (*SearchService, error) { return NewSearch(locker, transactions, nil) }, want: "create Search lifecycle with nil Cloud client"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service, err := tt.new()
 			if service != nil || err == nil || err.Error() != tt.want {
-				t.Fatalf("New() = (%v, %v), want (nil, %q)", service, err, tt.want)
+				t.Fatalf("NewSearch() = (%v, %v), want (nil, %q)", service, err, tt.want)
 			}
 		})
 	}
 }
 
-func newSearchService(t *testing.T, calls *[]string, result transaction.RecoveryResult, recoveryErr, releaseErr, cloudErr error) *Service {
+func newSearchService(t *testing.T, calls *[]string, result transaction.RecoveryResult, recoveryErr, releaseErr, cloudErr error) *SearchService {
 	t.Helper()
-	service, err := New(
+	service, err := NewSearch(
 		&stubLocker{calls: calls, unlock: &stubUnlock{calls: calls, err: releaseErr}},
 		&stubTransactionManager{calls: calls, result: result, err: recoveryErr},
 		&stubCloudClient{calls: calls, err: cloudErr},

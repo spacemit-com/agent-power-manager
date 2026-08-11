@@ -39,5 +39,5 @@ func newSearchLifecycle() (cli.SearchLifecycle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create local Cloud client: %w", err)
 	}
-	return lifecycle.New(locker, transactions, cloudClient)
+	return lifecycle.NewSearch(locker, transactions, cloudClient)
 }

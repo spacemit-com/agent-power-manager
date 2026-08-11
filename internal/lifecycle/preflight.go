@@ -9,7 +9,7 @@ import (
 	"apm/internal/logging"
 )
 
-func (s *Service) recoverSearch(ctx context.Context) error {
+func (s *SearchService) recoverSearch(ctx context.Context) error {
 	unlock, err := s.locker.Acquire()
 	if err != nil {
 		return fmt.Errorf("acquire search recovery lock: %w", err)

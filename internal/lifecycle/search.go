@@ -9,7 +9,7 @@ import (
 
 // Search 在锁内恢复共享状态，并在解锁后查询和筛选 Cloud Power。
 // 生命周期只返回结构化结果，不承担 CLI 渲染。
-func (s *Service) Search(ctx context.Context, flags cli.Flags) (cli.SearchResult, error) {
+func (s *SearchService) Search(ctx context.Context, flags cli.Flags) (cli.SearchResult, error) {
 	if err := s.recoverSearch(ctx); err != nil {
 		return cli.SearchResult{}, err
 	}
