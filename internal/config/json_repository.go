@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+
+	"github.com/Masterminds/semver/v3"
 
 	"apm/internal/domain"
 	"apm/internal/logging"
@@ -23,7 +26,7 @@ func NewJSONRepository() *JSONRepository {
 
 // List 返回指定智能体按类别组织的能力引用。
 func (r *JSONRepository) List(agent domain.AgentID) (domain.PowerGroups, error) {
-	groups, err := r.read(agent)
+	groups, err := r.read("List", agent)
 	if err != nil {
 		return nil, fmt.Errorf("List agent %q: %w", agent, err)
 	}
@@ -39,7 +42,7 @@ func (r *JSONRepository) Find(agent domain.AgentID, powerType domain.PowerType, 
 		return domain.PowerRef{}, false, fmt.Errorf("Find agent %q: empty power name: %w", agent, ErrInvalidPower)
 	}
 
-	groups, err := r.read(agent)
+	groups, err := r.read("Find", agent)
 	if err != nil {
 		return domain.PowerRef{}, false, fmt.Errorf("Find agent %q: %w", agent, err)
 	}
@@ -59,11 +62,11 @@ func (r *JSONRepository) Set(agent domain.AgentID, power domain.PowerRef) error 
 	if power.Name == "" {
 		return fmt.Errorf("Set agent %q: empty power name: %w", agent, ErrInvalidPower)
 	}
-	if power.Version == "" {
-		return fmt.Errorf("Set agent %q: empty power version: %w", agent, ErrInvalidPower)
+	if err := validateCanonicalVersion(power.Version); err != nil {
+		return fmt.Errorf("Set agent %q power %q version %q: %w", agent, power.Name, power.Version, err)
 	}
 
-	groups, err := r.read(agent)
+	groups, err := r.read("Set", agent)
 	if err != nil {
 		return fmt.Errorf("Set agent %q: %w", agent, err)
 	}
@@ -118,7 +121,7 @@ func (r *JSONRepository) Remove(agent domain.AgentID, powerType domain.PowerType
 		return fmt.Errorf("Remove agent %q: empty power name: %w", agent, ErrInvalidPower)
 	}
 
-	groups, err := r.read(agent)
+	groups, err := r.read("Remove", agent)
 	if err != nil {
 		return fmt.Errorf("Remove agent %q: %w", agent, err)
 	}
@@ -150,7 +153,31 @@ func (r *JSONRepository) Remove(agent domain.AgentID, powerType domain.PowerType
 
 var _ Repository = (*JSONRepository)(nil)
 
-func (r *JSONRepository) read(agent domain.AgentID) (domain.PowerGroups, error) {
+var canonicalVersionPattern = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+func validateCanonicalVersion(version string) error {
+	if !canonicalVersionPattern.MatchString(version) {
+		return fmt.Errorf("version %q must match vMAJOR.MINOR.PATCH: %w", version, ErrInvalidPower)
+	}
+	if _, err := semver.NewVersion(version); err != nil {
+		return fmt.Errorf("parse version %q: %w", version, errors.Join(ErrInvalidPower, err))
+	}
+	return nil
+}
+
+func validatePowerGroups(operation string, agent domain.AgentID, groups domain.PowerGroups) error {
+	for _, powerType := range []domain.PowerType{domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP} {
+		for index, power := range groups[powerType] {
+			if err := validateCanonicalVersion(power.Version); err != nil {
+				return fmt.Errorf("%s agent %q type %q entry %d power %q version %q: %w",
+					operation, agent, powerType, index, power.Name, power.Version, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (r *JSONRepository) read(operation string, agent domain.AgentID) (domain.PowerGroups, error) {
 	path, err := paths.ManifestPath(agent)
 	if err != nil {
 		return nil, fmt.Errorf("resolve manifest path for agent %q: %w", agent, err)
@@ -175,10 +202,17 @@ func (r *JSONRepository) read(agent domain.AgentID) (domain.PowerGroups, error) 
 	if document.Agent != agent {
 		return nil, fmt.Errorf("decode manifest %q for agent %q: document agent %q does not match", path, agent, document.Agent)
 	}
-	return manifestToPowerGroups(document), nil
+	groups := manifestToPowerGroups(document)
+	if err := validatePowerGroups(operation, agent, groups); err != nil {
+		return nil, err
+	}
+	return groups, nil
 }
 
 func (r *JSONRepository) write(agent domain.AgentID, groups domain.PowerGroups) (resultErr error) {
+	if err := validatePowerGroups("write", agent, groups); err != nil {
+		return err
+	}
 	document := powerGroupsToManifest(agent, groups)
 	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {

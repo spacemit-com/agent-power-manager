@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,39 @@ import (
 	"apm/internal/domain"
 	"apm/internal/paths"
 )
+
+func TestJSONRepositoryWriteRejectsInvalidVersionWithoutChangingTarget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	target, err := paths.ManifestPath(domain.AgentCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte("{\"agent\":\"codex\",\"skills\":[]}\n")
+	if err := os.WriteFile(target, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = (&JSONRepository{}).write(domain.AgentCodex, domain.PowerGroups{
+		domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.2"}},
+	})
+	if !errors.Is(err, ErrInvalidPower) {
+		t.Fatalf("write() error = %v, want ErrInvalidPower", err)
+	}
+
+	after, statErr := os.Stat(target)
+	contents, readErr := os.ReadFile(target)
+	if statErr != nil || readErr != nil || !os.SameFile(before, after) || !bytes.Equal(contents, original) {
+		t.Fatalf("invalid write changed target: stat=%v read=%v contents=%q", statErr, readErr, contents)
+	}
+}
 
 func TestJSONRepositoryWriteRenameFailurePreservesTargetAndCleansTemporaryFile(t *testing.T) {
 	home := t.TempDir()
@@ -27,7 +61,7 @@ func TestJSONRepositoryWriteRenameFailurePreservesTargetAndCleansTemporaryFile(t
 	}
 
 	err = (&JSONRepository{}).write("codex", domain.PowerGroups{
-		domain.PowerTypeSkill:  {{Name: "power", Type: domain.PowerTypeSkill, Version: "1"}},
+		domain.PowerTypeSkill:  {{Name: "power", Type: domain.PowerTypeSkill, Version: "v1.0.0"}},
 		domain.PowerTypePlugin: {},
 		domain.PowerTypeMCP:    {},
 	})

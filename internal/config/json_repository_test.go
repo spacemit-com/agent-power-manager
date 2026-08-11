@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -74,15 +76,101 @@ func TestJSONRepositoryListMissingManifest(t *testing.T) {
 	}
 }
 
+func TestJSONRepositoryRejectsNonCanonicalManifestVersions(t *testing.T) {
+	tests := []string{
+		"", "1.2.3", "v1.2", "v1.2.3.4", "v01.2.3",
+		"v1.02.3", "v1.2.03", "v1.2.3-alpha", "v1.2.3+build",
+		" v1.2.3", "v1.2.3 ", "v1.two.3", "v-1.2.3",
+	}
+	for _, version := range tests {
+		t.Run(fmt.Sprintf("version_%q", version), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("APM_HOME", home)
+			writeManifest(t, domain.AgentCodex, fmt.Sprintf(
+				`{"agent":"codex","skills":[{"name":"demo","version":%q}]}`,
+				version,
+			))
+			_, err := config.NewJSONRepository().List(domain.AgentCodex)
+			if !errors.Is(err, config.ErrInvalidPower) {
+				t.Fatalf("List() error = %v, want ErrInvalidPower", err)
+			}
+			for _, want := range []string{"List", "codex", "skill", "entry 0", "demo", strconv.Quote(version)} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("List() error = %q, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestJSONRepositoryFindAndRemoveRejectInvalidUnrelatedManifestEntry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	writeManifest(t, domain.AgentCodex, `{"agent":"codex","skills":[{"name":"demo","version":"v1.2.3"}],"mcps":[{"name":"broken","version":"1.2.3"}]}`)
+	for _, operation := range []string{"Find", "Remove"} {
+		t.Run(operation, func(t *testing.T) {
+			var err error
+			if operation == "Find" {
+				_, _, err = config.NewJSONRepository().Find(domain.AgentCodex, domain.PowerTypeSkill, "demo")
+			} else {
+				err = config.NewJSONRepository().Remove(domain.AgentCodex, domain.PowerTypeSkill, "demo")
+			}
+			if !errors.Is(err, config.ErrInvalidPower) {
+				t.Fatalf("%s() error = %v, want ErrInvalidPower", operation, err)
+			}
+			for _, want := range []string{operation, "codex", "mcp", "entry 0", "broken", `version "1.2.3"`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("%s() error = %q, want %q", operation, err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestJSONRepositorySetRejectsNonCanonicalVersionBeforeIO(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".apm"), []byte("blocking"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := config.NewJSONRepository().Set(domain.AgentCodex, domain.PowerRef{
+		Type: domain.PowerTypeSkill, Name: "demo", Version: "1.2.3",
+	})
+	if !errors.Is(err, config.ErrInvalidPower) || !strings.Contains(err.Error(), `version "1.2.3"`) {
+		t.Fatalf("Set() error = %v, want version ErrInvalidPower", err)
+	}
+}
+
+func TestJSONRepositoryCanonicalVersionsRoundTrip(t *testing.T) {
+	for _, version := range []string{"v0.0.0", "v1.2.3", "v123.456.789"} {
+		t.Run(version, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("APM_HOME", home)
+			if err := config.NewJSONRepository().Set(domain.AgentCodex, domain.PowerRef{
+				Type: domain.PowerTypeSkill, Name: "demo", Version: version,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			groups, err := config.NewJSONRepository().List(domain.AgentCodex)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := groups[domain.PowerTypeSkill][0].Version; got != version {
+				t.Fatalf("round-trip version = %q, want %q", got, version)
+			}
+		})
+	}
+}
+
 func TestJSONRepositoryListConvertsGroupsAndReturnsIndependentCopy(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
 	writeManifest(t, "codex", `{
 		"agent": "codex",
 		"unknown_top_level": true,
-		"skills": [{"name": "skill-a", "version": "1.2.3", "unknown_entry": "ignored"}],
-		"plugins": [{"name": "plugin-a", "version": "2.3.4", "unknown_entry": "ignored"}],
-		"mcps": [{"name": "mcp-a", "version": "3.4.5", "unknown_entry": "ignored"}]
+		"skills": [{"name": "skill-a", "version": "v1.2.3", "unknown_entry": "ignored"}],
+		"plugins": [{"name": "plugin-a", "version": "v2.3.4", "unknown_entry": "ignored"}],
+		"mcps": [{"name": "mcp-a", "version": "v3.4.5", "unknown_entry": "ignored"}]
 	}`)
 
 	repository := config.NewJSONRepository()
@@ -91,9 +179,9 @@ func TestJSONRepositoryListConvertsGroupsAndReturnsIndependentCopy(t *testing.T)
 		t.Fatal(err)
 	}
 	for powerType, want := range map[domain.PowerType]domain.PowerRef{
-		domain.PowerTypeSkill:  {Name: "skill-a", Type: domain.PowerTypeSkill, Version: "1.2.3"},
-		domain.PowerTypePlugin: {Name: "plugin-a", Type: domain.PowerTypePlugin, Version: "2.3.4"},
-		domain.PowerTypeMCP:    {Name: "mcp-a", Type: domain.PowerTypeMCP, Version: "3.4.5"},
+		domain.PowerTypeSkill:  {Name: "skill-a", Type: domain.PowerTypeSkill, Version: "v1.2.3"},
+		domain.PowerTypePlugin: {Name: "plugin-a", Type: domain.PowerTypePlugin, Version: "v2.3.4"},
+		domain.PowerTypeMCP:    {Name: "mcp-a", Type: domain.PowerTypeMCP, Version: "v3.4.5"},
 	} {
 		if got := groups[powerType]; len(got) != 1 || got[0] != want {
 			t.Fatalf("group %q = %#v, want %#v", powerType, got, []domain.PowerRef{want})
@@ -130,7 +218,7 @@ func TestJSONRepositoryListNormalizesManifestGroups(t *testing.T) {
 		{name: "wrong group type", content: `{"agent":"codex","skills":{}}`, wantErr: true},
 		{name: "missing agent", content: `{"skills":[]}`, wantErr: true},
 		{name: "mismatched agent", content: `{"agent":"claude","skills":[]}`, wantErr: true},
-		{name: "unchecked content", content: `{"agent":"codex","skills":[{"name":"","version":""},{"name":"","version":""}]}`, wantLen: 2},
+		{name: "unchecked content", content: `{"agent":"codex","skills":[{"name":"","version":""},{"name":"","version":""}]}`, wantErr: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -166,7 +254,7 @@ func TestJSONRepositoryListNormalizesManifestGroups(t *testing.T) {
 func TestJSONRepositoryFindReturnsFirstMatchingPower(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
-	writeManifest(t, "codex", `{"agent":"codex","skills":[{"name":"duplicate","version":"first"},{"name":"duplicate","version":"second"}]}`)
+	writeManifest(t, "codex", `{"agent":"codex","skills":[{"name":"duplicate","version":"v1.0.0"},{"name":"duplicate","version":"v2.0.0"}]}`)
 
 	power, found, err := config.NewJSONRepository().Find("codex", domain.PowerTypeSkill, "duplicate")
 	if err != nil {
@@ -175,7 +263,7 @@ func TestJSONRepositoryFindReturnsFirstMatchingPower(t *testing.T) {
 	if !found {
 		t.Fatal("Find() found = false, want true")
 	}
-	want := domain.PowerRef{Name: "duplicate", Type: domain.PowerTypeSkill, Version: "first"}
+	want := domain.PowerRef{Name: "duplicate", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 	if power != want {
 		t.Fatalf("Find() power = %#v, want %#v", power, want)
 	}
@@ -184,7 +272,7 @@ func TestJSONRepositoryFindReturnsFirstMatchingPower(t *testing.T) {
 func TestJSONRepositoryFindMissingNameReturnsNotFound(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
-	writeManifest(t, "codex", `{"agent":"codex","skills":[{"name":"present","version":"1"}]}`)
+	writeManifest(t, "codex", `{"agent":"codex","skills":[{"name":"present","version":"v1.0.0"}]}`)
 
 	power, found, err := config.NewJSONRepository().Find("codex", domain.PowerTypeSkill, "missing")
 	if err != nil {
@@ -249,7 +337,7 @@ func TestJSONRepositorySetCreatesManifestWithFixedSchema(t *testing.T) {
 	t.Setenv("APM_HOME", home)
 
 	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
-		Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "0.0.1",
+		Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -260,7 +348,7 @@ func TestJSONRepositorySetCreatesManifestWithFixedSchema(t *testing.T) {
   "skills": [
     {
       "name": "foo-before-summary",
-      "version": "0.0.1"
+      "version": "v0.0.1"
     }
   ],
   "plugins": [],
@@ -279,15 +367,15 @@ func TestJSONRepositorySetAppendsNewNameAndPreservesOrder(t *testing.T) {
 	path := writeManifest(t, "codex", `{
   "agent": "codex",
   "skills": [
-    {"name": "first", "version": "1"},
-    {"name": "", "version": "invalid-but-preserved"}
+    {"name": "first", "version": "v1.0.0"},
+    {"name": "", "version": "v9.0.0"}
   ],
-  "plugins": [{"name": "plugin-a", "version": "2"}],
-  "mcps": [{"name": "mcp-a", "version": "3"}]
+  "plugins": [{"name": "plugin-a", "version": "v2.0.0"}],
+  "mcps": [{"name": "mcp-a", "version": "v3.0.0"}]
 }`)
 
 	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
-		Name: "last", Type: domain.PowerTypeSkill, Version: "4",
+		Name: "last", Type: domain.PowerTypeSkill, Version: "v4.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -298,27 +386,27 @@ func TestJSONRepositorySetAppendsNewNameAndPreservesOrder(t *testing.T) {
   "skills": [
     {
       "name": "first",
-      "version": "1"
+      "version": "v1.0.0"
     },
     {
       "name": "",
-      "version": "invalid-but-preserved"
+      "version": "v9.0.0"
     },
     {
       "name": "last",
-      "version": "4"
+      "version": "v4.0.0"
     }
   ],
   "plugins": [
     {
       "name": "plugin-a",
-      "version": "2"
+      "version": "v2.0.0"
     }
   ],
   "mcps": [
     {
       "name": "mcp-a",
-      "version": "3"
+      "version": "v3.0.0"
     }
   ]
 }
@@ -334,18 +422,18 @@ func TestJSONRepositorySetReplacesFirstMatchAndRemovesDuplicates(t *testing.T) {
 	path := writeManifest(t, "codex", `{
   "agent": "codex",
   "skills": [
-    {"name": "before", "version": "1"},
-    {"name": "duplicate", "version": "old-first"},
-    {"name": "", "version": "invalid-but-preserved"},
-    {"name": "duplicate", "version": "old-second"},
-    {"name": "after", "version": "2"}
+    {"name": "before", "version": "v1.0.0"},
+    {"name": "duplicate", "version": "v2.0.0"},
+    {"name": "", "version": "v9.0.0"},
+    {"name": "duplicate", "version": "v3.0.0"},
+    {"name": "after", "version": "v4.0.0"}
   ],
-  "plugins": [{"name": "plugin-a", "version": "3"}],
+  "plugins": [{"name": "plugin-a", "version": "v3.0.0"}],
   "mcps": []
 }`)
 
 	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
-		Name: "duplicate", Type: domain.PowerTypeSkill, Version: "new",
+		Name: "duplicate", Type: domain.PowerTypeSkill, Version: "v5.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -356,25 +444,25 @@ func TestJSONRepositorySetReplacesFirstMatchAndRemovesDuplicates(t *testing.T) {
   "skills": [
     {
       "name": "before",
-      "version": "1"
+      "version": "v1.0.0"
     },
     {
       "name": "duplicate",
-      "version": "new"
+      "version": "v5.0.0"
     },
     {
       "name": "",
-      "version": "invalid-but-preserved"
+      "version": "v9.0.0"
     },
     {
       "name": "after",
-      "version": "2"
+      "version": "v4.0.0"
     }
   ],
   "plugins": [
     {
       "name": "plugin-a",
-      "version": "3"
+      "version": "v3.0.0"
     }
   ],
   "mcps": []
@@ -390,7 +478,7 @@ func TestJSONRepositorySetIdenticalSingleMatchDoesNotReplaceFile(t *testing.T) {
 	t.Setenv("APM_HOME", home)
 	path := writeManifest(t, "codex", `{
   "agent": "codex",
-  "skills": [{"name": "same", "version": "1"}],
+  "skills": [{"name": "same", "version": "v1.0.0"}],
   "plugins": [],
   "mcps": []
 }`)
@@ -404,7 +492,7 @@ func TestJSONRepositorySetIdenticalSingleMatchDoesNotReplaceFile(t *testing.T) {
 	slog.SetDefault(logging.NewLogger(io.Discard, &stderr, true))
 
 	err = config.NewJSONRepository().Set("codex", domain.PowerRef{
-		Name: "same", Type: domain.PowerTypeSkill, Version: "1",
+		Name: "same", Type: domain.PowerTypeSkill, Version: "v1.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -416,7 +504,7 @@ func TestJSONRepositorySetIdenticalSingleMatchDoesNotReplaceFile(t *testing.T) {
 	if !os.SameFile(before, after) {
 		t.Fatal("Set() replaced the manifest for an identical single match")
 	}
-	for _, want := range []string{"agent=codex", "power=same", "version=1"} {
+	for _, want := range []string{"agent=codex", "power=same", "version=v1.0.0"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("Set() no-op log = %q, want field %q", stderr.String(), want)
 		}
@@ -429,8 +517,8 @@ func TestJSONRepositorySetRejectsInvalidPowerBeforeIO(t *testing.T) {
 		power     domain.PowerRef
 		wantField string
 	}{
-		{name: "unknown type", power: domain.PowerRef{Name: "power", Type: "unknown", Version: "1"}, wantField: "type"},
-		{name: "empty name", power: domain.PowerRef{Type: domain.PowerTypeSkill, Version: "1"}, wantField: "name"},
+		{name: "unknown type", power: domain.PowerRef{Name: "power", Type: "unknown", Version: "v1.0.0"}, wantField: "type"},
+		{name: "empty name", power: domain.PowerRef{Type: domain.PowerTypeSkill, Version: "v1.0.0"}, wantField: "name"},
 		{name: "empty version", power: domain.PowerRef{Name: "power", Type: domain.PowerTypeSkill}, wantField: "version"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -461,13 +549,13 @@ func TestJSONRepositoryRemoveDeletesAllMatchesAndPreservesOrder(t *testing.T) {
 	path := writeManifest(t, "codex", `{
   "agent": "codex",
   "skills": [
-    {"name": "before", "version": "1"},
-    {"name": "remove", "version": "old-first"},
-    {"name": "", "version": "invalid-but-preserved"},
-    {"name": "remove", "version": "old-second"},
-    {"name": "after", "version": "2"}
+    {"name": "before", "version": "v1.0.0"},
+    {"name": "remove", "version": "v2.0.0"},
+    {"name": "", "version": "v9.0.0"},
+    {"name": "remove", "version": "v3.0.0"},
+    {"name": "after", "version": "v4.0.0"}
   ],
-  "plugins": [{"name": "plugin-a", "version": "3"}],
+  "plugins": [{"name": "plugin-a", "version": "v3.0.0"}],
   "mcps": []
 }`)
 
@@ -480,21 +568,21 @@ func TestJSONRepositoryRemoveDeletesAllMatchesAndPreservesOrder(t *testing.T) {
   "skills": [
     {
       "name": "before",
-      "version": "1"
+      "version": "v1.0.0"
     },
     {
       "name": "",
-      "version": "invalid-but-preserved"
+      "version": "v9.0.0"
     },
     {
       "name": "after",
-      "version": "2"
+      "version": "v4.0.0"
     }
   ],
   "plugins": [
     {
       "name": "plugin-a",
-      "version": "3"
+      "version": "v3.0.0"
     }
   ],
   "mcps": []
@@ -508,7 +596,7 @@ func TestJSONRepositoryRemoveDeletesAllMatchesAndPreservesOrder(t *testing.T) {
 func TestJSONRepositoryRemoveMissingNameDoesNotReplaceFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
-	path := writeManifest(t, "codex", `{"agent":"codex","skills":[{"name":"present","version":"1"}]}`)
+	path := writeManifest(t, "codex", `{"agent":"codex","skills":[{"name":"present","version":"v1.0.0"}]}`)
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -601,7 +689,7 @@ func TestJSONRepositoryWriteNormalizesPermissionsAndDropsUnknownFields(t *testin
 	if err := os.WriteFile(path, []byte(`{
   "agent": "codex",
   "unknown_top_level": true,
-  "skills": [{"name": "old", "version": "1", "unknown_entry": true}],
+  "skills": [{"name": "old", "version": "v1.0.0", "unknown_entry": true}],
   "plugins": [],
   "mcps": []
 }`), 0o644); err != nil {
@@ -612,7 +700,7 @@ func TestJSONRepositoryWriteNormalizesPermissionsAndDropsUnknownFields(t *testin
 	}
 
 	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
-		Name: "new", Type: domain.PowerTypeSkill, Version: "2",
+		Name: "new", Type: domain.PowerTypeSkill, Version: "v2.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -642,7 +730,7 @@ func TestJSONRepositoryWriteCleansUpTemporaryFileAfterSuccess(t *testing.T) {
 	t.Setenv("APM_HOME", home)
 
 	err := config.NewJSONRepository().Set("codex", domain.PowerRef{
-		Name: "power", Type: domain.PowerTypePlugin, Version: "1",
+		Name: "power", Type: domain.PowerTypePlugin, Version: "v1.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -668,7 +756,7 @@ func TestJSONRepositoryPublicMethodsWrapManifestReadAndDecodeErrors(t *testing.T
 			return err
 		}},
 		{name: "Set", call: func(r *config.JSONRepository) error {
-			return r.Set("codex", domain.PowerRef{Name: "power", Type: domain.PowerTypeSkill, Version: "1"})
+			return r.Set("codex", domain.PowerRef{Name: "power", Type: domain.PowerTypeSkill, Version: "v1.0.0"})
 		}},
 		{name: "Remove", call: func(r *config.JSONRepository) error { return r.Remove("codex", domain.PowerTypeSkill, "power") }},
 	}
@@ -731,12 +819,12 @@ func TestJSONRepositoryIsStatelessAcrossAgents(t *testing.T) {
 	repository := config.NewJSONRepository()
 
 	if err := repository.Set("codex", domain.PowerRef{
-		Name: "codex-skill", Type: domain.PowerTypeSkill, Version: "1",
+		Name: "codex-skill", Type: domain.PowerTypeSkill, Version: "v1.0.0",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.Set("claude", domain.PowerRef{
-		Name: "claude-plugin", Type: domain.PowerTypePlugin, Version: "2",
+		Name: "claude-plugin", Type: domain.PowerTypePlugin, Version: "v2.0.0",
 	}); err != nil {
 		t.Fatal(err)
 	}
