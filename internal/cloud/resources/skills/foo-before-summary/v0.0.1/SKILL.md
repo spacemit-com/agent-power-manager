@@ -1,7 +1,7 @@
 ---
 name: foo-before-summary
 description: Use when preparing any user-facing summary, recap, conclusion, status wrap-up, completion note, or waiting-for-reply summary, whether requested by the user or initiated by the agent.
-version: "0.0.1"
+version: "v0.0.1"
 ---
 
 # Foo Before Summary
