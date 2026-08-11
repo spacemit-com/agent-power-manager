@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-08-11
+
+分类：新增功能
+
+用户需求：
+
+实现并交付 `search <keyword>` 的完整 lifecycle：在查询 Cloud 前完成上次 transaction 恢复，按名称查询并渲染每种 Power 的最新版本；同时同步 ADR、架构图、概览和构建文档，并保持尚未实现的命令边界清晰。
+
+相关提交：
+
+- `86a4eb5 docs(search): define lifecycle design`
+- `1520d16 docs(search): add implementation plan`
+- `53d1157 test(cloud): align v-prefixed fixture`
+- `1e7101a feat(search): select latest matching powers`
+- `0651245 feat(search): recover before cloud query`
+- `e20277c docs: record search lifecycle recovery`
+- `86deaf9 fix(search): assert recovery warn before unlock`
+- `8117eac feat(search): render lifecycle results`
+- `afe0f7a docs(search): revise lifecycle lock boundary`
+- `1a440e2 docs(search): clarify recovery concurrency scope`
+
+解决方案或完成结果：
+
+`search` 在全局锁内执行 `Recover`；恢复成功会实时输出 Warn，且该 Warn 发生在 Release 之前。恢复完成后先释放锁，再调用 Cloud，随后才执行过滤、最新 SemVer 选择、稳定排序和精确 `<type>/<name>@<version>` 渲染。恢复错误仍会尝试 Release，并仅由 CLI 外层记录一次。查询只对 `Name` 进行 Unicode 大小写无关匹配，保留精确 Power type；同类型同名的多个版本选择最大 SemVer，输出保持稳定顺序。lifecycle 返回 `SearchResult` 而不接收 Renderer，CLI 负责渲染；`--agent` 未接入 search，仍作为未知 flag 拒绝。ADR-002、修订后的 ADR-003、ADR-009、C4/流程图、项目概览和 `BUILD.md` 已对齐。`list`、`install`、`uninstall` 的 lifecycle 接口和命令 wiring 仍未连接。
+
+验证结果或限制：
+
+`test -z "$(gofmt -l cmd internal)"`、两次 `git diff --check`、`go mod tidy`、`go test -count=1 ./internal/cloud ./internal/lifecycle ./internal/cli ./cmd/apm`、`go test -count=1 ./...`、`go vet ./...` 与 `go build -o /dev/null ./cmd/apm` 均以退出码 0 完成，且 tidy 未产生模块文件变更。构建后的隔离验收中，`search summary` 的 stdout 精确为 `skill/foo-before-summary@v0.0.1` 且 stderr 为空；`search summary --agent=all` 非零退出，stdout 为空，stderr 恰有一条 `level=ERROR`、包含 `unknown flag: --agent` 和 `Usage:`。生产代码直接打印/独立 logger 扫描及 lifecycle 的 `slog.Error` 扫描均无匹配。
+
 ## 2026-08-10
 
 分类：新增功能
