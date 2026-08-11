@@ -50,7 +50,7 @@ func TestFilesystemCacheMissClearsOldStagingAndTemporaryStaging(t *testing.T) {
 
 func TestFilesystemCacheFetchesVersionAndReturnsStagingRoot(t *testing.T) {
 	stateHome, cacheHome := setCacheEnvironment(t)
-	source := filepath.Join(cacheHome, "apm", "skills", "demo", "1.0.0")
+	source := filepath.Join(cacheHome, "apm", "skills", "demo", "v1.0.0")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestFilesystemCacheFetchesVersionAndReturnsStagingRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 	root, err := store.Fetch(ref)
 	if err != nil {
 		t.Fatal(err)

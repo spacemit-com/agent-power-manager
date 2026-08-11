@@ -33,7 +33,7 @@ type UninstallRequest struct {
 	Adapter adapter.Adapter
 }
 
-// ManifestWriter 定义提交点后所需的清单写操作。
+// ManifestWriter 定义提交后的清单写入，以及安装预检发现陈旧清单时不创建 journal 的单条移除操作。
 type ManifestWriter interface {
 	Set(domain.AgentID, domain.PowerRef) error
 	Remove(domain.AgentID, domain.PowerType, string) error

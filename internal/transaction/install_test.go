@@ -200,6 +200,10 @@ func TestInstallManagedMissingTargetRemovesManifestCleansStagingAndStops(t *test
 	fixture := newInstallFixture(t)
 	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 	fixture.request.Previous = &old
+	fixture.service.newID = func() (string, error) {
+		t.Fatal("stale-manifest repair generated a transaction ID")
+		return "", nil
+	}
 	if err := os.MkdirAll(fixture.staging, 0o755); err != nil {
 		t.Fatal(err)
 	}
