@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -24,6 +25,17 @@ type installFixture struct {
 	selected       string
 	installed      map[domain.AgentID]domain.PowerRef
 	cacheResponses map[domain.AgentID][]installCacheResponse
+
+	acquireErr            error
+	releaseErr            error
+	recoverErr            error
+	refreshErr            error
+	cloudListErr          error
+	cloudGetErr           error
+	resolveErrors         map[domain.AgentID]error
+	configFindErrors      map[domain.AgentID]error
+	transactionInstallErr map[domain.AgentID]error
+	versionErr            error
 
 	currentAgent domain.AgentID
 	cacheCalls   map[domain.AgentID]int
@@ -47,7 +59,7 @@ func (u *installFakeUnlock) Release() error {
 		u.fixture.beforeRelease()
 	}
 	*u.calls = append(*u.calls, "release")
-	return nil
+	return u.fixture.releaseErr
 }
 
 type installFakeLocker struct {
@@ -57,6 +69,9 @@ type installFakeLocker struct {
 
 func (l *installFakeLocker) Acquire() (lock.Unlock, error) {
 	*l.calls = append(*l.calls, "acquire")
+	if l.fixture.acquireErr != nil {
+		return nil, l.fixture.acquireErr
+	}
 	return &installFakeUnlock{calls: l.calls, fixture: l.fixture}, nil
 }
 
@@ -67,12 +82,12 @@ type installFakeTransactions struct {
 
 func (m *installFakeTransactions) Recover(context.Context) (transaction.RecoveryResult, error) {
 	*m.calls = append(*m.calls, "recover")
-	return m.fixture.recovery, nil
+	return m.fixture.recovery, m.fixture.recoverErr
 }
 
 func (m *installFakeTransactions) Install(_ context.Context, request transaction.InstallRequest) error {
 	*m.calls = append(*m.calls, "transaction:install:"+string(request.Agent))
-	return nil
+	return m.fixture.transactionInstallErr[request.Agent]
 }
 
 func (*installFakeTransactions) Uninstall(context.Context, transaction.UninstallRequest) error {
@@ -86,12 +101,12 @@ type installFakeCloud struct {
 
 func (c *installFakeCloud) List() ([]domain.PowerRef, error) {
 	*c.calls = append(*c.calls, "cloud:list")
-	return c.fixture.cloudRefs, nil
+	return c.fixture.cloudRefs, c.fixture.cloudListErr
 }
 
 func (c *installFakeCloud) Get(domain.PowerRef) error {
 	*c.calls = append(*c.calls, "cloud:get")
-	return nil
+	return c.fixture.cloudGetErr
 }
 
 type installFakeCache struct {
@@ -122,7 +137,7 @@ type installFakeRegistry struct {
 func (r *installFakeRegistry) Resolve(agent domain.AgentID, _ domain.PowerType) (adapter.Adapter, error) {
 	r.fixture.currentAgent = agent
 	*r.calls = append(*r.calls, "resolve:"+string(agent))
-	return installFakeAdapter{}, nil
+	return installFakeAdapter{}, r.fixture.resolveErrors[agent]
 }
 
 func (r *installFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
@@ -130,7 +145,7 @@ func (r *installFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 		r.fixture.beforeRefresh()
 	}
 	*r.calls = append(*r.calls, "refresh")
-	return r.fixture.snapshot, nil
+	return r.fixture.snapshot, r.fixture.refreshErr
 }
 
 type installFakeAdapter struct{}
@@ -151,7 +166,7 @@ type installFakeConfig struct {
 func (c *installFakeConfig) Find(agent domain.AgentID, _ domain.PowerType, _ string) (domain.PowerRef, bool, error) {
 	*c.calls = append(*c.calls, "config:find:"+string(agent))
 	ref, ok := c.fixture.installed[agent]
-	return ref, ok, nil
+	return ref, ok, c.fixture.configFindErrors[agent]
 }
 
 func (*installFakeConfig) List(domain.AgentID) (domain.PowerGroups, error) { return nil, nil }
@@ -162,9 +177,10 @@ func (*installFakeConfig) Remove(domain.AgentID, domain.PowerType, string) error
 
 type installFakeVersions struct {
 	selected string
+	err      error
 }
 
-func (s *installFakeVersions) Select([]string, string) (string, error) { return s.selected, nil }
+func (s *installFakeVersions) Select([]string, string) (string, error) { return s.selected, s.err }
 
 func TestInstallFirstInstallOrdersDependenciesAndReturnsInstalled(t *testing.T) {
 	var calls []string
@@ -319,6 +335,250 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 		{Agent: domain.AgentCodex, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeUnchanged},
 		{Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeInstalled},
 	})
+}
+
+func TestInstallAllFailsFastAndCompletesResultAfterRelease(t *testing.T) {
+	cause := errors.New("find installed Codex power")
+	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{
+			domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes,
+		}},
+		cloudRefs: targetRefs(target),
+		selected:  target.Version,
+		configFindErrors: map[domain.AgentID]error{
+			domain.AgentCodex: cause,
+		},
+	})
+
+	result, err := service.Install(context.Background(), cli.Flags{Agent: "all", Type: "skill", Name: "demo"})
+	if err == nil {
+		t.Fatal("Install() error = nil, want failed Agent marker")
+	}
+	assertInstallItems(t, result, []cli.InstallItem{
+		{Agent: domain.AgentClaudeCode, Power: target, Outcome: cli.InstallOutcomeInstalled},
+		{Agent: domain.AgentCodex, Power: target, Outcome: cli.InstallOutcomeFailed},
+		{Agent: domain.AgentHermes, Power: target, Outcome: cli.InstallOutcomeUnexecuted},
+	})
+	assertInstallBatchError(t, err, domain.AgentCodex, cause)
+	if !containsEvent(calls, "release") {
+		t.Fatalf("calls = %v, want release", calls)
+	}
+	for _, event := range calls {
+		if strings.Contains(event, string(domain.AgentHermes)) {
+			t.Fatalf("calls = %v, want no Hermes operation after Codex failure", calls)
+		}
+	}
+}
+
+func TestInstallConcreteFailureReturnsFailedItemAndMarkerAfterRelease(t *testing.T) {
+	cause := errors.New("find installed Codex power")
+	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		snapshot:         domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		cloudRefs:        targetRefs(target),
+		selected:         target.Version,
+		configFindErrors: map[domain.AgentID]error{domain.AgentCodex: cause},
+	})
+
+	result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "skill", Name: "demo"})
+	if err == nil {
+		t.Fatal("Install() error = nil, want failed Agent marker")
+	}
+	assertInstallItems(t, result, []cli.InstallItem{{
+		Agent: domain.AgentCodex, Power: target, Outcome: cli.InstallOutcomeFailed,
+	}})
+	assertInstallBatchError(t, err, domain.AgentCodex, cause)
+	if !containsEvent(calls, "release") {
+		t.Fatalf("calls = %v, want release", calls)
+	}
+}
+
+func TestInstallFatalPreTargetFailuresReturnZeroResultWithoutBatchError(t *testing.T) {
+	tests := []struct {
+		name        string
+		flags       cli.Flags
+		configure   func(*installFixture, error)
+		wantRelease bool
+		wantCause   bool
+	}{
+		{name: "acquire", flags: installTargetFlags("codex"), configure: func(f *installFixture, cause error) { f.acquireErr = cause }, wantCause: true},
+		{name: "recover", flags: installTargetFlags("codex"), configure: func(f *installFixture, cause error) { f.recoverErr = cause }, wantRelease: true, wantCause: true},
+		{name: "refresh", flags: installTargetFlags("codex"), configure: func(f *installFixture, cause error) { f.refreshErr = cause }, wantRelease: true, wantCause: true},
+		{name: "concrete Agent missing", flags: installTargetFlags("hermes-agent"), configure: func(*installFixture, error) {}, wantRelease: true},
+		{name: "all snapshot empty", flags: installTargetFlags("all"), configure: func(f *installFixture, _ error) { f.snapshot = domain.AgentSnapshot{} }, wantRelease: true},
+		{name: "Cloud list", flags: installTargetFlags("codex"), configure: func(f *installFixture, cause error) { f.cloudListErr = cause }, wantRelease: true, wantCause: true},
+		{name: "name not found", flags: installTargetFlags("codex"), configure: func(f *installFixture, _ error) {
+			f.cloudRefs = targetRefs(domain.PowerRef{Name: "other", Type: domain.PowerTypeSkill, Version: "v2.0.0"})
+		}, wantRelease: true},
+		{name: "type ambiguity", flags: cli.Flags{Agent: "codex", Name: "demo"}, configure: func(f *installFixture, _ error) {
+			f.cloudRefs = []domain.PowerRef{{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, {Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}}
+		}, wantRelease: true},
+		{name: "explicit type not found", flags: cli.Flags{Agent: "codex", Type: "mcp", Name: "demo"}, configure: func(*installFixture, error) {}, wantRelease: true},
+		{name: "version not found", flags: cli.Flags{Agent: "codex", Type: "skill", Name: "demo", Version: "v9.0.0"}, configure: func(f *installFixture, cause error) { f.versionErr = cause }, wantRelease: true, wantCause: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cause := errors.New(tt.name)
+			fixture := installTargetFixture()
+			tt.configure(&fixture, cause)
+			var calls []string
+			service := newInstallService(t, &calls, fixture)
+
+			result, err := service.Install(context.Background(), tt.flags)
+			if err == nil {
+				t.Fatal("Install() error = nil, want fatal failure")
+			}
+			assertZeroInstallResult(t, result)
+			assertNoInstallBatchError(t, err)
+			if tt.wantCause && !errors.Is(err, cause) {
+				t.Fatalf("Install() error = %v, want cause %v", err, cause)
+			}
+			if containsEvent(calls, "release") != tt.wantRelease {
+				t.Fatalf("calls = %v, release = %t, want %t", calls, containsEvent(calls, "release"), tt.wantRelease)
+			}
+		})
+	}
+}
+
+func TestInstallAgentFailuresReturnFailedResultAndMarkerAfterRelease(t *testing.T) {
+	tests := []struct {
+		name      string
+		cause     error
+		configure func(*installFixture, error)
+	}{
+		{name: "Adapter Resolve", configure: func(f *installFixture, cause error) {
+			f.resolveErrors = map[domain.AgentID]error{domain.AgentCodex: cause}
+		}},
+		{name: "Config Find", configure: func(f *installFixture, cause error) {
+			f.configFindErrors = map[domain.AgentID]error{domain.AgentCodex: cause}
+		}},
+		{name: "first Fetch", configure: func(f *installFixture, cause error) {
+			f.cacheResponses = map[domain.AgentID][]installCacheResponse{domain.AgentCodex: {{err: cause}}}
+		}},
+		{name: "Cloud Get", configure: func(f *installFixture, cause error) {
+			f.cacheResponses = map[domain.AgentID][]installCacheResponse{domain.AgentCodex: {{err: cache.ErrMiss}}}
+			f.cloudGetErr = cause
+		}},
+		{name: "second Fetch", configure: func(f *installFixture, cause error) {
+			f.cacheResponses = map[domain.AgentID][]installCacheResponse{domain.AgentCodex: {{err: cache.ErrMiss}, {err: cause}}}
+		}},
+		{name: "Transaction Install", configure: func(f *installFixture, cause error) {
+			f.transactionInstallErr = map[domain.AgentID]error{domain.AgentCodex: cause}
+		}},
+		{name: "Transaction Install stale manifest", cause: transaction.ErrStaleManifest, configure: func(f *installFixture, cause error) {
+			f.transactionInstallErr = map[domain.AgentID]error{domain.AgentCodex: cause}
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cause := tt.cause
+			if cause == nil {
+				cause = errors.New(tt.name)
+			}
+			fixture := installTargetFixture()
+			tt.configure(&fixture, cause)
+			var calls []string
+			service := newInstallService(t, &calls, fixture)
+
+			result, err := service.Install(context.Background(), installTargetFlags("codex"))
+			if err == nil {
+				t.Fatal("Install() error = nil, want failed Agent marker")
+			}
+			assertInstallItems(t, result, []cli.InstallItem{{
+				Agent: domain.AgentCodex, Power: installTarget(), Outcome: cli.InstallOutcomeFailed,
+			}})
+			assertInstallBatchError(t, err, domain.AgentCodex, cause)
+			if !containsEvent(calls, "release") {
+				t.Fatalf("calls = %v, want release", calls)
+			}
+		})
+	}
+}
+
+func TestInstallRecoveryFailureStillReleasesAndJoinsReleaseError(t *testing.T) {
+	businessCause := errors.New("recover transaction")
+	releaseCause := errors.New("unlock filesystem")
+	fixture := installTargetFixture()
+	fixture.recoverErr = businessCause
+	fixture.releaseErr = releaseCause
+	var calls []string
+	service := newInstallService(t, &calls, fixture)
+
+	result, err := service.Install(context.Background(), installTargetFlags("codex"))
+	if err == nil {
+		t.Fatal("Install() error = nil, want recovery and release failure")
+	}
+	assertZeroInstallResult(t, result)
+	assertNoInstallBatchError(t, err)
+	if !errors.Is(err, businessCause) || !errors.Is(err, releaseCause) {
+		t.Fatalf("Install() error = %v, want recovery %v and release %v", err, businessCause, releaseCause)
+	}
+	if !containsEvent(calls, "release") {
+		t.Fatalf("calls = %v, want release", calls)
+	}
+}
+
+func TestInstallFatalBusinessAndReleaseFailuresAreJoinedWithoutResult(t *testing.T) {
+	businessCause := errors.New("list Cloud powers")
+	releaseCause := errors.New("unlock filesystem")
+	fixture := installTargetFixture()
+	fixture.cloudListErr = businessCause
+	fixture.releaseErr = releaseCause
+	var calls []string
+	service := newInstallService(t, &calls, fixture)
+
+	result, err := service.Install(context.Background(), installTargetFlags("codex"))
+	if err == nil {
+		t.Fatal("Install() error = nil, want Cloud list and release failure")
+	}
+	assertZeroInstallResult(t, result)
+	assertNoInstallBatchError(t, err)
+	if !errors.Is(err, businessCause) || !errors.Is(err, releaseCause) {
+		t.Fatalf("Install() error = %v, want list %v and release %v", err, businessCause, releaseCause)
+	}
+}
+
+func TestInstallBatchAndReleaseFailuresSuppressResultAndMarker(t *testing.T) {
+	businessCause := errors.New("find installed power")
+	releaseCause := errors.New("unlock filesystem")
+	fixture := installTargetFixture()
+	fixture.configFindErrors = map[domain.AgentID]error{domain.AgentCodex: businessCause}
+	fixture.releaseErr = releaseCause
+	var calls []string
+	service := newInstallService(t, &calls, fixture)
+
+	result, err := service.Install(context.Background(), installTargetFlags("codex"))
+	if err == nil {
+		t.Fatal("Install() error = nil, want Agent and release failure")
+	}
+	assertZeroInstallResult(t, result)
+	assertNoInstallBatchError(t, err)
+	if !errors.Is(err, businessCause) || !errors.Is(err, releaseCause) {
+		t.Fatalf("Install() error = %v, want Agent %v and release %v", err, businessCause, releaseCause)
+	}
+}
+
+func TestInstallReleaseFailureAfterSuccessSuppressesCompletedResult(t *testing.T) {
+	releaseCause := errors.New("unlock filesystem")
+	fixture := installTargetFixture()
+	fixture.releaseErr = releaseCause
+	var calls []string
+	service := newInstallService(t, &calls, fixture)
+
+	result, err := service.Install(context.Background(), installTargetFlags("codex"))
+	if err == nil {
+		t.Fatal("Install() error = nil, want release failure")
+	}
+	assertZeroInstallResult(t, result)
+	assertNoInstallBatchError(t, err)
+	if !errors.Is(err, releaseCause) {
+		t.Fatalf("Install() error = %v, want release cause %v", err, releaseCause)
+	}
 }
 
 func TestInstallRecoveryWarnIsWrittenBeforeRefreshAndRelease(t *testing.T) {
@@ -481,12 +741,62 @@ func newInstallService(t *testing.T, calls *[]string, fixture installFixture) *I
 		&installFakeCache{calls: calls, fixture: &fixture},
 		&installFakeRegistry{calls: calls, fixture: &fixture},
 		&installFakeConfig{calls: calls, fixture: &fixture},
-		&installFakeVersions{selected: fixture.selected},
+		&installFakeVersions{selected: fixture.selected, err: fixture.versionErr},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return service
+}
+
+func installTarget() domain.PowerRef {
+	return domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}
+}
+
+func targetRefs(target domain.PowerRef) []domain.PowerRef {
+	return []domain.PowerRef{target}
+}
+
+func installTargetFixture() installFixture {
+	target := installTarget()
+	return installFixture{
+		snapshot:  domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		cloudRefs: targetRefs(target),
+		selected:  target.Version,
+	}
+}
+
+func installTargetFlags(agent string) cli.Flags {
+	return cli.Flags{Agent: agent, Type: "skill", Name: "demo"}
+}
+
+func assertZeroInstallResult(t *testing.T, result cli.InstallResult) {
+	t.Helper()
+	if result.Items != nil {
+		t.Fatalf("Install() result = %#v, want zero result", result)
+	}
+}
+
+func assertNoInstallBatchError(t *testing.T, err error) {
+	t.Helper()
+	var batch *cli.InstallBatchError
+	if errors.As(err, &batch) {
+		t.Fatalf("Install() error = %v, want no InstallBatchError", err)
+	}
+}
+
+func assertInstallBatchError(t *testing.T, err error, agent domain.AgentID, cause error) {
+	t.Helper()
+	var batch *cli.InstallBatchError
+	if !errors.As(err, &batch) {
+		t.Fatalf("Install() error = %v, want InstallBatchError", err)
+	}
+	if batch.Agent != agent {
+		t.Fatalf("InstallBatchError agent = %q, want %q", batch.Agent, agent)
+	}
+	if !errors.Is(batch, cause) {
+		t.Fatalf("InstallBatchError = %v, want cause %v", batch, cause)
+	}
 }
 
 func assertEventSubsequence(t *testing.T, events, want []string) {

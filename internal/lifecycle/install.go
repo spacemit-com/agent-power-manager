@@ -58,48 +58,61 @@ var _ cli.InstallLifecycle = (*InstallService)(nil)
 // Install 在一次全局锁持有期间恢复共享状态并串行安装所选 Agent。
 // 所有可渲染结果均在成功释放锁后返回，避免暴露仍受保护的中间状态。
 func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.InstallResult, error) {
-	empty := cli.InstallResult{Items: make([]cli.InstallItem, 0)}
-
 	unlock, err := s.locker.Acquire()
 	if err != nil {
-		return empty, fmt.Errorf("acquire install lock: %w", err)
+		return cli.InstallResult{}, fmt.Errorf("acquire install lock: %w", err)
 	}
 
 	recovery, err := s.transactions.Recover(ctx)
 	if err != nil {
-		return empty, releaseInstall(unlock, fmt.Errorf("recover transaction before install: %w", err))
+		return cli.InstallResult{}, releaseInstall(unlock, fmt.Errorf("recover transaction before install: %w", err))
 	}
 	logInstallRecovery(recovery)
 
 	snapshot, err := s.registry.RefreshInstalled()
 	if err != nil {
-		return empty, releaseInstall(unlock, fmt.Errorf("refresh installed agents for install: %w", err))
+		return cli.InstallResult{}, releaseInstall(unlock, fmt.Errorf("refresh installed agents for install: %w", err))
 	}
 	agents, err := installAgents(flags, snapshot)
 	if err != nil {
-		return empty, releaseInstall(unlock, err)
+		return cli.InstallResult{}, releaseInstall(unlock, err)
 	}
 
 	refs, err := s.cloud.List()
 	if err != nil {
-		return empty, releaseInstall(unlock, fmt.Errorf("list Cloud powers for install: %w", err))
+		return cli.InstallResult{}, releaseInstall(unlock, fmt.Errorf("list Cloud powers for install: %w", err))
 	}
 	ref, err := resolveInstallPower(flags, refs, s.versions)
 	if err != nil {
-		return empty, releaseInstall(unlock, err)
+		return cli.InstallResult{}, releaseInstall(unlock, err)
 	}
 
-	result := cli.InstallResult{Items: make([]cli.InstallItem, 0, len(agents))}
-	for _, agent := range agents {
+	items := make([]cli.InstallItem, 0, len(agents))
+	var failedAgent domain.AgentID
+	var businessErr error
+	for index, agent := range agents {
 		item, installErr := s.installOne(ctx, agent, ref)
 		if installErr != nil {
-			return empty, releaseInstall(unlock, installErr)
+			failedAgent = agent
+			businessErr = installErr
+			items = append(items, cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeFailed})
+			for _, skippedAgent := range agents[index+1:] {
+				items = append(items, cli.InstallItem{Agent: skippedAgent, Power: ref, Outcome: cli.InstallOutcomeUnexecuted})
+			}
+			break
 		}
-		result.Items = append(result.Items, item)
+		items = append(items, item)
 	}
 
-	if err := unlock.Release(); err != nil {
-		return empty, fmt.Errorf("release install lock: %w", err)
+	if releaseErr := unlock.Release(); releaseErr != nil {
+		return cli.InstallResult{}, errors.Join(
+			businessErr,
+			fmt.Errorf("release install lock: %w", releaseErr),
+		)
+	}
+	result := cli.InstallResult{Items: items}
+	if businessErr != nil {
+		return result, &cli.InstallBatchError{Agent: failedAgent, Err: businessErr}
 	}
 	return result, nil
 }
