@@ -30,3 +30,8 @@ type PowerCache = cache.PowerCache
 
 // CloudClient 是云端能力客户端的别名。
 type CloudClient = cloud.Client
+
+// VersionSelector 定义 Install 在可信候选中选择目标版本的最小接口。
+type VersionSelector interface {
+	Select([]string, string) (string, error)
+}
