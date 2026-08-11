@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"fmt"
+	"slices"
 
 	"apm/internal/domain"
 )
@@ -37,14 +38,16 @@ func (r *Registry) Resolve(agent domain.AgentID, power domain.PowerType) (Adapte
 	return adapter, nil
 }
 
-// RefreshInstalled 刷新已安装智能体的快照。
+// RefreshInstalled 按 Agent ID 字典序探测并返回已安装智能体快照。
 func (r *Registry) RefreshInstalled() (domain.AgentSnapshot, error) {
-	installed := make([]domain.AgentID, 0, len(r.ordered))
-	for _, agent := range r.ordered {
+	ordered := slices.Clone(r.ordered)
+	slices.Sort(ordered)
+	installed := make([]domain.AgentID, 0, len(ordered))
+	for _, agent := range ordered {
 		adapter := r.byAgent[agent]
 		found, err := adapter.DetectAgent()
 		if err != nil {
-			return domain.AgentSnapshot{}, err
+			return domain.AgentSnapshot{}, fmt.Errorf("refresh installed agent %q: %w", agent, err)
 		}
 		if found {
 			installed = append(installed, agent)

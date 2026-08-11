@@ -5,12 +5,31 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"apm/internal/domain"
 )
 
-func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInConfigOrder(t *testing.T) {
+type recordingDetectAdapter struct {
+	agent domain.AgentID
+	calls *[]domain.AgentID
+	found bool
+	err   error
+}
+
+func (a recordingDetectAdapter) DetectAgent() (bool, error) {
+	*a.calls = append(*a.calls, a.agent)
+	return a.found, a.err
+}
+
+func (recordingDetectAdapter) TargetPath(domain.PowerRef) (string, error) { return "", nil }
+
+func (recordingDetectAdapter) Install(domain.PowerRef, string) (InstallResult, error) {
+	return InstallResult{}, nil
+}
+
+func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentIDOrder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
 	t.Setenv("CODEX_HOME", "")
@@ -41,6 +60,58 @@ func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInConfig
 	want := []domain.AgentID{domain.AgentCodex, domain.AgentHermes}
 	if !slices.Equal(snapshot.Ordered(), want) {
 		t.Fatalf("snapshot = %v, want %v", snapshot.Ordered(), want)
+	}
+}
+
+func TestRegistryRefreshInstalledSortsDetectionAndSnapshotByAgentID(t *testing.T) {
+	var calls []domain.AgentID
+	wantRegistration := []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode}
+	registry := &Registry{
+		ordered: wantRegistration,
+		byAgent: map[domain.AgentID]Adapter{},
+	}
+	for _, agent := range registry.ordered {
+		registry.byAgent[agent] = recordingDetectAdapter{agent: agent, calls: &calls, found: agent != domain.AgentCodex}
+	}
+
+	snapshot, err := registry.RefreshInstalled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCalls := []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
+	wantSnapshot := []domain.AgentID{domain.AgentClaudeCode, domain.AgentHermes}
+	if !slices.Equal(calls, wantCalls) || !slices.Equal(snapshot.Ordered(), wantSnapshot) {
+		t.Fatalf("calls/snapshot = %v/%v, want %v/%v", calls, snapshot.Ordered(), wantCalls, wantSnapshot)
+	}
+	if !slices.Equal(registry.ordered, wantRegistration) {
+		t.Fatalf("registration order = %v, want unchanged %v", registry.ordered, wantRegistration)
+	}
+}
+
+func TestRegistryRefreshInstalledStopsAfterFirstDetectionError(t *testing.T) {
+	var calls []domain.AgentID
+	detectErr := errors.New("permission denied")
+	registry := &Registry{
+		ordered: []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode},
+		byAgent: map[domain.AgentID]Adapter{},
+	}
+	for _, agent := range registry.ordered {
+		adapter := recordingDetectAdapter{agent: agent, calls: &calls, found: true}
+		if agent == domain.AgentClaudeCode {
+			adapter.err = detectErr
+		}
+		registry.byAgent[agent] = adapter
+	}
+
+	snapshot, err := registry.RefreshInstalled()
+	if !slices.Equal(calls, []domain.AgentID{domain.AgentClaudeCode}) {
+		t.Fatalf("DetectAgent calls = %v, want only %q", calls, domain.AgentClaudeCode)
+	}
+	if len(snapshot.Ordered()) != 0 {
+		t.Fatalf("snapshot = %v, want zero snapshot", snapshot.Ordered())
+	}
+	if !errors.Is(err, detectErr) || !strings.Contains(err.Error(), string(domain.AgentClaudeCode)) {
+		t.Fatalf("error = %v, want agent %q wrapping %v", err, domain.AgentClaudeCode, detectErr)
 	}
 }
 
