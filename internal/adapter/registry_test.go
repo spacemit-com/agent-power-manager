@@ -65,9 +65,9 @@ func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentI
 
 func TestRegistryRefreshInstalledSortsDetectionAndSnapshotByAgentID(t *testing.T) {
 	var calls []domain.AgentID
-	wantRegistration := []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode}
+	registration := []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode}
 	registry := &Registry{
-		ordered: wantRegistration,
+		ordered: slices.Clone(registration),
 		byAgent: map[domain.AgentID]Adapter{},
 	}
 	for _, agent := range registry.ordered {
@@ -83,8 +83,8 @@ func TestRegistryRefreshInstalledSortsDetectionAndSnapshotByAgentID(t *testing.T
 	if !slices.Equal(calls, wantCalls) || !slices.Equal(snapshot.Ordered(), wantSnapshot) {
 		t.Fatalf("calls/snapshot = %v/%v, want %v/%v", calls, snapshot.Ordered(), wantCalls, wantSnapshot)
 	}
-	if !slices.Equal(registry.ordered, wantRegistration) {
-		t.Fatalf("registration order = %v, want unchanged %v", registry.ordered, wantRegistration)
+	if !slices.Equal(registry.ordered, registration) {
+		t.Fatalf("registration order = %v, want unchanged %v", registry.ordered, registration)
 	}
 }
 
@@ -107,8 +107,8 @@ func TestRegistryRefreshInstalledStopsAfterFirstDetectionError(t *testing.T) {
 	if !slices.Equal(calls, []domain.AgentID{domain.AgentClaudeCode}) {
 		t.Fatalf("DetectAgent calls = %v, want only %q", calls, domain.AgentClaudeCode)
 	}
-	if len(snapshot.Ordered()) != 0 {
-		t.Fatalf("snapshot = %v, want zero snapshot", snapshot.Ordered())
+	if snapshot.Agents != nil {
+		t.Fatalf("snapshot = %#v, want zero snapshot", snapshot)
 	}
 	if !errors.Is(err, detectErr) || !strings.Contains(err.Error(), string(domain.AgentClaudeCode)) {
 		t.Fatalf("error = %v, want agent %q wrapping %v", err, domain.AgentClaudeCode, detectErr)
