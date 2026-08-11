@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"apm/internal/adapter"
+	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/config"
@@ -13,10 +14,11 @@ import (
 	"apm/internal/lock"
 	"apm/internal/logging"
 	"apm/internal/transaction"
+	"apm/internal/version"
 )
 
 func main() {
-	entry := cli.New(os.Stdout, os.Stderr, logging.SetupLogging, newSearchLifecycle, newListLifecycle, nil)
+	entry := cli.New(os.Stdout, os.Stderr, logging.SetupLogging, newSearchLifecycle, newListLifecycle, newInstallLifecycle)
 	if err := entry.Execute(os.Args[1:]); err != nil {
 		os.Exit(1)
 	}
@@ -55,6 +57,36 @@ func newListLifecycle() (cli.ListLifecycle, error) {
 		return nil, err
 	}
 	return lifecycle.NewList(locker, transactions, cloudClient, adapter.NewRegistry(), repository)
+}
+
+// newInstallLifecycle 创建 Install 命令所需的默认依赖，并共享清单读写 Repository。
+func newInstallLifecycle() (cli.InstallLifecycle, error) {
+	locker, err := lock.NewDefault()
+	if err != nil {
+		return nil, fmt.Errorf("create default lock: %w", err)
+	}
+	repository := config.NewJSONRepository()
+	transactions, err := transaction.NewManager(repository)
+	if err != nil {
+		return nil, fmt.Errorf("create transaction manager: %w", err)
+	}
+	cloudClient, err := newLocalCloudClient()
+	if err != nil {
+		return nil, err
+	}
+	powerCache, err := cache.NewFilesystem()
+	if err != nil {
+		return nil, fmt.Errorf("create power cache: %w", err)
+	}
+	return lifecycle.NewInstall(
+		locker,
+		transactions,
+		cloudClient,
+		powerCache,
+		adapter.NewRegistry(),
+		repository,
+		version.NewSelector(),
+	)
 }
 
 func newLocalCloudClient() (cloud.Client, error) {

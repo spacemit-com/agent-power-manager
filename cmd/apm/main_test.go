@@ -89,6 +89,101 @@ func TestNewListLifecycleListsInstalledManifest(t *testing.T) {
 	}
 }
 
+func TestNewInstallLifecycleInstallsBundledSkillAndThenReturnsUnchanged(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	changeToRepositoryRoot(t)
+
+	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatalf("create Codex root: %v", err)
+	}
+	service, err := newInstallLifecycle()
+	if err != nil {
+		t.Fatalf("newInstallLifecycle() error = %v", err)
+	}
+	flags := cli.Flags{Agent: "codex", Name: "foo-before-summary"}
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.0.1"}
+
+	installed, err := service.Install(context.Background(), flags)
+	if err != nil {
+		t.Fatalf("first Install() error = %v", err)
+	}
+	wantInstalled := cli.InstallResult{Items: []cli.InstallItem{{
+		Agent:   domain.AgentCodex,
+		Power:   ref,
+		Outcome: cli.InstallOutcomeInstalled,
+	}}}
+	if len(installed.Items) != len(wantInstalled.Items) || installed.Items[0] != wantInstalled.Items[0] {
+		t.Fatalf("first Install() = %#v, want %#v", installed, wantInstalled)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "skills", ref.Name, "SKILL.md")); err != nil {
+		t.Fatalf("installed skill marker: %v", err)
+	}
+	manifested, found, err := config.NewJSONRepository().Find(domain.AgentCodex, ref.Type, ref.Name)
+	if err != nil {
+		t.Fatalf("find installed manifest = %v", err)
+	}
+	if !found || manifested != ref {
+		t.Fatalf("installed manifest = (%#v, %t), want (%#v, true)", manifested, found, ref)
+	}
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", "staging"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", ".tmp", "staging"))
+
+	unchanged, err := service.Install(context.Background(), flags)
+	if err != nil {
+		t.Fatalf("second Install() error = %v", err)
+	}
+	wantUnchanged := cli.InstallResult{Items: []cli.InstallItem{{
+		Agent:   domain.AgentCodex,
+		Power:   ref,
+		Outcome: cli.InstallOutcomeUnchanged,
+	}}}
+	if len(unchanged.Items) != len(wantUnchanged.Items) || unchanged.Items[0] != wantUnchanged.Items[0] {
+		t.Fatalf("second Install() = %#v, want %#v", unchanged, wantUnchanged)
+	}
+}
+
+func TestNewInstallLifecycleRejectsAllWhenNoAgentsAreInstalled(t *testing.T) {
+	home := t.TempDir()
+	cacheHome := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	changeToRepositoryRoot(t)
+
+	service, err := newInstallLifecycle()
+	if err != nil {
+		t.Fatalf("newInstallLifecycle() error = %v", err)
+	}
+	result, err := service.Install(context.Background(), cli.Flags{Agent: "all", Name: "foo-before-summary"})
+	if err == nil {
+		t.Fatal("Install(all) error = nil, want no installed Agents error")
+	}
+	if len(result.Items) != 0 {
+		t.Fatalf("Install(all) result = %#v, want zero items", result)
+	}
+
+	assertPathAbsent(t, filepath.Join(cacheHome, "apm"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", "manifests"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", "staging"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", ".tmp", "staging"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions"))
+}
+
+func assertPathAbsent(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("path %q exists or cannot be inspected: %v", path, err)
+	}
+}
+
 func changeToRepositoryRoot(t *testing.T) {
 	t.Helper()
 	originalDirectory, err := os.Getwd()
