@@ -1,0 +1,66 @@
+package lifecycle
+
+import (
+	"sort"
+
+	"apm/internal/cli"
+	"apm/internal/domain"
+	"github.com/Masterminds/semver/v3"
+)
+
+// agentPowerGroups 保存单个 Agent 的已安装能力分组。
+type agentPowerGroups struct {
+	agent  domain.AgentID
+	groups domain.PowerGroups
+}
+
+// makeCloudListResult 将 Cloud 能力复制为 CLI 列表结果并完成过滤排序。
+func makeCloudListResult(flags cli.Flags, refs []domain.PowerRef) cli.ListResult {
+	powers := make([]cli.ListedPower, 0, len(refs))
+	for _, ref := range refs {
+		if flags.Type != "" && ref.Type != domain.PowerType(flags.Type) {
+			continue
+		}
+		powers = append(powers, cli.ListedPower{Power: ref})
+	}
+
+	sortListedPowers(powers)
+	return cli.ListResult{Powers: powers}
+}
+
+// makeInstalledListResult 展平各 Agent 能力并完成过滤排序。
+func makeInstalledListResult(flags cli.Flags, inputs []agentPowerGroups) cli.ListResult {
+	powers := make([]cli.ListedPower, 0)
+	for _, input := range inputs {
+		for _, refs := range input.groups {
+			for _, ref := range refs {
+				if flags.Type != "" && ref.Type != domain.PowerType(flags.Type) {
+					continue
+				}
+				powers = append(powers, cli.ListedPower{Agent: input.agent, Power: ref})
+			}
+		}
+	}
+
+	sortListedPowers(powers)
+	return cli.ListResult{Powers: powers}
+}
+
+func sortListedPowers(powers []cli.ListedPower) {
+	sort.SliceStable(powers, func(i, j int) bool {
+		left, right := powers[i], powers[j]
+		if left.Agent != right.Agent {
+			return left.Agent < right.Agent
+		}
+		if left.Power.Type != right.Power.Type {
+			return left.Power.Type < right.Power.Type
+		}
+		if left.Power.Name != right.Power.Name {
+			return left.Power.Name < right.Power.Name
+		}
+		if left.Power.Version == right.Power.Version {
+			return false
+		}
+		return semver.MustParse(left.Power.Version).GreaterThan(semver.MustParse(right.Power.Version))
+	})
+}
