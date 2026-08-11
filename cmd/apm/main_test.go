@@ -146,6 +146,9 @@ func TestNewInstallLifecycleInstallsBundledSkillAndThenReturnsUnchanged(t *testi
 	if len(unchanged.Items) != len(wantUnchanged.Items) || unchanged.Items[0] != wantUnchanged.Items[0] {
 		t.Fatalf("second Install() = %#v, want %#v", unchanged, wantUnchanged)
 	}
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", "staging"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", ".tmp", "staging"))
 }
 
 func TestNewInstallLifecycleRejectsAllWhenNoAgentsAreInstalled(t *testing.T) {
