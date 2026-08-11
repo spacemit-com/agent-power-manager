@@ -1,5 +1,5 @@
 classDiagram
-    note for Locker "全局 APM 锁：search/list/install/uninstall 从 journal 预检到命令结束全程持有，整个 APM 串行化"
+    note for Locker "全局 APM 锁：仅在恢复与共享状态业务期间持有；Search 在 Cloud 查询和 CLI 渲染前释放"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)
