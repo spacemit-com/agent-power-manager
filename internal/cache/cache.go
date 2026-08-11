@@ -3,12 +3,7 @@ package cache
 
 import "apm/internal/domain"
 
-// Content 表示缓存内容的位置。
-type Content struct {
-	Path string
-}
-
-// PowerCache 定义能力缓存的读取操作。
+// PowerCache 定义将版本化能力物化到公共 staging 根的操作。
 type PowerCache interface {
-	Fetch(domain.PowerRef) (Content, error)
+	Fetch(domain.PowerRef) (stagingRoot string, err error)
 }

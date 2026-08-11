@@ -38,16 +38,16 @@ func TestLocalCloudAndCacheFetchGetFetch(t *testing.T) {
 	if err = client.Get(ref); err != nil {
 		t.Fatal(err)
 	}
-	content, err := store.Fetch(ref)
+	stagingRoot, err := store.Fetch(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	cachePath := filepath.Join(cacheHome, "apm", "skills", ref.Name, ref.Version)
-	stagingPath := filepath.Join(stateHome, ".apm", "staging", "skills", ref.Name)
-	if content.Path != stagingPath {
-		t.Fatalf("Content.Path = %q, want %q", content.Path, stagingPath)
+	if stagingRoot != filepath.Join(stateHome, ".apm", "staging") {
+		t.Fatalf("Fetch() root = %q, want %q", stagingRoot, filepath.Join(stateHome, ".apm", "staging"))
 	}
+	stagingPath := filepath.Join(stagingRoot, "skills", ref.Name)
 	versionedStagingPath := filepath.Join(stagingPath, ref.Version)
 	if _, err = os.Stat(versionedStagingPath); !os.IsNotExist(err) {
 		t.Fatalf("versioned staging path %q error = %v, want not exist", versionedStagingPath, err)

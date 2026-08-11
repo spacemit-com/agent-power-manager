@@ -48,7 +48,7 @@ func TestFilesystemCacheMissClearsOldStagingAndTemporaryStaging(t *testing.T) {
 	assertStagingRemoved(t, staleStagingPaths)
 }
 
-func TestFilesystemCacheFetchesVersionWithoutStagingVersionLayer(t *testing.T) {
+func TestFilesystemCacheFetchesVersionAndReturnsStagingRoot(t *testing.T) {
 	stateHome, cacheHome := setCacheEnvironment(t)
 	source := filepath.Join(cacheHome, "apm", "skills", "demo", "1.0.0")
 	if err := os.MkdirAll(source, 0o755); err != nil {
@@ -65,14 +65,15 @@ func TestFilesystemCacheFetchesVersionWithoutStagingVersionLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
-	content, err := store.Fetch(ref)
+	root, err := store.Fetch(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPath := filepath.Join(stateHome, ".apm", "staging", "skills", "demo")
-	if content.Path != wantPath {
-		t.Fatalf("Content.Path = %q, want %q", content.Path, wantPath)
+	wantRoot := filepath.Join(stateHome, ".apm", "staging")
+	if root != wantRoot {
+		t.Fatalf("Fetch() root = %q, want %q", root, wantRoot)
 	}
+	wantPath := filepath.Join(root, "skills", "demo")
 	for _, name := range []string{"SKILL.md", "skill-card.md"} {
 		if _, err = os.Stat(filepath.Join(wantPath, name)); err != nil {
 			t.Fatal(err)

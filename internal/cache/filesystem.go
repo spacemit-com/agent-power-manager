@@ -39,16 +39,16 @@ func NewFilesystem() (*FilesystemCache, error) {
 	}, nil
 }
 
-// Fetch 将指定版本的缓存 Skill 复制到无版本层级的 staging 目录。
-func (c *FilesystemCache) Fetch(ref domain.PowerRef) (content Content, resultErr error) {
+// Fetch 将指定版本的缓存 Skill 复制到公共 staging，并返回 staging 根目录。
+func (c *FilesystemCache) Fetch(ref domain.PowerRef) (stagingRoot string, resultErr error) {
 	if ref.Version == "" {
-		return Content{}, errors.New("power version is required")
+		return "", errors.New("power version is required")
 	}
 	if err := os.RemoveAll(c.stagingPath); err != nil {
-		return Content{}, fmt.Errorf("remove staging path %q: %w", c.stagingPath, err)
+		return "", fmt.Errorf("remove staging path %q: %w", c.stagingPath, err)
 	}
 	if err := os.RemoveAll(c.stagingTempPath); err != nil {
-		return Content{}, fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err)
+		return "", fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err)
 	}
 	defer func() {
 		if err := os.RemoveAll(c.stagingTempPath); err != nil {
@@ -57,27 +57,27 @@ func (c *FilesystemCache) Fetch(ref domain.PowerRef) (content Content, resultErr
 	}()
 
 	if ref.Type != domain.PowerTypeSkill {
-		return Content{}, ErrMiss
+		return "", ErrMiss
 	}
 
 	source := filepath.Join(c.cacheRoot, "skills", ref.Name, ref.Version)
 	if _, err := os.Stat(source); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Content{}, ErrMiss
+			return "", ErrMiss
 		}
-		return Content{}, fmt.Errorf("stat cache path %q: %w", source, err)
+		return "", fmt.Errorf("stat cache path %q: %w", source, err)
 	}
 
 	target := filepath.Join(c.stagingTempPath, "skills", ref.Name)
 	if err := filesystem.CopyDir(source, target); err != nil {
-		return Content{}, fmt.Errorf("copy cache path %q to staging path %q: %w", source, target, err)
+		return "", fmt.Errorf("copy cache path %q to staging path %q: %w", source, target, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(c.stagingPath), 0o755); err != nil {
-		return Content{}, fmt.Errorf("create staging parent path %q: %w", filepath.Dir(c.stagingPath), err)
+		return "", fmt.Errorf("create staging parent path %q: %w", filepath.Dir(c.stagingPath), err)
 	}
 	if err := os.Rename(c.stagingTempPath, c.stagingPath); err != nil {
-		return Content{}, fmt.Errorf("rename staging temporary path %q to staging path %q: %w", c.stagingTempPath, c.stagingPath, err)
+		return "", fmt.Errorf("rename staging temporary path %q to staging path %q: %w", c.stagingTempPath, c.stagingPath, err)
 	}
 
-	return Content{Path: filepath.Join(c.stagingPath, "skills", ref.Name)}, nil
+	return c.stagingPath, nil
 }
