@@ -20,10 +20,11 @@
 - `8117eac feat(search): render lifecycle results`
 - `afe0f7a docs(search): revise lifecycle lock boundary`
 - `1a440e2 docs(search): clarify recovery concurrency scope`
+- `fcf11d4 test(search): strengthen lifecycle regressions`
 
 解决方案或完成结果：
 
-`search` 在全局锁内执行 `Recover`；恢复成功会实时输出 Warn，且该 Warn 发生在 Release 之前。恢复完成后先释放锁，再调用 Cloud，随后才执行过滤、最新 SemVer 选择、稳定排序和精确 `<type>/<name>@<version>` 渲染。恢复错误仍会尝试 Release，并仅由 CLI 外层记录一次。查询只对 `Name` 进行 Unicode 大小写无关匹配，保留精确 Power type；同类型同名的多个版本选择最大 SemVer，输出保持稳定顺序。lifecycle 返回 `SearchResult` 而不接收 Renderer，CLI 负责渲染；`--agent` 未接入 search，仍作为未知 flag 拒绝。ADR-002、修订后的 ADR-003、ADR-009、C4/流程图、项目概览和 `BUILD.md` 已对齐。`list`、`install`、`uninstall` 的 lifecycle 接口和命令 wiring 仍未连接。
+`search` 在全局锁内执行 `Recover`；恢复成功会实时输出 Warn，且该 Warn 发生在 Release 之前。恢复完成后先释放锁，再调用 Cloud，随后才执行过滤、最新 SemVer 选择、稳定排序和精确 `<type>/<name>@<version>` 渲染。恢复错误仍会尝试 Release，并仅由 CLI 外层记录一次。查询只对 `Name` 进行 Unicode 大小写无关匹配；提供 `--type` 时只与 `PowerRef.Type` 精确相等的引用匹配。同类型同名的多个版本选择最大 SemVer；最终结果按原始 `Type`、再按原始 `Name` 的稳定字典序升序排列。lifecycle 返回 `SearchResult` 而不接收 Renderer，CLI 负责渲染；`--agent` 未接入 search，仍作为未知 flag 拒绝。ADR-002、修订后的 ADR-003、ADR-009、C4/流程图、项目概览和 `BUILD.md` 已对齐。`list`、`install`、`uninstall` 的 lifecycle 接口和命令 wiring 仍未连接。
 
 验证结果或限制：
 
