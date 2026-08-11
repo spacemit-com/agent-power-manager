@@ -6,15 +6,15 @@
 
 ## Context
 
-[ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 已确定所有 lifecycle 命令启动时恢复唯一活动 journal，但 transaction 仍是占位实现，lifecycle 直接依赖 JournalStore，正常流程与恢复顺序容易散落在两层。[ADR-008](ADR-008-let-adapters-own-staging-to-installation.md) 随后把 staging 适配和原子发布交给 Adapter，使旧设计中“transaction 将 staging rename 到 target”的提交点描述不再符合真实边界。
+[ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 已确定 lifecycle 在选择执行共享状态恢复阶段时恢复唯一活动 journal，但 transaction 仍是占位实现，lifecycle 直接依赖 JournalStore，正常流程与恢复顺序容易散落在两层。[ADR-008](ADR-008-let-adapters-own-staging-to-installation.md) 随后把 staging 适配和原子发布交给 Adapter，使旧设计中“transaction 将 staging rename 到 target”的提交点描述不再符合真实边界。
 
-恢复还必须能够由任意下一条 APM 命令触发，而不是要求用户再次执行相同 Agent 或 Power 的命令。与此同时，Agent 目标与 APM state 可能位于不同文件系统，把 backup/quarantine 全部集中到 state 会使目标移动无法使用原子 rename。
+恢复必须能够由任意选择执行共享状态恢复阶段的 lifecycle 触发，而不是要求用户再次执行相同 Agent 或 Power 的命令。无论当前 lifecycle 的参数为何，Manager 都必须能够修复任意先前 install/uninstall 留下的事务。与此同时，Agent 目标与 APM state 可能位于不同文件系统，把 backup/quarantine 全部集中到 state 会使目标移动无法使用原子 rename。
 
 本决策服务于 [Feature 007](../features/007-central-lifecycle-transactions/feature-overview.md) 与 [Feature 008](../features/008-lifecycle-search/feature-overview.md)，并细化 ADR-003、[ADR-007](ADR-007-use-stateless-config-repository.md) 和 ADR-008。
 
 ## Decision
 
-APM 使用 transaction 高层 Manager 封装 `Recover`、`Install` 和 `Uninstall`。lifecycle 后续只负责全局锁、业务预检、版本与 Adapter 解析、Cloud/Cache 和多 Agent 调度；它不直接读写 journal、backup 或 quarantine。transaction 在提交点后调用 Config Repository 的 `Set/Remove`，使清单修改、事务清理和 journal 删除保持固定顺序。
+APM 使用 transaction 高层 Manager 封装 `Recover`、`Install` 和 `Uninstall`。每个 lifecycle 自行定义是否以及何时执行共享状态恢复阶段；选择该阶段时负责持有全局锁并调用 Manager。除该边界外，lifecycle 负责业务预检、版本与 Adapter 解析、Cloud/Cache 和多 Agent 调度；它不直接读写 journal、backup 或 quarantine。transaction 在提交点后调用 Config Repository 的 `Set/Remove`，使清单修改、事务清理和 journal 删除保持固定顺序。
 
 唯一活动 journal 集中存放在 APM state 的 `transactions/active.json`。它记录 transaction ID、operation、phase、Agent、新旧 PowerRef、staging 和全部实际事务路径。需要恢复的 lifecycle 在其共享状态锁边界内调用 `Recover`，即可修复上一次事务，无需原命令参数、原 Adapter 实例或相同目标。
 
@@ -45,5 +45,5 @@ Journal 和所有待删除路径在使用前严格校验。损坏、未知版本
 | lifecycle 调用细粒度 transaction 原语 | 阶段更新、提交点和 journal 删除顺序暴露给编排层，容易形成不可恢复组合。 |
 | transaction 接管版本、Cloud、Cache 和多 Agent 用例 | 依赖面过大，吞并 lifecycle 的业务职责。 |
 | backup/quarantine 全部放在集中 state | Agent 目标可能位于另一文件系统，无法用原子 rename 建立提交点。 |
-| 只在目标旁保存 journal | 下一条任意命令无法从统一入口发现活动事务。 |
+| 只在目标旁保存 journal | 任意选择共享状态恢复阶段的 lifecycle 无法从统一入口发现活动事务。 |
 | 仅检查 target 推断当前 Adapter 调用结果 | 清单外冲突和发布后清理失败可能具有相同路径表象，当前进程可以由 Adapter 显式报告。 |
