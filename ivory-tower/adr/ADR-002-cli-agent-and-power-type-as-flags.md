@@ -21,34 +21,37 @@ CLI 语法采用：
 
 ```text
 apm search <keyword> [--type=<skill|plugin|mcp>]
-apm list --agent=<agent-id|all> [--type=<skill|plugin|mcp>] [--installed]
+apm list [--type=<skill|plugin|mcp>]
+apm list --installed --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 apm install <power>[=<version>] --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 ```
 
-- `--agent`：仅适用于 `list`、`install`、`uninstall`；必填（或由本地配置提供 default-agent 作为缺省值），取值为具体 Agent ID 或字面量 `all`。
+- `--agent`：适用于 installed `list`、`install`、`uninstall`；取值为具体 Agent ID 或字面量 `all`。默认 Cloud `list` 显式提供该 flag（包括空值）必须返回 `--agent requires --installed`；installed `list` 必须提供非空 Agent。
 - `--type`：可选，但缺省语义按命令的数据来源确定：`search` 与默认 `list` 不应用类别过滤；`install` 从 Cloud `List()` 返回的带版本 `PowerRef` 推断；`list --installed` 与 `uninstall` 从目标 Agent 的本地安装清单解析，仅当本地同名 Power 跨类别产生歧义时才报错并要求显式指定 `--type`。
 - `--help` 顶层展示可用的 Agent/Power 类别枚举。
 
 - `search` 的 keyword 必填，只查询云端资源；省略 `--type` 时不应用类别过滤。
 - 该命令不注册 `--agent`，传入该 flag 时 Cobra 报告 unknown flag。
-- `list` 默认列出云端资源，省略 `--type` 时不应用类别过滤；`--installed` 改为读取本地安装清单并按本地记录解析类别。
+- `list` 默认列出 Cloud 资源，省略 `--type` 时不应用类别过滤，并保留每个版本；`list --installed` 读取本地安装清单并按本地记录解析类别。Cloud 行精确为 `<type>/<name>@<version>`，installed 行始终精确为 `<agent>/<type>/<name>@<version>`。
 - `install` 省略 `--type` 时从 Cloud `List()` 返回的带版本 `PowerRef` 推断类别；未指定版本时从候选引用选择最新版并填充 `PowerRef.Version`；显式 `<power>=<version>` 可安装、升级或降级到指定版本；相同版本视为成功且不重复安装。
 - `uninstall` 从本地安装清单解析类别；未找到本地安装记录时视为幂等成功；同名跨类别歧义要求显式 `--type`。
 
 适用的维度均以 flag 承载，不作为子命令命名空间；`verb`（`search`/`list`/`install`/`uninstall`）是唯一的子命令层级。
 
-本地 Power 操作的 Agent 检测与快照语义见 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md)。指定具体 `--agent` 时必须存在于当前快照；`--agent=all` 以快照为目标集合。多 Agent 执行语义见 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md)：install/uninstall 按 Agent 串行且 fail-fast；`list --installed` 继续逐 Agent 读取并汇总失败。
+本地 Power 操作的 Agent 检测与快照语义见 [ADR-004](ADR-004-discover-installed-agents-before-local-operations.md)。指定具体 `--agent` 时必须存在于当前快照；`--agent=all` 以快照为目标集合。多 Agent 执行语义见 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md)：install/uninstall 按 Agent 串行且 fail-fast；`list --installed --agent=all` 继续逐 Agent 读取。只有在全部读取尝试后成功 Release 的 partial error 才允许 CLI 渲染已成功记录；其他 fatal 或 Release error 均不输出业务行。
+
+List 的 Config 清单版本必须遵循 [ADR-007](ADR-007-use-stateless-config-repository.md) 的精确 `vMAJOR.MINOR.PATCH` 契约。
 
 ## Consequences
 
 - 正面影响：
   - Agent 集合可通过 Adapter 持续增添，不影响命令树结构和 `--help` 输出的稳定性，适合脚本化和自动化调用。
-  - 本地 Power 操作在执行前刷新已安装 Agent 快照，能拒绝未安装目标并使 `all` 只覆盖当前可用 Agent。
+  - 默认 Cloud List 无需选择 Agent；installed List 在执行前刷新已安装 Agent 快照，能拒绝未安装目标并使 `all` 只覆盖当前可用 Agent。
   - `--type` 保持可选，并由各命令依据 Cloud 全量 `PowerRef` 列表或本地清单采用明确的缺省语义，减少常见场景下的输入负担。
   - Search 的 Cloud 查询不需要 Agent 选择；本地 Power 命令仍以稳定的 Agent flag 形式表达目标集合，生命周期层按命令数据来源实现类别过滤、推断或本地消歧。
 - 代价与风险：
-  - `--agent=all` 下多 Agent 部分成功、部分失败的场景，要求错误汇总与非零退出码的实现足够清晰，避免用户误判整体命令是否成功。
+  - `--agent=all` 下多 Agent 部分成功、部分失败的场景要求在成功解锁后才输出已成功记录，并以非零退出码报告汇总错误，避免用户误判整体命令是否成功。
 - 后续动作：
   - 在 `internal/lifecycle` 中实现命令特定的 `--type` 缺省语义，以及「按 Agent 汇总结果」的公共逻辑，供 `install`/`uninstall`（及未来可能受影响的动词）复用。
   - Cloud `list` 接口返回带类别、名称与版本的全部 `PowerRef`，供 install 在 `--type` 缺省时推断并选择版本已确定的引用；本地清单查询需要检测同名跨类别歧义，供 `list --installed` 与 `uninstall` 要求显式消歧。

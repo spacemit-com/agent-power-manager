@@ -18,7 +18,7 @@ APM 使用 transaction 高层 Manager 封装 `Recover`、`Install` 和 `Uninstal
 
 唯一活动 journal 集中存放在 APM state 的 `transactions/active.json`。它记录 transaction ID、operation、phase、Agent、新旧 PowerRef、staging 和全部实际事务路径。需要恢复的 lifecycle 在其共享状态锁边界内调用 `Recover`，即可修复上一次事务，无需原命令参数、原 Adapter 实例或相同目标。
 
-[Feature 008](../features/008-lifecycle-search/feature-overview.md) 已将 Search 接入 Manager：Search 只在锁内执行恢复并记录同步 Warn，释放锁后才查询 Cloud 并把结构化结果交给 CLI 渲染，符合修订后的 ADR-003。list/install/uninstall 仍是未接线的命令解析入口；它们未来各自接入 Manager，并选择与自身共享状态业务相符的边界。
+[Feature 008](../features/008-lifecycle-search/feature-overview.md) 已将 Search 接入 Manager：Search 只在锁内执行恢复并记录同步 Warn，释放锁后才查询 Cloud 并把结构化结果交给 CLI 渲染，符合修订后的 ADR-003。Feature 009 已将 List 独立接线：Cloud List 不访问 Manager，installed List 仅在 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 的锁区间调用 `Recover`，再于成功 Release 后交给 CLI 渲染。install/uninstall 仍是未接线的命令解析入口，未来各自接入 Manager，并选择与自身共享状态业务相符的边界。
 
 backup/quarantine 存放在 target 同一父目录的 `.apm-transactions/<transaction-id>`，集中 journal 记录其绝对路径。该布局同时满足集中发现和同文件系统原子 rename；不使用跨文件系统 copy-delete 代替提交点。
 

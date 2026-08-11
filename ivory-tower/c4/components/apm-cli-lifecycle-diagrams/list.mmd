@@ -1,30 +1,28 @@
 flowchart TD
-    ListStart([生命周期入口]) --> ListRecovery[执行公共 journal 检查/修复；失败或中断在公共图内终止]
-    ListRecovery -->|成功；锁保持| ListCommand[进入当前命令]
+    ListStart([CLI 已解析/校验 List 参数]) --> ListInstalled{指定 --installed?}
+    ListInstalled -->|否：Cloud| CloudList[Cloud List：无锁、无 Recover、无 Registry/Config]
+    CloudList -->|失败| CloudFail[返回 fatal error：不渲染业务输出]
+    CloudList -->|成功| CloudCompute[按可选 type 过滤；Type/Name/Version 排序]
+    CloudCompute --> CloudRender[CLI 锁外渲染 `<type>/<name>@<version>`] --> CloudExit([退出])
 
-    ListCommand --> ListValidate[校验 agent、可选 type 与 installed flag]
-    ListValidate -->|失败| ListFail[打印参数或 Agent 错误] --> ListExitError
-    ListValidate -->|成功| ListInstalled{指定 --installed?}
-    ListInstalled -->|否| ListCloudList[调用 Cloud List 获取带版本的全部 PowerRef]
-    ListCloudList -->|失败| ListFail
-    ListCloudList -->|成功| ListFilterCloud[按可选 type 在 lifecycle 中筛选]
-    ListFilterCloud --> ListPrintCloud[打印云端 Power] --> ListExitOK([释放锁并正常退出])
-    ListInstalled -->|是| ListDiscovery[执行公共 Agent 刷新流程；失败或中断在公共图内终止]
-    ListDiscovery -->|成功；锁保持| ListAll{agent 等于 all?}
-    ListAll -->|否| ListTarget{目标 Agent 在已支持且已安装快照中?}
-    ListTarget -->|否| ListUnavailable[打印目标 Agent 未受支持或未安装] --> ListExitError
-    ListTarget -->|是| ListReadOne[调用 ConfigRepository.List 获取目标 Agent 的全部 PowerGroups]
-    ListReadOne -->|读取或解析失败| ListFail
-    ListReadOne -->|成功；缺失文件视为空分组| ListLocalType[由 lifecycle 按可选 type 筛选]
-    ListLocalType --> ListPrintOne[打印已安装 Power] --> ListExitOK
-    ListAll -->|是| ListNextAgent{按快照中已支持且已安装 Agent ID 升序还有目标 Agent?}
-    ListNextAgent -->|是| ListReadAgent[调用 ConfigRepository.List 获取该 Agent 的全部 PowerGroups]
-    ListReadAgent -->|读取或解析失败| ListRecordFailure[记录该 Agent 失败] --> ListNextAgent
-    ListReadAgent -->|成功；缺失文件视为空分组| ListRecordList[记录该 Agent 已安装列表] --> ListNextAgent
-    ListNextAgent -->|否| ListAnyFailure{存在读取失败?}
-    ListAnyFailure -->|否| ListPrintAll[按 Agent 分组打印结果] --> ListExitOK
-    ListAnyFailure -->|是| ListPrintPartial[打印分组结果与失败汇总] --> ListExitError
-    ListCloudList -.进程中断.-> ListInterrupted
-    ListValidate -.进程中断.-> ListInterrupted
-    ListReadOne -.进程中断.-> ListInterrupted
-    ListReadAgent -.进程中断.-> ListInterrupted
+    ListInstalled -->|是| Acquire[Acquire 全局 APM 锁]
+    Acquire -->|失败| Fatal[返回 fatal error：不渲染业务输出]
+    Acquire -->|成功| Recover[Recover transaction]
+    Recover -->|失败| ReleaseFatal[尝试 Release]
+    Recover -->|成功| Warn[锁内实时 Warn；无 journal 时 Debug]
+    Warn --> Refresh[RefreshInstalled：复制注册 Agent、按字典序 Detect]
+    Refresh -->|失败| ReleaseFatal
+    Refresh -->|成功| Select{具体 Agent 或 all?}
+    Select -->|具体 Agent 不在快照| ReleaseFatal
+    Select -->|具体 Agent| ReadOne[锁内 Config.List]
+    ReadOne -->|失败| ReleaseFatal
+    ReadOne -->|成功| ReleaseSuccess[Release 全局锁]
+    Select -->|all| ReadAll[锁内按快照字典序读取全部 Config]
+    ReadAll --> PartialStore[保留逐 Agent 失败并继续]
+    PartialStore --> ReleaseSuccess
+    ReleaseFatal -->|Release 成功或失败| Fatal
+    ReleaseSuccess -->|失败| Fatal
+    ReleaseSuccess -->|成功| InstalledCompute[锁外按可选 type 过滤并排序]
+    InstalledCompute --> HasPartial{存在 all 的读取失败?}
+    HasPartial -->|否| InstalledRender[CLI 渲染 `<agent>/<type>/<name>@<version>`] --> InstalledExit([成功退出])
+    HasPartial -->|是| PartialRender[唯一可渲染错误：先渲染成功记录] --> PartialError[CLI 记录一次 partial error、usage、非零退出]

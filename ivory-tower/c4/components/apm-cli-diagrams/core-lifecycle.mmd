@@ -1,26 +1,45 @@
 classDiagram
-    note for Lifecycle "生命周期用例接口：CLI 的四个动词一一对应"
-    class Lifecycle {
+    note for SearchLifecycle "Search 专属端口；恢复后解锁，再查询 Cloud 并返回结构化结果"
+    class SearchLifecycle {
         <<interface>>
         +Search(Context, Flags) (SearchResult, error)
-        +Install(Flags) (Result, error)
-        +Uninstall(Flags) (Result, error)
-        +List(Flags) (ListResult, error)
     }
 
     class SearchResult {
         +Powers []PowerRef
     }
 
-    note for lifecycleService "Search 获取锁并调用集中 TransactionManager 恢复，在锁内写恢复 Warn 后释放锁；随后查询 Cloud、筛选并返回 SearchResult。list/install/uninstall 仍待各自接线。"
-    class lifecycleService {
+    note for searchService "Acquire → Recover → 锁内 Warn → Release → Cloud List → 筛选/排序；不负责 CLI 打印"
+    class searchService {
         +Search(...)
-        +Install(...)
-        +Uninstall(...)
+    }
+
+    note for ListLifecycle "List 专属端口；Cloud 与 installed 是独立共享状态分支"
+    class ListLifecycle {
+        <<interface>>
+        +List(Context, Flags) (ListResult, error)
+    }
+
+    class ListedPower {
+        +Agent AgentID
+        +Power PowerRef
+    }
+
+    class ListResult {
+        +Powers []ListedPower
+    }
+
+    note for PartialListError "仅 all 的全部 Config 读取完成且 Release 成功后可携带已成功记录渲染"
+    class PartialListError {
+        +Failures []AgentFailure
+    }
+
+    note for listService "Cloud：无锁、无 Recover，仅 Cloud 查询→计算；installed：Acquire→Recover→Warn→Refresh→全部 Config 读→成功 Release→计算；均不负责 CLI 打印"
+    class listService {
         +List(...)
     }
 
-    note for AdapterRegistry "刷新当前命令的已支持且已安装 Agent 快照，并按 Agent × Power 类别解析适配实现"
+    note for AdapterRegistry "复制注册 Agent 后按字典序 Detect；成功快照保持同一顺序"
     class AdapterRegistry {
         <<interface>>
         +Resolve(AgentID, PowerType) (Adapter, error)
@@ -39,7 +58,7 @@ classDiagram
         +Ordered() []AgentID
     }
 
-    note for ConfigRepository "无状态封装各 Agent 清单的查询和原子读改写；调用时全局锁已由 lifecycle 持有"
+    note for ConfigRepository "无状态封装完整清单读取与原子读改写；版本只接受 vMAJOR.MINOR.PATCH；调用时 lifecycle 已持锁"
     class ConfigRepository {
         <<interface>>
         +List(AgentID) (PowerGroups, error)
@@ -56,7 +75,7 @@ classDiagram
         +Uninstall(Context, UninstallRequest) error
     }
 
-    note for Locker "仅在恢复或其他访问 APM 共享状态的业务期间持有的全局 APM 文件锁；Search 在 Cloud 查询前释放"
+    note for Locker "仅共享状态区间持有：Search 的恢复、installed List 的恢复/刷新/读取；Cloud List 不获取"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)
@@ -75,15 +94,20 @@ classDiagram
         +Get(PowerRef) error
     }
 
-    lifecycleService ..|> Lifecycle
-    lifecycleService --> SearchResult : returns for Search
-    lifecycleService --> AdapterRegistry
+    searchService ..|> SearchLifecycle
+    searchService --> SearchResult : returns
+    searchService --> TransactionManager
+    searchService --> Locker
+    searchService --> CloudClient
+    listService ..|> ListLifecycle
+    listService --> ListResult : returns
+    listService --> PartialListError : successful Release only
+    listService --> AdapterRegistry : installed only
+    listService --> ConfigRepository : installed only
+    listService --> TransactionManager : installed only
+    listService --> Locker : installed only
+    listService --> CloudClient : Cloud only
     AdapterRegistry --> Adapter : resolves
     AdapterRegistry --> AgentSnapshot : returns
-    lifecycleService --> ConfigRepository : List/Find
-    lifecycleService --> TransactionManager
     TransactionManager --> Adapter : TargetPath/Install
     TransactionManager --> ConfigRepository : Set/Remove
-    lifecycleService --> Locker
-    lifecycleService --> PowerCache
-    lifecycleService --> CloudClient

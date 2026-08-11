@@ -58,7 +58,10 @@ gofmt -w cmd internal
 ./apm search summary
 ./apm search summary --type skill
 ./apm --verbose search summary
-./apm list --agent all --installed
+./apm list
+./apm list --type skill
+./apm list --installed --agent codex
+./apm list --installed --agent all --type skill
 ./apm install example=1.0.0 --agent all
 ./apm uninstall example --agent all --type plugin
 ```
@@ -71,7 +74,21 @@ skill/foo-before-summary@v0.0.1
 
 Search 只接受可选的 `--type`，不接受 `--agent`。全局选项 `--verbose` 输出解析和恢复诊断到标准错误；帮助信息可查看每个子命令支持的参数。
 
-`list`、`install`、`uninstall` 当前仅完成命令解析和参数校验，尚未执行业务生命周期操作。
+List 已实现两种独立模式（命令与锁边界见 [ADR-002](ivory-tower/adr/ADR-002-cli-agent-and-power-type-as-flags.md) 和 [ADR-003](ivory-tower/adr/ADR-003-serialize-lifecycle-and-recover-journal.md)）：默认 Cloud List 不加锁、不 Recover，输出每个版本的精确行：
+
+```text
+<type>/<name>@<version>
+```
+
+Installed List 必须同时提供 `--installed --agent=<agent-id|all>`，在成功 Release 后输出精确行：
+
+```text
+<agent>/<type>/<name>@<version>
+```
+
+例如 `./apm list --agent all` 是无效组合：它会非零退出，并在 stderr 报告 `--agent requires --installed` 和 usage。`--agent=all` 的 installed 读取若出现部分失败，会输出成功记录后以非零状态报告错误；fatal 或 Release error 不输出业务行。已安装清单版本必须精确为 `vMAJOR.MINOR.PATCH`，APM 不会迁移或清理非法旧清单（[ADR-007](ivory-tower/adr/ADR-007-use-stateless-config-repository.md)）；Agent 刷新顺序见 [ADR-004](ivory-tower/adr/ADR-004-discover-installed-agents-before-local-operations.md)。
+
+`install`、`uninstall` 当前仍仅完成命令解析和参数校验，尚未执行业务生命周期操作。
 
 ## 清理本地构建产物
 

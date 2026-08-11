@@ -1,5 +1,5 @@
 classDiagram
-    note for Locker "全局 APM 锁：仅在恢复与共享状态业务期间持有；Search 在 Cloud 查询和 CLI 渲染前释放"
+    note for Locker "全局 APM 锁（ADR-003）：Search 在 Cloud 查询前释放；Cloud List 不获取；installed List 从 Recover、实时 Warn、Refresh 到全部 Config reads 后成功 Release"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)

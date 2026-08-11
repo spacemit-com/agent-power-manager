@@ -4,7 +4,7 @@
 
 - 特性名称：Lifecycle List
 - 要解决的问题：现有 `list` 只解析参数，聚合 lifecycle 仍以空实现占位；默认 Cloud 列表和 installed 本地列表尚未区分 Agent、恢复与共享状态锁边界，Config 清单也不能保证版本可安全按 SemVer 排序。
-- 可交付结果：完成 List 专属 lifecycle 与 CLI 接线；Cloud 模式无锁列出全部版本；installed 模式在锁内恢复、刷新 Agent 并读取清单，解锁后返回结构化结果供 CLI 渲染；同时落实 Agent 排序和规范版本校验。
+- 可交付结果：完成 List 专属 lifecycle 与 CLI 接线；Cloud 模式无锁、无 Recover 地列出全部版本；installed 模式在同一锁内完成 Recover、实时 Warn、Agent 刷新和全部 Config 读取，成功 Release 后才计算并返回结构化结果供 CLI 渲染；同时落实 Agent 排序和规范版本校验。
 
 ## Scope
 
@@ -19,5 +19,5 @@
 
 ## Acceptance
 
-- 验收条件：默认 List 不要求 Agent且不访问共享状态；installed List 要求 Agent，在同一锁区间恢复、实时 Warn、刷新和读取，解锁后过滤排序并渲染；Cloud 输出全部版本为 `<type>/<name>@<version>`，installed 始终输出 `<agent>/<type>/<name>@<version>`；Registry 按 Agent ID 升序；Config 只接受规范 `vMAJOR.MINOR.PATCH`；部分失败与 fatal error 的输出和退出状态符合 spec；Search 不回归，install/uninstall 仍为 parse-only。
+- 验收条件：默认 List 不要求 Agent且不访问共享状态；installed List 要求 Agent，在同一锁区间 Recover、实时 Warn、刷新和全部 Config reads，成功 Release 后才过滤排序并渲染；Cloud 输出全部版本为 `<type>/<name>@<version>`，installed 始终输出 `<agent>/<type>/<name>@<version>`；Registry 按 Agent ID 升序；Config 只接受规范 `vMAJOR.MINOR.PATCH` 且不迁移；只有成功 Release 后的 `all` 读取失败可作为 partial 输出，fatal/Release error 不输出业务行；Search 不回归，install/uninstall 仍为 parse-only。
 - 已知风险或待决问题：默认 Cloud List 有意不修复活动 journal；非法旧清单不会自动迁移，升级后需外部修正；开发期 Local Cloud 仍依赖仓库资源目录；List 信任 Cloud 的规范 PowerRef 契约。

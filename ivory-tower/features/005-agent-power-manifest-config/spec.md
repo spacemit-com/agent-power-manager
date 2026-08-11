@@ -4,7 +4,7 @@
 
 APM 为每个 Agent 保存一份已安装 Power 清单。本 feature 确定清单的领域模型、JSON 格式、默认路径和持久化接口，并以无状态 Repository 封装完整的读取、查询、变更和原子写入流程。
 
-lifecycle 后续只调用 `List`、`Find`、`Set` 和 `Remove`，不管理 JSONStore 的加载、写入或释放状态。本 feature 不把 Repository 串联到 lifecycle 或 CLI。
+lifecycle 后续只调用 `List`、`Find`、`Set` 和 `Remove`，不管理 JSONStore 的加载、写入或释放状态。本 feature 不把 Repository 串联到 lifecycle 或 CLI。版本验证要求已由后续 [ADR-007](../../adr/ADR-007-use-stateless-config-repository.md) 与 Feature 009 收紧；下文标为历史边界的“不验证版本”不再是当前契约。
 
 ## 领域语言与模型
 
@@ -80,7 +80,7 @@ config 实施调用方给出的目标清单状态，但不决定首次安装、�
 - 读取时，缺失分组或 `null` 按空数组处理；未知字段由标准 `encoding/json` 行为忽略。
 - 非法 JSON、字段类型错误或尾随非空白数据返回解析错误。
 - `agent` 必须存在、非空并与 Repository 方法传入的 Agent 相同；否则读取失败。
-- 读取不检查已有条目的空名称、空版本、版本语义或重复项。
+- 历史边界（已被 ADR-007/Feature 009 supersede）：本 feature 初版读取不检查已有条目的空名称、空版本、版本语义或重复项。当前 Repository 会验证完整 manifest 中每项版本精确为 `vMAJOR.MINOR.PATCH`，但名称和重复项规则保持原样。
 - 不增加 schema version、迁移协议、checksum 或完整性签名。
 
 ## 默认路径与权限
@@ -131,7 +131,7 @@ Set(agent, ref) → 校验 → read → 计算目标分组 → 必要时原子 w
 ```
 
 - `ref.Type` 必须为已知类型，`Name` 和 `Version` 必须非空。
-- 不验证 semver，也不限制名称字符集。
+- 历史边界（已被 ADR-007/Feature 009 supersede）：初版不验证 semver。当前 `Set` 在任何文件 I/O 前要求精确 `vMAJOR.MINOR.PATCH`；名称字符集仍不额外限制。
 - 同类型同名项不存在时追加到该分组末尾。
 - 存在时用新引用替换第一个匹配项并删除其余重复项；其他条目的相对顺序不变。
 - 仅有一条匹配项且版本完全相同时幂等成功，不写文件。
@@ -180,7 +180,7 @@ config 仅定义：
 var ErrInvalidPower = errors.New("invalid power reference")
 ```
 
-`Find`/`Remove` 的未知类型或空名称，以及 `Set` 的未知类型、空名称或空版本，包装该错误并指出字段。文件不存在不是错误；Find 未命中也不是错误。
+`Find`/`Remove` 的未知类型或空名称，以及 `Set` 的未知类型、空名称或非法版本，包装该错误并指出字段。当前 List/Find/Remove 读取完整 manifest 时遇到任何非法版本也包装该错误；文件不存在不是错误；Find 未命中也不是错误。
 
 路径、打开、读取、解析、创建目录、写入、同步、关闭和 rename 错误保留底层错误，支持 `errors.Is/As`，同时增加方法、Agent 和路径上下文。
 
@@ -198,7 +198,7 @@ config 不记录 Info、Warn 或 Error，避免 lifecycle 重复输出；只在�
 - 三个分组补全正确的 `PowerRef.Type`。
 - 缺失或 `null` 分组归一为空，未知字段忽略。
 - 非法 JSON、字段类型错误、Agent 缺失/空值/不匹配返回错误。
-- 空名称、空版本和重复项可以读取，证明 read 不做内容审计。
+- 历史初版允许空版本读取；当前完整读取会拒绝任何不符合 `vMAJOR.MINOR.PATCH` 的版本，不迁移或清理原文件（ADR-007）。
 
 ### 查询和变更
 
@@ -235,7 +235,7 @@ git diff --check
 
 - lifecycle、transaction、Adapter 或 CLI 的 config 串联。
 - 安装、升级、降级、卸载、筛选或打印的业务流程。
-- Agent ID 字符验证、Power 名称字符验证或 semver 校验。
+- Agent ID 字符验证、Power 名称字符验证；版本精确验证已由 ADR-007/Feature 009 实现。
 - schema version、格式迁移、未知字段保留、checksum、签名、加密或审计记录。
 - Repository 内部锁、并发写支持、批量事务或失败重试。
 - 独立 `AtomicWrite` API 或通用文件持久化工具。

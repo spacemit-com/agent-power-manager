@@ -1,5 +1,5 @@
 classDiagram
-    note for AdapterRegistry "仅解析 Skill；刷新当前命令中已支持且已安装的 Agent 快照"
+    note for AdapterRegistry "仅解析 Skill；RefreshInstalled 复制注册 Agent 并按 Agent ID 字典序探测，返回同序快照（ADR-004）"
     class AdapterRegistry {
         <<interface>>
         +Resolve(AgentID, PowerType) (Adapter, error)
@@ -14,14 +14,14 @@ classDiagram
         +Install(PowerRef, stagingRoot string) error
     }
 
-    note for AgentSnapshot "当前命令内不可变且不持久化的已支持且已安装 Agent 列表"
+    note for AgentSnapshot "当前命令内不可变且不持久化的已支持且已安装 Agent 列表；按 Agent ID 字典序"
     class AgentSnapshot {
         +Agents []AgentID
         +Contains(AgentID) bool
         +Ordered() []AgentID
     }
 
-    note for adapterRegistry "按 builtInAgentConfigs 的稳定顺序注册。Resolve 不要求已安装；Refresh 遇到检测错误立即返回零快照"
+    note for adapterRegistry "builtInAgentConfigs 的存储顺序不公开；Refresh 对其副本排序，Detect 失败返回零快照"
     class adapterRegistry {
         +Resolve(AgentID, PowerType) (Adapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
@@ -48,7 +48,7 @@ classDiagram
 
     adapterRegistry ..|> AdapterRegistry
     adapterRegistry --> skillAdapter : resolves by AgentID
-    AdapterRegistry --> AgentSnapshot : refreshes
+    AdapterRegistry --> AgentSnapshot : refreshes in lexical order
     skillAdapter ..|> Adapter
     codexConfig --> skillAdapter : configures
     claudeCodeConfig --> skillAdapter : configures
