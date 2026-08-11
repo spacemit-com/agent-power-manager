@@ -39,7 +39,7 @@ install 在原子 staging-to-target rename 前记录 publishing 意图，该 ren
 
 | 方案 | 未选择原因 |
 | --- | --- |
-| 仅 install/uninstall 持锁 | search/list 的启动修复会写本地状态，不能在无锁状态安全执行。 |
+| 仅 install/uninstall 持锁 | 实际执行启动恢复或其他共享状态工作的 lifecycle 不能在无锁状态安全执行；Feature 008 中的 List 仍只解析参数。 |
 | 仅在修复时临时加锁 | 锁范围分裂，命令状态可能在预检后被另一进程改变。 |
 | 锁一直持有到 CLI 渲染结束 | CLI writer 延迟会无必要地阻塞共享状态业务，且渲染不需要该序列化保证。 |
 | `--agent=all` 单 Agent 失败后继续 | 未解决 journal 存在时无法安全创建下一事务，破坏单 journal 不变量。 |

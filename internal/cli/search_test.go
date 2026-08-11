@@ -27,6 +27,15 @@ func (l *recordingSearchLifecycle) Search(_ context.Context, flags cli.Flags) (c
 	return l.result, l.err
 }
 
+type warningSearchLifecycle struct {
+	result cli.SearchResult
+}
+
+func (l *warningSearchLifecycle) Search(context.Context, cli.Flags) (cli.SearchResult, error) {
+	slog.Warn("transaction recovered", slog.String("operation", "install"))
+	return l.result, nil
+}
+
 func newSearchEntry(t *testing.T, stdout, stderr io.Writer, factory cli.SearchLifecycleFactory) *cli.CLIEntry {
 	t.Helper()
 	original := slog.Default()
@@ -69,6 +78,28 @@ func TestSearchRendersExactResultLines(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("search stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestSearchRoutesRecoveryWarnToStderrAndBusinessResultsToStdout(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	entry := newSearchEntry(t, &stdout, &stderr, func() (cli.SearchLifecycle, error) {
+		return &warningSearchLifecycle{result: cli.SearchResult{Powers: []domain.PowerRef{
+			{Type: domain.PowerTypeSkill, Name: "summary", Version: "v1.2.3"},
+		}}}, nil
+	})
+
+	if err := entry.Execute([]string{"search", "summary"}); err != nil {
+		t.Fatalf("Execute(search) error = %v", err)
+	}
+	if got, want := stdout.String(), "skill/summary@v1.2.3\n"; got != want {
+		t.Fatalf("search stdout = %q, want only business results %q", got, want)
+	}
+	if got := stderr.String(); !strings.Contains(got, "level=WARN") || !strings.Contains(got, "transaction recovered") {
+		t.Fatalf("search stderr = %q, want recovery WARN", got)
+	}
+	if strings.Contains(stderr.String(), "skill/summary@v1.2.3") {
+		t.Fatalf("search stderr = %q, want no business result", stderr.String())
 	}
 }
 

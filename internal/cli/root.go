@@ -1,4 +1,4 @@
-// Package cli 提供只解析和校验参数的 APM Cobra 命令树。
+// Package cli 提供解析和校验参数、调用 Search 生命周期并渲染业务结果的 APM Cobra 命令树。
 package cli
 
 import (

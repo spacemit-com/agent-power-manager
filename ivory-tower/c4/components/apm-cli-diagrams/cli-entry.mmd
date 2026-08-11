@@ -16,7 +16,12 @@ classDiagram
     note for CLIEntry "cobra 命令树根：注册 search/list/install/uninstall 子命令并路由"
     class CLIEntry {
         +Execute(args []string) error
-        +renderSearch(writer, SearchResult) error
+    }
+
+    note for searchRenderer "CLI 包级私有渲染职责：将 SearchResult 写入 stdout"
+    class searchRenderer {
+        <<package>>
+        -renderSearch(writer, SearchResult) error
     }
 
     note for SearchLifecycle "search 命令专属生命周期端口，是 CLI 入口的唯一下游业务依赖"
@@ -28,4 +33,5 @@ classDiagram
     CLIEntry --> Flags : parses
     CLIEntry --> SearchLifecycle : invokes Search
     SearchLifecycle --> SearchResult : returns
-    CLIEntry --> SearchResult : renders stdout
+    CLIEntry --> searchRenderer : invokes
+    searchRenderer --> SearchResult : renders stdout

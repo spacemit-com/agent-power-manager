@@ -108,7 +108,10 @@ func TestSearchRecoversWarnsUnlocksThenListsCloud(t *testing.T) {
 			Power:         domain.PowerRef{Name: "demo", Version: "v2.0.0"},
 			OriginalPhase: transaction.PhasePublishing,
 			Direction:     transaction.RecoveryCommit,
-			Actions:       []transaction.RecoveryAction{},
+			Actions: []transaction.RecoveryAction{
+				{Kind: transaction.RecoveryActionSetManifest},
+				{Kind: transaction.RecoveryActionRemoveBackup, Path: "/tmp/apm-backup"},
+			},
 		}},
 		cloud,
 	)
@@ -129,11 +132,15 @@ func TestSearchRecoversWarnsUnlocksThenListsCloud(t *testing.T) {
 	for _, want := range []string{
 		"operation=install", "agent=codex", "power=demo",
 		"version=v2.0.0", "phase=publishing",
-		"direction=commit", "actions=",
+		"direction=commit", "actions=", "set-manifest",
+		"remove-backup", "/tmp/apm-backup",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 		}
+	}
+	if got := strings.Count(stderr.String(), "level=WARN"); got != 1 {
+		t.Fatalf("recovery WARN count = %d, want 1; stderr = %q", got, stderr.String())
 	}
 }
 
