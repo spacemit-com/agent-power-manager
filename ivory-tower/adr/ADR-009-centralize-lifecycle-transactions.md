@@ -10,13 +10,15 @@
 
 恢复还必须能够由任意下一条 APM 命令触发，而不是要求用户再次执行相同 Agent 或 Power 的命令。与此同时，Agent 目标与 APM state 可能位于不同文件系统，把 backup/quarantine 全部集中到 state 会使目标移动无法使用原子 rename。
 
-本决策服务于 [Feature 007](../features/007-central-lifecycle-transactions/feature-overview.md)，并细化 ADR-003、[ADR-007](ADR-007-use-stateless-config-repository.md) 和 ADR-008。
+本决策服务于 [Feature 007](../features/007-central-lifecycle-transactions/feature-overview.md) 与 [Feature 008](../features/008-lifecycle-search/feature-overview.md)，并细化 ADR-003、[ADR-007](ADR-007-use-stateless-config-repository.md) 和 ADR-008。
 
 ## Decision
 
 APM 使用 transaction 高层 Manager 封装 `Recover`、`Install` 和 `Uninstall`。lifecycle 后续只负责全局锁、业务预检、版本与 Adapter 解析、Cloud/Cache 和多 Agent 调度；它不直接读写 journal、backup 或 quarantine。transaction 在提交点后调用 Config Repository 的 `Set/Remove`，使清单修改、事务清理和 journal 删除保持固定顺序。
 
-唯一活动 journal 集中存放在 APM state 的 `transactions/active.json`。它记录 transaction ID、operation、phase、Agent、新旧 PowerRef、staging 和全部实际事务路径。任意 lifecycle 命令在获取全局锁后调用 `Recover`，即可修复上一次事务，无需原命令参数、原 Adapter 实例或相同目标。
+唯一活动 journal 集中存放在 APM state 的 `transactions/active.json`。它记录 transaction ID、operation、phase、Agent、新旧 PowerRef、staging 和全部实际事务路径。需要恢复的 lifecycle 在其共享状态锁边界内调用 `Recover`，即可修复上一次事务，无需原命令参数、原 Adapter 实例或相同目标。
+
+[Feature 008](../features/008-lifecycle-search/feature-overview.md) 已将 Search 接入 Manager：Search 只在锁内执行恢复并记录同步 Warn，释放锁后才查询 Cloud 并把结构化结果交给 CLI 渲染，符合修订后的 ADR-003。list/install/uninstall 仍是未接线的命令解析入口；它们未来各自接入 Manager，并选择与自身共享状态业务相符的边界。
 
 backup/quarantine 存放在 target 同一父目录的 `.apm-transactions/<transaction-id>`，集中 journal 记录其绝对路径。该布局同时满足集中发现和同文件系统原子 rename；不使用跨文件系统 copy-delete 代替提交点。
 
@@ -33,8 +35,8 @@ Journal 和所有待删除路径在使用前严格校验。损坏、未知版本
 ## Consequences
 
 - 正面影响：恢复入口集中且与当前命令解耦；正常事务和恢复共享提交/回滚规则；lifecycle 无法绕过 journal 顺序；Adapter 发布边界明确；目标内容仍使用同盘原子移动。
-- 代价与风险：集中 journal 仍需记录目标文件系统上的分散事务内容；transaction 依赖清单写接口与 Adapter 最小接口；外部进程仍可能在检查与原子操作之间修改路径；CLI 只有在后续 lifecycle feature 接入 Manager 后才实际启用恢复。
-- 后续动作：Feature 007 实现 Manager、Journal Store、路径状态和 Adapter 发布结果；更新 lifecycle 图与组件接口；后续 lifecycle feature 在四个入口统一调用 Recover，并实现用户恢复日志。
+- 代价与风险：集中 journal 仍需记录目标文件系统上的分散事务内容；transaction 依赖清单写接口与 Adapter 最小接口；外部进程仍可能在检查与原子操作之间修改路径；其余命令的 Manager 接入仍需各自定义边界。
+- 后续动作：Feature 007 实现 Manager、Journal Store、路径状态和 Adapter 发布结果；Feature 008 已完成 Search 接入与用户恢复日志；list/install/uninstall 在后续 feature 中分别接入 Manager。
 
 ## Alternatives Considered
 

@@ -2,13 +2,17 @@ classDiagram
     note for Lifecycle "生命周期用例接口：CLI 的四个动词一一对应"
     class Lifecycle {
         <<interface>>
-        +Search(Flags) ([]PowerRef, error)
+        +Search(Context, Flags) (SearchResult, error)
         +Install(Flags) (Result, error)
         +Uninstall(Flags) (Result, error)
         +List(Flags) (ListResult, error)
     }
 
-    note for lifecycleService "四个命令先取全局锁并调用集中 TransactionManager 恢复；本地 Power 操作刷新 Agent 快照；业务预检后把单 Agent 文件与清单一致性交给 transaction"
+    class SearchResult {
+        +Powers []PowerRef
+    }
+
+    note for lifecycleService "Search 获取锁并调用集中 TransactionManager 恢复，在锁内写恢复 Warn 后释放锁；随后查询 Cloud、筛选并返回 SearchResult。list/install/uninstall 仍待各自接线。"
     class lifecycleService {
         +Search(...)
         +Install(...)
@@ -52,7 +56,7 @@ classDiagram
         +Uninstall(Context, UninstallRequest) error
     }
 
-    note for Locker "四个生命周期命令从启动预检到结束全程持有的全局 APM 文件锁"
+    note for Locker "仅在恢复或其他访问 APM 共享状态的业务期间持有的全局 APM 文件锁；Search 在 Cloud 查询前释放"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)
@@ -72,6 +76,7 @@ classDiagram
     }
 
     lifecycleService ..|> Lifecycle
+    lifecycleService --> SearchResult : returns for Search
     lifecycleService --> AdapterRegistry
     AdapterRegistry --> Adapter : resolves
     AdapterRegistry --> AgentSnapshot : returns

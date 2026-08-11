@@ -1,5 +1,5 @@
 classDiagram
-    note for Flags "install 解析 <power>[=<version>]；search 必须提供 Keyword；list 使用 Installed"
+    note for Flags "search 只解析 Keyword 和可选 Type；install 解析 <power>[=<version>]；list 使用 Installed"
     class Flags {
         +Agent string
         +Type string
@@ -9,26 +9,23 @@ classDiagram
         +Installed bool
     }
 
-    class ListResult {
-        +CloudPowers []PowerRef
-        +InstalledByAgent map~AgentID, PowerGroups~
-        +Failures map~AgentID, error~
+    class SearchResult {
+        +Powers []PowerRef
     }
 
     note for CLIEntry "cobra 命令树根：注册 search/list/install/uninstall 子命令并路由"
     class CLIEntry {
         +Execute(args []string) error
+        +renderSearch(writer, SearchResult) error
     }
 
-    note for Lifecycle "生命周期用例接口，CLI 入口的唯一下游依赖"
-    class Lifecycle {
+    note for SearchLifecycle "search 命令专属生命周期端口，是 CLI 入口的唯一下游业务依赖"
+    class SearchLifecycle {
         <<interface>>
-        +Search(Flags) ([]PowerRef, error)
-        +Install(Flags) (Result, error)
-        +Uninstall(Flags) (Result, error)
-        +List(Flags) (ListResult, error)
+        +Search(Context, Flags) (SearchResult, error)
     }
 
     CLIEntry --> Flags : parses
-    CLIEntry --> Lifecycle : invokes
-    Lifecycle --> ListResult : returns
+    CLIEntry --> SearchLifecycle : invokes Search
+    SearchLifecycle --> SearchResult : returns
+    CLIEntry --> SearchResult : renders stdout

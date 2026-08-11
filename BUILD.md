@@ -55,16 +55,23 @@ gofmt -w cmd internal
 
 ```bash
 ./apm --help
-./apm search example --agent all --type skill
+./apm search summary
+./apm search summary --type skill
+./apm --verbose search summary
 ./apm list --agent all --installed
 ./apm install example=1.0.0 --agent all
 ./apm uninstall example --agent all --type plugin
-./apm --verbose search example --agent all
 ```
 
-全局选项 `--verbose` 输出解析诊断到标准错误；帮助信息可查看每个子命令支持的参数。
+Search 已实现：它按名称搜索 Cloud Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
 
-当前实现仅完成命令解析和参数校验，`search`、`list`、`install`、`uninstall` 尚未执行业务生命周期操作。
+```text
+skill/foo-before-summary@v0.0.1
+```
+
+Search 只接受可选的 `--type`，不接受 `--agent`。全局选项 `--verbose` 输出解析和恢复诊断到标准错误；帮助信息可查看每个子命令支持的参数。
+
+`list`、`install`、`uninstall` 当前仅完成命令解析和参数校验，尚未执行业务生命周期操作。
 
 ## 清理本地构建产物
 

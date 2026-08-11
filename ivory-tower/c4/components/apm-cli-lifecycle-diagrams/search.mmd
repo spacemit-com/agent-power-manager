@@ -1,14 +1,21 @@
 flowchart TD
-    SearchStart([生命周期入口]) --> SearchRecovery[执行公共 journal 检查/修复；失败或中断在公共图内终止]
-    SearchRecovery -->|成功；锁保持| SearchCommand[进入当前命令]
-
-    SearchCommand --> SearchValidate[校验必填 keyword、agent 与可选 type]
-    SearchValidate -->|失败| SearchFail[打印参数或 Agent/Adapter 错误] --> SearchExitError
-    SearchValidate -->|成功| SearchCloudList[调用 Cloud List 获取带版本的全部 PowerRef]
-    SearchCloudList -->|读取或解析失败| SearchFail
-    SearchCloudList -->|成功| SearchFilter[在 lifecycle 中按 keyword 与可选 type 筛选]
-    SearchFilter --> SearchPrint[打印匹配的云端 Power]
-    SearchPrint --> SearchExitOK([释放锁并正常退出])
-    SearchValidate -.进程中断.-> SearchInterrupted
-    SearchCloudList -.进程中断.-> SearchInterrupted
-    SearchPrint -.进程中断.-> SearchInterrupted
+    SearchStart([Search CLI]) --> SearchValidate[校验 keyword 与可选 type]
+    SearchValidate -->|失败| SearchCLIError[CLI 记录一次 Error、打印 usage] --> SearchExitError([非零退出])
+    SearchValidate -->|成功| SearchAcquire[获取全局 APM 锁]
+    SearchAcquire -->|失败| SearchCLIError
+    SearchAcquire -->|成功| SearchRecover[TransactionManager.Recover]
+    SearchRecover -->|恢复成功| SearchWarn[锁内同步 Warn]
+    SearchRecover -->|无活动 journal| SearchDebug[可选锁内 Debug]
+    SearchWarn --> SearchRelease[释放锁]
+    SearchDebug --> SearchRelease
+    SearchRecover -->|失败| SearchAttemptRelease[尝试释放锁] --> SearchCLIError
+    SearchRelease -->|失败| SearchCLIError
+    SearchRelease -->|成功| SearchCloudList[Cloud List]
+    SearchCloudList -->|失败| SearchCLIError
+    SearchCloudList -->|成功| SearchFilter[按名称 fold 和可选 type 筛选]
+    SearchFilter --> SearchLatest[每个 Type/Name 选择最新 SemVer]
+    SearchLatest --> SearchSort[按 Type、Name 稳定排序]
+    SearchSort --> SearchResult[返回 SearchResult]
+    SearchResult --> SearchRender[CLI renderer 输出 type/name@version]
+    SearchRender -->|失败| SearchCLIError
+    SearchRender -->|成功| SearchExitOK([正常退出])

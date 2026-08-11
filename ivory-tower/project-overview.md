@@ -19,8 +19,8 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
     - `search <keyword>` 搜索云端资源；`list` 默认列出云端资源，`list --installed` 列出本地安装清单。
     - `install <power>[=<version>]` 未指定版本时选择云端最新版，相同版本幂等成功，不同版本执行升级或显式降级。
     - 生命周期安全，在任意执行阶段中断，系统都可以识别并纠正。
-    - 四条命令均在全局锁内先检查唯一活动 journal；提交点前回滚，提交点后完成提交，修复失败则非零退出。
-    - `list --installed`、`install`、`uninstall` 在执行本地 Power 操作前扫描已注册 Agent 的根目录，生成当前命令内的“已支持且已安装 Agent”快照。
+    - Search 在全局锁内检查并恢复唯一活动 journal，恢复成功后同步记录 Warn；释放锁后查询 Cloud、筛选并返回结构化结果。其余三个命令当前仅解析参数，尚未接线生命周期。
+    - 后续 `list --installed`、`install`、`uninstall` 在执行本地 Power 操作前扫描已注册 Agent 的根目录，生成当前命令内的“已支持且已安装 Agent”快照；当前三者仍为 parse-only。
     - 实现类似apt的文件锁，保证软件执行安全。
     - 缓存下载的Power。
     - 可增添的Agent Power Adapters。
@@ -32,11 +32,11 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 
 - 系统边界与外部依赖：Agent Power Manager 位于能力提供方、能力使用方与目标 Agent 之间；对外依赖目标 Agent的Power接入方式。目标 Agent 自身的运行时位于 Agent Power Manager 边界之外。
 - 模块边界与职责：
-    - 核心生命周期：定义 Power 的发现、安装、卸载、打印、配置读写和版本管理。
+    - 核心生命周期：定义 Power 的发现、安装、卸载、配置读写和版本管理；Search 只返回结构化结果，不打印业务输出。
     - 配置模型：通过无状态 Repository 维护每个 Agent 按 Skill、Plugin、MCP 分组的 Power 安装清单。
     - Adapter：承接不同 Power 类型和目标 Agent 的格式转换与安装位置差异，并检查已注册 Agent 的根目录是否存在；单个 Power 安装中，Adapter 从公共 staging 原地适配一直负责到目标旁临时复制、原子发布和 staging 清理，详见 [ADR-008](adr/ADR-008-let-adapters-own-staging-to-installation.md)。Adapter 不负责 Agent 安装、实时监控、运行时感知或更新通知；卸载契约另行设计。
-    - CLI：提供入口。
-- 数据与接口：每个 Agent 单独维护一份固定 `skills`、`plugins`、`mcps` 分组的 JSON 安装清单，条目统一为版本已确定的 `PowerRef`。Config Repository 在 `List/Find/Set/Remove` 内封装读取和原子读改写，lifecycle 不直接管理 JSON Manifest，详见 [ADR-007](adr/ADR-007-use-stateless-config-repository.md)。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)；公共恢复语义详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)，集中 transaction Manager、Adapter 提交点和同盘事务内容详见 [ADR-009](adr/ADR-009-centralize-lifecycle-transactions.md)；Agent 安装检测与命令内快照详见 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md)。本地 Power 操作中，`--agent` 的具体值必须存在于“已支持且已安装 Agent”快照，`all` 对快照中的全部 Agent 执行。Cloud `list` 返回带版本的全部 `PowerRef`，由 lifecycle 完成列表或搜索筛选；Cloud `get` 将版本已确定的 `PowerRef` 原子写入版本化缓存。
+    - CLI：提供入口，校验并解析命令参数；Search 成功时由 CLI 渲染 `SearchResult.Powers`。
+- 数据与接口：每个 Agent 单独维护一份固定 `skills`、`plugins`、`mcps` 分组的 JSON 安装清单，条目统一为版本已确定的 `PowerRef`。Config Repository 在 `List/Find/Set/Remove` 内封装读取和原子读改写，lifecycle 不直接管理 JSON Manifest，详见 [ADR-007](adr/ADR-007-use-stateless-config-repository.md)。用户侧通过CLI运行对应功能，CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)：Search 没有 Agent 维度，只接受 keyword 和可选 type；`--agent` 只属于 list/install/uninstall。本地 Power 操作中，`--agent` 的具体值必须存在于“已支持且已安装 Agent”快照，`all` 对快照中的全部 Agent 执行。Search 的 lifecycle 返回 `SearchResult`，CLI 在生命周期完成后渲染；它在锁内执行公共恢复，先释放锁再调用 Cloud `List()`、折叠和筛选结果。公共恢复与锁边界详见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)，集中 transaction Manager、Adapter 提交点和同盘事务内容详见 [ADR-009](adr/ADR-009-centralize-lifecycle-transactions.md)。Cloud `list` 返回带版本的全部 `PowerRef`，由 Search 选择最新 SemVer 并稳定排序；Cloud `get` 将版本已确定的 `PowerRef` 原子写入版本化缓存。list/install/uninstall 当前仍为 parse-only 命令，未来按各自业务接线，不复用或耦合 Search 的锁边界。
 - 技术与运行方式：使用 Go 实现，交付为单个静态二进制；CLI 基于 `cobra`，日志在预解析 `--verbose` 后通过分级 Handler 安装为全局 `slog`，文件锁基于 `flock`，安装记录为各 Agent 独立的 JSON 清单。开发阶段以 `internal/cloud/resources` 的本地资源模拟云端服务；安装先将版本已确定的 `PowerRef` 从缓存 fetch 到干净 staging，缓存未命中时执行 Cloud get 后再次 fetch。缓存写入和 staging 物化均通过同文件系统内的临时目录原子 rename，后续安装仍由 staging + journal 保证中断可识别与纠正。详见 [ADR-001](adr/ADR-001-use-go-as-implementation-language.md) 与 [ADR-006](adr/ADR-006-use-global-slog-with-level-routing.md)。
 
 ## Test Filesystem Isolation
