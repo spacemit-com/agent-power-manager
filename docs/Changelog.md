@@ -1,25 +1,5 @@
 # Changelog
 
-## 2026-08-11
-
-分类：新增功能
-
-用户需求：
-
-为 Search lifecycle 接入全局锁内的事务恢复：成功恢复在锁内同步记录结构化 Warn，显式解锁后才查询 Cloud；Search 返回结构化结果且不渲染或记录 Error。
-
-相关提交：
-
-- `0651245 feat(search): recover before cloud query`
-
-解决方案或完成结果：
-
-`Service` 现在注入 Locker、TransactionManager 和 CloudClient，并拒绝 nil 依赖。Search 在 Cloud 查询前获取全局锁、恢复未完成事务、按需写入恢复 Warn、显式释放锁，再筛选 Cloud Power；获取锁、恢复、释放和 Cloud 查询的错误均保留原因，恢复与释放同时失败时会合并。CLI 边界维持结构化 `SearchResult`，没有在 lifecycle 中渲染或记录 Error。
-
-验证结果或限制：
-
-无缓存 Search 生命周期测试、完整 lifecycle 包测试和 `go test -count=1 ./...` 均通过；静态扫描确认 lifecycle 生产代码无 `slog.Error` 或直接打印。测试覆盖锁/恢复/释放/Cloud 顺序、成功恢复日志、无 journal 的普通与 verbose 行为、各失败路径和依赖校验。
-
 ## 2026-08-10
 
 分类：新增功能

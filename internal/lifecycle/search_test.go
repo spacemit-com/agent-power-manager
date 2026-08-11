@@ -17,11 +17,15 @@ import (
 )
 
 type stubUnlock struct {
-	calls *[]string
-	err   error
+	calls  *[]string
+	before func()
+	err    error
 }
 
 func (u *stubUnlock) Release() error {
+	if u.before != nil {
+		u.before()
+	}
 	*u.calls = append(*u.calls, "release")
 	return u.err
 }
@@ -78,6 +82,14 @@ func TestSearchRecoversWarnsUnlocksThenListsCloud(t *testing.T) {
 	slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
 	t.Cleanup(func() { slog.SetDefault(originalLogger) })
 
+	unlock := &stubUnlock{
+		calls: &calls,
+		before: func() {
+			if !strings.Contains(stderr.String(), "level=WARN") {
+				t.Fatalf("stderr before lock release = %q, want recovery WARN", stderr.String())
+			}
+		},
+	}
 	cloud := &stubCloudClient{
 		calls: &calls,
 		refs:  []domain.PowerRef{{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}},
@@ -88,7 +100,7 @@ func TestSearchRecoversWarnsUnlocksThenListsCloud(t *testing.T) {
 		},
 	}
 	service, err := New(
-		&stubLocker{calls: &calls, unlock: &stubUnlock{calls: &calls}},
+		&stubLocker{calls: &calls, unlock: unlock},
 		&stubTransactionManager{calls: &calls, result: transaction.RecoveryResult{
 			Recovered:     true,
 			Operation:     transaction.OperationInstall,
