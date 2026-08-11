@@ -20,14 +20,17 @@
 - `36afaf8 feat(list): filter and sort power results`
 - `7f665ea feat(list): implement lifecycle orchestration`
 - `2c51cb4 feat(list): render lifecycle results`
+- `c53ccf1 docs(list): record lifecycle implementation`
+- `e715ea6 docs(list): correct lifecycle documentation`
+- `a3bf252 fix(lifecycle): reject typed nil dependencies`
 
 解决方案或完成结果：
 
-默认 Cloud List 不获取锁、不调用 Recover，直接查询 Cloud、计算并渲染全部版本；installed List 在同一把锁内依次执行 Recover、实时 Warn、Registry 刷新和全部 Config reads，只有成功 Release 后才过滤、排序和渲染。Cloud 精确输出 `<type>/<name>@<version>`，installed 始终输出 `<agent>/<type>/<name>@<version>`。`--agent=all` 的单 Agent 读取失败会继续读取；只有成功 Release 后的 `PartialListError` 可先输出成功记录再非零退出，Release 或其他 fatal error 不输出业务行。Registry 对注册 Agent 副本按字典序 Detect 并返回同序快照。Config 的完整读写只接受 `vMAJOR.MINOR.PATCH`，读取非法历史清单会失败且不迁移或清理。Search 与 List 采用独立端口；install/uninstall 继续仅解析参数。ADR-002/003/004/007（并同步 ADR-009 的历史接线说明）、C4、项目概览、Feature 005/008/009 与 BUILD 已对齐。
+默认 Cloud List 不获取锁、不调用 Recover，直接查询 Cloud、计算并渲染全部版本；installed List 在同一把锁内依次执行 Recover、实时 Warn、Registry 刷新和全部 Config reads，只有成功 Release 后才过滤、排序和渲染。Cloud 精确输出 `<type>/<name>@<version>`，installed 始终输出 `<agent>/<type>/<name>@<version>`。`--agent=all` 的单 Agent 读取失败会继续读取；只有成功 Release 后的 `PartialListError` 可先输出成功记录再非零退出，Release 或其他 fatal error 不输出业务行。Registry 对注册 Agent 副本按字典序 Detect 并返回同序快照。Config 的完整读写只接受 `vMAJOR.MINOR.PATCH`，读取非法历史清单会失败且不迁移或清理。Search 与 List 采用独立端口，并在 constructor 和 CLI factory 边界拒绝 typed-nil interface 依赖或服务，保持原有上下文错误且避免 panic；install/uninstall 继续仅解析参数。ADR-002/003/004/007（并同步 ADR-009 的历史接线说明）、C4、项目概览、Feature 005/008/009 与 BUILD 已对齐。
 
 验证结果或限制：
 
-`go mod tidy` 后 `go.mod`/`go.sum` 无 diff；`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`git diff --check` 和 lifecycle/config/adapter 的直接 Error/Print 静态扫描均以退出码 0 完成。隔离目录黑盒验收中，`list --type skill` 的 stdout 为 `skill/foo-before-summary@v0.0.1` 且 stderr 为空；无效 `list --agent all` 以状态 1 退出、stdout 为空、stderr 恰有一条 `level=ERROR` 并包含 `--agent requires --installed` 与 `Usage:`；创建空 Codex 根目录后 `list --installed --agent codex` 的 stdout/stderr 均为空。历史 feature/plan 中保留的旧边界均已标注为历史或 superseded；install/uninstall lifecycle 尚未实现。
+`go mod tidy` 后 `go.mod`/`go.sum` 无 diff；`test -z "$(gofmt -l cmd internal)"`、typed-nil lifecycle/CLI focused tests、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`git diff --check`、aggregate/Search no-op 扫描和 lifecycle/config/adapter 的直接 Error/Print 静态扫描均以退出码 0 完成。typed-nil constructor 测试覆盖 NewSearch 三类与 NewList 五类依赖的精确上下文错误；CLI 测试覆盖 factory 返回 typed-nil Search/List service 时不 panic、stdout 为空且 stderr 恰有一条 Error 和 Usage。隔离目录黑盒验收中，`list --type skill` 的 stdout 为 `skill/foo-before-summary@v0.0.1` 且 stderr 为空；无效 `list --agent all` 以状态 1 退出、stdout 为空、stderr 恰有一条 `level=ERROR` 并包含 `--agent requires --installed` 与 `Usage:`；创建空 Codex 根目录后 `list --installed --agent codex` 的 stdout/stderr 均为空。历史 feature/plan 中保留的旧边界均已标注为历史或 superseded；install/uninstall lifecycle 尚未实现。
 
 ## 2026-08-11
 
