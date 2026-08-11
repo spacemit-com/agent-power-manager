@@ -37,9 +37,6 @@ func resolveInstallPower(flags cli.Flags, refs []domain.PowerRef, selector Versi
 		for powerType := range types {
 			selectedType = powerType
 		}
-		if selectedType == "" {
-			return domain.PowerRef{}, fmt.Errorf("install power %q has no power type; specify --type", flags.Name)
-		}
 	}
 
 	candidates := make([]string, 0, len(matching))
