@@ -21,6 +21,8 @@ func newTestEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
 		return emptySearchLifecycle{}, nil
 	}, func() (cli.ListLifecycle, error) {
 		return emptyListLifecycle{}, nil
+	}, func() (cli.InstallLifecycle, error) {
+		return emptyInstallLifecycle{}, nil
 	})
 }
 
@@ -36,6 +38,12 @@ func (emptyListLifecycle) List(context.Context, cli.Flags) (cli.ListResult, erro
 	return cli.ListResult{}, nil
 }
 
+type emptyInstallLifecycle struct{}
+
+func (emptyInstallLifecycle) Install(context.Context, cli.Flags) (cli.InstallResult, error) {
+	return cli.InstallResult{Items: []cli.InstallItem{}}, nil
+}
+
 func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -46,7 +54,7 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 		{name: "search", args: []string{"search", "foo"}},
 		{name: "cloud list", args: []string{"list"}},
 		{name: "installed list", args: []string{"list", "--agent=codex", "--installed"}},
-		{name: "install", args: []string{"install", "demo=1.2.3", "--agent=codex", "--type=skill"}},
+		{name: "install", args: []string{"install", "demo=v1.2.3", "--agent=codex", "--type=skill"}},
 		{name: "uninstall", args: []string{"uninstall", "demo", "--agent=codex"}},
 		{name: "plugin type", args: []string{"search", "foo", "--type=plugin"}},
 		{name: "mcp type", args: []string{"list", "--type=mcp"}},

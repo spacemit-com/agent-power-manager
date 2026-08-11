@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	entry := cli.New(os.Stdout, os.Stderr, logging.SetupLogging, newSearchLifecycle, newListLifecycle)
+	entry := cli.New(os.Stdout, os.Stderr, logging.SetupLogging, newSearchLifecycle, newListLifecycle, nil)
 	if err := entry.Execute(os.Args[1:]); err != nil {
 		os.Exit(1)
 	}

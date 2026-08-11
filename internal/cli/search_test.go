@@ -45,6 +45,9 @@ func newSearchEntry(t *testing.T, stdout, stderr io.Writer, factory cli.SearchLi
 	}, factory, func() (cli.ListLifecycle, error) {
 		t.Fatal("Search dispatched to List factory")
 		return nil, nil
+	}, func() (cli.InstallLifecycle, error) {
+		t.Fatal("Search dispatched to Install factory")
+		return nil, nil
 	})
 }
 

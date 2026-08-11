@@ -36,7 +36,10 @@ func newListEntry(t *testing.T, stdout, stderr io.Writer, factory cli.ListLifecy
 	}, func() (cli.SearchLifecycle, error) {
 		t.Fatal("List dispatched to Search factory")
 		return nil, nil
-	}, factory)
+	}, factory, func() (cli.InstallLifecycle, error) {
+		t.Fatal("List dispatched to Install factory")
+		return nil, nil
+	})
 }
 
 func TestListValidatesConditionalAgentBeforeFactory(t *testing.T) {

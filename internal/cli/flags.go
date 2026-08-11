@@ -3,8 +3,11 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+var canonicalInstallVersion = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
 // Flags 保存命令解析后的公共选项和位置参数。
 type Flags struct {
@@ -41,4 +44,14 @@ func parsePower(value string) (string, string, error) {
 		return "", "", errors.New("power version must not be empty")
 	}
 	return name, version, nil
+}
+
+func validateInstallVersion(version string) error {
+	if version == "" {
+		return nil
+	}
+	if !canonicalInstallVersion.MatchString(version) {
+		return fmt.Errorf("invalid power version %q: must be vMAJOR.MINOR.PATCH", version)
+	}
+	return nil
 }

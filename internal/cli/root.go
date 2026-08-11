@@ -1,4 +1,4 @@
-// Package cli 提供解析和校验参数、调用 Search/List 生命周期并渲染业务结果的 APM Cobra 命令树。
+// Package cli 提供解析和校验参数、调用 Search/List/Install 生命周期并渲染业务结果的 APM Cobra 命令树。
 package cli
 
 import (
@@ -14,27 +14,29 @@ type SetupLoggingFunc func(verbose bool)
 
 // CLIEntry 是 APM 命令行的执行入口。
 type CLIEntry struct {
-	stdout             io.Writer
-	stderr             io.Writer
-	setupLogging       SetupLoggingFunc
-	newSearchLifecycle SearchLifecycleFactory
-	newListLifecycle   ListLifecycleFactory
+	stdout              io.Writer
+	stderr              io.Writer
+	setupLogging        SetupLoggingFunc
+	newSearchLifecycle  SearchLifecycleFactory
+	newListLifecycle    ListLifecycleFactory
+	newInstallLifecycle InstallLifecycleFactory
 }
 
-// New 使用指定输出、日志初始化函数和相互独立的 Search/List 生命周期工厂创建 CLI 入口。
-func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory) *CLIEntry {
+// New 使用指定输出、日志初始化函数和相互独立的 Search/List/Install 生命周期工厂创建 CLI 入口。
+func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newInstallLifecycle InstallLifecycleFactory) *CLIEntry {
 	return &CLIEntry{
-		stdout:             stdout,
-		stderr:             stderr,
-		setupLogging:       setupLogging,
-		newSearchLifecycle: newSearchLifecycle,
-		newListLifecycle:   newListLifecycle,
+		stdout:              stdout,
+		stderr:              stderr,
+		setupLogging:        setupLogging,
+		newSearchLifecycle:  newSearchLifecycle,
+		newListLifecycle:    newListLifecycle,
+		newInstallLifecycle: newInstallLifecycle,
 	}
 }
 
 // Execute 解析参数并执行选定的 CLI 命令。
 func (entry *CLIEntry) Execute(args []string) error {
-	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle, entry.newListLifecycle)
+	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle, entry.newListLifecycle, entry.newInstallLifecycle)
 	preparseLogging(root, args, entry.setupLogging)
 	root.SetArgs(args)
 	executed, err := root.ExecuteC()
@@ -66,7 +68,7 @@ func isNilInterface(value any) bool {
 	}
 }
 
-func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory) *cobra.Command {
+func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newInstallLifecycle InstallLifecycleFactory) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "apm",
 		Short:         "Agent Power Manager",
@@ -79,7 +81,7 @@ func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycle
 	root.AddCommand(
 		newSearchCommand(newSearchLifecycle),
 		newListCommand(newListLifecycle),
-		newInstallCommand(),
+		newInstallCommand(newInstallLifecycle),
 		newUninstallCommand(),
 	)
 	return root
