@@ -30,7 +30,7 @@ func TestLocalCloudAndCacheFetchGetFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "0.0.1"}
+	ref := domain.PowerRef{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"}
 
 	if _, err = store.Fetch(ref); !errors.Is(err, cache.ErrMiss) {
 		t.Fatalf("first Fetch() error = %v, want ErrMiss", err)

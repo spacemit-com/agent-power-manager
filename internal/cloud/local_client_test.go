@@ -36,7 +36,7 @@ func TestLocalClientListsCommittedSkillFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []domain.PowerRef{{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "0.0.1"}}
+	want := []domain.PowerRef{{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("List() = %#v, want %#v", got, want)
 	}
