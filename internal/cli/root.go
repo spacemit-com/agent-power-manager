@@ -4,6 +4,7 @@ package cli
 import (
 	"io"
 	"log/slog"
+	"reflect"
 
 	"github.com/spf13/cobra"
 )
@@ -50,6 +51,19 @@ func preparseLogging(root *cobra.Command, args []string, setupLogging SetupLoggi
 	_ = flags.Parse(args)
 	verbose, _ := flags.GetBool("verbose")
 	setupLogging(verbose)
+}
+
+func isNilInterface(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
 }
 
 func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory) *cobra.Command {

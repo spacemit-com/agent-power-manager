@@ -268,8 +268,11 @@ func TestNewSearchRejectsNilDependencies(t *testing.T) {
 		want string
 	}{
 		{name: "locker", new: func() (*SearchService, error) { return NewSearch(nil, transactions, cloud) }, want: "create Search lifecycle with nil locker"},
+		{name: "typed nil locker", new: func() (*SearchService, error) { return NewSearch((*stubLocker)(nil), transactions, cloud) }, want: "create Search lifecycle with nil locker"},
 		{name: "transaction manager", new: func() (*SearchService, error) { return NewSearch(locker, nil, cloud) }, want: "create Search lifecycle with nil transaction manager"},
+		{name: "typed nil transaction manager", new: func() (*SearchService, error) { return NewSearch(locker, (*stubTransactionManager)(nil), cloud) }, want: "create Search lifecycle with nil transaction manager"},
 		{name: "Cloud client", new: func() (*SearchService, error) { return NewSearch(locker, transactions, nil) }, want: "create Search lifecycle with nil Cloud client"},
+		{name: "typed nil Cloud client", new: func() (*SearchService, error) { return NewSearch(locker, transactions, (*stubCloudClient)(nil)) }, want: "create Search lifecycle with nil Cloud client"},
 	}
 
 	for _, tt := range tests {

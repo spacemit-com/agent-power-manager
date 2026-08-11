@@ -31,7 +31,7 @@ func newSearchCommand(newLifecycle SearchLifecycleFactory) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create search lifecycle: %w", err)
 			}
-			if service == nil {
+			if isNilInterface(service) {
 				return errors.New("create search lifecycle: nil service")
 			}
 			result, err := service.Search(command.Context(), flags)

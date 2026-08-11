@@ -322,6 +322,22 @@ func TestListFactoryFailuresAreContextual(t *testing.T) {
 	}
 }
 
+func TestListRejectsTypedNilLifecycleService(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	entry := newListEntry(t, &stdout, &stderr, func() (cli.ListLifecycle, error) {
+		return (*recordingListLifecycle)(nil), nil
+	})
+
+	err := entry.Execute([]string{"list"})
+	if err == nil || err.Error() != "create list lifecycle: nil service" {
+		t.Fatalf("Execute(list) error = %v, want typed-nil service error", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("list stdout = %q, want empty", stdout.String())
+	}
+	assertOneErrorAndUsage(t, stderr.String())
+}
+
 func TestListHelpExplainsAgentRequiresInstalled(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	entry := newListEntry(t, &stdout, &stderr, func() (cli.ListLifecycle, error) {

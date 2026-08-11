@@ -25,7 +25,7 @@ func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create list lifecycle: %w", err)
 			}
-			if service == nil {
+			if isNilInterface(service) {
 				return errors.New("create list lifecycle: nil service")
 			}
 			result, err := service.List(command.Context(), flags)

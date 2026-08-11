@@ -135,10 +135,25 @@ func TestNewListRejectsNilDependencies(t *testing.T) {
 		want string
 	}{
 		{name: "locker", new: func() (*ListService, error) { return NewList(nil, transactions, cloud, registry, config) }, want: "create List lifecycle with nil locker"},
+		{name: "typed nil locker", new: func() (*ListService, error) {
+			return NewList((*listFakeLocker)(nil), transactions, cloud, registry, config)
+		}, want: "create List lifecycle with nil locker"},
 		{name: "transaction manager", new: func() (*ListService, error) { return NewList(locker, nil, cloud, registry, config) }, want: "create List lifecycle with nil transaction manager"},
+		{name: "typed nil transaction manager", new: func() (*ListService, error) {
+			return NewList(locker, (*listFakeTransactions)(nil), cloud, registry, config)
+		}, want: "create List lifecycle with nil transaction manager"},
 		{name: "Cloud client", new: func() (*ListService, error) { return NewList(locker, transactions, nil, registry, config) }, want: "create List lifecycle with nil Cloud client"},
+		{name: "typed nil Cloud client", new: func() (*ListService, error) {
+			return NewList(locker, transactions, (*listFakeCloud)(nil), registry, config)
+		}, want: "create List lifecycle with nil Cloud client"},
 		{name: "adapter registry", new: func() (*ListService, error) { return NewList(locker, transactions, cloud, nil, config) }, want: "create List lifecycle with nil adapter registry"},
+		{name: "typed nil adapter registry", new: func() (*ListService, error) {
+			return NewList(locker, transactions, cloud, (*listFakeRegistry)(nil), config)
+		}, want: "create List lifecycle with nil adapter registry"},
 		{name: "config repository", new: func() (*ListService, error) { return NewList(locker, transactions, cloud, registry, nil) }, want: "create List lifecycle with nil config repository"},
+		{name: "typed nil config repository", new: func() (*ListService, error) {
+			return NewList(locker, transactions, cloud, registry, (*listFakeConfig)(nil))
+		}, want: "create List lifecycle with nil config repository"},
 	}
 
 	for _, tt := range tests {

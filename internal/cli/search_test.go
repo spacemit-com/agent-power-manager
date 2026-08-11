@@ -170,6 +170,22 @@ func TestSearchLifecycleErrorIsLoggedOnceWithUsage(t *testing.T) {
 	}
 }
 
+func TestSearchRejectsTypedNilLifecycleService(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	entry := newSearchEntry(t, &stdout, &stderr, func() (cli.SearchLifecycle, error) {
+		return (*recordingSearchLifecycle)(nil), nil
+	})
+
+	err := entry.Execute([]string{"search", "summary"})
+	if err == nil || err.Error() != "create search lifecycle: nil service" {
+		t.Fatalf("Execute(search) error = %v, want typed-nil service error", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("search stdout = %q, want empty", stdout.String())
+	}
+	assertOneErrorAndUsage(t, stderr.String())
+}
+
 func TestSearchFactoryRunsAfterVerboseLoggerSetup(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	factoryCalled := false

@@ -20,15 +20,15 @@ type ListService struct {
 // NewList 创建 List 生命周期；默认 Cloud 分支不得调用共享状态依赖。
 func NewList(locker Locker, transactions TransactionManager, cloud CloudClient, registry AdapterRegistry, config ConfigRepository) (*ListService, error) {
 	switch {
-	case locker == nil:
+	case isNilInterface(locker):
 		return nil, errors.New("create List lifecycle with nil locker")
-	case transactions == nil:
+	case isNilInterface(transactions):
 		return nil, errors.New("create List lifecycle with nil transaction manager")
-	case cloud == nil:
+	case isNilInterface(cloud):
 		return nil, errors.New("create List lifecycle with nil Cloud client")
-	case registry == nil:
+	case isNilInterface(registry):
 		return nil, errors.New("create List lifecycle with nil adapter registry")
-	case config == nil:
+	case isNilInterface(config):
 		return nil, errors.New("create List lifecycle with nil config repository")
 	}
 	return &ListService{
