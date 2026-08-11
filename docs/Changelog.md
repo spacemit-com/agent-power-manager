@@ -6,6 +6,40 @@
 
 用户需求：
 
+实现并交付完整的 Install lifecycle，并对齐 ADR、C4、Feature、BUILD 与 Changelog；在完成实现后执行全量、竞态、静态和隔离 CLI 黑盒验收。
+
+相关提交：
+
+- `de999d7 docs(install): define lifecycle design`
+- `02218df docs(install): add implementation plan`
+- `7cf3986 refactor(cache): return staging root from fetch`
+- `f26e45b feat(version): select exact or latest power version`
+- `466f1f7 fix(transaction): remove stale install manifest entries`
+- `0e7de3c feat(cli): define install result contract`
+- `6b0c53f feat(lifecycle): resolve install power references`
+- `0853899 fix(lifecycle): trust canonical inferred power types`
+- `dd426d7 feat(lifecycle): orchestrate successful installs`
+- `1c33afc feat(lifecycle): enforce install fail-fast results`
+- `04da8d3 feat(cli): execute and render install lifecycle`
+- `07dd3bd feat(apm): wire default install lifecycle`
+- `4d7932e test(apm): verify unchanged install cleanup`
+- `feb51b5 test: cover canonical cache and stale repair`
+- `afa8187 docs(install): record lifecycle implementation`
+
+解决方案或完成结果：
+
+提供独立的 Install CLI 端口、生命周期、批处理结果和 renderer。显式版本只接受规范 `vMAJOR.MINOR.PATCH`，Name 保持区分大小写的精确匹配；跨 Type 同名在版本选择前要求 `--type`。Install 在一次锁内依次完成恢复、刷新、Cloud、Cache 与 serial Transaction；成功 Release 后才渲染。每个结果精确输出 `<agent>/<type>/<name>@<version> <outcome>`，包含 installed、upgraded、downgraded、unchanged，以及 fail-fast 的 failed/unexecuted。旧清单存在而受管 target 缺失时，Transaction 只 Remove 对应条目、清理 canonical staging、返回 `ErrStaleManifest` 并中止，不创建 journal 或调用 Adapter。Cache Fetch 的公共契约为 staging-root 字符串，Adapter 依据 PowerRef 定位叶子内容。Search、List 和 Install 已实现；Uninstall 仍为 parse-only。
+
+验证结果或限制：
+
+以下命令均以退出码 0 完成：`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`go mod tidy`、`cmp go.mod /tmp/apm-go.mod.before`、`cmp go.sum /tmp/apm-go.sum.before`、`git diff --check`，以及 lifecycle/transaction/cache/version 的 Error/Print 静态扫描和 `cache.Content`/`Content.Path`/旧 install 签名扫描。隔离 CLI 黑盒验收的首次调用 stdout 精确为 `codex/skill/foo-before-summary@v0.0.1 installed`、stderr 为空；第二次规范版本调用 stdout 精确为 `codex/skill/foo-before-summary@v0.0.1 unchanged`、stderr 为空，并确认目标 `SKILL.md`、manifest 存在且无 active journal。无效 `0.0.1` 以状态 1 退出、stdout 为空、stderr 恰有一条 `level=ERROR`，且包含 `must be vMAJOR.MINOR.PATCH` 和 `Usage:`。
+
+## 2026-08-11
+
+分类：新增功能
+
+用户需求：
+
 实现并交付独立的 List lifecycle：默认 Cloud List 无锁列出全部版本，installed List 在一个锁区间内恢复、刷新已安装 Agent 并读取清单；同步 ADR、C4、概览、历史 feature 文档和构建指南，并完成全量与黑盒验收。
 
 相关提交：
