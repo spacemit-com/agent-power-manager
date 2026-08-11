@@ -2,6 +2,9 @@
 package lifecycle
 
 import (
+	"context"
+	"errors"
+
 	"apm/internal/cli"
 	"apm/internal/domain"
 )
@@ -15,24 +18,34 @@ type ListResult struct {
 
 // Lifecycle 定义能力生命周期操作。
 type Lifecycle interface {
-	Search(cli.Flags) ([]domain.PowerRef, error)
+	Search(context.Context, cli.Flags) (cli.SearchResult, error)
 	List(cli.Flags) (ListResult, error)
 	Install(cli.Flags) (domain.Result, error)
 	Uninstall(cli.Flags) (domain.Result, error)
 }
 
-// Service 是 Lifecycle 的零值占位实现。
-type Service struct{}
-
-// New 创建零值生命周期服务。
-func New() *Service {
-	return &Service{}
+// Service 是具有共享状态恢复依赖的 Lifecycle 实现。
+type Service struct {
+	locker       Locker
+	transactions TransactionManager
+	cloud        CloudClient
 }
 
-// Search 搜索能力。
-func (s *Service) Search(cli.Flags) ([]domain.PowerRef, error) {
-	return nil, nil
+// New 创建具有恢复、锁和 Cloud 依赖的生命周期服务。
+func New(locker Locker, transactions TransactionManager, cloud CloudClient) (*Service, error) {
+	switch {
+	case locker == nil:
+		return nil, errors.New("create lifecycle service with nil locker")
+	case transactions == nil:
+		return nil, errors.New("create lifecycle service with nil transaction manager")
+	case cloud == nil:
+		return nil, errors.New("create lifecycle service with nil cloud client")
+	}
+	return &Service{locker: locker, transactions: transactions, cloud: cloud}, nil
 }
+
+var _ Lifecycle = (*Service)(nil)
+var _ cli.SearchLifecycle = (*Service)(nil)
 
 // List 列出能力。
 func (s *Service) List(cli.Flags) (ListResult, error) {
