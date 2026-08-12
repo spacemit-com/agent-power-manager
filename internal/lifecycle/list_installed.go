@@ -13,6 +13,12 @@ import (
 	"apm/internal/transaction"
 )
 
+// agentPowerGroups 保存单个 Agent 的已安装能力分组。
+type agentPowerGroups struct {
+	agent  domain.AgentID
+	groups domain.PowerGroups
+}
+
 func installedListAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.AgentID, error) {
 	target := domain.AgentID(flags.Agent)
 	if target == domain.AllAgents {
@@ -31,7 +37,8 @@ func releaseInstalledList(unlock lock.Unlock, businessErr error) error {
 	return businessErr
 }
 
-// listInstalled 在同一全局锁内恢复、刷新并读取清单，且仅在成功解锁后生成可渲染结果。
+// listInstalled 的 Recover、快照刷新和全部 Config 读取共享同一锁区间；恢复日志也在锁内记录。
+// 结果转换等待成功 Release 后才执行。
 func (s *ListService) listInstalled(ctx context.Context, flags cli.Flags) (cli.ListResult, error) {
 	unlock, err := s.locker.Acquire()
 	if err != nil {

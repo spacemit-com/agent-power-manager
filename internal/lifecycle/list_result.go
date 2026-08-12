@@ -8,12 +8,6 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-// agentPowerGroups 保存单个 Agent 的已安装能力分组。
-type agentPowerGroups struct {
-	agent  domain.AgentID
-	groups domain.PowerGroups
-}
-
 // makeCloudListResult 将 Cloud 能力复制为 CLI 列表结果并完成过滤排序。
 func makeCloudListResult(flags cli.Flags, refs []domain.PowerRef) cli.ListResult {
 	powers := make([]cli.ListedPower, 0, len(refs))

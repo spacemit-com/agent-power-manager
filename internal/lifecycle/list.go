@@ -47,6 +47,7 @@ func (s *ListService) List(ctx context.Context, flags cli.Flags) (cli.ListResult
 	if flags.Installed {
 		return s.listInstalled(ctx, flags)
 	}
+	// Cloud 分支不读取本地共享状态，因此直接查询并返回结果，不获取全局锁。
 	refs, err := s.cloud.List()
 	if err != nil {
 		return cli.ListResult{}, fmt.Errorf("list Cloud powers: %w", err)
