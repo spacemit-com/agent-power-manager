@@ -62,9 +62,11 @@ func validateMCPInstallRequest(request MCPInstallRequest) error {
 	}
 	if err := validatePower(*request.Previous, ErrInvalidRequest); err != nil ||
 		request.Previous.Type != domain.PowerTypeMCP ||
-		request.Previous.Name != request.Power.Name ||
-		request.Previous.Version == request.Power.Version {
+		request.Previous.Name != request.Power.Name {
 		return fmt.Errorf("invalid previous MCP reference: %w", ErrInvalidRequest)
+	}
+	if request.Previous.Version == request.Power.Version && (request.Server != nil || request.PreviousServer != nil) {
+		return fmt.Errorf("same-version MCP update contains definitions: %w", ErrInvalidRequest)
 	}
 	if request.PreviousServer != nil {
 		if err := request.PreviousServer.Validate(); err != nil {

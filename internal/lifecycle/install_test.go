@@ -25,16 +25,22 @@ type installFixture struct {
 	installed      map[domain.AgentID]domain.PowerRef
 	cacheResponses map[domain.AgentID][]installCacheResponse
 
-	acquireErr            error
-	releaseErr            error
-	recoverErr            error
-	refreshErr            error
-	cloudListErr          error
-	cloudGetErr           error
-	resolveErrors         map[domain.AgentID]error
-	configFindErrors      map[domain.AgentID]error
-	transactionInstallErr map[domain.AgentID]error
-	versionErr            error
+	acquireErr               error
+	releaseErr               error
+	recoverErr               error
+	refreshErr               error
+	cloudListErr             error
+	cloudGetErr              error
+	resolveErrors            map[domain.AgentID]error
+	configFindErrors         map[domain.AgentID]error
+	transactionInstallErr    map[domain.AgentID]error
+	transactionMCPInstallErr map[domain.AgentID]error
+	mcpPresence              map[domain.AgentID]adapter.MCPPresence
+	mcpInspectErrors         map[domain.AgentID]error
+	mcpDefinitions           map[string]domain.MCPServer
+	mcpGetErrors             map[string]error
+	mcpRequests              []transaction.MCPInstallRequest
+	versionErr               error
 
 	currentAgent domain.AgentID
 	cacheCalls   map[domain.AgentID]int
@@ -89,7 +95,17 @@ func (m *installFakeTransactions) Install(_ context.Context, request transaction
 	return m.fixture.transactionInstallErr[request.Agent]
 }
 
+func (m *installFakeTransactions) InstallMCP(_ context.Context, request transaction.MCPInstallRequest) error {
+	*m.calls = append(*m.calls, "transaction:install-mcp:"+string(request.Agent))
+	m.fixture.mcpRequests = append(m.fixture.mcpRequests, request)
+	return m.fixture.transactionMCPInstallErr[request.Agent]
+}
+
 func (*installFakeTransactions) Uninstall(context.Context, transaction.UninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, nil
+}
+
+func (*installFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
 
@@ -106,6 +122,11 @@ func (c *installFakeCloud) List() ([]domain.PowerRef, error) {
 func (c *installFakeCloud) Get(domain.PowerRef) error {
 	*c.calls = append(*c.calls, "cloud:get")
 	return c.fixture.cloudGetErr
+}
+
+func (c *installFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error) {
+	*c.calls = append(*c.calls, "cloud:get-mcp:"+ref.Version)
+	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
 type installFakeCache struct {
@@ -133,10 +154,16 @@ type installFakeRegistry struct {
 	fixture *installFixture
 }
 
-func (r *installFakeRegistry) Resolve(agent domain.AgentID, _ domain.PowerType) (adapter.Adapter, error) {
+func (r *installFakeRegistry) ResolveSkill(agent domain.AgentID) (adapter.Adapter, error) {
 	r.fixture.currentAgent = agent
 	*r.calls = append(*r.calls, "resolve:"+string(agent))
 	return installFakeAdapter{}, r.fixture.resolveErrors[agent]
+}
+
+func (r *installFakeRegistry) ResolveMCP(agent domain.AgentID) (adapter.MCPAdapter, error) {
+	r.fixture.currentAgent = agent
+	*r.calls = append(*r.calls, "resolve-mcp:"+string(agent))
+	return installFakeMCPAdapter{agent: agent, calls: r.calls, fixture: r.fixture}, r.fixture.resolveErrors[agent]
 }
 
 func (r *installFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
@@ -155,6 +182,25 @@ func (installFakeAdapter) TargetPath(domain.PowerRef) (string, error) { return "
 
 func (installFakeAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
 	return adapter.InstallResult{Published: true}, nil
+}
+
+type installFakeMCPAdapter struct {
+	agent   domain.AgentID
+	calls   *[]string
+	fixture *installFixture
+}
+
+func (a installFakeMCPAdapter) Inspect(context.Context, string) (adapter.MCPPresence, error) {
+	*a.calls = append(*a.calls, "mcp:inspect:"+string(a.agent))
+	return a.fixture.mcpPresence[a.agent], a.fixture.mcpInspectErrors[a.agent]
+}
+
+func (installFakeMCPAdapter) Add(context.Context, domain.PowerRef, domain.MCPServer) (adapter.MCPMutationResult, error) {
+	return adapter.MCPMutationResult{State: adapter.MCPMutationApplied}, nil
+}
+
+func (installFakeMCPAdapter) Remove(context.Context, domain.PowerRef) (adapter.MCPMutationResult, error) {
+	return adapter.MCPMutationResult{State: adapter.MCPMutationApplied}, nil
 }
 
 type installFakeConfig struct {

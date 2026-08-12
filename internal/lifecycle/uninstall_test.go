@@ -81,10 +81,16 @@ func (m *uninstallFakeTransactions) Recover(context.Context) (transaction.Recove
 func (*uninstallFakeTransactions) Install(context.Context, transaction.InstallRequest) error {
 	return nil
 }
+func (*uninstallFakeTransactions) InstallMCP(context.Context, transaction.MCPInstallRequest) error {
+	return nil
+}
 
 func (m *uninstallFakeTransactions) Uninstall(_ context.Context, request transaction.UninstallRequest) (transaction.UninstallResult, error) {
 	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall:"+string(request.Agent))
 	return m.fixture.transactionResults[request.Agent], m.fixture.transactionErrors[request.Agent]
+}
+func (*uninstallFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, nil
 }
 
 type uninstallFakeRegistry struct {
@@ -92,10 +98,11 @@ type uninstallFakeRegistry struct {
 	fixture *uninstallFixture
 }
 
-func (r *uninstallFakeRegistry) Resolve(agent domain.AgentID, _ domain.PowerType) (adapter.Adapter, error) {
+func (r *uninstallFakeRegistry) ResolveSkill(agent domain.AgentID) (adapter.Adapter, error) {
 	recordUninstallEvent(r.calls, r.fixture, "resolve:"+string(agent))
 	return uninstallFakeAdapter{}, r.fixture.resolveErrors[agent]
 }
+func (*uninstallFakeRegistry) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) { return nil, nil }
 
 func (r *uninstallFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	recordUninstallEvent(r.calls, r.fixture, "refresh")

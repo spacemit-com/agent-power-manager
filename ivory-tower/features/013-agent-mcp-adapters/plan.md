@@ -588,7 +588,7 @@ Run: `go test ./internal/transaction -count=1 && go test -race ./internal/transa
 
 Expected: PASS for legacy filesystem and new agent-cli drivers.
 
-- [ ] **Step 9: Commit uninstall and recovery**
+- [x] **Step 9: Commit uninstall and recovery**
 
 ```bash
 git add internal/transaction
@@ -609,7 +609,7 @@ git commit -m "feat(mcp): recover Agent CLI transactions"
 - Consumes: `CloudClient.GetMCP`, `AdapterRegistry.ResolveSkill/ResolveMCP`, `TransactionManager.Install/InstallMCP`.
 - Preserves: `InstallService.Install` outer lock/batch/result flow and Skill Cache path.
 
-- [ ] **Step 1: Update lifecycle dependency fakes to compile with type-specific ports**
+- [x] **Step 1: Update lifecycle dependency fakes to compile with type-specific ports**
 
 Change the interface declarations to:
 
@@ -623,7 +623,7 @@ type AdapterRegistry interface {
 
 Extend lifecycle Cloud/Transaction fakes with recording `GetMCP` and `InstallMCP/UninstallMCP` methods while keeping existing event names for Skill tests.
 
-- [ ] **Step 2: Write failing MCP install lifecycle tests**
+- [x] **Step 2: Write failing MCP install lifecycle tests**
 
 Cover the approved state table and exact events. First install must be:
 
@@ -635,13 +635,13 @@ transaction:install-mcp:codex, release
 
 Add same-version present unchanged with no GetMCP/Cache/transaction; no-record present conflict; same/different-version absent stale repair through InstallMCP without GetMCP; update present with old GetMCP before new GetMCP; GetMCP old/new failures; all-Agent refetch of definitions; Inspect unknown fail-fast; and installed/upgraded/downgraded outcomes.
 
-- [ ] **Step 3: Run lifecycle MCP install tests and verify they fail**
+- [x] **Step 3: Run lifecycle MCP install tests and verify they fail**
 
 Run: `go test ./internal/lifecycle -run 'InstallMCP' -count=1`
 
 Expected: FAIL because `installMCP` dispatch is absent.
 
-- [ ] **Step 4: Implement a narrow type dispatch**
+- [x] **Step 4: Implement a narrow type dispatch**
 
 Refactor existing `installOne` to switch only on `ref.Type`:
 
@@ -658,7 +658,7 @@ default:
 
 Move the current body unchanged to `installSkill`. Implement `installMCP` from the state table, clone Cloud definitions into requests, and compare SemVer only after transaction success.
 
-- [ ] **Step 5: Run all Install lifecycle tests**
+- [x] **Step 5: Run all Install lifecycle tests**
 
 Run: `go test ./internal/lifecycle -run 'Install' -count=1`
 

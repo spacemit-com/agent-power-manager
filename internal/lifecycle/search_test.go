@@ -53,8 +53,14 @@ func (m *stubTransactionManager) Recover(context.Context) (transaction.RecoveryR
 }
 
 func (*stubTransactionManager) Install(context.Context, transaction.InstallRequest) error { return nil }
+func (*stubTransactionManager) InstallMCP(context.Context, transaction.MCPInstallRequest) error {
+	return nil
+}
 
 func (*stubTransactionManager) Uninstall(context.Context, transaction.UninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, nil
+}
+func (*stubTransactionManager) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
 
@@ -74,6 +80,9 @@ func (c *stubCloudClient) List() ([]domain.PowerRef, error) {
 }
 
 func (*stubCloudClient) Get(domain.PowerRef) error { return nil }
+func (*stubCloudClient) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
+	return domain.MCPServer{}, nil
+}
 
 func TestSearchRecoversWarnsUnlocksThenListsCloud(t *testing.T) {
 	var calls []string

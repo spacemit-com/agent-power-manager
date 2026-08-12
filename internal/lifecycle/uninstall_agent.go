@@ -29,7 +29,7 @@ func (s *UninstallService) uninstallOne(ctx context.Context, agent domain.AgentI
 
 	copied := ref
 	item := cli.UninstallItem{Agent: agent, Power: &copied}
-	resolved, err := s.registry.Resolve(agent, ref.Type)
+	resolved, err := s.registry.ResolveSkill(agent)
 	if err != nil {
 		item.Outcome = cli.UninstallOutcomeFailed
 		return item, fmt.Errorf("resolve uninstall adapter for agent %q: %w", agent, err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"apm/internal/adapter"
 	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/domain"
@@ -32,7 +33,18 @@ func (s *InstallService) fetchInstallStaging(ref domain.PowerRef) (string, error
 }
 
 func (s *InstallService) installOne(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
-	resolvedAdapter, err := s.registry.Resolve(agent, ref.Type)
+	switch ref.Type {
+	case domain.PowerTypeSkill:
+		return s.installSkill(ctx, agent, ref)
+	case domain.PowerTypeMCP:
+		return s.installMCP(ctx, agent, ref)
+	default:
+		return cli.InstallItem{}, fmt.Errorf("install power type %q: %w", ref.Type, adapter.ErrUnsupportedAdapter)
+	}
+}
+
+func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
+	resolvedAdapter, err := s.registry.ResolveSkill(agent)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("resolve install adapter for agent %q: %w", agent, err)
 	}

@@ -68,8 +68,14 @@ func (m *listFakeTransactions) Recover(context.Context) (transaction.RecoveryRes
 }
 
 func (*listFakeTransactions) Install(context.Context, transaction.InstallRequest) error { return nil }
+func (*listFakeTransactions) InstallMCP(context.Context, transaction.MCPInstallRequest) error {
+	return nil
+}
 
 func (*listFakeTransactions) Uninstall(context.Context, transaction.UninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, nil
+}
+func (*listFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
 
@@ -84,15 +90,19 @@ func (c *listFakeCloud) List() ([]domain.PowerRef, error) {
 }
 
 func (*listFakeCloud) Get(domain.PowerRef) error { return nil }
+func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
+	return domain.MCPServer{}, nil
+}
 
 type listFakeRegistry struct {
 	calls   *[]string
 	fixture *listFixture
 }
 
-func (*listFakeRegistry) Resolve(domain.AgentID, domain.PowerType) (adapter.Adapter, error) {
+func (*listFakeRegistry) ResolveSkill(domain.AgentID) (adapter.Adapter, error) {
 	return nil, nil
 }
+func (*listFakeRegistry) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) { return nil, nil }
 
 func (r *listFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	if r.fixture.beforeRefresh != nil {

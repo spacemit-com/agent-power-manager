@@ -14,7 +14,8 @@ import (
 
 // AdapterRegistry 定义智能体适配器注册表所需的操作。
 type AdapterRegistry interface {
-	Resolve(domain.AgentID, domain.PowerType) (adapter.Adapter, error)
+	ResolveSkill(domain.AgentID) (adapter.Adapter, error)
+	ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error)
 	RefreshInstalled() (domain.AgentSnapshot, error)
 }
 
