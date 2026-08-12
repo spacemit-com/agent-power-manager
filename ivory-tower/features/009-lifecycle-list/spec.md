@@ -4,7 +4,7 @@
 
 完成 `list` 的 lifecycle 与 CLI 接线，并明确 Cloud 列表与本地已安装列表的不同共享状态边界：默认 Cloud 列表不获取全局锁、不执行 transaction 恢复；`list --installed` 在全局锁内完成恢复、Agent 刷新和清单读取，释放锁后再过滤、排序和渲染。
 
-本 feature 同时把 List 从聚合的 lifecycle 占位接口拆为命令专属端口，清除 Search service 上未实现但静默成功的 List/Install/Uninstall 方法。Install 和 Uninstall CLI 保持 parse-only、不在本 feature 接线，是本 feature 的历史边界；Feature 010 已实现 Install，Uninstall 仍为 parse-only。
+本 feature 同时把 List 从聚合的 lifecycle 占位接口拆为命令专属端口，清除 Search service 上未实现但静默成功的 List/Install/Uninstall 方法。Install 和 Uninstall CLI 保持 parse-only、不在本 feature 接线，是本 feature 的历史边界；Feature 010/011 已分别实现 Install/Uninstall。
 
 List CLI 语法修订为：
 
@@ -318,7 +318,7 @@ Lifecycle、Registry、Config、Cloud 和 renderer 不提前记录 `slog.Error`�
 - Help 清楚表达 flag 组合；
 - List factory 在日志初始化后创建，nil factory/service 和构造错误进入统一出口；
 - repeated `CLIEntry.Execute` 不泄漏 installed、agent、type、logger 或 lifecycle 状态；
-- install/uninstall 仍只解析，不调用 List factory。
+- 本 feature 当时的 install/uninstall 只解析且不调用 List factory；该历史边界已由 Feature 010/011 supersede。
 
 ### Cloud List 测试
 
@@ -422,5 +422,5 @@ Spec 和后续实施计划保存在 `ivory-tower/features/009-lifecycle-list/`�
 6. Cloud 输出精确为 `<type>/<name>@<version>\n`；installed 输出精确为 `<agent>/<type>/<name>@<version>\n`。
 7. Config Repository 不向调用方返回、也不写入任何非规范 `vMAJOR.MINOR.PATCH`；读取发现非法现有清单时返回错误且不自动修改文件。
 8. 除可渲染 partial error 外，error 不产生业务 stdout；每次失败只由 CLI 记录一条 Error 并打印 usage。
-9. Search 行为不回归；Install/Uninstall parse-only 是本 feature 的历史验收边界，已由 Feature 010 supersede 为 Install 已实现、Uninstall 仍为 parse-only；不存在聚合 lifecycle 接口或静默成功的空业务方法。
+9. Search 行为不回归；Install/Uninstall parse-only 是本 feature 的历史验收边界，已由 Feature 010/011 分别 supersede 为 Install/Uninstall 已实现；不存在聚合 lifecycle 接口或静默成功的空业务方法。
 10. ADR、C4、项目概览、Feature 文档、BUILD 和 Changelog 与最终实现一致，全量测试、vet、构建和静态检查通过。

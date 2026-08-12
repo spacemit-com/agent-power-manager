@@ -1,5 +1,5 @@
 classDiagram
-    note for Flags "search/list/install 解析各自参数；Uninstall 仍仅 parse-only"
+    note for Flags "search/list/install/uninstall 分别解析自己的参数；uninstall 拒绝任何版本形式"
     class Flags {
         +Agent string
         +Type string
@@ -7,6 +7,44 @@ classDiagram
         +Version string
         +Keyword string
         +Installed bool
+    }
+
+    class CLIEntry {
+        +Execute(args []string) error
+    }
+
+    class SearchLifecycleFactory {
+        <<function>>
+        +Create() (SearchLifecycle, error)
+    }
+    class ListLifecycleFactory {
+        <<function>>
+        +Create() (ListLifecycle, error)
+    }
+    class InstallLifecycleFactory {
+        <<function>>
+        +Create() (InstallLifecycle, error)
+    }
+    class UninstallLifecycleFactory {
+        <<function>>
+        +Create() (UninstallLifecycle, error)
+    }
+
+    class SearchLifecycle {
+        <<interface>>
+        +Search(Context, Flags) (SearchResult, error)
+    }
+    class ListLifecycle {
+        <<interface>>
+        +List(Context, Flags) (ListResult, error)
+    }
+    class InstallLifecycle {
+        <<interface>>
+        +Install(Context, Flags) (InstallResult, error)
+    }
+    class UninstallLifecycle {
+        <<interface>>
+        +Uninstall(Context, Flags) (UninstallResult, error)
     }
 
     class SearchResult {
@@ -19,9 +57,6 @@ classDiagram
     class ListResult {
         +Powers []ListedPower
     }
-    class PartialListError {
-        +Failures []AgentFailure
-    }
     class InstallItem {
         +Agent AgentID
         +Power PowerRef
@@ -30,28 +65,26 @@ classDiagram
     class InstallResult {
         +Items []InstallItem
     }
+    class UninstallItem {
+        +Agent AgentID
+        +Power *PowerRef
+        +Outcome UninstallOutcome
+    }
+    class UninstallResult {
+        +Items []UninstallItem
+    }
+    class PartialListError {
+        +Failures []AgentFailure
+    }
     class InstallBatchError {
         +Agent AgentID
         +Err error
     }
+    class UninstallBatchError {
+        +Agent AgentID
+        +Err error
+    }
 
-    note for CLIEntry "cobra 命令树根：Search、List、Install 调用专属端口；Uninstall 只解析"
-    class CLIEntry {
-        +Execute(args []string) error
-    }
-    class SearchLifecycle {
-        <<interface>>
-        +Search(Context, Flags) (SearchResult, error)
-    }
-    class ListLifecycle {
-        <<interface>>
-        +List(Context, Flags) (ListResult, error)
-    }
-    note for InstallLifecycle "成功 Release 后，InstallBatchError 才能携带可渲染结果"
-    class InstallLifecycle {
-        <<interface>>
-        +Install(Context, Flags) (InstallResult, error)
-    }
     class searchRenderer {
         <<package>>
         -renderSearch(writer, SearchResult) error
@@ -60,22 +93,43 @@ classDiagram
         <<package>>
         -renderList(writer, ListResult) error
     }
-    note for installRenderer "只在成功或成功 Release 的 InstallBatchError 时写 stdout"
     class installRenderer {
         <<package>>
         -renderInstall(writer, InstallResult) error
     }
+    note for uninstallRenderer "只在成功或成功 Release 的 UninstallBatchError 时写 stdout；完整 PowerRef 和 Agent-only 两种行"
+    class uninstallRenderer {
+        <<package>>
+        -renderUninstall(writer, UninstallResult) error
+    }
 
     CLIEntry --> Flags : parses
+    CLIEntry --> SearchLifecycleFactory : creates after logging setup
+    CLIEntry --> ListLifecycleFactory : creates after logging setup
+    CLIEntry --> InstallLifecycleFactory : creates after logging setup
+    CLIEntry --> UninstallLifecycleFactory : creates after logging setup
+    SearchLifecycleFactory --> SearchLifecycle : returns
+    ListLifecycleFactory --> ListLifecycle : returns
+    InstallLifecycleFactory --> InstallLifecycle : returns
+    UninstallLifecycleFactory --> UninstallLifecycle : returns
+
     CLIEntry --> SearchLifecycle : invokes
-    SearchLifecycle --> SearchResult : returns
-    CLIEntry --> searchRenderer : invokes
     CLIEntry --> ListLifecycle : invokes
+    CLIEntry --> InstallLifecycle : invokes
+    CLIEntry --> UninstallLifecycle : invokes
+    SearchLifecycle --> SearchResult : returns
     ListLifecycle --> ListResult : returns
     ListLifecycle --> PartialListError : may return with result
-    CLIEntry --> listRenderer : invokes
-    CLIEntry --> InstallLifecycle : invokes
     InstallLifecycle --> InstallResult : returns
     InstallLifecycle --> InstallBatchError : successful Release only
+    UninstallLifecycle --> UninstallResult : returns
+    UninstallLifecycle --> UninstallBatchError : successful Release only
+
+    CLIEntry --> searchRenderer : invokes
+    CLIEntry --> listRenderer : invokes
     CLIEntry --> installRenderer : invokes
+    CLIEntry --> uninstallRenderer : invokes
+    searchRenderer --> SearchResult : renders stdout
+    listRenderer --> ListResult : renders stdout
     installRenderer --> InstallResult : renders stdout
+    uninstallRenderer --> UninstallResult : renders stdout

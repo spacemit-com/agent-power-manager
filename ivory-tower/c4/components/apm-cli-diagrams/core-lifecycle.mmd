@@ -1,5 +1,5 @@
 classDiagram
-    note for SearchLifecycle "Search：Recover 后 Release，再查询 Cloud；返回结构化结果，不打印"
+    note for SearchLifecycle "Search：Recover 后 Release，再查询 Cloud；返回结构化结果"
     class SearchLifecycle {
         <<interface>>
         +Search(Context, Flags) (SearchResult, error)
@@ -43,9 +43,30 @@ classDiagram
         +Agent AgentID
         +Err error
     }
-    note for installService "Acquire → Recover/Warn → Refresh/target validation → Cloud resolve → serial work → successful Release；不负责 CLI 打印"
     class installService {
         +Install(...)
+    }
+
+    note for UninstallLifecycle "Uninstall 专属端口；只有成功 Release 的 batch error 可保留结果"
+    class UninstallLifecycle {
+        <<interface>>
+        +Uninstall(Context, Flags) (UninstallResult, error)
+    }
+    class UninstallItem {
+        +Agent AgentID
+        +Power *PowerRef
+        +Outcome UninstallOutcome
+    }
+    class UninstallResult {
+        +Items []UninstallItem
+    }
+    class UninstallBatchError {
+        +Agent AgentID
+        +Err error
+    }
+    note for uninstallService "Acquire → Recover/Warn → Refresh → per-Agent Config/Resolve/Transaction → successful Release；Warn 同步且不负责 CLI 渲染"
+    class uninstallService {
+        +Uninstall(...)
     }
 
     class AdapterRegistry {
@@ -53,10 +74,14 @@ classDiagram
         +Resolve(AgentID, PowerType) (Adapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
     }
+    note for Adapter "不定义 Uninstall 方法；Transaction 使用 TargetPath 管理 quarantine"
     class Adapter {
         <<interface>>
         +TargetPath(PowerRef) (string, error)
-        +Install(PowerRef, stagingRoot) (InstallResult, error)
+        +Install(PowerRef, stagingRoot) (AdapterInstallResult, error)
+    }
+    class AdapterInstallResult {
+        +Published bool
     }
     class AgentSnapshot {
         +Agents []AgentID
@@ -70,12 +95,15 @@ classDiagram
         +Set(AgentID, PowerRef) error
         +Remove(AgentID, PowerType, name) error
     }
-    note for TransactionManager "集中 journal；Install 陈旧 target 缺失时 Remove 单条清单、清理 staging、ErrStaleManifest 并中止"
+    note for TransactionManager "集中 journal；Uninstall 依 ADR-009 返回可与 error 并存的 target 事实，不记录 Warn"
     class TransactionManager {
         <<interface>>
         +Recover(Context) (RecoveryResult, error)
         +Install(Context, InstallRequest) error
-        +Uninstall(Context, UninstallRequest) error
+        +Uninstall(Context, UninstallRequest) (TransactionUninstallResult, error)
+    }
+    class TransactionUninstallResult {
+        +TargetMissing bool
     }
     class Locker {
         <<interface>>
@@ -96,26 +124,42 @@ classDiagram
     }
 
     searchService ..|> SearchLifecycle
-    searchService --> TransactionManager
+    searchService --> SearchResult : returns
+    searchService --> TransactionManager : Recover
     searchService --> Locker
     searchService --> CloudClient
+
     listService ..|> ListLifecycle
+    listService --> ListResult : returns
+    listService --> PartialListError : successful Release only
     listService --> AdapterRegistry : installed only
     listService --> ConfigRepository : installed only
-    listService --> TransactionManager : installed only
+    listService --> TransactionManager : Recover, installed only
     listService --> Locker : installed only
     listService --> CloudClient : Cloud only
+
     installService ..|> InstallLifecycle
     installService --> InstallResult : returns
     installService --> InstallBatchError : successful Release only
-    installService --> Locker : 1 lock interval
-    installService --> TransactionManager : Recover/Install
-    installService --> CloudClient : List/Get
+    installService --> Locker : one lock interval
+    installService --> TransactionManager : Recover / Install
+    installService --> CloudClient : List / Get
     installService --> PowerCache : Fetch
-    installService --> AdapterRegistry : Refresh/Resolve
+    installService --> AdapterRegistry : Refresh / Resolve
     installService --> ConfigRepository : Find
     installService --> VersionSelector : resolve version
+
+    uninstallService ..|> UninstallLifecycle
+    uninstallService --> UninstallResult : returns after Release
+    uninstallService --> UninstallBatchError : successful Release only
+    uninstallService --> Locker : one lock interval
+    uninstallService --> TransactionManager : Recover / Uninstall
+    uninstallService --> AdapterRegistry : Refresh / Resolve
+    uninstallService --> ConfigRepository : List
+
     AdapterRegistry --> Adapter : resolves
     AdapterRegistry --> AgentSnapshot : returns
-    TransactionManager --> Adapter : TargetPath/Install
-    TransactionManager --> ConfigRepository : Set/Remove
+    Adapter --> AdapterInstallResult : Install returns
+    TransactionManager --> Adapter : TargetPath / Install
+    TransactionManager --> TransactionUninstallResult : returns
+    TransactionManager --> ConfigRepository : Set / Remove

@@ -4,9 +4,9 @@
 
 完成 `install` 的 lifecycle 与 CLI 端到端接线。Install 在同一次全局 APM 锁内完成 transaction 恢复、Agent 快照、Cloud 解析、Cache staging 物化及全部目标 Agent 的串行安装；只有成功释放锁后，才把结构化结果交给 CLI 渲染。
 
-本 feature 复用既有 Adapter 发布和集中 transaction 能力，不建立跨 Search、List、Install 的通用 runner。Uninstall 继续保持 parse-only。
+本 feature 复用既有 Adapter 发布和集中 transaction 能力，不建立跨 Search、List、Install 的通用 runner。Uninstall 在本 feature 当时继续保持 parse-only，该历史边界已由 Feature 011 supersede。
 
-> **实现状态（2026-08-11）：** 本 spec 的已批准要求已实现；本状态记录不改变下文的需求、边界或验收标准。Uninstall 继续保持 parse-only。
+> **实现状态（2026-08-11）：** 本 spec 的已批准要求已实现；本状态记录不改变下文的需求、边界或验收标准。当时保持 parse-only 的 Uninstall 已由 Feature 011 于 2026-08-12 接线。
 
 CLI 语法保持：
 
@@ -374,7 +374,7 @@ Install factory 在 CLI 预解析 `--verbose` 并安装默认 logger 后创建�
 - 精确六种 outcome 行；
 - success、batch、fatal、Release 和 writer error 的渲染边界；
 - batch 与 writer error 同时保留全部 cause；
-- Search/List 不回归，Uninstall 仍为 parse-only。
+- Search/List 不回归，Uninstall parse-only 是本 feature 的历史验收边界，现已由 Feature 011 supersede。
 
 ### Power 解析与 Version Selector
 
@@ -488,4 +488,4 @@ Spec 和后续 implementation plan 均保存在 `ivory-tower/features/010-lifecy
 7. 首次安装、升级和显式降级分别输出 installed、upgraded、downgraded。
 8. 不同旧版本但目标缺失时，Transaction 只 Remove 对应清单项、清理 staging并返回错误；不创建 journal、不安装目标版本。
 9. 成功 Release 后，批处理失败精确输出 failed/unexecuted 汇总，再由 CLI 记录一次 Error 和 usage；fatal 或 Release error 不输出业务行。
-10. Uninstall 保持 parse-only，Search/List 既有锁、结果和 CLI 行为不回归。
+10. Uninstall 保持 parse-only 是本 feature 的历史验收边界，已由 Feature 011 supersede；Search/List 既有锁、结果和 CLI 行为不回归。

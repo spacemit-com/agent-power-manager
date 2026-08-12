@@ -1,5 +1,7 @@
 # Lifecycle Uninstall 规格
 
+> **实现状态（2026-08-12）：** 本 spec 的已批准要求已实现。`Manager.Uninstall` 的 `TargetMissing` 事实返回与锁内同步消费边界由 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 记录。
+
 ## 目标
 
 完成 `uninstall` 的 lifecycle 与 CLI 端到端接线。Uninstall 在同一次全局 APM 锁内完成 transaction 恢复、Agent 快照、逐 Agent 本地清单解析及串行卸载；恢复、未安装和目标缺失事实在锁内同步写入 stderr，只有成功释放锁后才把结构化业务汇总交给 CLI 渲染。

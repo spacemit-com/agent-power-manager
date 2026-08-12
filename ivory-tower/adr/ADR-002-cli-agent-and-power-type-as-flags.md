@@ -2,7 +2,7 @@
 
 - Status：Accepted
 - Date：2026-08-03
-- Revised：2026-08-11
+- Revised：2026-08-12
 - Decision Makers：liangjunzhao
 
 ## Context
@@ -36,7 +36,7 @@ apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 - 该命令不注册 `--agent`，传入该 flag 时 Cobra 报告 unknown flag。
 - `list` 默认列出 Cloud 资源，省略 `--type` 时不应用类别过滤，并保留每个版本；`list --installed` 读取本地安装清单并按本地记录解析类别。Cloud 行精确为 `<type>/<name>@<version>`，installed 行始终精确为 `<agent>/<type>/<name>@<version>`。
 - `install` 的 Name 与 Cloud `PowerRef.Name` 按区分大小写的原始字符串精确匹配；省略 `--type` 时从 Cloud `List()` 返回的带版本 `PowerRef` 推断类别。若同名候选跨 Type，必须在任何版本选择（包括显式版本）前报歧义并要求 `--type`。未指定版本时从确定类别的候选引用选择最新版并填充 `PowerRef.Version`；显式 `<power>=<version>` 只接受规范 `vMAJOR.MINOR.PATCH`，可安装、升级或降级到指定版本；相同版本视为成功且不重复安装。
-- `uninstall` 从本地安装清单解析类别；未找到本地安装记录时视为幂等成功；同名跨类别歧义要求显式 `--type`。
+- `uninstall` 不接受版本；位置参数中任何 `=` 都在创建 lifecycle 前被拒绝并返回 `uninstall does not accept a version`。它为每个目标 Agent 分别从本地安装清单解析 Type 和 Version：显式 `--type` 只精确匹配该类别，省略时只在当前 Agent 内对同名记录消歧；不同 Agent 可解析为不同 Type/Version。当前 Agent 无匹配记录时同步 Warn，记为 Agent-only `unexecuted` 并继续，整体仍是幂等成功；同名跨类别歧义则要求显式 `--type`。
 
 适用的维度均以 flag 承载，不作为子命令命名空间；`verb`（`search`/`list`/`install`/`uninstall`）是唯一的子命令层级。
 
@@ -45,6 +45,15 @@ apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 List 的 Config 清单版本必须遵循 [ADR-007](ADR-007-use-stateless-config-repository.md) 的精确 `vMAJOR.MINOR.PATCH` 契约。
 
 Install 的每个 Agent 结果精确渲染为 `<agent>/<type>/<name>@<version> <outcome>`，其中 outcome 为 `installed`、`upgraded`、`downgraded`、`unchanged`、`failed` 或 `unexecuted`。`all` 按 Agent ID 字典序串行并 fail-fast：首个业务失败后补齐当前 `failed` 和剩余 `unexecuted`。只有成功 Release 后的 Install batch error 才允许 CLI 先渲染该完整结果、再以非零状态返回；fatal 或 Release error 均抑制业务行。
+
+Uninstall 的结果根据 lifecycle 是否已解析出唯一本地 `PowerRef` 精确渲染为两种行：
+
+```text
+<agent>/<type>/<name>@<version> <completed|failed|unexecuted>
+<agent> <failed|unexecuted>
+```
+
+清单无记录和前序 Agent 失败后未执行使用 Agent-only `unexecuted`；清单读取或类别消歧失败使用 Agent-only `failed`；解析出唯一引用后的完成或失败保留完整引用。`all` 按 Agent ID 字典序串行并 fail-fast。只有成功 Release 后的 Uninstall batch error 才允许 CLI 先渲染完整结果、再以非零状态返回；fatal 或 Release error 均抑制业务行。
 
 ## Consequences
 

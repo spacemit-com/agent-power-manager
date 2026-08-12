@@ -9,7 +9,7 @@
 ## Scope
 
 - 包含：Search 专属 lifecycle 端口与依赖注入；锁内 `Recover`；恢复成功 Warn、无 journal Debug；锁外 Cloud `List()`；Unicode 大小写归一化名称搜索；精确类型过滤；每个 `(Type, Name)` 的最大 SemVer 选择；稳定排序；CLI 精确输出；`--agent` 未知 flag；错误、usage 和退出码；ADR、架构图、项目概览与构建文档同步。
-- 不包含：本 feature 当时的 list/install/uninstall lifecycle 接线、接口重构或业务实现；通用 lifecycle runner；Cloud 非法数据的校验、跳过或降级排序；真实 HTTP Cloud；搜索描述、标签、内容或版本；模糊匹配和相关性排序。前一项是历史边界：Feature 009 已使 List 成为独立 lifecycle，Feature 010 随后已实现 Install；只有 Uninstall 仍为 parse-only。
+- 不包含：本 feature 当时的 list/install/uninstall lifecycle 接线、接口重构或业务实现；通用 lifecycle runner；Cloud 非法数据的校验、跳过或降级排序；真实 HTTP Cloud；搜索描述、标签、内容或版本；模糊匹配和相关性排序。前一项是历史边界：Feature 009、010、011 随后已分别实现 List、Install 和 Uninstall 独立 lifecycle。
 
 ## Implementation Context
 

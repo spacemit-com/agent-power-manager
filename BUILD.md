@@ -65,7 +65,8 @@ gofmt -w cmd internal
 ./apm install foo-before-summary --agent codex
 ./apm install foo-before-summary=v0.0.1 --agent codex --type skill
 ./apm install foo-before-summary --agent all
-./apm uninstall example --agent all --type plugin
+./apm uninstall foo-before-summary --agent codex
+./apm uninstall foo-before-summary --agent all --type skill
 ```
 
 Search 已实现：它按名称搜索 Cloud Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
@@ -103,7 +104,20 @@ Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.
 <agent>/<type>/<name>@<version> unexecuted
 ```
 
-`--agent=all` 按 Agent ID 字典序 fail-fast；只有业务失败后又成功 Release 的批处理结果会先渲染 `failed/unexecuted` 行、再非零退出。fatal 或 Release error 不输出业务行。Uninstall 仍是 parse-only，仅完成命令解析和参数校验。
+`--agent=all` 按 Agent ID 字典序 fail-fast；只有业务失败后又成功 Release 的批处理结果会先渲染 `failed/unexecuted` 行、再非零退出。fatal 或 Release error 不输出业务行。
+
+Uninstall 已实现完整生命周期。它不接受版本；例如 `./apm uninstall foo-before-summary=v0.0.1 --agent codex` 会在创建 lifecycle 前报告 `uninstall does not accept a version`。省略 `--type` 时，每个 Agent 分别从自己的本地清单解析 Type 和 Version；同一 Agent 内存在跨 Type 同名记录时，必须显式提供 `--type`。
+
+Uninstall 在一次 Acquire/Release 之间完成 Recover、恢复 Warn、Agent 刷新、逐 Agent 清单解析和串行 Transaction。清单无记录时同步 Warn、记为 Agent-only `unexecuted` 并继续；清单有记录但 target 已缺失时，Transaction 仍移除该清单项，lifecycle 同步 Warn 并记为完整引用 `completed`。决策边界见 [ADR-003](ivory-tower/adr/ADR-003-serialize-lifecycle-and-recover-journal.md) 与 [ADR-009](ivory-tower/adr/ADR-009-centralize-lifecycle-transactions.md)。
+
+stdout 只有两种精确行形式：
+
+```text
+<agent>/<type>/<name>@<version> <completed|failed|unexecuted>
+<agent> <failed|unexecuted>
+```
+
+例如成功卸载可输出 `codex/skill/foo-before-summary@v0.0.1 completed`；重复执行时可输出 `codex unexecuted`。`--agent=all` 按 Agent ID 字典序 fail-fast：首个业务失败后，当前 Agent 记为 `failed`、剩余 Agent 记为 `unexecuted`。只有成功 Release 后才渲染汇总；Release error 抑制全部业务行。当前只有 Skill Adapter 可执行真实安装/卸载；Plugin/MCP Adapter 仍不支持。
 
 ## 清理本地构建产物
 

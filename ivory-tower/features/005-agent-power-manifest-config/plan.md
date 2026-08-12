@@ -1,6 +1,6 @@
 # Agent Power 安装清单与无状态 Config Repository Implementation Plan
 
-> **历史计划（已被后续 feature 修订）：** 本计划中的 CLI parse-only smoke check 只记录当时边界；Search、List、Install 已实现，只有 Uninstall 仍为 parse-only。
+> **历史计划（已被后续 feature 修订）：** 本计划中的 CLI parse-only smoke check 只记录当时边界；Search、List、Install、Uninstall 已由 Feature 008–011 接线。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

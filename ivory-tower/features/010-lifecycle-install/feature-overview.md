@@ -8,7 +8,7 @@
 
 ## Implementation Status
 
-- 状态：已于 2026-08-11 实现。实际行为满足本 spec 的已批准要求；Uninstall 仍为 parse-only。
+- 状态：已于 2026-08-11 实现。实际行为满足本 spec 的已批准要求；当时不在本 feature 范围内的 Uninstall 已由 Feature 011 接线。
 
 ## Scope
 

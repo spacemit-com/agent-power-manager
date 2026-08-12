@@ -1,6 +1,6 @@
 # Central Lifecycle Transactions Implementation Plan
 
-> **历史计划（Install 分支已被 Feature 010 supersede）：** 本计划中的 Install self-heal 描述只记录当时步骤；当前已纳管 Install target 缺失时只 Remove 对应清单、清理 canonical staging、返回 `ErrStaleManifest` 并中止。Uninstall target 缺失语义不变。
+> **历史计划（已被 Feature 010/011 supersede）：** 本计划中的 Install self-heal 和 `Uninstall(...) error` 签名只记录当时步骤；当前已纳管 Install target 缺失时只 Remove 对应清单、清理 canonical staging、返回 `ErrStaleManifest` 并中止，Uninstall target 缺失仍按幂等提交处理且当前签名返回 `UninstallResult.TargetMissing` 与 error。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

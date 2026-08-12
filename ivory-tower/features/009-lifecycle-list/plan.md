@@ -1,6 +1,6 @@
 # Lifecycle List Implementation Plan
 
-> **历史计划（Install 状态已被 Feature 010 supersede）：** 本计划中的 Install parse-only 描述只记录 Feature 009 的边界；Feature 010 已实现 Install，只有 Uninstall 仍为 parse-only。
+> **历史计划（Install/Uninstall 状态已被 Feature 010/011 supersede）：** 本计划中的 install/uninstall parse-only 描述只记录 Feature 009 的当时边界；两者现均已接线。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

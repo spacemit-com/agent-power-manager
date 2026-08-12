@@ -5,7 +5,7 @@ classDiagram
         +Resolve(AgentID, PowerType) (Adapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
     }
-    note for Adapter "Install 根据 PowerRef 从 stagingRoot 定位自身叶子内容；完成适配、原子发布和 staging 清理"
+    note for Adapter "Install 根据 PowerRef 从 stagingRoot 定位自身叶子内容；TargetPath 供 Transaction 定位卸载目标；不定义 Uninstall 方法（ADR-009）"
     class Adapter {
         <<interface>>
         +DetectAgent() (bool, error)

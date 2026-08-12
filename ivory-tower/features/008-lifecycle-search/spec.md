@@ -27,7 +27,7 @@ apm search <keyword> [--type=<skill|plugin|mcp>]
 
 ### 不包含
 
-- 历史边界：本 feature 时 list/install/uninstall 的 lifecycle 接线、接口重构或业务实现不包含。该边界已先由 Feature 009 supersede 为 List 独立 lifecycle，再由 Feature 010 supersede 为 Install 已实现；只有 Uninstall 仍为 parse-only。
+- 历史边界：本 feature 时 list/install/uninstall 的 lifecycle 接线、接口重构或业务实现不包含。该边界已由 Feature 009、010、011 分别 supersede 为 List、Install、Uninstall 独立 lifecycle 已实现。
 - 为四个命令建立通用 runner、公共回调流水线或统一持锁模板；
 - Agent 发现、Adapter、Config、Cache、安装或卸载业务；
 - Cloud 非法版本、非法类别或非法名称的校验、跳过、错误映射或降级排序；
@@ -62,7 +62,7 @@ type searchService struct {
 
 重要构造与 Search 接口添加简要、规范的中文注释，说明用途以及锁范围约束。依赖通过构造函数注入；nil 依赖在构造或调用入口返回明确错误，不允许因占位零值产生静默成功。
 
-CLI 的 Search 命令只持有 Search 专属端口。本 feature 时 list/install/uninstall 均保持未接线占位；该历史状态已由 Feature 009 supersede 为 List 独立接线，再由 Feature 010 supersede 为 Install 已接线，只有 Uninstall 仍 parse-only。不得让 Search 调用其他命令 lifecycle，也不得抽象跨命令执行器。
+CLI 的 Search 命令只持有 Search 专属端口。本 feature 时 list/install/uninstall 均保持未接线占位；该历史状态已由 Feature 009、010、011 分别 supersede 为 List、Install、Uninstall 独立接线。不得让 Search 调用其他命令 lifecycle，也不得抽象跨命令执行器。
 
 `cmd/apm` 使用工厂构造 Search 默认依赖。工厂在 Cobra 已根据 `--verbose` 安装全局 logger 后执行，使路径或依赖初始化错误进入同一个 CLI 错误出口。默认依赖为全局文件锁、集中 transaction Manager 和开发期 Local Cloud；Local Cloud 资源根按当前构建指南从仓库根的 `internal/cloud/resources` 解析为绝对路径。
 
@@ -291,7 +291,7 @@ CLI 对所有失败使用单一出口：
 实现完成必须同时满足：
 
 1. Search 的正常、空结果、恢复成功、恢复失败、锁失败、Cloud 失败和渲染失败行为符合本规格。
-2. 历史验收边界：当时 list/install/uninstall 没有 lifecycle 接线；Feature 009 已使 List 独立接线，Feature 010 已实现 Install，只有 Uninstall 仍为 parse-only。
+2. 历史验收边界：当时 list/install/uninstall 没有 lifecycle 接线；Feature 009、010、011 已分别实现 List、Install、Uninstall 独立接线。
 3. 源码中的重要 Search 接口和构造具有简要中文注释。
 4. ADR、C4 图、项目概览和构建文档语义一致。
 5. `gofmt`、聚焦无缓存测试、全量无缓存测试、`go vet`、构建和 `git diff --check` 通过。

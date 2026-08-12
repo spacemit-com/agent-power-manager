@@ -1,5 +1,7 @@
 # Lifecycle Uninstall Implementation Plan
 
+> **已执行的历史计划（2026-08-12）：** 本计划中的 parse-only、red 阶段和逐步替换说明只记录实施过程；当前 Uninstall 行为以 [spec.md](spec.md) 与 [ADR-002](../../adr/ADR-002-cli-agent-and-power-type-as-flags.md)、[ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-004](../../adr/ADR-004-discover-installed-agents-before-local-operations.md)、[ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the complete `uninstall` lifecycle, including local manifest resolution, recoverable serial transactions, synchronous Warn logging, structured fail-fast summaries, CLI rendering, default wiring, and aligned architecture documentation.

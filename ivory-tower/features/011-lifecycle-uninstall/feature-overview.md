@@ -3,12 +3,12 @@
 ## Goal
 
 - 特性名称：Lifecycle Uninstall
-- 要解决的问题：`uninstall` 当前只解析参数，尚未把既有 Config、Adapter Registry 与 TransactionManager 串成可执行命令；既有文档也没有完整定义逐 Agent 本地消歧、幂等未安装、目标缺失修复、fail-fast 汇总以及锁外统一渲染的边界。
+- 要解决的问题：本 feature 实施前，`uninstall` 只解析参数，未把既有 Config、Adapter Registry 与 TransactionManager 串成可执行命令；既有文档也没有完整定义逐 Agent 本地消歧、幂等未安装、目标缺失修复、fail-fast 汇总以及锁外统一渲染的边界。
 - 可交付结果：完成 Uninstall 专属 lifecycle 与 CLI 接线；在一次全局锁内恢复、刷新并按 Agent 字典序串行卸载，实时记录未安装与目标缺失 Warn，成功 Release 后返回并渲染结构化 completed/failed/unexecuted 汇总。
 
 ## Implementation Status
 
-- 状态：待实现。本 feature 已于 2026-08-12 完成需求澄清和设计确认。
+- 状态：已于 2026-08-12 实现。实际行为满足本 spec 的已批准要求；`TargetMissing` 重大接口决策已记录于 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。
 
 ## Scope
 

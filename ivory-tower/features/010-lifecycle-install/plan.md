@@ -1,6 +1,6 @@
 # Lifecycle Install Implementation Plan
 
-> **已执行的历史计划（2026-08-11）：** 本计划中的 red 阶段、旧 Install parse-only 状态和 self-heal 替换说明记录实施过程；当前行为以 Feature 010 spec、ADR-002、ADR-003 和 ADR-009 为准，Install 已实现，Uninstall 仍为 parse-only。
+> **已执行的历史计划（2026-08-11）：** 本计划中的 red 阶段、旧 Install parse-only 状态、当时的 Uninstall parse-only 边界和 self-heal 替换说明记录实施过程；当前 Install 以 Feature 010 spec 为准，Uninstall 已由 Feature 011 接线，共享决策以 ADR-002、ADR-003 和 ADR-009 为准。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

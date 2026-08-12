@@ -8,7 +8,7 @@
 
 > **历史 Install 规则已被 Feature 010 supersede（2026-08-11）：** 本文原来允许“已纳管 Install target 缺失时继续安装”的自愈描述不再是当前契约。现在该分支在生成 transaction ID、创建 journal 或调用 Adapter 前，执行 `ManifestWriter.Remove(agent,type,name)`、清理 canonical staging、返回 `ErrStaleManifest` 并中止。本文 Uninstall target 缺失时继续清单删除的语义保持不变。
 
-> **Feature 007 的 lifecycle 边界已被 Feature 008–010 supersede：** Search 只在 Recover 期间持锁，随后释放锁再查询 Cloud；Cloud List 无锁，installed List 使用自己的 Recover/Refresh/Config 锁区间；Install 在一个锁区间内完成 Recover、刷新、Cloud、Cache 与 serial Transaction，并在成功 Release 后由 CLI 渲染结构化结果。Uninstall 仍为未接线的未来 lifecycle；本 feature 的 Transaction 公开接口和 Uninstall 事务语义仍是其接线基础。
+> **Feature 007 的 lifecycle 边界已被 Feature 008–011 supersede：** Search 只在 Recover 期间持锁，随后释放锁再查询 Cloud；Cloud List 无锁，installed List 使用自己的 Recover/Refresh/Config 锁区间；Install 在一个锁区间内完成 Recover、刷新、Cloud、Cache 与 serial Transaction；Uninstall 在自己的单锁区间内完成 Recover、刷新、本地清单解析与 serial Transaction；二者都在成功 Release 后由 CLI 渲染结构化结果。本 feature 的 Transaction 公开接口是历史基础，当前 Uninstall 结果接口以 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 为准。
 
 本设计由 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 记录，并细化 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-007](../../adr/ADR-007-use-stateless-config-repository.md) 和 [ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md)。
 
@@ -48,6 +48,8 @@ Config Repository 的 `List/Find` 由 lifecycle 调用；必须与提交点和 j
 ## 公开接口
 
 transaction 向 lifecycle 暴露高层接口，而不是可被任意排列的 `Begin/Backup/Commit` 原语：
+
+> **已 supersede 的历史签名：** 以下 Feature 007 接口保留当时的 `Uninstall(...) error`；Feature 011 已将当前签名修订为 `Uninstall(...) (UninstallResult, error)`，其 `TargetMissing` 事实契约见 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。
 
 ```go
 type Manager interface {
@@ -145,7 +147,7 @@ const (
 )
 ```
 
-`RecoveryDirection` 只允许 `rollback` 或 `commit`。文件系统 action 的 `Path` 保存实际路径，manifest action 的 `Path` 为空。无活动 journal 时返回 `Recovered=false`、其他字段为零值且 error 为 nil。恢复成功时 `Recovered=true`；恢复失败时 `Recovered=false`，但已读取的 journal 元数据与已经完成的 actions 仍保留在结果中，并同时返回 error。该结果供未来 lifecycle 输出 ADR-003 要求的恢复日志。
+`RecoveryDirection` 只允许 `rollback` 或 `commit`。文件系统 action 的 `Path` 保存实际路径，manifest action 的 `Path` 为空。无活动 journal 时返回 `Recovered=false`、其他字段为零值且 error 为 nil。恢复成功时 `Recovered=true`；恢复失败时 `Recovered=false`，但已读取的 journal 元数据与已经完成的 actions 仍保留在结果中，并同时返回 error。该结果供选择 Recover 的 lifecycle 记录 ADR-003 要求的恢复日志。
 
 ## 集中状态与同盘事务内容
 
@@ -246,7 +248,7 @@ Journal 根目录权限固定为 `0700`，文件权限固定为 `0600`。Create/
 1. 检查 context 和 request，通过 Adapter 获取 target，并确认没有活动 journal。
 2. 生成 transaction ID、本地事务路径和 quarantine 路径，直接写入 `removing` journal。
 3. target 存在时创建本地事务目录，并把 target 原子移动到 quarantine；该 rename 是提交点。
-4. target 在事务开始前已经缺失，或 rename 时发现其已被外部删除，均按漂移自愈视为文件侧已经提交。
+4. target 在事务开始前已经缺失，或 rename 时发现其已被外部删除，均按漂移幂等提交视为文件侧已经提交。
 5. 把 journal 更新为 `committing`，幂等调用 `Remove(Agent, Power.Type, Power.Name)`，删除 quarantine，清理本地事务目录，最后删除 journal。
 6. rename 前的普通失败先持久化 `rolling-back` 并回滚；提交点后的失败保留 journal，不把 quarantine 恢复为 target。
 
@@ -299,7 +301,7 @@ var (
 
 所有 I/O、Adapter 和 Repository 错误保留底层错误，并补充 operation、transaction ID、Agent、Power、阶段和路径上下文。合并错误使用 `errors.Join`，不让清理错误覆盖主错误。
 
-transaction 和 Adapter 不直接打印。内部阶段使用包级 `slog.Debug`，并复用 logging 的 Agent、Power、Version 和 Phase 字段。`RecoveryResult` 为未来 lifecycle 的 stderr 恢复日志提供结构化数据。
+transaction 和 Adapter 不直接打印。内部阶段使用包级 `slog.Debug`，并复用 logging 的 Agent、Power、Version 和 Phase 字段。`RecoveryResult` 为选择 Recover 的 lifecycle 的 stderr 恢复日志提供结构化数据。
 
 ## 路径安全
 
@@ -337,7 +339,7 @@ Adapter 与 transaction 应复用同一组物理路径解析和分隔符感知�
 
 ### Uninstall
 
-- 正常 quarantine、target 已手动删除时自愈、Remove 和清理；
+- 正常 quarantine、target 已手动删除时幂等完成、Remove 和清理；
 - rename 失败、外部删除竞态、Remove/清理/journal 删除失败；
 - 提交点前回滚和提交点后固定完成提交。
 

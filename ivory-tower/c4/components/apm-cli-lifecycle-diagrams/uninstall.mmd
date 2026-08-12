@@ -1,48 +1,49 @@
 flowchart TD
-    UninstallStart([生命周期入口]) --> UninstallRecovery[执行公共 TransactionManager 恢复；失败或中断在公共图内终止]
-    UninstallRecovery -->|成功；锁保持| UninstallCommand[进入当前命令]
+    UninstallStart([Uninstall lifecycle]) --> UninstallAcquire[Acquire 全局锁]
+    UninstallAcquire -->|failure| UninstallFatal([fatal error；无业务汇总])
+    UninstallAcquire -->|success| UninstallRecover[TransactionManager.Recover]
+    UninstallRecover -->|recovered| UninstallRecoverWarn[锁内同步 recovery Warn]
+    UninstallRecover -->|no journal| UninstallRefresh[RefreshInstalled]
+    UninstallRecoverWarn --> UninstallRefresh
+    UninstallRecover -->|failure| UninstallReleaseFatal[Release]
+    UninstallRefresh -->|failure / invalid target / empty all| UninstallReleaseFatal
+    UninstallRefresh -->|success| UninstallNext{next Agent?}
 
-    UninstallCommand --> UninstallDiscovery[执行公共 Agent 刷新流程；失败或中断在公共图内终止]
-    UninstallDiscovery -->|成功；锁保持| UninstallTarget{具体目标在快照中，或 all 快照非空?}
-    UninstallTarget -->|否| UninstallTargetFail[打印目标 Agent 未受支持或未安装，或没有已支持且已安装的 Agent] --> UninstallPreflightFail[记录预执行失败；全部目标 Agent 标记 unexecuted] --> UninstallPrintFailureSummary
-    UninstallTarget -->|是| UninstallNextAgent{按快照顺序还有目标 Agent?}
-    UninstallNextAgent -->|否| UninstallPrintSuccessSummary[打印 completed、failed、unexecuted 汇总] --> UninstallOK([释放锁并正常退出])
-    UninstallNextAgent -->|是| UninstallFind[ConfigRepository.List；由 lifecycle 定位 Power 并处理跨类型歧义]
-    UninstallFind -->|读取失败或类型歧义| UninstallFail[记录当前 Agent failed；其余标记 unexecuted]
-    UninstallFind -->|清单无记录| UninstallSkip[打印未安装、无需处理；记录 completed] --> UninstallNextAgent
-    UninstallFind -->|清单有记录| UninstallAdapter[Resolve 当前 Agent Adapter]
-    UninstallAdapter -->|失败| UninstallFail
-    UninstallAdapter -->|成功| UninstallTransaction[调用 TransactionManager.Uninstall]
+    UninstallNext -->|yes| UninstallList[ConfigRepository.List]
+    UninstallList -->|no record| UninstallNotInstalledWarn[锁内同步 not-installed Warn]
+    UninstallNotInstalledWarn --> UninstallAgentOnlyUnexecuted[Agent-only unexecuted]
+    UninstallAgentOnlyUnexecuted --> UninstallNext
 
-    subgraph UninstallTx[TransactionManager 内部]
-        UninstallTransaction --> UninstallCreateJournal[创建集中 removing journal]
-        UninstallCreateJournal -->|失败| UninstallTxError[返回事务错误]
-        UninstallCreateJournal -->|成功；target 存在| UninstallQuarantine[原子移动 target 到同盘 quarantine：提交点]
-        UninstallCreateJournal -->|成功；target 已缺失| UninstallCommitIntent[按漂移自愈更新 journal 为 committing]
-        UninstallQuarantine -->|target 在 rename 前消失| UninstallCommitIntent
-        UninstallQuarantine -->|其他提交点前失败| UninstallRollbackIntent[更新 journal 为 rolling-back]
-        UninstallRollbackIntent --> UninstallRollback[恢复安全的事务前状态]
-        UninstallRollback -->|成功| UninstallDeleteRolledBack[删除 journal；返回原始错误] --> UninstallTxError
-        UninstallRollback -->|失败| UninstallKeepRollback[保留 journal；返回回滚错误] --> UninstallTxError
-        UninstallQuarantine -->|rename 成功| UninstallCommitIntent
-        UninstallCommitIntent -->|失败| UninstallKeepCommit[保留 journal；返回提交后错误] --> UninstallTxError
-        UninstallCommitIntent -->|成功| UninstallManifest[ConfigRepository.Remove 清单记录]
-        UninstallManifest -->|失败| UninstallKeepCommit
-        UninstallManifest -->|成功| UninstallCleanup[删除 quarantine 并清理同盘事务目录]
-        UninstallCleanup -->|失败| UninstallKeepCommit
-        UninstallCleanup -->|成功| UninstallDeleteJournal[最后删除集中 journal]
-        UninstallDeleteJournal -->|失败| UninstallKeepCommit
-        UninstallDeleteJournal -->|成功| UninstallTxSuccess[返回成功]
+    UninstallList -->|read failure / ambiguity| UninstallAgentOnlyFailed[Agent-only failed]
+    UninstallAgentOnlyFailed --> UninstallFillLater[后续 Agent-only unexecuted]
+    UninstallList -->|unique local PowerRef| UninstallResolve[AdapterRegistry.Resolve]
+    UninstallResolve -->|failure| UninstallFullFailed[full-ref failed]
+    UninstallResolve -->|success| UninstallTransaction[TransactionManager.Uninstall]
+
+    subgraph UninstallTx[TransactionManager；ADR-009]
+        UninstallTransaction --> UninstallTargetPath[Adapter.TargetPath]
+        UninstallTargetPath --> UninstallJournal[验证路径并驱动 removing / rolling-back / committing journal]
+        UninstallJournal --> UninstallTxReturn[返回 Transaction UninstallResult.TargetMissing + error]
     end
 
-    UninstallTxSuccess --> UninstallRemoved[打印卸载成功；记录 completed] --> UninstallNextAgent
-    UninstallTxError --> UninstallFail
-    UninstallFail --> UninstallPrintFailureSummary[打印 completed、failed、unexecuted 汇总] --> UninstallBatchError([停止剩余 Agent；释放锁；非零退出])
+    UninstallTxReturn -->|TargetMissing=true| UninstallMissingWarn[锁内同步 full-ref target-missing Warn]
+    UninstallMissingWarn --> UninstallTxError{error?}
+    UninstallTxReturn -->|TargetMissing=false| UninstallTxError
+    UninstallTxError -->|no| UninstallCompleted[full-ref completed]
+    UninstallTxError -->|yes| UninstallFullFailed
+    UninstallCompleted --> UninstallNext
+    UninstallFullFailed --> UninstallFillLater
+    UninstallFillLater --> UninstallReleaseBatch[Release]
 
-    UninstallCreateJournal -.进程中断；保留集中 journal.-> UninstallInterrupted
-    UninstallQuarantine -.进程中断；恢复器结合 removing 与路径状态判定方向.-> UninstallInterrupted
-    UninstallRollback -.进程中断；rolling-back 固定回滚方向.-> UninstallInterrupted
-    UninstallManifest -.进程中断；committing 固定提交方向.-> UninstallInterrupted
-    UninstallCleanup -.进程中断；保留集中 journal.-> UninstallInterrupted
+    UninstallNext -->|no| UninstallReleaseSuccess[Release]
+    UninstallReleaseFatal -->|success| UninstallFatal
+    UninstallReleaseFatal -->|failure| UninstallSuppress[返回 zero result；抑制 summary]
+    UninstallReleaseBatch -->|success| UninstallRenderBatch[CLI render completed / failed / unexecuted]
+    UninstallRenderBatch --> UninstallBatchError([return UninstallBatchError])
+    UninstallReleaseBatch -->|failure| UninstallSuppress
+    UninstallReleaseSuccess -->|success| UninstallRender[CLI render completed / unexecuted]
+    UninstallReleaseSuccess -->|failure| UninstallSuppress
+    UninstallRender --> UninstallOK([success])
+    UninstallSuppress --> UninstallReleaseError([Release error])
 
     style UninstallTx fill:#fff4e5,stroke:#d97706,stroke-width:2px
