@@ -160,7 +160,7 @@ Run: `go test ./internal/domain ./internal/cloud -count=1`
 
 Expected: PASS, including all existing Skill Cloud tests.
 
-- [ ] **Step 8: Commit the domain and Cloud slice**
+- [x] **Step 8: Commit the domain and Cloud slice**
 
 ```bash
 git add internal/domain internal/cloud
@@ -180,7 +180,7 @@ git commit -m "feat(mcp): add versioned Cloud definitions"
 - Produces: `adapter.MCPAdapter`, `MCPPresence`, `MCPMutationState`, and `MCPMutationResult` exactly as specified.
 - Produces private testable boundary: `mcpCommandRunner.Run(context.Context, string, []string, string) (mcpCommandResult, error)`.
 
-- [ ] **Step 1: Write compile-time and runner failure tests**
+- [x] **Step 1: Write compile-time and runner failure tests**
 
 Define a fake runner and assert the public enum values exactly match the journal vocabulary. Add integration-style runner tests that create a temporary executable and verify argv/stdin capture:
 
@@ -204,13 +204,13 @@ printf 'ok'
 
 Add tests for missing executable before start, context cancellation, injected short timeout, stdout/stderr truncation at the declared bound, and no shell expansion of `$HOME`, backticks, or semicolons.
 
-- [ ] **Step 2: Run Adapter runner tests and verify they fail**
+- [x] **Step 2: Run Adapter runner tests and verify they fail**
 
 Run: `go test ./internal/adapter -run 'MCPRunner|MCPAdapterContract' -count=1`
 
 Expected: FAIL because the MCP contract and runner do not exist.
 
-- [ ] **Step 3: Implement the MCP contract and runner**
+- [x] **Step 3: Implement the MCP contract and runner**
 
 Implement these exact result carriers:
 
@@ -227,7 +227,7 @@ type mcpCommandResult struct {
 
 The default runner must resolve with `exec.LookPath`, create `context.WithTimeout(ctx, 30*time.Second)`, call `exec.CommandContext` directly, use a fixed-size writer for each output stream, and close stdin unless a non-empty scripted input is supplied. It returns enough fact for adapters to distinguish pre-start `not-applied` from post-start `unknown`.
 
-- [ ] **Step 4: Add stable MCP adapter errors**
+- [x] **Step 4: Add stable MCP adapter errors**
 
 Add and document:
 
@@ -241,7 +241,7 @@ ErrAgentCLIUnavailable = errors.New("agent CLI is unavailable")
 
 Every wrapped error must include Agent, operation, Power name, executable, and bounded stderr context where available.
 
-- [ ] **Step 5: Run focused Adapter tests**
+- [x] **Step 5: Run focused Adapter tests**
 
 Run: `go test ./internal/adapter -run 'MCPRunner|MCPAdapterContract' -count=1`
 

@@ -11,4 +11,14 @@ var (
 	ErrTargetConflict = errors.New("target path already exists")
 	// ErrInvalidSkill 表示 Skill 引用、staging 或元数据不符合安装约束。
 	ErrInvalidSkill = errors.New("invalid skill")
+	// ErrInvalidMCP 表示 MCP 引用或启动定义不符合约束。
+	ErrInvalidMCP = errors.New("invalid MCP server")
+	// ErrMCPStateUnknown 表示 Agent CLI 无法明确判断 MCP 是否存在。
+	ErrMCPStateUnknown = errors.New("MCP state is unknown")
+	// ErrMCPConflict 表示未被 APM 纳管的同名 MCP 已存在。
+	ErrMCPConflict = errors.New("MCP server already exists")
+	// ErrMCPMutationUnknown 表示 Agent CLI 变更可能已经发生但结果无法确认。
+	ErrMCPMutationUnknown = errors.New("MCP mutation result is unknown")
+	// ErrAgentCLIUnavailable 表示目标 Agent CLI 无法解析或启动。
+	ErrAgentCLIUnavailable = errors.New("agent CLI is unavailable")
 )
