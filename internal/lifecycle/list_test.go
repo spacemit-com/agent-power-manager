@@ -69,8 +69,8 @@ func (m *listFakeTransactions) Recover(context.Context) (transaction.RecoveryRes
 
 func (*listFakeTransactions) Install(context.Context, transaction.InstallRequest) error { return nil }
 
-func (*listFakeTransactions) Uninstall(context.Context, transaction.UninstallRequest) error {
-	return nil
+func (*listFakeTransactions) Uninstall(context.Context, transaction.UninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, nil
 }
 
 type listFakeCloud struct {

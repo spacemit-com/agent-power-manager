@@ -90,8 +90,8 @@ func (m *installFakeTransactions) Install(_ context.Context, request transaction
 	return m.fixture.transactionInstallErr[request.Agent]
 }
 
-func (*installFakeTransactions) Uninstall(context.Context, transaction.UninstallRequest) error {
-	return nil
+func (*installFakeTransactions) Uninstall(context.Context, transaction.UninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, nil
 }
 
 type installFakeCloud struct {

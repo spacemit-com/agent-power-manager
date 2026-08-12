@@ -14,7 +14,7 @@ import (
 type Manager interface {
 	Recover(context.Context) (RecoveryResult, error)
 	Install(context.Context, InstallRequest) error
-	Uninstall(context.Context, UninstallRequest) error
+	Uninstall(context.Context, UninstallRequest) (UninstallResult, error)
 }
 
 // InstallRequest 描述单个 Agent 的已解析安装事务输入。
@@ -31,6 +31,11 @@ type UninstallRequest struct {
 	Agent   domain.AgentID
 	Power   domain.PowerRef
 	Adapter adapter.Adapter
+}
+
+// UninstallResult 描述卸载事务已确认的目标状态；该事实可与后续错误同时返回。
+type UninstallResult struct {
+	TargetMissing bool
 }
 
 // ManifestWriter 定义提交后的清单写入，以及安装预检发现陈旧清单时不创建 journal 的单条移除操作。

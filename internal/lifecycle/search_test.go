@@ -54,8 +54,8 @@ func (m *stubTransactionManager) Recover(context.Context) (transaction.RecoveryR
 
 func (*stubTransactionManager) Install(context.Context, transaction.InstallRequest) error { return nil }
 
-func (*stubTransactionManager) Uninstall(context.Context, transaction.UninstallRequest) error {
-	return nil
+func (*stubTransactionManager) Uninstall(context.Context, transaction.UninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, nil
 }
 
 type stubCloudClient struct {
