@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"apm/internal/cli"
 	"apm/internal/config"
 	"apm/internal/domain"
+	"apm/internal/logging"
 )
 
 func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
@@ -178,6 +182,147 @@ func TestNewInstallLifecycleRejectsAllWhenNoAgentsAreInstalled(t *testing.T) {
 	assertPathAbsent(t, filepath.Join(home, ".apm", "staging"))
 	assertPathAbsent(t, filepath.Join(home, ".apm", ".tmp", "staging"))
 	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions"))
+}
+
+func TestNewUninstallLifecycleRemovesBundledSkillAndThenReportsNotInstalled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	changeToRepositoryRoot(t)
+
+	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatalf("create Codex root: %v", err)
+	}
+	flags := cli.Flags{Agent: "codex", Name: "foo-before-summary"}
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.0.1"}
+	installer, err := newInstallLifecycle()
+	if err != nil {
+		t.Fatalf("newInstallLifecycle() error = %v", err)
+	}
+	if _, err := installer.Install(context.Background(), flags); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	uninstaller, err := newUninstallLifecycle()
+	if err != nil {
+		t.Fatalf("newUninstallLifecycle() error = %v", err)
+	}
+	result, err := uninstaller.Uninstall(context.Background(), flags)
+	if err != nil {
+		t.Fatalf("first Uninstall() error = %v", err)
+	}
+	assertSingleUninstallItem(t, result, domain.AgentCodex, &ref, cli.UninstallOutcomeCompleted)
+	assertPathAbsent(t, filepath.Join(home, ".codex", "skills", ref.Name))
+	assertManifestEntryAbsent(t, domain.AgentCodex, ref)
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
+
+	var stdout, stderr bytes.Buffer
+	installCommandTestLogger(t, &stdout, &stderr)
+	result, err = uninstaller.Uninstall(context.Background(), flags)
+	if err != nil {
+		t.Fatalf("second Uninstall() error = %v", err)
+	}
+	assertSingleUninstallItem(t, result, domain.AgentCodex, nil, cli.UninstallOutcomeUnexecuted)
+	if strings.Count(stderr.String(), "level=WARN") != 1 {
+		t.Fatalf("second Uninstall() stderr = %q, want exactly one Warn", stderr.String())
+	}
+	for _, want := range []string{
+		`msg="power is not installed"`, "operation=uninstall", "agent=codex", "power=foo-before-summary",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("second Uninstall() stderr = %q, want field %q", stderr.String(), want)
+		}
+	}
+	if strings.Contains(stderr.String(), "level=ERROR") {
+		t.Fatalf("second Uninstall() stderr = %q, want no Error", stderr.String())
+	}
+}
+
+func TestNewUninstallLifecycleRemovesManifestWhenInstalledTargetIsMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	changeToRepositoryRoot(t)
+
+	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatalf("create Codex root: %v", err)
+	}
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "missing-target", Version: "v1.2.3"}
+	if err := config.NewJSONRepository().Set(domain.AgentCodex, ref); err != nil {
+		t.Fatalf("seed manifest: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	installCommandTestLogger(t, &stdout, &stderr)
+	uninstaller, err := newUninstallLifecycle()
+	if err != nil {
+		t.Fatalf("newUninstallLifecycle() error = %v", err)
+	}
+	result, err := uninstaller.Uninstall(context.Background(), cli.Flags{
+		Agent: "codex",
+		Type:  "skill",
+		Name:  ref.Name,
+	})
+	if err != nil {
+		t.Fatalf("Uninstall() error = %v", err)
+	}
+	assertSingleUninstallItem(t, result, domain.AgentCodex, &ref, cli.UninstallOutcomeCompleted)
+	if strings.Count(stderr.String(), "level=WARN") != 1 {
+		t.Fatalf("Uninstall() stderr = %q, want exactly one Warn", stderr.String())
+	}
+	for _, want := range []string{
+		`msg="installed power target is missing"`, "operation=uninstall", "agent=codex",
+		"power=missing-target", "type=skill", "version=v1.2.3",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("Uninstall() stderr = %q, want field %q", stderr.String(), want)
+		}
+	}
+	assertManifestEntryAbsent(t, domain.AgentCodex, ref)
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
+}
+
+func assertSingleUninstallItem(t *testing.T, result cli.UninstallResult, agent domain.AgentID, power *domain.PowerRef, outcome cli.UninstallOutcome) {
+	t.Helper()
+	if len(result.Items) != 1 {
+		t.Fatalf("Uninstall() result = %#v, want one item", result)
+	}
+	item := result.Items[0]
+	if item.Agent != agent || item.Outcome != outcome {
+		t.Fatalf("Uninstall() item = %#v, want agent %q and outcome %q", item, agent, outcome)
+	}
+	if power == nil {
+		if item.Power != nil {
+			t.Fatalf("Uninstall() item power = %#v, want nil", item.Power)
+		}
+		return
+	}
+	if item.Power == nil || *item.Power != *power {
+		t.Fatalf("Uninstall() item power = %#v, want %#v", item.Power, power)
+	}
+}
+
+func assertManifestEntryAbsent(t *testing.T, agent domain.AgentID, ref domain.PowerRef) {
+	t.Helper()
+	manifested, found, err := config.NewJSONRepository().Find(agent, ref.Type, ref.Name)
+	if err != nil {
+		t.Fatalf("find manifest entry: %v", err)
+	}
+	if found {
+		t.Fatalf("manifest entry = %#v, want absent", manifested)
+	}
+}
+
+func installCommandTestLogger(t *testing.T, stdout, stderr *bytes.Buffer) {
+	t.Helper()
+	originalLogger := slog.Default()
+	slog.SetDefault(logging.NewLogger(stdout, stderr, false))
+	t.Cleanup(func() { slog.SetDefault(originalLogger) })
 }
 
 func assertPathAbsent(t *testing.T, path string) {

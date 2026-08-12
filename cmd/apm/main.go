@@ -18,7 +18,15 @@ import (
 )
 
 func main() {
-	entry := cli.New(os.Stdout, os.Stderr, logging.SetupLogging, newSearchLifecycle, newListLifecycle, newInstallLifecycle)
+	entry := cli.New(
+		os.Stdout,
+		os.Stderr,
+		logging.SetupLogging,
+		newSearchLifecycle,
+		newListLifecycle,
+		newInstallLifecycle,
+		newUninstallLifecycle,
+	)
 	if err := entry.Execute(os.Args[1:]); err != nil {
 		os.Exit(1)
 	}
@@ -87,6 +95,20 @@ func newInstallLifecycle() (cli.InstallLifecycle, error) {
 		repository,
 		version.NewSelector(),
 	)
+}
+
+// newUninstallLifecycle 创建 Uninstall 命令所需的默认依赖，并共享清单读写 Repository。
+func newUninstallLifecycle() (cli.UninstallLifecycle, error) {
+	locker, err := lock.NewDefault()
+	if err != nil {
+		return nil, fmt.Errorf("create default lock: %w", err)
+	}
+	repository := config.NewJSONRepository()
+	transactions, err := transaction.NewManager(repository)
+	if err != nil {
+		return nil, fmt.Errorf("create transaction manager: %w", err)
+	}
+	return lifecycle.NewUninstall(locker, transactions, adapter.NewRegistry(), repository)
 }
 
 func newLocalCloudClient() (cloud.Client, error) {
