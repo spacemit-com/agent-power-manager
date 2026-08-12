@@ -16,7 +16,7 @@
 
 ### Lifecycle（Feature 007 历史边界）
 
-以下列表记录 Feature 007 当时对后续 lifecycle 的预期，已由 Feature 008–010 的命令专属边界 supersede，不能理解为所有当前命令都采用同一锁或直接输出模型：
+以下列表记录 Feature 007 当时对后续 lifecycle 的预期，已由 Feature 008–011 的命令专属边界 supersede，不能理解为所有当前命令都采用同一锁或直接输出模型：
 
 - 获取并持有全局 APM 锁；
 - 在每个命令入口调用 transaction 恢复；

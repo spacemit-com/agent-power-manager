@@ -6,6 +6,8 @@ APM 为 Codex、Claude Code 和 Hermes Agent 提供首批可用 Adapter。Adapte
 
 本 feature 只实现全局 Skill Adapter，不把 Adapter 串联到 lifecycle 或 CLI。lifecycle 在调用 Adapter 前已经完成版本选择、清单查询和安装许可判断；升级或降级时，transaction 必须先把已纳管旧目标移到 backup，使 Adapter 接收到的最终目标路径为空。详见 [ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md)。
 
+> **Feature 006 的卸载边界是历史记录：** 本 feature 删除了无真实行为的 Adapter `Uninstall` 占位，当时未定义后续卸载编排。Feature 011 现已确定当前契约：Adapter 仍不增加 `Uninstall` 方法，Transaction 通过既有 `TargetPath` 执行 quarantine 与卸载，并返回 ADR-009 定义的结构化 target 事实。
+
 ## 支持矩阵
 
 | Agent ID | 根目录覆盖变量 | 默认根目录 | 全局 Skill 根目录 |
@@ -48,7 +50,7 @@ Feature 007 根据 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions
 - `TargetPath` 校验 Power 类型和名称，返回 `<agent-root>/skills/<ref.Name>`；它不要求路径存在，也不读写文件。lifecycle/transaction 使用它记录、备份和恢复 Agent 特有目标，不能自行重复路径规则。
 - `Install` 校验版本已确定的 Skill，在目标为空的前提下完成冲突检查、适配、复制、发布和清理。它不读取 Config Repository，不判断首次安装、相同版本、升级或降级。
 
-删除占位 `domain.Power` 参数和当前没有真实行为的 `Uninstall`。卸载将在其 lifecycle 与事务契约明确后另行扩展，不为未来行为保留胖接口。
+本 feature 当时删除占位 `domain.Power` 参数和没有真实行为的 `Uninstall`，不为尚未确定的行为保留胖接口。Feature 011 后续选择在 lifecycle 和 Transaction 中实现卸载：Adapter 保持上述三方法接口，Transaction 使用 `TargetPath` 完成目标操作，详见 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。
 
 ## 共享管线与 Agent 配置
 

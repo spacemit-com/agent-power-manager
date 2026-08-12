@@ -1,5 +1,5 @@
 classDiagram
-    note for Locker "全局 APM 锁（ADR-003）：Search 在 Cloud 前释放；Cloud List 不获取；installed List 覆盖 Recover→Warn→Refresh→Config reads；Install 一次锁覆盖 Recover→Refresh→Cloud→Cache→Transaction，并在 CLI 渲染前成功 Release"
+    note for Locker "全局 APM 锁（ADR-003）：Search 覆盖 Recover→Warn，Release 后才访问 Cloud；Cloud List 不获取；installed List 一次锁覆盖 Recover→Warn→Refresh→全部 Config reads；Install 一次锁覆盖 Recover→Warn→Refresh→Cloud→Cache→串行 Transaction；Uninstall 一次锁覆盖 Recover→Warn→Refresh→逐 Agent Config/Resolve/串行 Transaction；installed List、Install 和 Uninstall 只在成功 Release 后计算或渲染业务结果"
     class Locker {
         <<interface>>
         +Acquire() (Unlock, error)

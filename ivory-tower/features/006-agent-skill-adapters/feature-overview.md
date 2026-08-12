@@ -11,6 +11,8 @@
 - 包含：三个正式 Agent ID；Agent 根目录解析与检测；Skill Adapter Registry；目标路径解析；YAML frontmatter 校验；清单外目标冲突防护；公共 staging 原地适配 hook；复制安装、同目录临时目录和原子 rename；目标临时目录与 staging 清理；Agent 快照；错误分类、debug 日志和单元测试。
 - 不包含：lifecycle/CLI 串联；Config Repository 读写；版本选择和清单判断；事务 journal、旧版本备份或恢复；卸载；Plugin/MCP Adapter；项目级安装；symlink 安装；真实 Agent 的安装或创建。
 
+> **Feature 006 的卸载边界是历史记录：** 本 feature 当时不实现卸载编排。Feature 011 现已确定当前边界：Adapter 仍没有 `Uninstall` 方法，Transaction 通过 Adapter `TargetPath` 完成 quarantine 与卸载，详见 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。
+
 ## Implementation Context
 
 - 关联模块或服务：`internal/adapter`、`internal/domain`、`internal/paths`、`internal/utils/filesystem`，以及只依赖 Adapter Registry 的 lifecycle 接口边界。
@@ -20,4 +22,4 @@
 ## Acceptance
 
 - 验收条件：三个 Agent 按环境变量和有效 HOME 解析全局目录；Registry 只支持 Skill 并稳定生成已安装 Agent 快照；Adapter 在适配前拒绝任意同名目标，校验 YAML frontmatter，完整复制到目标旁临时目录并原子发布；成功和所有失败路径均清理 staging，且不会暴露半成品目标；全量测试、vet、构建和静态检查通过。
-- 已知风险或待决问题：外部进程仍可能在发布前的二次检查与 rename 之间竞争；发布成功后的 staging 清理失败会返回错误但保留目标，必须由后续 lifecycle/transaction 根据 journal 处理；Plugin/MCP、卸载和多 Agent 串联另行设计。
+- 已知风险或待决问题：外部进程仍可能在发布前的二次检查与 rename 之间竞争；发布成功后的 staging 清理失败会返回错误但保留目标，必须由后续 lifecycle/transaction 根据 journal 处理；Plugin/MCP Adapter 仍待设计。卸载和多 Agent 串行 lifecycle 已由 Feature 011 实现，不改变本 feature 当时的历史 scope。

@@ -31,7 +31,7 @@ apm list --installed --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 
 ### 不包含
 
-- install/uninstall lifecycle 接线或业务实现（Install/Uninstall 未接线是本 feature 的历史边界；Feature 010 已实现 Install）；
+- install/uninstall lifecycle 接线或业务实现（Install/Uninstall 未接线是本 feature 的历史边界；Feature 010/011 已分别实现 Install/Uninstall）；
 - Adapter 卸载能力、Power 安装或 transaction 写流程调整；
 - 通用命令 runner、跨命令回调流水线或共享持锁模板；
 - Cloud 非法类别、名称或版本的校验、跳过、降级排序或错误映射；
