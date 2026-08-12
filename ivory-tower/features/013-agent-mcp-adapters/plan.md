@@ -71,7 +71,7 @@ Existing files are modified only where their declared boundary expands: `interna
 - Produces: `cloud.Client.GetMCP(domain.PowerRef) (domain.MCPServer, error)` and `(*LocalClient).GetMCP`.
 - Preserves: `cloud.Client.Get(domain.PowerRef) error` as the Skill-only cache writer.
 
-- [ ] **Step 1: Write failing MCP domain tests**
+- [x] **Step 1: Write failing MCP domain tests**
 
 Add a table that proves the exact union and clone behavior:
 
@@ -107,13 +107,13 @@ func TestMCPServerValidate(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the domain test and verify it fails**
+- [x] **Step 2: Run the domain test and verify it fails**
 
 Run: `go test ./internal/domain -run MCPServer -count=1`
 
 Expected: FAIL because `MCPServer` and transports do not exist.
 
-- [ ] **Step 3: Implement the strict MCP domain type**
+- [x] **Step 3: Implement the strict MCP domain type**
 
 Create `mcp.go` with the approved fields, `ErrInvalidMCPServer`, URL parsing via `net/url`, exact transport checks, and a deep-copying `Clone`:
 
@@ -126,7 +126,7 @@ func (server MCPServer) Clone() MCPServer {
 
 Do not trim or rewrite stored Command/Args/URL values after validation.
 
-- [ ] **Step 4: Write failing Cloud MCP tests**
+- [x] **Step 4: Write failing Cloud MCP tests**
 
 Cover these concrete cases in `local_mcp_test.go`:
 
@@ -144,17 +144,17 @@ func TestLocalClientGetMCPReadsExactVersion(t *testing.T) {
 
 Also assert: List returns both Skill and MCP refs in Type/Name/Version order; missing/wrong-type/symlink marker returns `cloud.ErrNotFound`; unknown field, second JSON value, invalid union, and wrong JSON types fail; `GetMCP` leaves configured cache and staging paths absent.
 
-- [ ] **Step 5: Run Cloud tests and verify they fail**
+- [x] **Step 5: Run Cloud tests and verify they fail**
 
 Run: `go test ./internal/cloud -run 'MCP|List' -count=1`
 
 Expected: FAIL because `GetMCP` is missing and List scans only Skills.
 
-- [ ] **Step 6: Implement Cloud MCP discovery and retrieval**
+- [x] **Step 6: Implement Cloud MCP discovery and retrieval**
 
 Add `GetMCP` to `cloud.Client`. Refactor `LocalClient.List` into two focused scanners that recognize only regular `SKILL.md` and `MCP.json` markers, concatenate refs, then apply the existing stable sort. In `local_mcp.go`, use `json.Decoder.DisallowUnknownFields`, require EOF after one value, call `MCPServer.Validate`, and return a cloned value.
 
-- [ ] **Step 7: Run focused and package tests**
+- [x] **Step 7: Run focused and package tests**
 
 Run: `go test ./internal/domain ./internal/cloud -count=1`
 

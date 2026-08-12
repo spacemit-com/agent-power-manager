@@ -7,4 +7,5 @@ import "apm/internal/domain"
 type Client interface {
 	List() ([]domain.PowerRef, error)
 	Get(domain.PowerRef) error
+	GetMCP(domain.PowerRef) (domain.MCPServer, error)
 }

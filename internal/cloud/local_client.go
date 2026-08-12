@@ -40,47 +40,20 @@ func NewLocalClient(resourcesRoot string) (*LocalClient, error) {
 	}, nil
 }
 
-// List 按稳定的类型、名称、版本顺序返回所有有效的本地 Skill 资源。
+// List 按稳定的类型、名称、版本顺序返回所有有效的本地 Power 资源。
 func (c *LocalClient) List() ([]domain.PowerRef, error) {
 	if _, err := os.ReadDir(c.resourcesRoot); err != nil {
 		return nil, fmt.Errorf("read resource root %q: %w", c.resourcesRoot, err)
 	}
-	skillsRoot := filepath.Join(c.resourcesRoot, "skills")
-	skills, err := os.ReadDir(skillsRoot)
-	if errors.Is(err, fs.ErrNotExist) {
-		return []domain.PowerRef{}, nil
-	}
+	refs, err := c.listResources("skills", "SKILL.md", domain.PowerTypeSkill)
 	if err != nil {
-		return nil, fmt.Errorf("read skills directory %q: %w", skillsRoot, err)
+		return nil, err
 	}
-
-	var refs []domain.PowerRef
-	for _, skill := range skills {
-		if !skill.IsDir() {
-			continue
-		}
-		versions, err := os.ReadDir(filepath.Join(skillsRoot, skill.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("read skill directory %q: %w", skill.Name(), err)
-		}
-		for _, version := range versions {
-			if !version.IsDir() {
-				continue
-			}
-			markerPath := filepath.Join(skillsRoot, skill.Name(), version.Name(), "SKILL.md")
-			marker, err := os.Lstat(markerPath)
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return nil, fmt.Errorf("stat skill marker %q: %w", markerPath, err)
-			}
-			if !marker.Mode().IsRegular() {
-				continue
-			}
-			refs = append(refs, domain.PowerRef{Name: skill.Name(), Type: domain.PowerTypeSkill, Version: version.Name()})
-		}
+	mcpRefs, err := c.listResources("mcps", "MCP.json", domain.PowerTypeMCP)
+	if err != nil {
+		return nil, err
 	}
+	refs = append(refs, mcpRefs...)
 	sort.Slice(refs, func(i, j int) bool {
 		if refs[i].Type != refs[j].Type {
 			return refs[i].Type < refs[j].Type
@@ -90,6 +63,45 @@ func (c *LocalClient) List() ([]domain.PowerRef, error) {
 		}
 		return refs[i].Version < refs[j].Version
 	})
+	return refs, nil
+}
+
+func (c *LocalClient) listResources(directory, markerName string, powerType domain.PowerType) ([]domain.PowerRef, error) {
+	root := filepath.Join(c.resourcesRoot, directory)
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return []domain.PowerRef{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s directory %q: %w", directory, root, err)
+	}
+	refs := make([]domain.PowerRef, 0)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		versions, err := os.ReadDir(filepath.Join(root, entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read %s resource directory %q: %w", powerType, entry.Name(), err)
+		}
+		for _, version := range versions {
+			if !version.IsDir() {
+				continue
+			}
+			markerPath := filepath.Join(root, entry.Name(), version.Name(), markerName)
+			marker, err := os.Lstat(markerPath)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("stat %s marker %q: %w", powerType, markerPath, err)
+			}
+			if !marker.Mode().IsRegular() {
+				continue
+			}
+			refs = append(refs, domain.PowerRef{Name: entry.Name(), Type: powerType, Version: version.Name()})
+		}
+	}
 	return refs, nil
 }
 
