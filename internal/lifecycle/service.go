@@ -1,9 +1,7 @@
-// Package lifecycle 提供命令专属的 Power 生命周期服务。
 package lifecycle
 
 import (
 	"errors"
-	"reflect"
 
 	"apm/internal/cli"
 )
@@ -26,19 +24,6 @@ func NewSearch(locker Locker, transactions TransactionManager, cloud CloudClient
 		return nil, errors.New("create Search lifecycle with nil Cloud client")
 	}
 	return &SearchService{locker: locker, transactions: transactions, cloud: cloud}, nil
-}
-
-func isNilInterface(value any) bool {
-	if value == nil {
-		return true
-	}
-	reflected := reflect.ValueOf(value)
-	switch reflected.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return reflected.IsNil()
-	default:
-		return false
-	}
 }
 
 var _ cli.SearchLifecycle = (*SearchService)(nil)
