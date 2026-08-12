@@ -42,6 +42,38 @@ func validateUninstallRequest(request UninstallRequest) error {
 	return nil
 }
 
+func validateMCPInstallRequest(request MCPInstallRequest) error {
+	if err := validateAgentAndPower(request.Agent, request.Power); err != nil || request.Power.Type != domain.PowerTypeMCP {
+		return fmt.Errorf("validate MCP install identity: %v: %w", err, ErrInvalidRequest)
+	}
+	if isNilInterface(request.Adapter) {
+		return fmt.Errorf("validate MCP install request: nil adapter: %w", ErrInvalidRequest)
+	}
+	if request.Server != nil {
+		if err := request.Server.Validate(); err != nil {
+			return fmt.Errorf("validate MCP install server: %v: %w", err, ErrInvalidRequest)
+		}
+	}
+	if request.Previous == nil {
+		if request.PreviousServer != nil {
+			return fmt.Errorf("MCP previous server without previous reference: %w", ErrInvalidRequest)
+		}
+		return nil
+	}
+	if err := validatePower(*request.Previous, ErrInvalidRequest); err != nil ||
+		request.Previous.Type != domain.PowerTypeMCP ||
+		request.Previous.Name != request.Power.Name ||
+		request.Previous.Version == request.Power.Version {
+		return fmt.Errorf("invalid previous MCP reference: %w", ErrInvalidRequest)
+	}
+	if request.PreviousServer != nil {
+		if err := request.PreviousServer.Validate(); err != nil {
+			return fmt.Errorf("validate previous MCP server: %v: %w", err, ErrInvalidRequest)
+		}
+	}
+	return nil
+}
+
 func isNilInterface(value any) bool {
 	if value == nil {
 		return true

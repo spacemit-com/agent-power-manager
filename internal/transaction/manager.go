@@ -14,6 +14,7 @@ import (
 type Manager interface {
 	Recover(context.Context) (RecoveryResult, error)
 	Install(context.Context, InstallRequest) error
+	InstallMCP(context.Context, MCPInstallRequest) error
 	Uninstall(context.Context, UninstallRequest) (UninstallResult, error)
 }
 
@@ -24,6 +25,16 @@ type InstallRequest struct {
 	Previous    *domain.PowerRef
 	StagingRoot string
 	Adapter     adapter.Adapter
+}
+
+// MCPInstallRequest 描述单个 Agent 的 MCP 安装或版本切换输入；定义允许为空以支持无副作用的冲突和漂移复查。
+type MCPInstallRequest struct {
+	Agent          domain.AgentID
+	Power          domain.PowerRef
+	Previous       *domain.PowerRef
+	Server         *domain.MCPServer
+	PreviousServer *domain.MCPServer
+	Adapter        adapter.MCPAdapter
 }
 
 // UninstallRequest 描述单个 Agent 的已解析卸载事务输入。

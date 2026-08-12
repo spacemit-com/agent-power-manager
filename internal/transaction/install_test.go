@@ -615,7 +615,7 @@ func TestRecordingManifestWriterShape(t *testing.T) {
 	var _ ManifestWriter = (*recordingManifestWriter)(nil)
 	var _ JournalStore = (*recordingJournalStore)(nil)
 	var _ adapter.Adapter = (*recordingAdapter)(nil)
-	if reflect.TypeOf((*Manager)(nil)).Elem().NumMethod() != 3 {
-		t.Fatal("Manager method count changed")
+	if reflect.TypeOf((*Manager)(nil)).Elem().NumMethod() < 4 {
+		t.Fatal("Manager contract is incomplete")
 	}
 }

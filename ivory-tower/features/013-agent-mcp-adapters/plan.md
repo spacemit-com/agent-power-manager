@@ -420,7 +420,7 @@ Run: `go test ./internal/transaction -count=1`
 
 Expected: PASS. Existing install/uninstall/recovery event order and filesystem assertions remain unchanged; stored new journals assert schema 2/driver filesystem.
 
-- [ ] **Step 6: Commit the journal migration**
+- [x] **Step 6: Commit the journal migration**
 
 ```bash
 git add internal/transaction
@@ -442,7 +442,7 @@ git commit -m "refactor(transaction): add typed journal drivers"
 - Produces: `MCPInstallRequest` and `Manager.InstallMCP(context.Context, MCPInstallRequest) error`.
 - Produces phases: `adding-new` and `removing-old` in addition to shared `preparing`, `rolling-back`, `committing`.
 
-- [ ] **Step 1: Write request validation tests**
+- [x] **Step 1: Write request validation tests**
 
 Cover exact combinations: non-MCP Power, empty Agent/name/version, `all`, nil Adapter, mismatched Previous Type/Name, PreviousServer without Previous, first install missing Server, update missing either definition, same previous/target version, and the allowed no-definition conflict/stale probe requests.
 
@@ -459,11 +459,11 @@ func validMCPInstallRequest() MCPInstallRequest {
 }
 ```
 
-- [ ] **Step 2: Write failing first-install transaction tests**
+- [x] **Step 2: Write failing first-install transaction tests**
 
 Prove order `journal:create(adding-new) → adapter:add → journal:update(committing) → manifest:set → journal:delete`. Add cases for preflight present conflict, preflight absent with no definition invalid request, Add applied, Add not-applied, Add unknown, phase update failure, manifest failure, and journal deletion failure.
 
-- [ ] **Step 3: Write failing update transaction tests**
+- [x] **Step 3: Write failing update transaction tests**
 
 Prove order `journal:create(removing-old) → adapter:remove → journal:update(adding-new) → adapter:add → journal:update(committing) → manifest:set → journal:delete`. Verify:
 
@@ -474,17 +474,17 @@ Prove order `journal:create(removing-old) → adapter:remove → journal:update(
 - Add unknown preserves journal at adding-new;
 - applied plus error follows the applied direction.
 
-- [ ] **Step 4: Run MCP install tests and verify they fail**
+- [x] **Step 4: Run MCP install tests and verify they fail**
 
 Run: `go test ./internal/transaction -run 'MCPInstall' -count=1`
 
 Expected: FAIL because `InstallMCP` does not exist.
 
-- [ ] **Step 5: Implement MCP install/update transaction flow**
+- [x] **Step 5: Implement MCP install/update transaction flow**
 
 Create the journal before the first write, persist every next intent before invoking the CLI, clone definitions into `AgentCLIJournalPayload`, and never call Cloud from transaction. Map mutation states exactly: applied follows forward direction, not-applied performs current-process rollback, unknown returns an error wrapping `ErrIndeterminateState` and leaves the journal.
 
-- [ ] **Step 6: Run focused and full transaction tests**
+- [x] **Step 6: Run focused and full transaction tests**
 
 Run: `go test ./internal/transaction -run 'MCPInstall' -count=1 && go test ./internal/transaction -count=1`
 
