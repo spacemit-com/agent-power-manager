@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -284,6 +285,71 @@ func TestNewUninstallLifecycleRemovesManifestWhenInstalledTargetIsMissing(t *tes
 		}
 	}
 	assertManifestEntryAbsent(t, domain.AgentCodex, ref)
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
+}
+
+func TestNewUninstallLifecycleUsesFirstDuplicateManifestEntryAndRemovesAllMatches(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	changeToRepositoryRoot(t)
+
+	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatalf("create Codex root: %v", err)
+	}
+	manifestDirectory := filepath.Join(home, ".apm", "manifests")
+	if err := os.MkdirAll(manifestDirectory, 0o700); err != nil {
+		t.Fatalf("create manifest directory: %v", err)
+	}
+	manifest := []byte(`{
+  "agent": "codex",
+  "skills": [
+    {"name": "duplicate", "version": "v2.0.0"},
+    {"name": "duplicate", "version": "v1.0.0"},
+    {"name": "keep", "version": "v3.0.0"}
+  ],
+  "plugins": [],
+  "mcps": []
+}
+`)
+	if err := os.WriteFile(filepath.Join(manifestDirectory, "codex.json"), manifest, 0o600); err != nil {
+		t.Fatalf("seed duplicate manifest: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	installCommandTestLogger(t, &stdout, &stderr)
+	uninstaller, err := newUninstallLifecycle()
+	if err != nil {
+		t.Fatalf("newUninstallLifecycle() error = %v", err)
+	}
+	result, err := uninstaller.Uninstall(context.Background(), cli.Flags{
+		Agent: "codex",
+		Name:  "duplicate",
+	})
+	if err != nil {
+		t.Fatalf("Uninstall() error = %v", err)
+	}
+	first := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "duplicate", Version: "v2.0.0"}
+	assertSingleUninstallItem(t, result, domain.AgentCodex, &first, cli.UninstallOutcomeCompleted)
+
+	groups, err := config.NewJSONRepository().List(domain.AgentCodex)
+	if err != nil {
+		t.Fatalf("List() after Uninstall: %v", err)
+	}
+	wantSkills := []domain.PowerRef{{Type: domain.PowerTypeSkill, Name: "keep", Version: "v3.0.0"}}
+	if !reflect.DeepEqual(groups[domain.PowerTypeSkill], wantSkills) {
+		t.Fatalf("skills after Uninstall = %#v, want %#v", groups[domain.PowerTypeSkill], wantSkills)
+	}
+	for _, want := range []string{
+		`msg="installed power target is missing"`, "power=duplicate", "type=skill", "version=v2.0.0",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("Uninstall() stderr = %q, want field %q", stderr.String(), want)
+		}
+	}
 	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
 }
 

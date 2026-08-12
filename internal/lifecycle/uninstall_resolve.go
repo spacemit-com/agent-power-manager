@@ -8,7 +8,7 @@ import (
 	"apm/internal/domain"
 )
 
-// resolveUninstallPower 从单个 Agent 的可信清单中解析待卸载能力，保持输入清单不变。
+// resolveUninstallPower 从单个 Agent 的可信清单中解析待卸载能力；同类别重复取清单首项，仅跨类别匹配报歧义，并保持输入清单不变。
 func resolveUninstallPower(flags cli.Flags, groups domain.PowerGroups) (domain.PowerRef, bool, error) {
 	types := []domain.PowerType{
 		domain.PowerTypeSkill,
@@ -26,10 +26,13 @@ func resolveUninstallPower(flags cli.Flags, groups domain.PowerGroups) (domain.P
 	}
 
 	matches := make([]domain.PowerRef, 0, 1)
+	matchedTypes := make([]string, 0, 1)
 	for _, powerType := range types {
 		for _, ref := range groups[powerType] {
 			if ref.Name == flags.Name {
 				matches = append(matches, ref)
+				matchedTypes = append(matchedTypes, string(powerType))
+				break
 			}
 		}
 	}
@@ -37,14 +40,10 @@ func resolveUninstallPower(flags cli.Flags, groups domain.PowerGroups) (domain.P
 		return domain.PowerRef{}, false, nil
 	}
 	if len(matches) > 1 {
-		values := make([]string, 0, len(matches))
-		for _, ref := range matches {
-			values = append(values, string(ref.Type))
-		}
-		slices.Sort(values)
+		slices.Sort(matchedTypes)
 		return domain.PowerRef{}, false, fmt.Errorf(
 			"uninstall power %q has multiple power types %v; specify --type",
-			flags.Name, values,
+			flags.Name, matchedTypes,
 		)
 	}
 	return matches[0], true, nil

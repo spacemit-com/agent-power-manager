@@ -33,6 +33,8 @@ Install 使用 `preparing`、`publishing`、`rolling-back` 和 `committing`；Un
 
 Transaction 不记录 Warn。Uninstall lifecycle 在 `Manager.Uninstall` 返回后立即消费该结构化事实：只要 `TargetMissing=true`，即使同时返回 error，也必须在仍持有全局锁时同步记录完整 PowerRef Warn，再将该 Agent 分类为 `completed` 或 `failed`。
 
+Uninstall lifecycle 按 [ADR-007](ADR-007-use-stateless-config-repository.md) 组合清单契约：同一类别内存在重复 Type/Name 时选择清单第一条，只有跨类别匹配才歧义；成功 transaction 的 `Remove(agent,type,name)` 清除该 Type/Name 的全部重复记录。
+
 Install 的清单有记录而 target 已被用户删除时，Transaction 在生成 transaction ID、创建 journal 或调用 Adapter 前执行 `ManifestWriter.Remove(agent,type,name)`，安全清理 canonical staging，返回 `ErrStaleManifest` 并中止本次命令；它不会自动安装新版本。Uninstall 的 target 缺失语义保持既有的完成清单删除。清单无记录但 target 存在仍是清单外冲突，不覆盖或删除。
 
 Journal 和所有待删除路径在使用前严格校验。损坏、未知版本、越界或不可判定状态 fail closed：保留 journal 和现场，不执行用户命令。

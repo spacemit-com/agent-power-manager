@@ -17,7 +17,7 @@
 - CLI syntax is exactly `apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]`.
 - Reject every position argument containing `=` before lifecycle construction with `uninstall does not accept a version`; Cobra usage and one outer Error must be produced.
 - Preserve every nonblank Power Name exactly and match `PowerRef.Name` case-sensitively and exactly. Do not trim the stored Name, case-fold, normalize Unicode, or perform substring matching.
-- If `--type` is present, compare it exactly. If omitted, resolve Type independently inside each Agent manifest; cross-Agent Type differences are valid, but same-Agent cross-Type duplicates are ambiguous.
+- If `--type` is present, compare it exactly and use the first same-Type/Name record in manifest order. If omitted, resolve Type independently inside each Agent manifest; same-Type duplicates still select the first record, cross-Agent Type differences are valid, and only same-Agent cross-Type matches are ambiguous.
 - Trust Config Repository's canonical Type/Name/`vMAJOR.MINOR.PATCH` contract. Do not revalidate, skip, migrate, sort, or degrade invalid manifest data.
 - Acquire exactly once. While holding the same lock: Recover, synchronously log recovery Warn, RefreshInstalled, read all reached manifests, Resolve adapters, and execute serial Uninstall transactions.
 - No active journal may produce only command-specific Debug diagnostics. Recovery failure stops immediately after one Release attempt.
@@ -377,7 +377,7 @@ git commit -m "feat(cli): define uninstall result contract"
 
 - [ ] **Step 1: Write resolver table tests**
 
-Cover these exact cases in one table:
+Cover these exact cases in one table, including explicit/inferred same-Type duplicates selecting the first record and cross-Type ambiguity listing each matched Type once even when one Type is duplicated:
 
 ```go
 tests := []struct {
@@ -455,10 +455,13 @@ func resolveUninstallPower(flags cli.Flags, groups domain.PowerGroups) (domain.P
     }
 
     matches := make([]domain.PowerRef, 0, 1)
+    matchedTypes := make([]string, 0, 1)
     for _, powerType := range types {
         for _, ref := range groups[powerType] {
             if ref.Name == flags.Name {
                 matches = append(matches, ref)
+                matchedTypes = append(matchedTypes, string(powerType))
+                break
             }
         }
     }
@@ -466,21 +469,17 @@ func resolveUninstallPower(flags cli.Flags, groups domain.PowerGroups) (domain.P
         return domain.PowerRef{}, false, nil
     }
     if len(matches) > 1 {
-        values := make([]string, 0, len(matches))
-        for _, ref := range matches {
-            values = append(values, string(ref.Type))
-        }
-        slices.Sort(values)
+        slices.Sort(matchedTypes)
         return domain.PowerRef{}, false, fmt.Errorf(
             "uninstall power %q has multiple power types %v; specify --type",
-            flags.Name, values,
+            flags.Name, matchedTypes,
         )
     }
     return matches[0], true, nil
 }
 ```
 
-Do not parse or compare versions. Repository uniqueness is a precondition; do not add fallback semantics for duplicate same-Type records.
+Do not parse or compare versions. Repository preserves legal duplicate same-Type/Name records: explicit and inferred resolution select the first record in manifest order, while ambiguity is based on distinct matching Types. A successful transaction `Remove` clears every matching Type/Name record.
 
 - [ ] **Step 4: Run focused resolver tests**
 
@@ -539,7 +538,7 @@ Add a successful all-Agent order test with Claude Code and Codex in the snapshot
 
 Expected items are both full-Power completed and ordered by the snapshot.
 
-Before implementation, also add core failure-boundary tests: Config List failure produces an Agent-only failed item and later Agent-only unexecuted items; Adapter Resolve and Transaction failures after unique resolution produce full-Power failed items; Release failure returns zero results and no `UninstallBatchError`; Recover failure still attempts Release and stops before Refresh.
+Before implementation, also add core failure-boundary tests: Config List failure produces an Agent-only failed item and later Agent-only unexecuted items; Adapter Resolve and Transaction failures after a determined resolution produce full-Power failed items; Release failure returns zero results and no `UninstallBatchError`; Recover failure still attempts Release and stops before Refresh.
 
 - [ ] **Step 2: Write synchronous logging tests**
 
@@ -816,7 +815,7 @@ Add these independent cases:
 
 1. Config List failure on the first Agent returns `<agent> failed`, never calls Resolve/Transaction for it, never reads later Config, and appends each later Agent as Agent-only unexecuted.
 2. Same-Agent cross-Type ambiguity follows the same shape and error contains `specify --type`.
-3. Adapter Resolve failure after a unique ref produces a full-Power failed item.
+3. Adapter Resolve failure after a determined ref produces a full-Power failed item.
 4. Transaction failure produces a full-Power failed item and later Agent-only unexecuted items.
 5. Missing records before a later successful Agent produce unexecuted then completed, return nil, and preserve order.
 6. All missing records return all Agent-only unexecuted items and nil.
@@ -1223,7 +1222,7 @@ The Uninstall lifecycle diagram must show:
 Acquire → Recover/Warn → Refresh → next Agent → Config.List
   ├─ no record → synchronous not-installed Warn → Agent-only unexecuted → continue
   ├─ ambiguity/read failure → Agent-only failed → later unexecuted → Release
-  └─ unique ref → Resolve → Transaction.Uninstall
+  └─ determined ref → Resolve → Transaction.Uninstall
        ├─ TargetMissing → synchronous full-ref Warn
        ├─ success → full-ref completed → continue
        └─ error → full-ref failed → later unexecuted → Release

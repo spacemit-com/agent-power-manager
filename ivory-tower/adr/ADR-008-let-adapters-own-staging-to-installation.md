@@ -26,7 +26,7 @@ Adapter 暴露只读的目标路径解析能力，使 lifecycle/transaction 可�
 
 - 正面影响：Agent 格式与路径差异集中在 Adapter；冲突防护、原子发布和清理只有一份共享实现；transaction 可通过 Adapter 获取目标而不复制路径规则；未来格式转换不会污染其他 Agent 的 staging。
 - 代价与风险：多 Agent 安装必须为每个 Agent 重新 fetch，不能并行复用 staging；物理根重叠时会故意保留 staging 供调用方诊断或安全处置；发布成功但 staging 清理失败会形成需 journal 判定的中间结果；Adapter 的单次安装职责比只返回路径的薄 Adapter 更重；外部进程仍可能在物理根检查后改变 symlink，或在最终目标检查与 rename 之间竞争。
-- 后续动作：Feature 006 实现三种 Skill Adapter 与 Registry；后续 lifecycle/transaction feature 按“先处理已纳管旧目标，再调用 Adapter”的契约串联，并为发布后清理失败提供恢复路径；Plugin/MCP 和卸载分别设计其 Adapter 契约。
+- 后续动作：Feature 006 已实现三种 Skill Adapter 与 Registry；后续 lifecycle/transaction feature 按“先处理已纳管旧目标，再调用 Adapter”的契约串联，并为发布后清理失败提供恢复路径。Uninstall Adapter 边界已由 [ADR-009](ADR-009-centralize-lifecycle-transactions.md) 与 [Feature 011](../features/011-lifecycle-uninstall/feature-overview.md) 解决：Adapter 继续只提供 `TargetPath`，TransactionManager 独占 quarantine、清单删除与恢复，不新增 Adapter `Uninstall` 方法。Plugin/MCP Adapter 仍待后续设计。
 
 ## Alternatives Considered
 

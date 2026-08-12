@@ -1,5 +1,7 @@
 # Changelog
 
+记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
+
 ## 2026-08-12
 
 分类：新增功能
@@ -23,16 +25,22 @@
 - `f968264 feat(apm): wire default uninstall lifecycle`
 - `cfe9046 docs(uninstall): record lifecycle implementation`
 - `1c15d93 docs(uninstall): align remaining architecture boundaries`
+- `0574c05 docs(uninstall): record completed feature`
+- `e4a285e docs(uninstall): correct agent-only outcomes`
 
 解决方案或完成结果：
 
 Transaction 继续独占 target 检查、journal/quarantine 和 manifest 变更，并以 `UninstallResult{TargetMissing bool}` 把已经确认的 target 缺失事实返回给 lifecycle，即使后续同时返回 error 也不丢失该事实；Adapter 只提供 `TargetPath`，不拥有 Uninstall。Uninstall lifecycle 在一次 Acquire/Release 锁区间内依次完成 Recover、同步恢复 Warn、RefreshInstalled、逐 Agent 清单读取与本地 Type/Version 解析、Adapter Resolve 和串行 Transaction；省略 `--type` 时，每个 Agent 独立按自己的清单消歧，因此同一名称可以在不同 Agent 解析为不同 Type/Version。清单无匹配记录时同步输出 `power is not installed` Warn、生成 Agent-only `unexecuted` 并继续；清单存在但 transaction 确认 target 缺失时同步输出 `installed power target is missing` Warn，成功修复清单后仍生成完整引用 `completed`。首个 Config/解析/Resolve/Transaction 业务错误把当前 Agent 标为 `failed`、后续 Agent 标为 `unexecuted` 并停止访问其依赖。只有成功 Release 后，CLI 才渲染完整形式 `<agent>/<type>/<name>@<version> <outcome>` 或 Agent-only 形式 `<agent> <failed|unexecuted>`；成功 Release 后的 batch error 先渲染再失败，其他 fatal/Release error 抑制业务 stdout。普通 Error 与 Usage 仅由 CLI 统一写入 stderr，transaction、lifecycle 和 adapter 不直接记录 Error。
+
+Config Repository 的既有契约允许同一 Type/Name 重复并保留清单顺序，`Find` 返回第一条，`Remove` 清除全部。本轮修复使 Uninstall 在显式或省略 `--type` 时都确定性选择目标类别的第一条同名记录；省略 Type 的歧义按匹配到的不同类别判断，错误中的类别标签去重并稳定排序。真实 JSONRepository 到默认 lifecycle/transaction 的集成覆盖验证了首条引用进入结果，且成功 transaction 会清除该 Type/Name 的全部重复记录。本轮生产代码只修改 Uninstall resolver，Search、List、Install 生产行为未变。
 
 验证结果或限制：
 
 以下命令均以退出码 0 完成：`cp go.mod /tmp/apm-uninstall-go.mod.before`、`cp go.sum /tmp/apm-uninstall-go.sum.before`、`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`go mod tidy`、`cmp go.mod /tmp/apm-uninstall-go.mod.before`、`cmp go.sum /tmp/apm-uninstall-go.sum.before`、`git diff --check`；tidy 后两个 module 文件均保持不变。静态边界扫描 `! rg -n 'slog\.Error|fmt\.Print|log\.Print' internal/lifecycle internal/transaction internal/adapter --glob '*.go'` 与 `! rg -n 'func \([^)]*\) Uninstall\(' internal/adapter --glob '*.go'` 无匹配并成功，正向扫描 `rg -n 'Uninstall\(context\.Context, UninstallRequest\) \(UninstallResult, error\)' internal/transaction/manager.go` 和 `rg -n 'newUninstallLifecycle|NewUninstall|UninstallLifecycleFactory' cmd internal --glob '*.go'` 均成功显示预期契约与独立接线。
 
 隔离 CLI 黑盒使用 `accept_root=$(mktemp -d)`、显式 `accept_bin`/`accept_home`/`accept_cache`，执行 `go build -o "$accept_bin" ./cmd/apm`；随后在 `APM_HOME="$accept_home" XDG_CACHE_HOME="$accept_cache" CODEX_HOME= CLAUDE_CONFIG_DIR= HERMES_HOME=` 下依次执行 `"$accept_bin" install foo-before-summary --agent codex --type skill`、`"$accept_bin" uninstall foo-before-summary --agent codex`、再次执行同一 Uninstall，以及 `"$accept_bin" uninstall foo-before-summary=v0.0.1 --agent codex`。安装 stdout 精确为 `codex/skill/foo-before-summary@v0.0.1 installed\n`、stderr 为空；首次卸载 stdout 精确为 `codex/skill/foo-before-summary@v0.0.1 completed\n`、stderr 为空，target 与对应 manifest 项均消失且无 active journal。第二次卸载状态为 0，stdout 精确为 `codex unexecuted\n`，stderr 精确一行且恰有一个 `level=WARN`、`msg="power is not installed"`、`operation=uninstall`、`agent=codex` 和 `power=foo-before-summary`。版本卸载状态为 1、stdout 为空，stderr 恰有一个 `level=ERROR`、`uninstall does not accept a version` 和 `Usage:`。
+
+本轮回归先观察到 `go test -count=1 ./internal/lifecycle -run '^TestResolveUninstallPower'` 因错误的 `[skill skill]`/`[plugin skill skill]` 类别列表失败，且真实 Repository 集成测试因同类别重复被误判歧义而失败；最小 resolver 修复后两者通过。随后 `go test -count=1 ./internal/lifecycle ./cmd/apm`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`test -z "$(gofmt -l cmd internal)"` 与 `git diff --check` 均以退出码 0 完成。
 
 当前仅提供内置 Agent 的 Skill Adapter，Plugin 与 MCP 尚无可执行 Adapter；外部进程在 APM 文件系统操作期间造成的竞态仍不在 APM 的一致性保证范围内。
 

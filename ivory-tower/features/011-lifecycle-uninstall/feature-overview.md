@@ -12,7 +12,7 @@
 
 ## Scope
 
-- 包含：Uninstall 专属端口、factory、service、结果与 renderer；拒绝版本参数；从各 Agent 本地清单独立解析 Type 和 Version；一次锁内恢复、刷新和串行 Transaction；幂等未安装 Warn；目标缺失结构化事务结果与 Warn；首错停止和完整汇总；默认依赖接线；ADR/C4/概览/构建文档同步。
+- 包含：Uninstall 专属端口、factory、service、结果与 renderer；拒绝版本参数；从各 Agent 本地清单独立解析 Type 和 Version，同类别重复取清单第一条、跨类别按去重类别消歧；一次锁内恢复、刷新和串行 Transaction；成功时清除选定 Type/Name 的全部清单记录；幂等未安装 Warn；目标缺失结构化事务结果与 Warn；首错停止和完整汇总；默认依赖接线；ADR/C4/概览/构建文档同步。
 - 不包含：Search/List/Install lifecycle 重构；通用 lifecycle runner 或共享批处理框架；Cloud、Cache 或版本选择；Adapter `Uninstall` 方法；Plugin/MCP Adapter；并行卸载、失败后继续、非法历史清单迁移或降级；JSON、表格、颜色、进度或交互确认。
 
 ## Implementation Context
@@ -23,5 +23,5 @@
 
 ## Acceptance
 
-- 验收条件：Uninstall 全程只获取一次锁；恢复、未安装和目标缺失 Warn 均在锁内同步输出；Name 区分大小写精确匹配；省略 Type 时按每个 Agent 的清单独立消歧；无记录记为 unexecuted 但命令保持幂等成功；清单存在而目标缺失时修复清单、Warn 并记 completed；任一业务失败立即停止并补齐后续 unexecuted；仅成功 Release 后按精确双形态输出汇总；所有 Error 仍由 CLI 统一记录。
+- 验收条件：Uninstall 全程只获取一次锁；恢复、未安装和目标缺失 Warn 均在锁内同步输出；Name 区分大小写精确匹配；显式或推断 Type 时同类别重复取清单第一条，省略 Type 时只对跨类别匹配报歧义；成功 transaction 清除选定 Type/Name 的全部重复记录；无记录记为 unexecuted 但命令保持幂等成功；清单存在而目标缺失时修复清单、Warn 并记 completed；任一业务失败立即停止并补齐后续 unexecuted；仅成功 Release 后按精确双形态输出汇总；所有 Error 仍由 CLI 统一记录。
 - 已知风险或待决问题：完整卸载事务位于全局锁区间，慢文件系统操作会延长锁持有时间；实时 Warn 在后续 Release 失败时无法撤回；外部进程仍可能在目标检查和原子 rename 之间修改路径，但现有 transaction 会把 rename 竞态缺失纳入幂等提交。

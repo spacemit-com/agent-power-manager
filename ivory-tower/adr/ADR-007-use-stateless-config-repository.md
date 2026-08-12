@@ -2,6 +2,7 @@
 
 - Status：Accepted
 - Date：2026-08-07
+- Revised：2026-08-12
 - Decision Makers：liangjunzhao
 
 ## Context
@@ -18,16 +19,18 @@ APM 使用无状态 Config Repository。lifecycle 只调用 `List(agent)`、`Fin
 
 每个 Agent 的 JSON 使用固定 `skills`、`plugins`、`mcps` 分组。清单条目统一为版本已确定的 `PowerRef`，磁盘组内不重复保存 type；读取后由 Repository 根据分组补全。系统删除 `InstalledPower` 和 `InstalledAt`，并以共享 `PowerGroups` 表达三类已安装 Power。
 
+Repository 从固定分组补全 Type、原样提供 Name，并校验规范版本，但不保证 Type/Name 唯一；同一 Type/Name 的重复记录是合法清单数据。`List` 保留清单顺序，`Find` 返回目标分组中的第一条同名记录，`Set` 在目标位置写入一条并归并其余重复项，`Remove` 删除目标 Type/Name 的全部记录。
+
 版本必须精确匹配 `vMAJOR.MINOR.PATCH`：三个数值分量允许 `0`，其他值不得有前导零；不得缺失 `v`、分量或出现空白、正负号、prerelease、build metadata。Repository 使用相同校验覆盖 `List`、`Find`、`Set`、`Remove` 的完整 manifest 读取，`Set` 的输入（任何文件 I/O 前）以及私有 write 接收的完整 `PowerGroups`。读取会校验所有分组中的所有条目，即使条目与当前 Find/Remove/Set 目标无关；错误包含操作、Agent、类别、索引、名称和原始版本，并包装 `ErrInvalidPower`。
 
-非法既有条目会使读取失败，Repository 不返回部分结果，也不跳过、清洗、重排、自动补 `v`、覆盖或迁移它们；原文件保持不变。该刻意不提供迁移或 cleanup 的契约保证 List 能在成功读取后安全按 SemVer 排序。List 如何持锁读取和呈现错误由 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 决定，CLI 形式由 [ADR-002](ADR-002-cli-agent-and-power-type-as-flags.md) 决定。
+非法版本条目会使读取失败，Repository 不返回部分结果，也不跳过、清洗、重排、自动补 `v`、覆盖或迁移它们；原文件保持不变。该刻意不提供迁移或 cleanup 的契约保证 List 能在成功读取后安全按 SemVer 排序。List 如何持锁读取和呈现错误由 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 决定，CLI 形式由 [ADR-002](ADR-002-cli-agent-and-power-type-as-flags.md) 决定。
 
 Repository 不获取全局锁，也不保证并发写安全。lifecycle 按 ADR-003 在调用本地清单操作时持有全局 APM 锁。Repository 只实施目标状态；版本选择、升级/降级判断、卸载许可、跨类型消歧、筛选和用户输出仍由 lifecycle 负责。
 
 ## Consequences
 
 - 正面影响：lifecycle 不需要管理 JSONStore 的隐式状态；只读和多 Agent 流程不需要额外释放；单个 Repository 实例可顺序处理不同 Agent；JSON 格式和原子写入细节完全封装在 config。
-- 代价与风险：Find 后 Set、Find 后 Remove 会分别读取文件；Repository 依赖外层全局锁保证读改写串行；固定三分组格式新增 Power 类型时需要扩展 schema；未知字段读取后不会被保留。
+- 代价与风险：Find 后 Set、Find 后 Remove 会分别读取文件；调用方不能把同一 Type/Name 唯一性当作读取前置条件，必须按 Repository 的首条选择和全部删除契约组合；Repository 依赖外层全局锁保证读改写串行；固定三分组格式新增 Power 类型时需要扩展 schema；未知字段读取后不会被保留。
 - 后续动作：Feature 005 实现 Repository、默认路径、原子写入与测试；后续 lifecycle feature 通过四个业务接口串联清单，不重新引入显式 Read/Write 或 Store 加载状态。Feature 009 已将规范版本验证落实到完整读写路径；不新增历史清单迁移。
 
 ## Alternatives Considered

@@ -20,7 +20,7 @@ apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 
 - Uninstall 命令专属 lifecycle 端口、factory、service、结构化结果和 renderer；
 - Agent、Power 名称、可选 Type 以及禁止版本语法的参数契约；
-- 每个目标 Agent 独立从本地清单解析唯一 `PowerRef`；
+- 每个目标 Agent 独立从本地清单确定一个 `PowerRef`；
 - 一次锁内的恢复、同步 Warn、Agent 刷新、Config 读取、Adapter Resolve 和 Transaction Uninstall；
 - 清单无记录时的幂等 unexecuted 结果；
 - 清单存在但目标缺失时的结构化 transaction 事实、清单修复和 completed 结果；
@@ -101,7 +101,7 @@ type UninstallBatchError struct {
 type UninstallLifecycleFactory func() (UninstallLifecycle, error)
 ```
 
-`Power == nil` 表示 lifecycle 尚未解析到唯一清单引用：清单无记录、清单读取或类别消歧失败，以及前序 Agent 失败后未再读取清单都使用该形态。得到唯一 `PowerRef` 后，Adapter Resolve 或 Transaction 失败仍保留完整引用。Lifecycle 创建 item 时复制引用值，不保留 Config 返回 map 或 slice 的引用。
+`Power == nil` 表示 lifecycle 尚未确定清单引用：清单无记录、清单读取或类别消歧失败，以及前序 Agent 失败后未再读取清单都使用该形态。选定 `PowerRef` 后，Adapter Resolve 或 Transaction 失败仍保留完整引用。Lifecycle 创建 item 时复制引用值，不保留 Config 返回 map 或 slice 的引用。
 
 `UninstallResult.Items` 在所有可渲染返回中均为非 nil，并按目标 Agent ID 字典序排列。具体 Agent 模式只包含该 Agent。每个目标 Agent 恰有一条 item，包括未安装和前序失败后未执行的 Agent。
 
@@ -174,26 +174,26 @@ Transaction 不直接调用 `slog.Warn` 或 `slog.Error`。Lifecycle 在 Transac
 
 ## 本地 Power 解析
 
-Lifecycle 对每个 Agent 调用一次 `ConfigRepository.List(agent)`。Repository 继续完整读取并验证该 Agent 的固定分组清单；非法版本、结构或重复条目使整个读取失败，Lifecycle 不跳过、迁移或降级非法数据。
+Lifecycle 对每个 Agent 调用一次 `ConfigRepository.List(agent)`。Repository 继续完整读取并验证该 Agent 的固定分组清单；非法版本或结构使整个读取失败，Lifecycle 不跳过、迁移或降级非法数据。同一 Type/Name 的重复条目是合法清单数据，Repository 保留其顺序。
 
 ### 显式 Type
 
 只收集 `Name == flags.Name` 且 `Type == flags.Type` 的记录：
 
 - 没有记录：进入幂等未安装分支；即使其他 Type 有同名记录也不回退。
-- 有唯一记录：使用清单中的完整 Type、Name 和 Version。
+- 有一条或多条记录：确定性使用该类别清单顺序中的第一条，包含其完整 Type、Name 和 Version。
 
 ### 省略 Type
 
 先按 `Name == flags.Name` 收集当前 Agent 的所有类别：
 
 - 没有记录：进入幂等未安装分支。
-- 只有一个类别：使用该类别中的唯一清单引用。
-- 跨类别同名：当前 Agent 失败并要求显式 `--type`。
+- 只有一个匹配类别：使用该类别清单顺序中的第一条同名引用；同类别重复不构成歧义。
+- 跨多个类别同名：按去重后的匹配类别判定歧义，当前 Agent 失败并要求显式 `--type`；错误中的类别标签唯一且排序确定。
 
 消歧完全按 Agent 独立进行。同一个 `uninstall foo --agent=all` 可以在一个 Agent 卸载 `skill/foo@v1.0.0`，在另一个 Agent 卸载 `plugin/foo@v2.0.0`；只要每个 Agent 内部都不歧义，就不要求整条命令统一 Type 或 Version。
 
-Config Repository 已保证 Type、Name 和规范 `vMAJOR.MINOR.PATCH` 清单约束。Lifecycle 信任该公共契约，不重新验证或排序版本，也不为同 Type/Name 重复记录定义选择规则。
+Config Repository 只保证从固定分组补全 Type、原样提供 Name，并校验规范 `vMAJOR.MINOR.PATCH` 版本；它不保证 Type/Name 唯一。Lifecycle 信任该公共契约，不重新验证或排序版本，并按上述清单顺序选择同类别第一条。成功的 Uninstall transaction 调用 `Remove(agent,type,name)`，清除该 Type/Name 的全部重复记录。
 
 ## 锁、恢复与预执行顺序
 
@@ -234,10 +234,10 @@ Uninstall 从 Acquire 到 Release 始终持有同一把全局锁。它不在 Rec
 
 按目标 Agent 顺序执行：
 
-1. `Config.List(agent)` 并依据本地 Power 解析规则选择唯一引用。
+1. `Config.List(agent)` 并依据本地 Power 解析规则选择确定引用。
 2. 清单读取失败或省略 Type 时跨类别歧义：当前 Agent 添加无 Power 的 `failed` item，停止。
 3. 没有匹配记录：同步记录未安装 Warn，添加无 Power 的 `unexecuted` item，继续下一个 Agent。
-4. 得到唯一引用后，复制该 `PowerRef` 并调用 `Registry.Resolve(agent, ref.Type)`。
+4. 得到确定引用后，复制该 `PowerRef` 并调用 `Registry.Resolve(agent, ref.Type)`。
 5. Adapter Resolve 失败：当前 Agent 添加完整 Power 的 `failed` item，停止。
 6. 调用 `TransactionManager.Uninstall(ctx, request)`。
 7. 若返回 `TargetMissing=true`，无论 error 是否为空，都先同步记录目标缺失 Warn。
@@ -282,13 +282,13 @@ Lifecycle、Transaction、Adapter 和 renderer 不调用 `slog.Error`。最终 e
 
 Renderer 根据 item 是否携带 Power 写两种精确行。
 
-有唯一引用：
+有确定引用：
 
 ```text
 <agent>/<type>/<name>@<version> <completed|failed|unexecuted>\n
 ```
 
-没有唯一引用：
+未确定引用：
 
 ```text
 <agent> <failed|unexecuted>\n
@@ -387,7 +387,9 @@ CLI 根命令需要增加 Uninstall factory 与默认依赖接线；现有命令
 - 无活动 journal 普通模式无输出、verbose 模式只写 Debug；
 - Name 区分大小写精确匹配；
 - 显式 Type 精确过滤且不回退；
-- 省略 Type 的无记录、唯一类别和当前 Agent 内跨类别歧义；
+- 显式或省略 Type 时同类别重复均选择清单第一条；省略 Type 的无记录、单一匹配类别和当前 Agent 内跨类别歧义；
+- 跨类别且某类别重复时，歧义错误只列去重并确定排序的类别标签；
+- 真实 JSONRepository 重复清单与 lifecycle/transaction 组合后选择第一条，并由成功 Remove 清除该 Type/Name 的全部记录；
 - 不同 Agent 可解析为不同 Type/Version；
 - Config 非法或读取失败；
 - 具体 Agent、all 字典序与空快照；
@@ -442,7 +444,7 @@ CLI 根命令需要增加 Uninstall factory 与默认依赖接线；现有命令
 
 1. Uninstall 只有一个全局锁区间，所有 Config、Adapter Resolve 和 Transaction 操作都在其中；结果仅在成功 Release 后渲染。
 2. Recover 成功、清单无记录和目标缺失均按本 spec 在锁内同步 Warn；无普通重复 Error。
-3. Name 区分大小写精确匹配，Type 按每个 Agent 本地清单独立解析，版本只能来自清单。
+3. Name 区分大小写精确匹配，Type 按每个 Agent 本地清单独立解析，版本只能来自清单；同类别重复取清单第一条，只有跨类别才歧义。
 4. 无记录为 Warn + Agent-only unexecuted，并保持幂等成功；目标缺失为 Warn + 完整 completed，且对应清单项被移除。
 5. 首个业务失败后不访问后续 Agent，并输出当前 failed 与剩余 Agent-only unexecuted；只有成功 Release 后的 batch error 可先渲染再非零退出。
 6. Transaction 在初查与 rename 竞态缺失时都返回 `TargetMissing=true`，且后续错误不丢失该事实。

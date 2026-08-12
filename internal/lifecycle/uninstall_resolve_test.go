@@ -37,11 +37,43 @@ func TestResolveUninstallPower(t *testing.T) {
 			found: false,
 		},
 		{
+			name:  "explicit type uses first duplicate in manifest order",
+			flags: cli.Flags{Name: "demo", Type: "skill"},
+			groups: domain.PowerGroups{domain.PowerTypeSkill: {
+				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
+				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+			}},
+			want:  domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
+			found: true,
+		},
+		{
+			name:  "inferred type uses first duplicate in manifest order",
+			flags: cli.Flags{Name: "demo"},
+			groups: domain.PowerGroups{domain.PowerTypeSkill: {
+				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
+				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+			}},
+			want:  domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
+			found: true,
+		},
+		{
 			name:  "same agent cross type ambiguity",
 			flags: cli.Flags{Name: "demo"},
 			groups: domain.PowerGroups{
 				domain.PowerTypeSkill:  {{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}},
 				domain.PowerTypePlugin: {{Type: domain.PowerTypePlugin, Name: "demo", Version: "v2.0.0"}},
+			},
+			wantErr: "multiple power types [plugin skill]; specify --type",
+		},
+		{
+			name:  "cross type ambiguity lists each type once",
+			flags: cli.Flags{Name: "demo"},
+			groups: domain.PowerGroups{
+				domain.PowerTypeSkill: {
+					{Type: domain.PowerTypeSkill, Name: "demo", Version: "v3.0.0"},
+					{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
+				},
+				domain.PowerTypePlugin: {{Type: domain.PowerTypePlugin, Name: "demo", Version: "v1.0.0"}},
 			},
 			wantErr: "multiple power types [plugin skill]; specify --type",
 		},
