@@ -45,3 +45,9 @@ func failedMCPResponse(stderr string) queuedMCPResponse {
 		err:    errors.New("exit status 1"),
 	}
 }
+
+func truncatedMCPResponse(stdout string) queuedMCPResponse {
+	response := successfulMCPResponse(stdout)
+	response.result.StdoutTruncated = true
+	return response
+}

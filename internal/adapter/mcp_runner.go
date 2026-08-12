@@ -18,12 +18,14 @@ const (
 )
 
 type mcpCommandResult struct {
-	Path     string
-	Stdout   string
-	Stderr   string
-	ExitCode int
-	Started  bool
-	TimedOut bool
+	Path            string
+	Stdout          string
+	Stderr          string
+	ExitCode        int
+	Started         bool
+	TimedOut        bool
+	StdoutTruncated bool
+	StderrTruncated bool
 }
 
 type mcpRunner interface {
@@ -81,6 +83,8 @@ func (runner *mcpCommandRunner) Run(ctx context.Context, executable string, args
 	err = command.Wait()
 	result.Stdout = stdout.String()
 	result.Stderr = stderr.String()
+	result.StdoutTruncated = stdout.Truncated()
+	result.StderrTruncated = stderr.Truncated()
 	if command.ProcessState != nil {
 		result.ExitCode = command.ProcessState.ExitCode()
 	}
@@ -97,6 +101,7 @@ func (runner *mcpCommandRunner) Run(ctx context.Context, executable string, args
 type boundedWriter struct {
 	remaining int
 	contents  strings.Builder
+	truncated bool
 }
 
 func newBoundedWriter(limit int) *boundedWriter {
@@ -109,6 +114,7 @@ func newBoundedWriter(limit int) *boundedWriter {
 func (writer *boundedWriter) Write(contents []byte) (int, error) {
 	original := len(contents)
 	if len(contents) > writer.remaining {
+		writer.truncated = true
 		contents = contents[:writer.remaining]
 	}
 	if len(contents) > 0 {
@@ -120,6 +126,10 @@ func (writer *boundedWriter) Write(contents []byte) (int, error) {
 
 func (writer *boundedWriter) String() string {
 	return writer.contents.String()
+}
+
+func (writer *boundedWriter) Truncated() bool {
+	return writer.truncated
 }
 
 var _ mcpRunner = (*mcpCommandRunner)(nil)

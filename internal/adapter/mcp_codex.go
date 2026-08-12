@@ -22,6 +22,9 @@ func newCodexMCPAdapter(runner mcpRunner) *codexMCPAdapter {
 
 func (adapter *codexMCPAdapter) Inspect(ctx context.Context, name string) (MCPPresence, error) {
 	result, runErr := adapter.runner.Run(ctx, "codex", []string{"mcp", "get", "--json", name}, "")
+	if result.StdoutTruncated || result.StderrTruncated {
+		return inspectTruncated(domain.AgentCodex, name, result)
+	}
 	if runErr != nil {
 		if strings.Contains(result.Stderr, fmt.Sprintf("No MCP server named '%s' found.", name)) {
 			return MCPAbsent, nil

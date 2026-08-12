@@ -201,8 +201,8 @@ func TestMCPIntegrationHTTPConflictAndStaleRepair(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "mcp", Name: "filesystem", Version: "v0.0.1"})
-		if !errors.Is(err, adapter.ErrTargetConflict) {
-			t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
+		if !errors.Is(err, adapter.ErrMCPConflict) {
+			t.Fatalf("Install() error = %v, want ErrMCPConflict", err)
 		}
 		harness.assertManagedMCP(domain.AgentCodex, "filesystem", "", true)
 		harness.assertMCPOnlyPathsAbsent()

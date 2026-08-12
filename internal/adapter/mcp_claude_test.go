@@ -48,6 +48,10 @@ func TestClaudeMCPInspectRejectsNonUserOrUnclearScope(t *testing.T) {
 		{name: "local only", response: successfulMCPResponse("demo:\n  Scope: Local\n  Status: Connected\n"), wantErr: ErrMCPStateUnknown},
 		{name: "project only", response: successfulMCPResponse("demo:\n  Scope: Project\n  Status: Connected\n"), wantErr: ErrMCPStateUnknown},
 		{name: "missing scope", response: successfulMCPResponse("demo:\n  Status: Connected\n"), wantErr: ErrMCPStateUnknown},
+		{name: "unrelated user scope", response: successfulMCPResponse("demo:\n  Scope: Local\nother:\n  Scope: User\n"), wantErr: ErrMCPStateUnknown},
+		{name: "duplicate target section", response: successfulMCPResponse("demo:\n  Scope: User\ndemo:\n  Scope: User\n"), wantErr: ErrMCPStateUnknown},
+		{name: "contradictory target scopes", response: successfulMCPResponse("demo:\n  Scope: User\n  Scope: Local\n"), wantErr: ErrMCPStateUnknown},
+		{name: "truncated valid prefix", response: truncatedMCPResponse("demo:\n  Scope: User\n"), wantErr: ErrMCPStateUnknown},
 		{name: "health failure", response: failedMCPResponse("demo: Failed to connect"), wantErr: ErrMCPStateUnknown},
 	}
 	for _, tt := range tests {

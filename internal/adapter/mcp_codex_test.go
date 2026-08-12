@@ -48,6 +48,7 @@ func TestCodexMCPInspectRequiresExactStructuredName(t *testing.T) {
 		{name: "wrong name", response: successfulMCPResponse(`{"name":"other"}`), wantErr: ErrMCPStateUnknown},
 		{name: "invalid JSON", response: successfulMCPResponse(`{"name":`), wantErr: ErrMCPStateUnknown},
 		{name: "trailing JSON", response: successfulMCPResponse(`{"name":"demo"} {}`), wantErr: ErrMCPStateUnknown},
+		{name: "truncated valid JSON", response: truncatedMCPResponse(`{"name":"demo"}`), wantErr: ErrMCPStateUnknown},
 		{name: "ambiguous failure", response: failedMCPResponse("permission denied"), wantErr: ErrMCPStateUnknown},
 	}
 	for _, tt := range tests {

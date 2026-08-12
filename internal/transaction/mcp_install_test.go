@@ -143,8 +143,8 @@ func TestMCPInstallPreflightBranchesDoNotCreateJournal(t *testing.T) {
 		fixture := newMCPInstallFixture(t)
 		fixture.adapter.presence = adapter.MCPPresent
 		fixture.request.Server = nil
-		if err := fixture.service.InstallMCP(context.Background(), fixture.request); !errors.Is(err, adapter.ErrTargetConflict) {
-			t.Fatalf("InstallMCP() error = %v, want ErrTargetConflict", err)
+		if err := fixture.service.InstallMCP(context.Background(), fixture.request); !errors.Is(err, adapter.ErrMCPConflict) {
+			t.Fatalf("InstallMCP() error = %v, want ErrMCPConflict", err)
 		}
 		if fixture.journals.found || len(fixture.adapter.addServers) != 0 {
 			t.Fatal("conflict path changed state")
@@ -281,6 +281,19 @@ func TestMCPInstallUpdateFailureDirections(t *testing.T) {
 		fixture.adapter.addAnswers = []mcpMutationAnswer{{result: adapter.MCPMutationResult{State: adapter.MCPMutationUnknown}, err: operationErr}}
 		err := fixture.service.InstallMCP(context.Background(), fixture.request)
 		if !errors.Is(err, ErrIndeterminateState) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseAddingNew {
+			t.Fatalf("error/journal = %v/%+v", err, fixture.journals.journal)
+		}
+	})
+	t.Run("old restore applied plus error keeps rollback direction", func(t *testing.T) {
+		fixture := mcpUpdateFixture(t)
+		restoreErr := errors.New("restore cleanup failed")
+		fixture.adapter.addAnswers = []mcpMutationAnswer{
+			{result: adapter.MCPMutationResult{State: adapter.MCPMutationNotApplied}, err: operationErr},
+			{result: adapter.MCPMutationResult{State: adapter.MCPMutationApplied}, err: restoreErr},
+		}
+		err := fixture.service.InstallMCP(context.Background(), fixture.request)
+		if !errors.Is(err, restoreErr) || errors.Is(err, ErrIndeterminateState) ||
+			!fixture.journals.found || fixture.journals.journal.Phase != PhaseRollingBack {
 			t.Fatalf("error/journal = %v/%+v", err, fixture.journals.journal)
 		}
 	})

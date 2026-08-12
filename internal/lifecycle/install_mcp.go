@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"apm/internal/adapter"
@@ -27,7 +28,7 @@ func (s *InstallService) installMCP(ctx context.Context, agent domain.AgentID, r
 		return cli.InstallItem{}, fmt.Errorf("inspect MCP %+v for agent %q: %w", ref, agent, err)
 	}
 	if !installed && presence == adapter.MCPPresent {
-		return cli.InstallItem{}, fmt.Errorf("unmanaged MCP %q exists for agent %q: %w", ref.Name, agent, adapter.ErrTargetConflict)
+		return cli.InstallItem{}, fmt.Errorf("unmanaged MCP %q exists for agent %q: %w", ref.Name, agent, errors.Join(adapter.ErrMCPConflict, adapter.ErrTargetConflict))
 	}
 	if installed && previous.Version == ref.Version && presence == adapter.MCPPresent {
 		return cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeUnchanged}, nil

@@ -46,7 +46,7 @@ func TestInstallMCPStateTableAvoidsUnneededCloudDefinitions(t *testing.T) {
 		wantTxn   bool
 	}{
 		{name: "same present unchanged", installed: mcpRefPointer("v2.0.0"), presence: adapter.MCPPresent, outcome: cli.InstallOutcomeUnchanged},
-		{name: "unmanaged present conflict", presence: adapter.MCPPresent, wantErr: adapter.ErrTargetConflict},
+		{name: "unmanaged present conflict", presence: adapter.MCPPresent, wantErr: adapter.ErrMCPConflict},
 		{name: "same absent stale", installed: mcpRefPointer("v2.0.0"), presence: adapter.MCPAbsent, wantErr: transaction.ErrStaleManifest, wantTxn: true},
 		{name: "different absent stale", installed: mcpRefPointer("v1.0.0"), presence: adapter.MCPAbsent, wantErr: transaction.ErrStaleManifest, wantTxn: true},
 	}

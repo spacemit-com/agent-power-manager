@@ -64,6 +64,14 @@ func mutationFromCommand(agent domain.AgentID, operation string, ref domain.Powe
 	if !result.Started {
 		return MCPMutationResult{State: MCPMutationNotApplied}, fmt.Errorf("%s MCP %s %q did not start: %w", agent, operation, ref.Name, runErr)
 	}
+	if result.StdoutTruncated || result.StderrTruncated {
+		runErr = errors.Join(runErr, fmt.Errorf(
+			"Agent CLI output was truncated (stdout=%t, stderr=%t)",
+			result.StdoutTruncated,
+			result.StderrTruncated,
+		))
+		success = false
+	}
 	if runErr == nil && success {
 		return MCPMutationResult{State: MCPMutationApplied}, nil
 	}
@@ -88,4 +96,12 @@ func inspectUnknown(agent domain.AgentID, name string, result mcpCommandResult, 
 		agent, name, result.Path, result.ExitCode, diagnostic,
 		errors.Join(ErrMCPStateUnknown, err),
 	)
+}
+
+func inspectTruncated(agent domain.AgentID, name string, result mcpCommandResult) (MCPPresence, error) {
+	return inspectUnknown(agent, name, result, fmt.Errorf(
+		"Agent CLI output was truncated (stdout=%t, stderr=%t)",
+		result.StdoutTruncated,
+		result.StderrTruncated,
+	))
 }

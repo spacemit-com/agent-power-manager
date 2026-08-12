@@ -6,11 +6,31 @@ import (
 	"reflect"
 	"testing"
 
+	"apm/internal/adapter"
 	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/transaction"
 )
+
+func TestInstallPluginDoesNotDispatchThroughSkillAdapter(t *testing.T) {
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		snapshot:  domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		cloudRefs: []domain.PowerRef{ref},
+		selected:  ref.Version,
+	})
+
+	result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})
+	if !errors.Is(err, adapter.ErrUnsupportedAdapter) {
+		t.Fatalf("Install() error = %v, want ErrUnsupportedAdapter", err)
+	}
+	assertInstallItems(t, result, []cli.InstallItem{{Agent: domain.AgentCodex, Power: ref, Outcome: cli.InstallOutcomeFailed}})
+	if containsEvent(calls, "resolve:codex") || containsEvent(calls, "transaction:install:codex") {
+		t.Fatalf("calls = %v, want no Skill adapter or filesystem transaction", calls)
+	}
+}
 
 func TestInstallFirstInstallOrdersDependenciesAndReturnsInstalled(t *testing.T) {
 	var calls []string

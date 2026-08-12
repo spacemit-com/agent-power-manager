@@ -31,7 +31,7 @@ func (s *Service) InstallMCP(ctx context.Context, request MCPInstallRequest) err
 	}
 	if request.Previous == nil {
 		if presence == adapter.MCPPresent {
-			return fmt.Errorf("unmanaged MCP %q is already registered: %w", request.Power.Name, adapter.ErrTargetConflict)
+			return fmt.Errorf("unmanaged MCP %q is already registered: %w", request.Power.Name, errors.Join(adapter.ErrMCPConflict, adapter.ErrTargetConflict))
 		}
 		if presence != adapter.MCPAbsent {
 			return fmt.Errorf("unexpected MCP presence %q: %w", presence, ErrIndeterminateState)
@@ -120,8 +120,14 @@ func (s *Service) finishMCPAdd(ctx context.Context, journal Journal, mcpAdapter 
 			return errors.Join(originalErr, fmt.Errorf("persist MCP rollback direction: %w", err))
 		}
 		restoreResult, restoreErr := mcpAdapter.Add(ctx, *journal.Previous, *journal.AgentCLI.PreviousServer)
-		if restoreResult.State != adapter.MCPMutationApplied || restoreErr != nil {
+		if restoreResult.State == adapter.MCPMutationApplied {
+			if restoreErr != nil {
+				return errors.Join(originalErr, restoreErr)
+			}
+		} else if restoreResult.State == adapter.MCPMutationUnknown {
 			return errors.Join(originalErr, indeterminateMCPMutation("restore old MCP", restoreErr))
+		} else {
+			return errors.Join(originalErr, mutationError("restore old MCP", restoreErr))
 		}
 		if err := s.journals.Delete(journal.TransactionID); err != nil {
 			return errors.Join(originalErr, fmt.Errorf("delete rolled-back MCP journal: %w", err))

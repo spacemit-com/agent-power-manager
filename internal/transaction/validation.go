@@ -15,6 +15,9 @@ func validateInstallRequest(request InstallRequest) error {
 	if err := validateAgentAndPower(request.Agent, request.Power); err != nil {
 		return fmt.Errorf("validate install request: %w", err)
 	}
+	if request.Power.Type != domain.PowerTypeSkill {
+		return fmt.Errorf("filesystem install power type %q: %w", request.Power.Type, ErrInvalidRequest)
+	}
 	if isNilInterface(request.Adapter) {
 		return fmt.Errorf("validate install request: nil adapter: %w", ErrInvalidRequest)
 	}
@@ -35,6 +38,9 @@ func validateInstallRequest(request InstallRequest) error {
 func validateUninstallRequest(request UninstallRequest) error {
 	if err := validateAgentAndPower(request.Agent, request.Power); err != nil {
 		return fmt.Errorf("validate uninstall request: %w", err)
+	}
+	if request.Power.Type != domain.PowerTypeSkill {
+		return fmt.Errorf("filesystem uninstall power type %q: %w", request.Power.Type, ErrInvalidRequest)
 	}
 	if isNilInterface(request.Adapter) {
 		return fmt.Errorf("validate uninstall request: nil adapter: %w", ErrInvalidRequest)
@@ -150,6 +156,9 @@ func validateJournal(journal Journal) error {
 }
 
 func validateFilesystemJournal(journal Journal, payload FilesystemJournalPayload) error {
+	if journal.Power.Type != domain.PowerTypeSkill {
+		return fmt.Errorf("filesystem power type %q: %w", journal.Power.Type, ErrInvalidJournal)
+	}
 	for name, path := range map[string]string{
 		"target":          payload.TargetPath,
 		"transaction dir": payload.TransactionDir,

@@ -21,6 +21,9 @@ func newHermesMCPAdapter(runner mcpRunner) *hermesMCPAdapter {
 
 func (adapter *hermesMCPAdapter) Inspect(ctx context.Context, name string) (MCPPresence, error) {
 	result, runErr := adapter.runner.Run(ctx, "hermes", []string{"mcp", "list"}, "")
+	if result.StdoutTruncated || result.StderrTruncated {
+		return inspectTruncated(domain.AgentHermes, name, result)
+	}
 	if runErr != nil {
 		return inspectUnknown(domain.AgentHermes, name, result, runErr)
 	}

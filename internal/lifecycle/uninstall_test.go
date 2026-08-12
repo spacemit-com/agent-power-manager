@@ -225,13 +225,13 @@ func TestNewUninstallRejectsNilDependencies(t *testing.T) {
 }
 
 func TestUninstallAllUsesSnapshotOrderAndDistinctPowerPointers(t *testing.T) {
-	claudeRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	claudeRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 	codexRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}
 	var calls []string
 	service := newUninstallService(t, &calls, uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
 		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentClaudeCode: {domain.PowerTypePlugin: {claudeRef}},
+			domain.AgentClaudeCode: {domain.PowerTypeSkill: {claudeRef}},
 			domain.AgentCodex:      {domain.PowerTypeSkill: {codexRef}},
 		},
 	})

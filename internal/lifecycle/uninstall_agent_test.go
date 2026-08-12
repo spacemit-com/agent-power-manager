@@ -8,10 +8,31 @@ import (
 	"strings"
 	"testing"
 
+	"apm/internal/adapter"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/transaction"
 )
+
+func TestUninstallPluginDoesNotDispatchThroughSkillAdapter(t *testing.T) {
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	var calls []string
+	service := newUninstallService(t, &calls, uninstallFixture{
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		groups: map[domain.AgentID]domain.PowerGroups{
+			domain.AgentCodex: {domain.PowerTypePlugin: {ref}},
+		},
+	})
+
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})
+	if !errors.Is(err, adapter.ErrUnsupportedAdapter) {
+		t.Fatalf("Uninstall() error = %v, want ErrUnsupportedAdapter", err)
+	}
+	assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Power: powerPointer(ref), Outcome: cli.UninstallOutcomeFailed}})
+	if containsEvent(calls, "resolve:codex") || containsEvent(calls, "transaction:uninstall:codex") {
+		t.Fatalf("calls = %v, want no Skill adapter or filesystem transaction", calls)
+	}
+}
 
 func TestUninstallConfigFailureReturnsAgentOnlyFailedAndLaterUnexecutedItems(t *testing.T) {
 	cause := errors.New("read manifest")

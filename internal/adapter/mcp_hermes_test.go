@@ -67,6 +67,7 @@ func TestHermesMCPInspectStrictlyParsesListTable(t *testing.T) {
 		{name: "empty", response: successfulMCPResponse("No MCP servers configured."), want: MCPAbsent},
 		{name: "duplicate", response: successfulMCPResponse("MCP Servers:\nName Transport Tools Status\ndemo npx all enabled\ndemo node all enabled\n"), wantErr: ErrMCPStateUnknown},
 		{name: "missing header", response: successfulMCPResponse("demo npx all enabled\n"), wantErr: ErrMCPStateUnknown},
+		{name: "truncated valid table", response: truncatedMCPResponse("MCP Servers:\nName Transport Tools Status\ndemo npx all enabled\n"), wantErr: ErrMCPStateUnknown},
 		{name: "failure", response: failedMCPResponse("config unreadable"), wantErr: ErrMCPStateUnknown},
 	}
 	for _, tt := range tests {
@@ -87,6 +88,7 @@ func TestHermesMCPInspectStrictlyParsesListTable(t *testing.T) {
 func TestHermesMCPMutationRequiresExplicitSuccessMarker(t *testing.T) {
 	tests := []queuedMCPResponse{
 		successfulMCPResponse("Connected with 3 tools"),
+		truncatedMCPResponse("Saved 'demo' to config"),
 		failedMCPResponse("Failed to connect"),
 	}
 	for index, response := range tests {

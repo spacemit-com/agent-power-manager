@@ -32,7 +32,7 @@ func (s *UninstallService) uninstallOne(ctx context.Context, agent domain.AgentI
 	item := cli.UninstallItem{Agent: agent, Power: &copied}
 	var transactionResult transaction.UninstallResult
 	switch ref.Type {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+	case domain.PowerTypeSkill:
 		transactionResult, err = s.uninstallSkill(ctx, agent, ref)
 	case domain.PowerTypeMCP:
 		transactionResult, err = s.uninstallMCP(ctx, agent, ref)

@@ -18,6 +18,9 @@ func newClaudeMCPAdapter(runner mcpRunner) *claudeMCPAdapter {
 
 func (adapter *claudeMCPAdapter) Inspect(ctx context.Context, name string) (MCPPresence, error) {
 	result, runErr := adapter.runner.Run(ctx, "claude", []string{"mcp", "get", name}, "")
+	if result.StdoutTruncated || result.StderrTruncated {
+		return inspectTruncated(domain.AgentClaudeCode, name, result)
+	}
 	combined := result.Stdout + "\n" + result.Stderr
 	if runErr != nil {
 		if strings.Contains(combined, "No MCP server found with name: "+name) {
@@ -25,19 +28,28 @@ func (adapter *claudeMCPAdapter) Inspect(ctx context.Context, name string) (MCPP
 		}
 		return inspectUnknown(domain.AgentClaudeCode, name, result, runErr)
 	}
-	lines := strings.Split(result.Stdout, "\n")
-	foundName := false
-	foundUserScope := false
-	for _, line := range lines {
-		switch strings.TrimSpace(line) {
-		case name + ":":
-			foundName = true
-		case "Scope: User":
-			foundUserScope = true
+	targetSections := 0
+	targetScopes := 0
+	inTargetSection := false
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasSuffix(trimmed, ":") && strings.Count(trimmed, ":") == 1 {
+			inTargetSection = trimmed == name+":"
+			if inTargetSection {
+				targetSections++
+			}
+			continue
+		}
+		if !inTargetSection || !strings.HasPrefix(trimmed, "Scope:") {
+			continue
+		}
+		targetScopes++
+		if trimmed != "Scope: User" {
+			return inspectUnknown(domain.AgentClaudeCode, name, result, fmt.Errorf("target section has non-user scope %q", trimmed))
 		}
 	}
-	if !foundName || !foundUserScope {
-		return inspectUnknown(domain.AgentClaudeCode, name, result, fmt.Errorf("name or user scope missing"))
+	if targetSections != 1 || targetScopes != 1 {
+		return inspectUnknown(domain.AgentClaudeCode, name, result, fmt.Errorf("target sections=%d scopes=%d", targetSections, targetScopes))
 	}
 	return MCPPresent, nil
 }

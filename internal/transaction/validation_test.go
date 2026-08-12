@@ -44,17 +44,23 @@ func TestValidateInstallRequest(t *testing.T) {
 	}
 
 	tests := map[string]func(*InstallRequest){
-		"empty agent":        func(r *InstallRequest) { r.Agent = "" },
-		"all agents":         func(r *InstallRequest) { r.Agent = domain.AllAgents },
-		"empty name":         func(r *InstallRequest) { r.Power.Name = "" },
-		"empty type":         func(r *InstallRequest) { r.Power.Type = "" },
-		"empty version":      func(r *InstallRequest) { r.Power.Version = "" },
-		"empty staging":      func(r *InstallRequest) { r.StagingRoot = "" },
-		"nil adapter":        func(r *InstallRequest) { r.Adapter = nil },
-		"typed nil adapter":  func(r *InstallRequest) { r.Adapter = (*nilValidationAdapter)(nil) },
-		"previous name":      func(r *InstallRequest) { r.Previous.Name = "other" },
-		"previous type":      func(r *InstallRequest) { r.Previous.Type = domain.PowerTypePlugin },
-		"previous version":   func(r *InstallRequest) { r.Previous.Version = "" },
+		"empty agent":       func(r *InstallRequest) { r.Agent = "" },
+		"all agents":        func(r *InstallRequest) { r.Agent = domain.AllAgents },
+		"empty name":        func(r *InstallRequest) { r.Power.Name = "" },
+		"empty type":        func(r *InstallRequest) { r.Power.Type = "" },
+		"empty version":     func(r *InstallRequest) { r.Power.Version = "" },
+		"empty staging":     func(r *InstallRequest) { r.StagingRoot = "" },
+		"nil adapter":       func(r *InstallRequest) { r.Adapter = nil },
+		"typed nil adapter": func(r *InstallRequest) { r.Adapter = (*nilValidationAdapter)(nil) },
+		"previous name":     func(r *InstallRequest) { r.Previous.Name = "other" },
+		"previous type":     func(r *InstallRequest) { r.Previous.Type = domain.PowerTypePlugin },
+		"previous version":  func(r *InstallRequest) { r.Previous.Version = "" },
+		"plugin power": func(r *InstallRequest) {
+			r.Power.Type, r.Previous.Type = domain.PowerTypePlugin, domain.PowerTypePlugin
+		},
+		"MCP power": func(r *InstallRequest) {
+			r.Power.Type, r.Previous.Type = domain.PowerTypeMCP, domain.PowerTypeMCP
+		},
 		"noncanonical stage": func(r *InstallRequest) { r.StagingRoot += string(filepath.Separator) + ".." },
 	}
 	for name, mutate := range tests {
@@ -80,9 +86,18 @@ func TestValidateUninstallRequest(t *testing.T) {
 	if err := validateUninstallRequest(valid); err != nil {
 		t.Fatalf("validateUninstallRequest(valid) error = %v", err)
 	}
-	valid.Adapter = nil
-	if err := validateUninstallRequest(valid); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("validateUninstallRequest(nil adapter) error = %v", err)
+	for name, mutate := range map[string]func(*UninstallRequest){
+		"nil adapter":  func(r *UninstallRequest) { r.Adapter = nil },
+		"plugin power": func(r *UninstallRequest) { r.Power.Type = domain.PowerTypePlugin },
+		"MCP power":    func(r *UninstallRequest) { r.Power.Type = domain.PowerTypeMCP },
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := valid
+			mutate(&request)
+			if err := validateUninstallRequest(request); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("validateUninstallRequest(nil adapter) error = %v", err)
+			}
+		})
 	}
 }
 
@@ -99,6 +114,12 @@ func TestValidateJournalRejectsUnsafeFields(t *testing.T) {
 		"uninstall publishing": func(j *Journal) { j.Operation, j.Phase = OperationUninstall, PhasePublishing },
 		"install quarantine": func(j *Journal) {
 			j.Filesystem.QuarantinePath = filepath.Join(j.Filesystem.TransactionDir, "quarantine")
+		},
+		"filesystem plugin": func(j *Journal) {
+			j.Power.Type, j.Previous.Type = domain.PowerTypePlugin, domain.PowerTypePlugin
+		},
+		"filesystem MCP": func(j *Journal) {
+			j.Power.Type, j.Previous.Type = domain.PowerTypeMCP, domain.PowerTypeMCP
 		},
 	}
 	for name, mutate := range tests {

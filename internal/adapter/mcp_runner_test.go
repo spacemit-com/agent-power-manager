@@ -38,7 +38,7 @@ printf 'ok'
 	result, err := newDefaultMCPRunner().Run(
 		context.Background(),
 		"codex",
-		[]string{"mcp", "add", "demo", "--", "cmd", "a b", "$HOME", "x;y"},
+		[]string{"mcp", "add", "demo", "--", "cmd", "a b", "$HOME", "x;y", "路径🚀"},
 		"answer\n",
 	)
 	if err != nil {
@@ -54,7 +54,7 @@ printf 'ok'
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantArgv := "mcp\nadd\ndemo\n--\ncmd\na b\n$HOME\nx;y\n"
+	wantArgv := "mcp\nadd\ndemo\n--\ncmd\na b\n$HOME\nx;y\n路径🚀\n"
 	if string(argv) != wantArgv {
 		t.Fatalf("argv = %q, want %q", argv, wantArgv)
 	}
@@ -101,6 +101,9 @@ printf 'abcdefghij' >&2
 	}
 	if result.Stdout != "12345" || result.Stderr != "abcde" {
 		t.Fatalf("bounded output = %q/%q, want 12345/abcde", result.Stdout, result.Stderr)
+	}
+	if !result.StdoutTruncated || !result.StderrTruncated {
+		t.Fatalf("truncation flags = %v/%v, want true/true", result.StdoutTruncated, result.StderrTruncated)
 	}
 }
 
