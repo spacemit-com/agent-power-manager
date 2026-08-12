@@ -74,6 +74,21 @@ func validateMCPInstallRequest(request MCPInstallRequest) error {
 	return nil
 }
 
+func validateMCPUninstallRequest(request MCPUninstallRequest) error {
+	if err := validateAgentAndPower(request.Agent, request.Power); err != nil || request.Power.Type != domain.PowerTypeMCP {
+		return fmt.Errorf("validate MCP uninstall identity: %v: %w", err, ErrInvalidRequest)
+	}
+	if isNilInterface(request.Adapter) {
+		return fmt.Errorf("validate MCP uninstall request: nil adapter: %w", ErrInvalidRequest)
+	}
+	if request.Server != nil {
+		if err := request.Server.Validate(); err != nil {
+			return fmt.Errorf("validate MCP uninstall server: %v: %w", err, ErrInvalidRequest)
+		}
+	}
+	return nil
+}
+
 func isNilInterface(value any) bool {
 	if value == nil {
 		return true
@@ -239,7 +254,7 @@ func validInstallPhase(phase Phase) bool {
 }
 
 func validMCPInstallPhase(phase Phase) bool {
-	return phase == PhasePreparing || phase == PhaseRemovingOld || phase == PhaseAddingNew || phase == PhaseRollingBack || phase == PhaseCommitting
+	return phase == PhaseRemovingOld || phase == PhaseAddingNew || phase == PhaseRollingBack || phase == PhaseCommitting
 }
 
 func validUninstallPhase(phase Phase) bool {

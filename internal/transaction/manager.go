@@ -16,6 +16,12 @@ type Manager interface {
 	Install(context.Context, InstallRequest) error
 	InstallMCP(context.Context, MCPInstallRequest) error
 	Uninstall(context.Context, UninstallRequest) (UninstallResult, error)
+	UninstallMCP(context.Context, MCPUninstallRequest) (UninstallResult, error)
+}
+
+// MCPAdapterResolver 根据 journal 中的 Agent 动态解析恢复所需的 MCP Adapter。
+type MCPAdapterResolver interface {
+	ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error)
 }
 
 // InstallRequest 描述单个 Agent 的已解析安装事务输入。
@@ -44,6 +50,14 @@ type UninstallRequest struct {
 	Adapter adapter.Adapter
 }
 
+// MCPUninstallRequest 描述单个 Agent 的 MCP 卸载输入；Server 仅在 CLI 确认注册存在时必需。
+type MCPUninstallRequest struct {
+	Agent   domain.AgentID
+	Power   domain.PowerRef
+	Server  *domain.MCPServer
+	Adapter adapter.MCPAdapter
+}
+
 // UninstallResult 描述卸载事务已确认的目标状态；该事实可与后续错误同时返回。
 type UninstallResult struct {
 	TargetMissing bool
@@ -57,34 +71,42 @@ type ManifestWriter interface {
 
 // Service 实现集中 journal 驱动的事务管理。
 type Service struct {
-	manifests ManifestWriter
-	journals  JournalStore
-	files     fileOps
-	newID     func() (string, error)
+	manifests   ManifestWriter
+	journals    JournalStore
+	mcpAdapters MCPAdapterResolver
+	files       fileOps
+	newID       func() (string, error)
 }
 
 // newService 创建可注入存储与文件操作的事务服务。
-func newService(manifests ManifestWriter, journals JournalStore) *Service {
-	return &Service{
+func newService(manifests ManifestWriter, journals JournalStore, mcpAdapters ...MCPAdapterResolver) *Service {
+	service := &Service{
 		manifests: manifests,
 		journals:  journals,
 		files:     defaultFileOps(),
 		newID:     newTransactionID,
 	}
+	if len(mcpAdapters) != 0 {
+		service.mcpAdapters = mcpAdapters[0]
+	}
+	return service
 }
 
 var _ Manager = (*Service)(nil)
 
 // NewManager 创建使用集中事务日志的默认事务管理器。
-func NewManager(manifests ManifestWriter) (*Service, error) {
+func NewManager(manifests ManifestWriter, mcpAdapters MCPAdapterResolver) (*Service, error) {
 	if isNilInterface(manifests) {
 		return nil, fmt.Errorf("create transaction manager with nil manifest writer: %w", ErrInvalidRequest)
+	}
+	if isNilInterface(mcpAdapters) {
+		return nil, fmt.Errorf("create transaction manager with nil MCP adapter resolver: %w", ErrInvalidRequest)
 	}
 	journalPath, err := paths.JournalPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve journal path: %w", err)
 	}
-	return newService(manifests, newFilesystemJournalStore(journalPath)), nil
+	return newService(manifests, newFilesystemJournalStore(journalPath), mcpAdapters), nil
 }
 
 type fileOps struct {

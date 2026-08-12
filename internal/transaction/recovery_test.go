@@ -383,7 +383,8 @@ func TestNewManagerUsesCentralJournal(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
 	events := []string{}
-	manager, err := NewManager(&recordingManifestWriter{events: &events})
+	resolver := &recordingMCPResolver{events: &events, err: errors.New("unused")}
+	manager, err := NewManager(&recordingManifestWriter{events: &events}, resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +397,7 @@ func TestNewManagerUsesCentralJournal(t *testing.T) {
 }
 
 func TestNewManagerRejectsNilManifestWriter(t *testing.T) {
-	if _, err := NewManager(nil); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := NewManager(nil, nil); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("NewManager(nil) error = %v", err)
 	}
 }

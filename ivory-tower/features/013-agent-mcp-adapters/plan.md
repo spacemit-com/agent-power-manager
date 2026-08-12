@@ -490,7 +490,7 @@ Run: `go test ./internal/transaction -run 'MCPInstall' -count=1 && go test ./int
 
 Expected: PASS with filesystem transaction regressions green.
 
-- [ ] **Step 7: Commit MCP install transactions**
+- [x] **Step 7: Commit MCP install transactions**
 
 ```bash
 git add internal/transaction
@@ -515,7 +515,7 @@ git commit -m "feat(mcp): add recoverable install transactions"
 - Consumes: narrow `MCPAdapterResolver.ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error)` held by `Service` for recovery.
 - Preserves: `Manager.Recover(context.Context) (RecoveryResult, error)` as the single recovery entry point.
 
-- [ ] **Step 1: Write failing MCP uninstall tests**
+- [x] **Step 1: Write failing MCP uninstall tests**
 
 Prove present order `journal:create(removing) → adapter:remove → journal:update(committing) → manifest:remove → journal:delete`. Cover applied/not-applied/unknown, manifest/delete failure, context cancellation, and applied plus error.
 
@@ -534,11 +534,11 @@ if journals.created || mcpAdapter.removeCalls != 0 {
 
 Also prove an Inspect error leaves both config and manifest unchanged.
 
-- [ ] **Step 2: Implement MCP uninstall transaction flow**
+- [x] **Step 2: Implement MCP uninstall transaction flow**
 
 Validate/Inspect before journal creation. The absent branch removes only the MCP entry and preserves `TargetMissing=true` even if the manifest removal returns an error. The present branch requires a valid Server, journals removing intent, and uses mutation state to commit, roll back without change, or retain unknown state.
 
-- [ ] **Step 3: Write failing phase-table recovery tests**
+- [x] **Step 3: Write failing phase-table recovery tests**
 
 Use table cases with a fresh Manager and resolver:
 
@@ -558,21 +558,21 @@ Use table cases with a fresh Manager and resolver:
 
 Assert RecoveryResult driver-independent fields, direction, original phase, and new MCP action kinds.
 
-- [ ] **Step 4: Add cross-type and resolver failure tests**
+- [x] **Step 4: Add cross-type and resolver failure tests**
 
 Prove a Manager recovers a schema v1/v2 filesystem journal when an MCP resolver is installed, recovers an MCP journal before a simulated Skill operation, rejects a second active journal, dynamically calls ResolveMCP with the journal Agent, and retains the journal when the resolver or CLI is unavailable.
 
-- [ ] **Step 5: Run recovery tests and verify they fail**
+- [x] **Step 5: Run recovery tests and verify they fail**
 
 Run: `go test ./internal/transaction -run 'MCPUninstall|MCPRecovery|CrossType' -count=1`
 
 Expected: FAIL because MCP recovery routing is missing.
 
-- [ ] **Step 6: Implement driver-based Recover routing**
+- [x] **Step 6: Implement driver-based Recover routing**
 
 Keep filesystem logic in `recovery.go`; dispatch `DriverAgentCLI` to `recoverMCP`. Persist committing/rolling-back before recovery writes, use only the resolver and journal definitions, append structured MCP Add/Remove/Set/Remove actions, and delete the shared journal only after convergence.
 
-- [ ] **Step 7: Change NewManager to require the recovery resolver**
+- [x] **Step 7: Change NewManager to require the recovery resolver**
 
 Use the exact signature:
 
@@ -582,7 +582,7 @@ func NewManager(manifests ManifestWriter, mcpAdapters MCPAdapterResolver) (*Serv
 
 Reject nil and typed-nil dependencies. Update transaction unit fixtures with a recording resolver; production composition is handled in Task 9.
 
-- [ ] **Step 8: Run all transaction tests including race**
+- [x] **Step 8: Run all transaction tests including race**
 
 Run: `go test ./internal/transaction -count=1 && go test -race ./internal/transaction -count=1`
 

@@ -33,6 +33,13 @@ func (s *Service) Recover(ctx context.Context) (RecoveryResult, error) {
 	if err := ctx.Err(); err != nil {
 		return result, recoveryError(err)
 	}
+	if journal.Driver == DriverAgentCLI {
+		if err := s.recoverMCP(ctx, journal, &result); err != nil {
+			return result, recoveryError(err)
+		}
+		result.Recovered = true
+		return result, nil
+	}
 	state, err := inspectPathState(journal)
 	if err != nil {
 		return result, recoveryError(err)
