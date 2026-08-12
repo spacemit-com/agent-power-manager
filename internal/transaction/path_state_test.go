@@ -9,16 +9,16 @@ import (
 
 func TestInspectPathStateReportsFilesystemEntries(t *testing.T) {
 	journal := validInstallJournal(t)
-	if err := os.MkdirAll(journal.TargetPath, 0o755); err != nil {
+	if err := os.MkdirAll(journal.Filesystem.TargetPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(journal.BackupPath), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(journal.Filesystem.BackupPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(journal.BackupPath, []byte("backup"), 0o600); err != nil {
+	if err := os.WriteFile(journal.Filesystem.BackupPath, []byte("backup"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(journal.StagingRoot, 0o755); err != nil {
+	if err := os.MkdirAll(journal.Filesystem.StagingRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 

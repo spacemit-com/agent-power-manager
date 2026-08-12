@@ -68,6 +68,7 @@ func (s *Service) Recover(ctx context.Context) (RecoveryResult, error) {
 
 // recoverInstallRollback 按固定回滚方向恢复安装事务。
 func (s *Service) recoverInstallRollback(ctx context.Context, journal Journal, state PathState, result *RecoveryResult) error {
+	filesystem := journal.Filesystem
 	if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 		return err
 	}
@@ -78,10 +79,10 @@ func (s *Service) recoverInstallRollback(ctx context.Context, journal Journal, s
 		if state.TargetExists {
 			return fmt.Errorf("install target and backup both exist during rollback: %w", ErrIndeterminateState)
 		}
-		if err := s.files.rename(journal.BackupPath, journal.TargetPath); err != nil {
-			return fmt.Errorf("restore install backup %q to %q: %w", journal.BackupPath, journal.TargetPath, err)
+		if err := s.files.rename(filesystem.BackupPath, filesystem.TargetPath); err != nil {
+			return fmt.Errorf("restore install backup %q to %q: %w", filesystem.BackupPath, filesystem.TargetPath, err)
 		}
-		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRestoreTarget, Path: journal.TargetPath})
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRestoreTarget, Path: filesystem.TargetPath})
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -94,8 +95,9 @@ func (s *Service) recoverInstallRollback(ctx context.Context, journal Journal, s
 
 // recoverInstallCommit 按固定提交方向完成安装事务。
 func (s *Service) recoverInstallCommit(ctx context.Context, journal Journal, state PathState, result *RecoveryResult) error {
+	filesystem := journal.Filesystem
 	if !state.TargetExists {
-		return fmt.Errorf("committed install target %q is missing: %w", journal.TargetPath, ErrIndeterminateState)
+		return fmt.Errorf("committed install target %q is missing: %w", filesystem.TargetPath, ErrIndeterminateState)
 	}
 	if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
 		return err
@@ -111,10 +113,10 @@ func (s *Service) recoverInstallCommit(ctx context.Context, journal Journal, sta
 		return err
 	}
 	if state.BackupExists {
-		if err := s.files.removeAll(journal.BackupPath); err != nil {
-			return fmt.Errorf("remove recovered install backup %q: %w", journal.BackupPath, err)
+		if err := s.files.removeAll(filesystem.BackupPath); err != nil {
+			return fmt.Errorf("remove recovered install backup %q: %w", filesystem.BackupPath, err)
 		}
-		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveBackup, Path: journal.BackupPath})
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveBackup, Path: filesystem.BackupPath})
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -123,7 +125,7 @@ func (s *Service) recoverInstallCommit(ctx context.Context, journal Journal, sta
 		if err := cleanupCommittedStagingWithOps(journal, s.files); err != nil {
 			return err
 		}
-		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveStaging, Path: journal.StagingRoot})
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveStaging, Path: filesystem.StagingRoot})
 	}
 	if err := s.cleanupRecoveredTransactionDir(journal, result); err != nil {
 		return err
@@ -133,6 +135,7 @@ func (s *Service) recoverInstallCommit(ctx context.Context, journal Journal, sta
 
 // recoverUninstallRollback 按固定回滚方向恢复卸载事务。
 func (s *Service) recoverUninstallRollback(ctx context.Context, journal Journal, state PathState, result *RecoveryResult) error {
+	filesystem := journal.Filesystem
 	if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 		return err
 	}
@@ -143,10 +146,10 @@ func (s *Service) recoverUninstallRollback(ctx context.Context, journal Journal,
 		if state.TargetExists {
 			return fmt.Errorf("uninstall target and quarantine both exist during rollback: %w", ErrIndeterminateState)
 		}
-		if err := s.files.rename(journal.QuarantinePath, journal.TargetPath); err != nil {
-			return fmt.Errorf("restore uninstall quarantine %q to %q: %w", journal.QuarantinePath, journal.TargetPath, err)
+		if err := s.files.rename(filesystem.QuarantinePath, filesystem.TargetPath); err != nil {
+			return fmt.Errorf("restore uninstall quarantine %q to %q: %w", filesystem.QuarantinePath, filesystem.TargetPath, err)
 		}
-		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRestoreTarget, Path: journal.TargetPath})
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRestoreTarget, Path: filesystem.TargetPath})
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -159,6 +162,7 @@ func (s *Service) recoverUninstallRollback(ctx context.Context, journal Journal,
 
 // recoverUninstallCommit 按固定提交方向完成卸载事务。
 func (s *Service) recoverUninstallCommit(ctx context.Context, journal Journal, state PathState, result *RecoveryResult) error {
+	filesystem := journal.Filesystem
 	if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
 		return err
 	}
@@ -173,10 +177,10 @@ func (s *Service) recoverUninstallCommit(ctx context.Context, journal Journal, s
 		return err
 	}
 	if state.QuarantineExists {
-		if err := s.files.removeAll(journal.QuarantinePath); err != nil {
-			return fmt.Errorf("remove recovered uninstall quarantine %q: %w", journal.QuarantinePath, err)
+		if err := s.files.removeAll(filesystem.QuarantinePath); err != nil {
+			return fmt.Errorf("remove recovered uninstall quarantine %q: %w", filesystem.QuarantinePath, err)
 		}
-		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveQuarantine, Path: journal.QuarantinePath})
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveQuarantine, Path: filesystem.QuarantinePath})
 	}
 	if err := s.cleanupRecoveredTransactionDir(journal, result); err != nil {
 		return err
@@ -198,15 +202,16 @@ func (s *Service) persistRecoveryDirection(journal *Journal, phase Phase) error 
 
 // cleanupRecoveredTransactionDir 仅清理 journal 所属的事务产物目录。
 func (s *Service) cleanupRecoveredTransactionDir(journal Journal, result *RecoveryResult) error {
-	exists, err := s.pathExists(journal.TransactionDir)
+	transactionDir := journal.Filesystem.TransactionDir
+	exists, err := s.pathExists(transactionDir)
 	if err != nil {
-		return fmt.Errorf("inspect recovered transaction directory %q: %w", journal.TransactionDir, err)
+		return fmt.Errorf("inspect recovered transaction directory %q: %w", transactionDir, err)
 	}
 	if err := cleanupTransactionDirWithOps(journal, s.files); err != nil {
 		return err
 	}
 	if exists {
-		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveTransactionDir, Path: journal.TransactionDir})
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveTransactionDir, Path: transactionDir})
 	}
 	return nil
 }
@@ -220,8 +225,9 @@ func (s *Service) deleteRecoveredJournal(journal Journal) error {
 
 // validateRecoveryArtifacts 拒绝通过符号链接或非目录访问恢复产物。
 func (s *Service) validateRecoveryArtifacts(journal Journal) error {
-	root := filepath.Dir(journal.TransactionDir)
-	for _, path := range []string{root, journal.TransactionDir} {
+	transactionDir := journal.Filesystem.TransactionDir
+	root := filepath.Dir(transactionDir)
+	for _, path := range []string{root, transactionDir} {
 		info, err := s.files.lstat(path)
 		switch {
 		case errors.Is(err, os.ErrNotExist):

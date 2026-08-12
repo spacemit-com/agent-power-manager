@@ -85,7 +85,7 @@ func cleanupTransactionDirWithOps(journal Journal, files fileOps) error {
 	if err := validateJournal(journal); err != nil {
 		return err
 	}
-	artifacts, err := artifactPaths(journal.TargetPath, journal.TransactionID)
+	artifacts, err := artifactPaths(journal.Filesystem.TargetPath, journal.TransactionID)
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func cleanupCommittedStagingWithOps(journal Journal, files fileOps) error {
 	if journal.Operation != OperationInstall {
 		return fmt.Errorf("cleanup staging for operation %q: %w", journal.Operation, ErrUnsafePath)
 	}
-	return cleanupInstallStagingWithOps(journal.StagingRoot, journal.TargetPath, files)
+	return cleanupInstallStagingWithOps(journal.Filesystem.StagingRoot, journal.Filesystem.TargetPath, files)
 }
 
 func cleanupInstallStagingWithOps(stagingRoot, targetPath string, files fileOps) error {

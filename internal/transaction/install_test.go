@@ -365,7 +365,7 @@ func TestInstallRollbackDirectionFailureDoesNotRestoreUnderPublishing(t *testing
 	if _, statErr := os.Lstat(fixture.target); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("target restored under stale phase: %v", statErr)
 	}
-	if _, statErr := os.Stat(fixture.journals.journal.BackupPath); statErr != nil {
+	if _, statErr := os.Stat(fixture.journals.journal.Filesystem.BackupPath); statErr != nil {
 		t.Fatalf("backup not preserved: %v", statErr)
 	}
 }
@@ -471,7 +471,7 @@ func TestInstallRestoreFailurePreservesRollingBackJournal(t *testing.T) {
 	if !fixture.journals.found || fixture.journals.journal.Phase != PhaseRollingBack {
 		t.Fatalf("journal = %+v", fixture.journals.journal)
 	}
-	if _, statErr := os.Stat(fixture.journals.journal.BackupPath); statErr != nil {
+	if _, statErr := os.Stat(fixture.journals.journal.Filesystem.BackupPath); statErr != nil {
 		t.Fatalf("backup missing: %v", statErr)
 	}
 }
@@ -485,7 +485,7 @@ func TestInstallBackupCleanupFailurePreservesCommittingJournal(t *testing.T) {
 	}
 	cleanupErr := errors.New("backup cleanup failed")
 	fixture.service.files.removeAll = func(path string) error {
-		if path == fixture.journals.journal.BackupPath {
+		if path == fixture.journals.journal.Filesystem.BackupPath {
 			return cleanupErr
 		}
 		return os.RemoveAll(path)

@@ -69,17 +69,20 @@ func (s *Service) Install(ctx context.Context, request InstallRequest) error {
 		return err
 	}
 	journal := Journal{
-		SchemaVersion:  1,
-		TransactionID:  transactionID,
-		Operation:      OperationInstall,
-		Phase:          PhasePreparing,
-		Agent:          request.Agent,
-		Power:          request.Power,
-		Previous:       clonePowerRef(request.Previous),
-		StagingRoot:    request.StagingRoot,
-		TargetPath:     target,
-		TransactionDir: artifacts.dir,
-		BackupPath:     artifacts.backup,
+		SchemaVersion: 2,
+		TransactionID: transactionID,
+		Driver:        DriverFilesystem,
+		Operation:     OperationInstall,
+		Phase:         PhasePreparing,
+		Agent:         request.Agent,
+		Power:         request.Power,
+		Previous:      clonePowerRef(request.Previous),
+		Filesystem: &FilesystemJournalPayload{
+			StagingRoot:    request.StagingRoot,
+			TargetPath:     target,
+			TransactionDir: artifacts.dir,
+			BackupPath:     artifacts.backup,
+		},
 	}
 	if err := s.journals.Create(journal); err != nil {
 		return fmt.Errorf("create install journal: %w", err)
@@ -152,20 +155,21 @@ func (s *Service) rollbackInstall(journal Journal, originalErr error) error {
 	if err := s.journals.Update(journal); err != nil {
 		return errors.Join(originalErr, fmt.Errorf("persist install rollback direction: %w", err))
 	}
-	backupExists, err := s.pathExists(journal.BackupPath)
+	filesystem := journal.Filesystem
+	backupExists, err := s.pathExists(filesystem.BackupPath)
 	if err != nil {
-		return errors.Join(originalErr, fmt.Errorf("inspect install backup %q: %w", journal.BackupPath, err))
+		return errors.Join(originalErr, fmt.Errorf("inspect install backup %q: %w", filesystem.BackupPath, err))
 	}
 	if backupExists {
-		targetExists, err := s.pathExists(journal.TargetPath)
+		targetExists, err := s.pathExists(filesystem.TargetPath)
 		if err != nil {
-			return errors.Join(originalErr, fmt.Errorf("inspect rollback target %q: %w", journal.TargetPath, err))
+			return errors.Join(originalErr, fmt.Errorf("inspect rollback target %q: %w", filesystem.TargetPath, err))
 		}
 		if targetExists {
 			return errors.Join(originalErr, fmt.Errorf("rollback target and backup both exist: %w", ErrIndeterminateState))
 		}
-		if err := s.files.rename(journal.BackupPath, journal.TargetPath); err != nil {
-			return errors.Join(originalErr, fmt.Errorf("restore install backup %q to %q: %w", journal.BackupPath, journal.TargetPath, err))
+		if err := s.files.rename(filesystem.BackupPath, filesystem.TargetPath); err != nil {
+			return errors.Join(originalErr, fmt.Errorf("restore install backup %q to %q: %w", filesystem.BackupPath, filesystem.TargetPath, err))
 		}
 	}
 	if err := cleanupTransactionDirWithOps(journal, s.files); err != nil {

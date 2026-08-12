@@ -56,7 +56,7 @@ func TestFilesystemJournalStoreRejectsInvalidDocuments(t *testing.T) {
 		"invalid JSON":   `{`,
 		"trailing JSON":  validJournalJSON(t) + ` {}`,
 		"unknown field":  strings.Replace(validJournalJSON(t), `"phase"`, `"unknown":true,"phase"`, 1),
-		"unknown schema": strings.Replace(validJournalJSON(t), `"schema_version": 1`, `"schema_version": 2`, 1),
+		"unknown schema": strings.Replace(validJournalJSON(t), `"schema_version": 1`, `"schema_version": 3`, 1),
 	}
 	for name, contents := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -261,7 +261,10 @@ func assertPermission(t *testing.T, path string, want os.FileMode) {
 
 func validJournalJSON(t *testing.T) string {
 	t.Helper()
-	journal := validInstallJournal(t)
+	return legacyJournalJSON(validInstallJournal(t))
+}
+
+func legacyJournalJSON(journal Journal) string {
 	return `{
   "schema_version": 1,
   "transaction_id": "` + journal.TransactionID + `",
@@ -270,9 +273,9 @@ func validJournalJSON(t *testing.T) string {
   "agent": "codex",
   "power": {"Name":"demo","Type":"skill","Version":"2.0.0"},
   "previous": {"Name":"demo","Type":"skill","Version":"1.0.0"},
-  "staging_root": "` + journal.StagingRoot + `",
-  "target_path": "` + journal.TargetPath + `",
-  "transaction_dir": "` + journal.TransactionDir + `",
-  "backup_path": "` + journal.BackupPath + `"
+	"staging_root": "` + journal.Filesystem.StagingRoot + `",
+	"target_path": "` + journal.Filesystem.TargetPath + `",
+	"transaction_dir": "` + journal.Filesystem.TransactionDir + `",
+	"backup_path": "` + journal.Filesystem.BackupPath + `"
 }`
 }

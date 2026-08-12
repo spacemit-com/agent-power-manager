@@ -21,15 +21,16 @@ func InspectPathState(journal Journal) (PathState, error) {
 
 func inspectPathState(journal Journal) (PathState, error) {
 	var state PathState
+	filesystem := journal.Filesystem
 	checks := []struct {
 		name   string
 		path   string
 		exists *bool
 	}{
-		{name: "staging", path: journal.StagingRoot, exists: &state.StagingExists},
-		{name: "target", path: journal.TargetPath, exists: &state.TargetExists},
-		{name: "backup", path: journal.BackupPath, exists: &state.BackupExists},
-		{name: "quarantine", path: journal.QuarantinePath, exists: &state.QuarantineExists},
+		{name: "staging", path: filesystem.StagingRoot, exists: &state.StagingExists},
+		{name: "target", path: filesystem.TargetPath, exists: &state.TargetExists},
+		{name: "backup", path: filesystem.BackupPath, exists: &state.BackupExists},
+		{name: "quarantine", path: filesystem.QuarantinePath, exists: &state.QuarantineExists},
 	}
 	for _, check := range checks {
 		if check.path == "" {

@@ -94,7 +94,7 @@ func TestEnsureTransactionDirRejectsNonDirectoryRoot(t *testing.T) {
 
 func TestCleanupTransactionDirRejectsSymlinkTransactionID(t *testing.T) {
 	journal := validInstallJournal(t)
-	root := filepath.Dir(journal.TransactionDir)
+	root := filepath.Dir(journal.Filesystem.TransactionDir)
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestCleanupTransactionDirRejectsSymlinkTransactionID(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(external, journal.TransactionDir); err != nil {
+	if err := os.Symlink(external, journal.Filesystem.TransactionDir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,10 +117,10 @@ func TestCleanupTransactionDirRejectsSymlinkTransactionID(t *testing.T) {
 
 func TestCleanupTransactionDirPreservesNonemptySharedRoot(t *testing.T) {
 	journal := validInstallJournal(t)
-	if err := os.MkdirAll(journal.TransactionDir, 0o700); err != nil {
+	if err := os.MkdirAll(journal.Filesystem.TransactionDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	shared := filepath.Dir(journal.TransactionDir)
+	shared := filepath.Dir(journal.Filesystem.TransactionDir)
 	other := filepath.Join(shared, "ffeeddccbbaa99887766554433221100")
 	if err := os.Mkdir(other, 0o700); err != nil {
 		t.Fatal(err)
@@ -131,41 +131,41 @@ func TestCleanupTransactionDirPreservesNonemptySharedRoot(t *testing.T) {
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("other transaction removed: %v", err)
 	}
-	if _, err := os.Stat(journal.TransactionDir); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(journal.Filesystem.TransactionDir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("current transaction remains: %v", err)
 	}
 }
 
 func TestCleanupCommittedStagingRemovesCanonicalDisjointRoot(t *testing.T) {
 	journal := validInstallJournal(t)
-	if err := os.MkdirAll(journal.TargetPath, 0o755); err != nil {
+	if err := os.MkdirAll(journal.Filesystem.TargetPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(journal.StagingRoot, 0o755); err != nil {
+	if err := os.MkdirAll(journal.Filesystem.StagingRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(journal.StagingRoot, "stale"), []byte("stale"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(journal.Filesystem.StagingRoot, "stale"), []byte("stale"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := cleanupCommittedStaging(journal); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(journal.StagingRoot); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(journal.Filesystem.StagingRoot); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("staging remains: %v", err)
 	}
 }
 
 func TestCleanupCommittedStagingRejectsPhysicalTargetOverlap(t *testing.T) {
 	journal := validInstallJournal(t)
-	journal.TargetPath = filepath.Join(journal.StagingRoot, "agent", "skills", "demo")
-	dir := filepath.Join(filepath.Dir(journal.TargetPath), ".apm-transactions", journal.TransactionID)
-	journal.TransactionDir = dir
-	journal.BackupPath = filepath.Join(dir, "backup")
-	if err := os.MkdirAll(journal.TargetPath, 0o755); err != nil {
+	journal.Filesystem.TargetPath = filepath.Join(journal.Filesystem.StagingRoot, "agent", "skills", "demo")
+	dir := filepath.Join(filepath.Dir(journal.Filesystem.TargetPath), ".apm-transactions", journal.TransactionID)
+	journal.Filesystem.TransactionDir = dir
+	journal.Filesystem.BackupPath = filepath.Join(dir, "backup")
+	if err := os.MkdirAll(journal.Filesystem.TargetPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	sentinel := filepath.Join(journal.StagingRoot, "sentinel")
+	sentinel := filepath.Join(journal.Filesystem.StagingRoot, "sentinel")
 	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -180,15 +180,15 @@ func TestCleanupCommittedStagingRejectsPhysicalTargetOverlap(t *testing.T) {
 
 func TestCleanupCommittedStagingRejectsStagingWithinTarget(t *testing.T) {
 	journal := validInstallJournal(t)
-	target := filepath.Dir(filepath.Dir(journal.StagingRoot))
-	journal.TargetPath = target
+	target := filepath.Dir(filepath.Dir(journal.Filesystem.StagingRoot))
+	journal.Filesystem.TargetPath = target
 	dir := filepath.Join(filepath.Dir(target), ".apm-transactions", journal.TransactionID)
-	journal.TransactionDir = dir
-	journal.BackupPath = filepath.Join(dir, "backup")
-	if err := os.MkdirAll(journal.StagingRoot, 0o755); err != nil {
+	journal.Filesystem.TransactionDir = dir
+	journal.Filesystem.BackupPath = filepath.Join(dir, "backup")
+	if err := os.MkdirAll(journal.Filesystem.StagingRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	sentinel := filepath.Join(journal.StagingRoot, "sentinel")
+	sentinel := filepath.Join(journal.Filesystem.StagingRoot, "sentinel")
 	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}

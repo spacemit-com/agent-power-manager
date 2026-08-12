@@ -162,22 +162,46 @@ func (s *filesystemJournalStore) writeAtomic(journal Journal) (resultErr error) 
 }
 
 func decodeJournal(contents []byte) (Journal, error) {
-	decoder := json.NewDecoder(bytes.NewReader(contents))
-	decoder.DisallowUnknownFields()
-	var journal Journal
-	if err := decoder.Decode(&journal); err != nil {
-		return Journal{}, fmt.Errorf("decode JSON: %w: %w", err, ErrInvalidJournal)
+	var probe struct {
+		SchemaVersion int `json:"schema_version"`
 	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("unexpected second JSON value")
+	if err := json.Unmarshal(contents, &probe); err != nil {
+		return Journal{}, fmt.Errorf("decode schema: %w: %w", err, ErrInvalidJournal)
+	}
+	var journal Journal
+	switch probe.SchemaVersion {
+	case 1:
+		var legacy legacyFilesystemJournal
+		if err := decodeExactJSON(contents, &legacy); err != nil {
+			return Journal{}, err
 		}
-		return Journal{}, fmt.Errorf("decode trailing JSON: %w: %w", err, ErrInvalidJournal)
+		journal = legacy.normalize()
+	case 2:
+		if err := decodeExactJSON(contents, &journal); err != nil {
+			return Journal{}, err
+		}
+	default:
+		return Journal{}, fmt.Errorf("schema version %d: %w", probe.SchemaVersion, ErrInvalidJournal)
 	}
 	if err := validateJournal(journal); err != nil {
 		return Journal{}, err
 	}
 	return journal, nil
+}
+
+func decodeExactJSON(contents []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("decode JSON: %w: %w", err, ErrInvalidJournal)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("unexpected second JSON value")
+		}
+		return fmt.Errorf("decode trailing JSON: %w: %w", err, ErrInvalidJournal)
+	}
+	return nil
 }
 
 func syncDirectory(path string) error {

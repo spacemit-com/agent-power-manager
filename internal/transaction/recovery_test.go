@@ -41,21 +41,24 @@ func newRecoveryFixture(t *testing.T, operation Operation, phase Phase) *recover
 		t.Fatal(err)
 	}
 	journal := Journal{
-		SchemaVersion:  1,
-		TransactionID:  id,
-		Operation:      operation,
-		Phase:          phase,
-		Agent:          domain.AgentCodex,
-		Power:          domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "2.0.0"},
-		TargetPath:     target,
-		TransactionDir: artifacts.dir,
+		SchemaVersion: 2,
+		TransactionID: id,
+		Driver:        DriverFilesystem,
+		Operation:     operation,
+		Phase:         phase,
+		Agent:         domain.AgentCodex,
+		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "2.0.0"},
+		Filesystem: &FilesystemJournalPayload{
+			TargetPath:     target,
+			TransactionDir: artifacts.dir,
+		},
 	}
 	if operation == OperationInstall {
 		journal.Previous = powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"})
-		journal.StagingRoot = staging
-		journal.BackupPath = artifacts.backup
+		journal.Filesystem.StagingRoot = staging
+		journal.Filesystem.BackupPath = artifacts.backup
 	} else {
-		journal.QuarantinePath = artifacts.quarantine
+		journal.Filesystem.QuarantinePath = artifacts.quarantine
 	}
 	fixture := &recoveryFixture{t: t, home: home, target: target, staging: staging, journalPath: journalPath, journal: journal}
 	fixture.manifests = &recordingManifestWriter{events: &fixture.events}
@@ -102,7 +105,7 @@ func TestRecoverWithoutJournalReturnsZeroResult(t *testing.T) {
 func TestRecoverPublishingInstallWithTargetCompletesCommitWithoutAdapter(t *testing.T) {
 	fixture := newRecoveryFixture(t, OperationInstall, PhasePublishing)
 	fixture.writePath(fixture.target, "new")
-	fixture.writePath(fixture.journal.BackupPath, "old")
+	fixture.writePath(fixture.journal.Filesystem.BackupPath, "old")
 	fixture.writePath(fixture.staging, "staging")
 	fixture.persist()
 
@@ -116,7 +119,7 @@ func TestRecoverPublishingInstallWithTargetCompletesCommitWithoutAdapter(t *test
 	if _, err := os.Stat(fixture.target); err != nil {
 		t.Fatalf("target missing: %v", err)
 	}
-	if _, err := os.Lstat(fixture.journal.BackupPath); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(fixture.journal.Filesystem.BackupPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("backup remains: %v", err)
 	}
 	fixture.assertJournalAbsent()
@@ -124,7 +127,7 @@ func TestRecoverPublishingInstallWithTargetCompletesCommitWithoutAdapter(t *test
 
 func TestRecoverPublishingInstallWithoutTargetRollsBackBackup(t *testing.T) {
 	fixture := newRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writePath(fixture.journal.BackupPath, "old")
+	fixture.writePath(fixture.journal.Filesystem.BackupPath, "old")
 	fixture.persist()
 
 	result, err := fixture.freshService().Recover(context.Background())
@@ -193,7 +196,7 @@ func TestRecoverUninstallDirectionsConverge(t *testing.T) {
 				fixture.writePath(fixture.target, "installed")
 			}
 			if test.quarantine {
-				fixture.writePath(fixture.journal.QuarantinePath, "installed")
+				fixture.writePath(fixture.journal.Filesystem.QuarantinePath, "installed")
 			}
 			fixture.persist()
 
@@ -217,7 +220,7 @@ func TestRecoverUninstallDirectionsConverge(t *testing.T) {
 func TestRecoverContradictoryPathsFailsClosed(t *testing.T) {
 	fixture := newRecoveryFixture(t, OperationUninstall, PhaseRemoving)
 	fixture.writePath(fixture.target, "external")
-	fixture.writePath(fixture.journal.QuarantinePath, "installed")
+	fixture.writePath(fixture.journal.Filesystem.QuarantinePath, "installed")
 	fixture.persist()
 
 	result, err := fixture.freshService().Recover(context.Background())
@@ -234,7 +237,7 @@ func TestRecoverContradictoryPathsFailsClosed(t *testing.T) {
 
 func TestRecoverCancellationPreservesJournalBeforeMutation(t *testing.T) {
 	fixture := newRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writePath(fixture.journal.BackupPath, "old")
+	fixture.writePath(fixture.journal.Filesystem.BackupPath, "old")
 	fixture.persist()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -243,7 +246,7 @@ func TestRecoverCancellationPreservesJournalBeforeMutation(t *testing.T) {
 	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
-	if _, statErr := os.Stat(fixture.journal.BackupPath); statErr != nil {
+	if _, statErr := os.Stat(fixture.journal.Filesystem.BackupPath); statErr != nil {
 		t.Fatalf("backup changed: %v", statErr)
 	}
 	if _, statErr := os.Stat(fixture.journalPath); statErr != nil {
@@ -272,7 +275,7 @@ func TestRecoverCorruptJournalFailsClosed(t *testing.T) {
 func TestRecoverSymlinkTransactionRootFailsClosed(t *testing.T) {
 	fixture := newRecoveryFixture(t, OperationUninstall, PhaseCommitting)
 	external := t.TempDir()
-	root := filepath.Dir(fixture.journal.TransactionDir)
+	root := filepath.Dir(fixture.journal.Filesystem.TransactionDir)
 	if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +310,7 @@ func (s *failOnceDeleteJournalStore) Delete(transactionID string) error {
 func TestRecoverDeleteFailureCanRetryWithFreshManager(t *testing.T) {
 	fixture := newRecoveryFixture(t, OperationInstall, PhasePublishing)
 	fixture.writePath(fixture.target, "new")
-	fixture.writePath(fixture.journal.BackupPath, "old")
+	fixture.writePath(fixture.journal.Filesystem.BackupPath, "old")
 	fixture.persist()
 	store := newFilesystemJournalStore(fixture.journalPath)
 	deleteErr := errors.New("delete failed")
@@ -331,12 +334,12 @@ func TestRecoverDeleteFailureCanRetryWithFreshManager(t *testing.T) {
 func TestRecoverFailureReturnsCompletedActions(t *testing.T) {
 	fixture := newRecoveryFixture(t, OperationInstall, PhasePublishing)
 	fixture.writePath(fixture.target, "new")
-	fixture.writePath(fixture.journal.BackupPath, "old")
+	fixture.writePath(fixture.journal.Filesystem.BackupPath, "old")
 	fixture.persist()
 	service := fixture.freshService()
 	cleanupErr := errors.New("remove backup failed")
 	service.files.removeAll = func(path string) error {
-		if path == fixture.journal.BackupPath {
+		if path == fixture.journal.Filesystem.BackupPath {
 			return cleanupErr
 		}
 		return os.RemoveAll(path)
@@ -356,7 +359,7 @@ func TestRecoverFailureReturnsCompletedActions(t *testing.T) {
 
 func TestRecoverDirectionUpdateFailurePreservesArtifacts(t *testing.T) {
 	fixture := newRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writePath(fixture.journal.BackupPath, "old")
+	fixture.writePath(fixture.journal.Filesystem.BackupPath, "old")
 	fixture.persist()
 	events := []string{}
 	recording := &recordingJournalStore{
@@ -371,7 +374,7 @@ func TestRecoverDirectionUpdateFailurePreservesArtifacts(t *testing.T) {
 	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, recording.fail["update:rolling-back"]) || result.Recovered {
 		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
-	if _, statErr := os.Stat(fixture.journal.BackupPath); statErr != nil {
+	if _, statErr := os.Stat(fixture.journal.Filesystem.BackupPath); statErr != nil {
 		t.Fatalf("backup changed after phase update failure: %v", statErr)
 	}
 }

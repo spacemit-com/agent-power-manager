@@ -75,7 +75,7 @@ func validatePower(power domain.PowerRef, sentinel error) error {
 }
 
 func validateJournal(journal Journal) error {
-	if journal.SchemaVersion != 1 {
+	if journal.SchemaVersion != 2 {
 		return fmt.Errorf("schema version %d: %w", journal.SchemaVersion, ErrInvalidJournal)
 	}
 	if !validTransactionID(journal.TransactionID) {
@@ -84,17 +84,34 @@ func validateJournal(journal Journal) error {
 	if err := validateJournalIdentity(journal); err != nil {
 		return err
 	}
+	switch journal.Driver {
+	case DriverFilesystem:
+		if journal.Filesystem == nil || journal.AgentCLI != nil {
+			return fmt.Errorf("filesystem driver requires only filesystem payload: %w", ErrInvalidJournal)
+		}
+		return validateFilesystemJournal(journal, *journal.Filesystem)
+	case DriverAgentCLI:
+		if journal.AgentCLI == nil || journal.Filesystem != nil {
+			return fmt.Errorf("agent-cli driver requires only agent_cli payload: %w", ErrInvalidJournal)
+		}
+		return validateAgentCLIJournal(journal, *journal.AgentCLI)
+	default:
+		return fmt.Errorf("driver %q: %w", journal.Driver, ErrInvalidJournal)
+	}
+}
+
+func validateFilesystemJournal(journal Journal, payload FilesystemJournalPayload) error {
 	for name, path := range map[string]string{
-		"target":          journal.TargetPath,
-		"transaction dir": journal.TransactionDir,
+		"target":          payload.TargetPath,
+		"transaction dir": payload.TransactionDir,
 	} {
 		if err := validateAbsoluteCleanPath(name, path); err != nil {
 			return err
 		}
 	}
-	wantDir := filepath.Join(filepath.Dir(journal.TargetPath), ".apm-transactions", journal.TransactionID)
-	if journal.TransactionDir != wantDir {
-		return fmt.Errorf("transaction dir %q does not match %q: %w", journal.TransactionDir, wantDir, ErrInvalidJournal)
+	wantDir := filepath.Join(filepath.Dir(payload.TargetPath), ".apm-transactions", journal.TransactionID)
+	if payload.TransactionDir != wantDir {
+		return fmt.Errorf("transaction dir %q does not match %q: %w", payload.TransactionDir, wantDir, ErrInvalidJournal)
 	}
 
 	switch journal.Operation {
@@ -102,14 +119,14 @@ func validateJournal(journal Journal) error {
 		if !validInstallPhase(journal.Phase) {
 			return fmt.Errorf("install phase %q: %w", journal.Phase, ErrInvalidJournal)
 		}
-		if err := validateCanonicalStaging(journal.StagingRoot, ErrInvalidJournal); err != nil {
+		if err := validateCanonicalStaging(payload.StagingRoot, ErrInvalidJournal); err != nil {
 			return err
 		}
-		if err := validateExactArtifact("backup", journal.BackupPath, filepath.Join(wantDir, "backup")); err != nil {
+		if err := validateExactArtifact("backup", payload.BackupPath, filepath.Join(wantDir, "backup")); err != nil {
 			return err
 		}
-		if journal.QuarantinePath != "" {
-			return fmt.Errorf("install quarantine path %q: %w", journal.QuarantinePath, ErrInvalidJournal)
+		if payload.QuarantinePath != "" {
+			return fmt.Errorf("install quarantine path %q: %w", payload.QuarantinePath, ErrInvalidJournal)
 		}
 		if journal.Previous != nil {
 			if err := validatePower(*journal.Previous, ErrInvalidJournal); err != nil {
@@ -123,11 +140,51 @@ func validateJournal(journal Journal) error {
 		if !validUninstallPhase(journal.Phase) {
 			return fmt.Errorf("uninstall phase %q: %w", journal.Phase, ErrInvalidJournal)
 		}
-		if journal.Previous != nil || journal.StagingRoot != "" || journal.BackupPath != "" {
+		if journal.Previous != nil || payload.StagingRoot != "" || payload.BackupPath != "" {
 			return fmt.Errorf("uninstall contains install-only fields: %w", ErrInvalidJournal)
 		}
-		if err := validateExactArtifact("quarantine", journal.QuarantinePath, filepath.Join(wantDir, "quarantine")); err != nil {
+		if err := validateExactArtifact("quarantine", payload.QuarantinePath, filepath.Join(wantDir, "quarantine")); err != nil {
 			return err
+		}
+	default:
+		return fmt.Errorf("operation %q: %w", journal.Operation, ErrInvalidJournal)
+	}
+	return nil
+}
+
+func validateAgentCLIJournal(journal Journal, payload AgentCLIJournalPayload) error {
+	if journal.Power.Type != domain.PowerTypeMCP {
+		return fmt.Errorf("agent-cli power type %q: %w", journal.Power.Type, ErrInvalidJournal)
+	}
+	if err := payload.Server.Validate(); err != nil {
+		return fmt.Errorf("agent-cli server: %v: %w", err, ErrInvalidJournal)
+	}
+	switch journal.Operation {
+	case OperationInstall:
+		if !validMCPInstallPhase(journal.Phase) {
+			return fmt.Errorf("MCP install phase %q: %w", journal.Phase, ErrInvalidJournal)
+		}
+		if journal.Previous == nil {
+			if payload.PreviousServer != nil || journal.Phase == PhaseRemovingOld {
+				return fmt.Errorf("first MCP install contains previous state: %w", ErrInvalidJournal)
+			}
+			return nil
+		}
+		if err := validatePower(*journal.Previous, ErrInvalidJournal); err != nil ||
+			journal.Previous.Type != domain.PowerTypeMCP ||
+			journal.Previous.Name != journal.Power.Name ||
+			journal.Previous.Version == journal.Power.Version || payload.PreviousServer == nil {
+			return fmt.Errorf("invalid previous MCP state: %w", ErrInvalidJournal)
+		}
+		if err := payload.PreviousServer.Validate(); err != nil {
+			return fmt.Errorf("previous MCP server: %v: %w", err, ErrInvalidJournal)
+		}
+	case OperationUninstall:
+		if !validUninstallPhase(journal.Phase) {
+			return fmt.Errorf("MCP uninstall phase %q: %w", journal.Phase, ErrInvalidJournal)
+		}
+		if journal.Previous != nil || payload.PreviousServer != nil {
+			return fmt.Errorf("MCP uninstall contains previous state: %w", ErrInvalidJournal)
 		}
 	default:
 		return fmt.Errorf("operation %q: %w", journal.Operation, ErrInvalidJournal)
@@ -147,6 +204,10 @@ func validateJournalIdentity(journal Journal) error {
 
 func validInstallPhase(phase Phase) bool {
 	return phase == PhasePreparing || phase == PhasePublishing || phase == PhaseRollingBack || phase == PhaseCommitting
+}
+
+func validMCPInstallPhase(phase Phase) bool {
+	return phase == PhasePreparing || phase == PhaseRemovingOld || phase == PhaseAddingNew || phase == PhaseRollingBack || phase == PhaseCommitting
 }
 
 func validUninstallPhase(phase Phase) bool {

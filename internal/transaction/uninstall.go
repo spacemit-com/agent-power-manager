@@ -40,15 +40,18 @@ func (s *Service) Uninstall(ctx context.Context, request UninstallRequest) (Unin
 		return result, err
 	}
 	journal := Journal{
-		SchemaVersion:  1,
-		TransactionID:  transactionID,
-		Operation:      OperationUninstall,
-		Phase:          PhaseRemoving,
-		Agent:          request.Agent,
-		Power:          request.Power,
-		TargetPath:     target,
-		TransactionDir: artifacts.dir,
-		QuarantinePath: artifacts.quarantine,
+		SchemaVersion: 2,
+		TransactionID: transactionID,
+		Driver:        DriverFilesystem,
+		Operation:     OperationUninstall,
+		Phase:         PhaseRemoving,
+		Agent:         request.Agent,
+		Power:         request.Power,
+		Filesystem: &FilesystemJournalPayload{
+			TargetPath:     target,
+			TransactionDir: artifacts.dir,
+			QuarantinePath: artifacts.quarantine,
+		},
 	}
 	if err := s.journals.Create(journal); err != nil {
 		return result, fmt.Errorf("create uninstall journal: %w", err)
@@ -109,20 +112,21 @@ func (s *Service) rollbackUninstall(journal Journal, originalErr error) error {
 	if err := s.journals.Update(journal); err != nil {
 		return errors.Join(originalErr, fmt.Errorf("persist uninstall rollback direction: %w", err))
 	}
-	quarantineExists, err := s.pathExists(journal.QuarantinePath)
+	filesystem := journal.Filesystem
+	quarantineExists, err := s.pathExists(filesystem.QuarantinePath)
 	if err != nil {
-		return errors.Join(originalErr, fmt.Errorf("inspect uninstall quarantine %q: %w", journal.QuarantinePath, err))
+		return errors.Join(originalErr, fmt.Errorf("inspect uninstall quarantine %q: %w", filesystem.QuarantinePath, err))
 	}
 	if quarantineExists {
-		targetExists, err := s.pathExists(journal.TargetPath)
+		targetExists, err := s.pathExists(filesystem.TargetPath)
 		if err != nil {
-			return errors.Join(originalErr, fmt.Errorf("inspect uninstall rollback target %q: %w", journal.TargetPath, err))
+			return errors.Join(originalErr, fmt.Errorf("inspect uninstall rollback target %q: %w", filesystem.TargetPath, err))
 		}
 		if targetExists {
 			return errors.Join(originalErr, fmt.Errorf("rollback target and quarantine both exist: %w", ErrIndeterminateState))
 		}
-		if err := s.files.rename(journal.QuarantinePath, journal.TargetPath); err != nil {
-			return errors.Join(originalErr, fmt.Errorf("restore uninstall quarantine %q to %q: %w", journal.QuarantinePath, journal.TargetPath, err))
+		if err := s.files.rename(filesystem.QuarantinePath, filesystem.TargetPath); err != nil {
+			return errors.Join(originalErr, fmt.Errorf("restore uninstall quarantine %q to %q: %w", filesystem.QuarantinePath, filesystem.TargetPath, err))
 		}
 	}
 	if err := cleanupTransactionDirWithOps(journal, s.files); err != nil {

@@ -89,19 +89,23 @@ func TestValidateUninstallRequest(t *testing.T) {
 func TestValidateJournalRejectsUnsafeFields(t *testing.T) {
 	valid := validInstallJournal(t)
 	tests := map[string]func(*Journal){
-		"unknown schema":    func(j *Journal) { j.SchemaVersion = 2 },
+		"unknown schema":    func(j *Journal) { j.SchemaVersion = 3 },
 		"empty transaction": func(j *Journal) { j.TransactionID = "" },
-		"relative target":   func(j *Journal) { j.TargetPath = "relative" },
-		"dirty target":      func(j *Journal) { j.TargetPath += string(filepath.Separator) + ".." },
+		"relative target":   func(j *Journal) { j.Filesystem.TargetPath = "relative" },
+		"dirty target":      func(j *Journal) { j.Filesystem.TargetPath += string(filepath.Separator) + ".." },
 		"wrong artifact id": func(j *Journal) {
-			j.TransactionDir = filepath.Join(filepath.Dir(j.TargetPath), ".apm-transactions", "other")
+			j.Filesystem.TransactionDir = filepath.Join(filepath.Dir(j.Filesystem.TargetPath), ".apm-transactions", "other")
 		},
 		"uninstall publishing": func(j *Journal) { j.Operation, j.Phase = OperationUninstall, PhasePublishing },
-		"install quarantine":   func(j *Journal) { j.QuarantinePath = filepath.Join(j.TransactionDir, "quarantine") },
+		"install quarantine": func(j *Journal) {
+			j.Filesystem.QuarantinePath = filepath.Join(j.Filesystem.TransactionDir, "quarantine")
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
 			journal := valid
+			filesystem := *valid.Filesystem
+			journal.Filesystem = &filesystem
 			mutate(&journal)
 			if err := validateJournal(journal); !errors.Is(err, ErrInvalidJournal) {
 				t.Fatalf("validateJournal() error = %v, want ErrInvalidJournal", err)
@@ -143,17 +147,20 @@ func validInstallJournal(t *testing.T) Journal {
 	id := "00112233445566778899aabbccddeeff"
 	dir := filepath.Join(filepath.Dir(target), ".apm-transactions", id)
 	return Journal{
-		SchemaVersion:  1,
-		TransactionID:  id,
-		Operation:      OperationInstall,
-		Phase:          PhasePreparing,
-		Agent:          domain.AgentCodex,
-		Power:          domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "2.0.0"},
-		Previous:       powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}),
-		StagingRoot:    staging,
-		TargetPath:     target,
-		TransactionDir: dir,
-		BackupPath:     filepath.Join(dir, "backup"),
+		SchemaVersion: 2,
+		TransactionID: id,
+		Driver:        DriverFilesystem,
+		Operation:     OperationInstall,
+		Phase:         PhasePreparing,
+		Agent:         domain.AgentCodex,
+		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "2.0.0"},
+		Previous:      powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}),
+		Filesystem: &FilesystemJournalPayload{
+			StagingRoot:    staging,
+			TargetPath:     target,
+			TransactionDir: dir,
+			BackupPath:     filepath.Join(dir, "backup"),
+		},
 	}
 }
 

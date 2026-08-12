@@ -334,7 +334,7 @@ Run: `go test ./internal/adapter -count=1`
 
 Expected: PASS; fake runner call logs show no real executable paths.
 
-- [ ] **Step 9: Commit the Agent adapters**
+- [x] **Step 9: Commit the Agent adapters**
 
 ```bash
 git add internal/adapter
@@ -359,7 +359,7 @@ git commit -m "feat(mcp): add Agent-specific adapters"
 - Produces: schema v1 strict decode → normalized schema v2 in-memory `Journal`.
 - Preserves: all existing filesystem transaction phases, paths, recovery directions, and filesystem behavior.
 
-- [ ] **Step 1: Write failing schema v2 and legacy decode tests**
+- [x] **Step 1: Write failing schema v2 and legacy decode tests**
 
 Add exact JSON fixtures for:
 
@@ -383,13 +383,13 @@ Add exact JSON fixtures for:
 
 Use test-generated canonical staging paths rather than hard-coded `/tmp/apm/staging`. Prove a current schema v1 fixture decodes to `SchemaVersion==2`, `DriverFilesystem`, and a populated filesystem payload. Reject unknown driver, missing driver, both payloads, wrong payload, unknown fields, invalid phases, and schema 3.
 
-- [ ] **Step 2: Run journal tests and verify they fail**
+- [x] **Step 2: Run journal tests and verify they fail**
 
 Run: `go test ./internal/transaction -run 'Journal|Legacy' -count=1`
 
 Expected: FAIL because the shared envelope and drivers do not exist.
 
-- [ ] **Step 3: Implement the v2 envelope and v1 conversion**
+- [x] **Step 3: Implement the v2 envelope and v1 conversion**
 
 Use this in-memory shape:
 
@@ -410,11 +410,11 @@ type Journal struct {
 
 Decode a small schema probe first; decode schema 1 through a private exact legacy struct and normalize immediately; decode schema 2 strictly into `Journal`. `Create/Update` writes only schema 2.
 
-- [ ] **Step 4: Migrate filesystem transaction code to the payload**
+- [x] **Step 4: Migrate filesystem transaction code to the payload**
 
 Change journal construction and every path access to `journal.Filesystem.*`. Keep `OperationInstall/Uninstall`, phases, artifact validation, rollback, cleanup, and recovery order byte-for-byte equivalent in behavior. Add helpers such as `filesystemPayload(journal)` only when they centralize nil validation rather than hide control flow.
 
-- [ ] **Step 5: Run all transaction tests and fix only schema-shape expectations**
+- [x] **Step 5: Run all transaction tests and fix only schema-shape expectations**
 
 Run: `go test ./internal/transaction -count=1`
 

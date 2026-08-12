@@ -242,7 +242,7 @@ func TestUninstallQuarantineCleanupFailurePreservesCommittingJournal(t *testing.
 	}
 	cleanupErr := errors.New("cleanup failed")
 	fixture.service.files.removeAll = func(path string) error {
-		if path == fixture.journals.journal.QuarantinePath {
+		if path == fixture.journals.journal.Filesystem.QuarantinePath {
 			return cleanupErr
 		}
 		return os.RemoveAll(path)
@@ -268,7 +268,7 @@ func TestUninstallTransactionDirectoryCleanupFailurePreservesCommittingJournal(t
 	}
 	cleanupErr := errors.New("transaction directory cleanup failed")
 	fixture.service.files.removeAll = func(path string) error {
-		if path == fixture.journals.journal.TransactionDir {
+		if path == fixture.journals.journal.Filesystem.TransactionDir {
 			return cleanupErr
 		}
 		return os.RemoveAll(path)
