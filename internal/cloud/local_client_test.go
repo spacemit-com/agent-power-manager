@@ -37,6 +37,9 @@ func TestLocalClientListsCommittedSkillFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []domain.PowerRef{
+		{Name: "company-tools", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
+		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
+		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.1.0"},
 		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 		{Name: "checklist-first", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 		{Name: "code-comment-cn", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
@@ -54,7 +57,7 @@ func TestLocalClientListsCommittedSkillFixture(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("List() = %#v, want %#v", got, want)
 	}
-	for _, ref := range want {
+	for _, ref := range want[3:] {
 		for _, filename := range []string{"SKILL.md", "skill-card.md"} {
 			path := filepath.Join(root, "skills", ref.Name, ref.Version, filename)
 			info, err := os.Stat(path)

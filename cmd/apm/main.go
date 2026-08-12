@@ -38,7 +38,9 @@ func newSearchLifecycle() (cli.SearchLifecycle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create default lock: %w", err)
 	}
-	transactions, err := transaction.NewManager(config.NewJSONRepository())
+	repository := config.NewJSONRepository()
+	registry := adapter.NewRegistry()
+	transactions, err := transaction.NewManager(repository, registry)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
@@ -56,7 +58,8 @@ func newListLifecycle() (cli.ListLifecycle, error) {
 		return nil, fmt.Errorf("create default lock: %w", err)
 	}
 	repository := config.NewJSONRepository()
-	transactions, err := transaction.NewManager(repository)
+	registry := adapter.NewRegistry()
+	transactions, err := transaction.NewManager(repository, registry)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
@@ -64,7 +67,7 @@ func newListLifecycle() (cli.ListLifecycle, error) {
 	if err != nil {
 		return nil, err
 	}
-	return lifecycle.NewList(locker, transactions, cloudClient, adapter.NewRegistry(), repository)
+	return lifecycle.NewList(locker, transactions, cloudClient, registry, repository)
 }
 
 // newInstallLifecycle 创建 Install 命令所需的默认依赖，并共享清单读写 Repository。
@@ -74,7 +77,8 @@ func newInstallLifecycle() (cli.InstallLifecycle, error) {
 		return nil, fmt.Errorf("create default lock: %w", err)
 	}
 	repository := config.NewJSONRepository()
-	transactions, err := transaction.NewManager(repository)
+	registry := adapter.NewRegistry()
+	transactions, err := transaction.NewManager(repository, registry)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
@@ -91,7 +95,7 @@ func newInstallLifecycle() (cli.InstallLifecycle, error) {
 		transactions,
 		cloudClient,
 		powerCache,
-		adapter.NewRegistry(),
+		registry,
 		repository,
 		version.NewSelector(),
 	)
@@ -104,11 +108,16 @@ func newUninstallLifecycle() (cli.UninstallLifecycle, error) {
 		return nil, fmt.Errorf("create default lock: %w", err)
 	}
 	repository := config.NewJSONRepository()
-	transactions, err := transaction.NewManager(repository)
+	registry := adapter.NewRegistry()
+	transactions, err := transaction.NewManager(repository, registry)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
-	return lifecycle.NewUninstall(locker, transactions, adapter.NewRegistry(), repository)
+	cloudClient, err := newLocalCloudClient()
+	if err != nil {
+		return nil, err
+	}
+	return lifecycle.NewUninstall(locker, transactions, cloudClient, registry, repository)
 }
 
 func newLocalCloudClient() (cloud.Client, error) {

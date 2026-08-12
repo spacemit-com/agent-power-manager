@@ -717,7 +717,7 @@ Run: `go test ./internal/lifecycle -count=1`
 
 Expected: PASS with existing Search/List/Skill Install/Skill Uninstall ordering unchanged.
 
-- [ ] **Step 6: Commit lifecycle Uninstall support**
+- [x] **Step 6: Commit lifecycle Uninstall support**
 
 ```bash
 git add internal/lifecycle
@@ -739,7 +739,7 @@ git commit -m "feat(mcp): wire uninstall lifecycle"
 - Consumes: `transaction.NewManager(repository, registry)` and `lifecycle.NewUninstall(..., cloudClient, ...)`.
 - Produces: default CLI factories capable of recovering either driver before every recovery-enabled command.
 
-- [ ] **Step 1: Write failing production composition tests/build checks**
+- [x] **Step 1: Write failing production composition tests/build checks**
 
 Add `cmd/apm/main_test.go` that sets `APM_HOME` and `XDG_CACHE_HOME` to `t.TempDir()`, clears all Agent root overrides, calls `newSearchLifecycle`, `newListLifecycle`, `newInstallLifecycle`, and `newUninstallLifecycle`, and asserts every returned lifecycle is non-nil with no construction error. Then compile after the NewManager/NewUninstall signatures change; the source change in Step 2 supplies the same Registry instance to recovery and normal resolution.
 
@@ -768,11 +768,11 @@ Run: `go test ./cmd/apm ./internal/cli -count=1 && go build -o /dev/null ./cmd/a
 
 Expected: FAIL until all factories construct Registry before TransactionManager and pass Cloud to Uninstall.
 
-- [ ] **Step 2: Update all four default factories**
+- [x] **Step 2: Update all four default factories**
 
 For Search/List/Install/Uninstall, construct one Registry per factory, pass it to `transaction.NewManager(repository, registry)`, and pass the same instance to lifecycle where that command needs normal resolution. Search now constructs Registry solely so Recover can resolve an interrupted MCP journal. Preserve one Repository instance per factory for recovery and normal manifest access.
 
-- [ ] **Step 3: Add committed local Cloud MCP fixtures**
+- [x] **Step 3: Add committed local Cloud MCP fixtures**
 
 Use exact definitions:
 
@@ -788,7 +788,7 @@ for filesystem v0.0.1; use `args=["-y","@modelcontextprotocol/server-filesystem"
 
 for company-tools. Update Cloud/Search/List fixture expectations to include all versions in stable order.
 
-- [ ] **Step 4: Write the isolated end-to-end harness**
+- [x] **Step 4: Write the isolated end-to-end harness**
 
 Create a fake-bin under `t.TempDir()`, prepend it to PATH, set all four home variables to the same test root subdirectories, and make each fake CLI record state/calls under `FAKE_MCP_STATE`. Before every subprocess invocation, assert the resolved executable path is within fake-bin.
 
@@ -802,11 +802,11 @@ hermes mcp list/add/remove with Saved/Removed markers
 
 They never read real home directories.
 
-- [ ] **Step 5: Add end-to-end lifecycle cases**
+- [x] **Step 5: Add end-to-end lifecycle cases**
 
 For each Agent, install stdio v0.0.1, verify the fake state and exact APM MCP manifest entry, upgrade to v0.1.0, uninstall, and verify only that MCP entry is removed. Add one HTTP install/uninstall, one unmanaged conflict, one stale-entry repair, and one interrupted agent-cli journal recovered by a subsequent Skill/Search recovery call. Assert Cache/Staging paths are absent throughout MCP-only cases.
 
-- [ ] **Step 6: Run integration and full functional tests**
+- [x] **Step 6: Run integration and full functional tests**
 
 Run: `go test ./internal/lifecycle ./internal/cloud ./cmd/apm -count=1`
 

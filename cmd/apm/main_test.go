@@ -39,6 +39,29 @@ func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
 	}
 }
 
+func TestDefaultLifecycleFactoriesConstructWithMCPRecoveryResolver(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	changeToRepositoryRoot(t)
+
+	factories := []func() (any, error){
+		func() (any, error) { return newSearchLifecycle() },
+		func() (any, error) { return newListLifecycle() },
+		func() (any, error) { return newInstallLifecycle() },
+		func() (any, error) { return newUninstallLifecycle() },
+	}
+	for index, factory := range factories {
+		got, err := factory()
+		if err != nil || got == nil {
+			t.Fatalf("factory %d = %v, %v", index, got, err)
+		}
+	}
+}
+
 func TestNewListLifecycleListsBundledCloud(t *testing.T) {
 	t.Setenv("APM_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
