@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-12
+
+分类：功能变更
+
+用户需求：
+
+为 transaction Uninstall 返回已确认的目标缺失事实，并在后续错误时保留该事实；保持 Search、List、Install 的生产 lifecycle 行为不变。
+
+相关提交：
+
+- `afbca08 refactor(transaction): report missing uninstall targets`
+
+解决方案或完成结果：
+
+新增 `transaction.UninstallResult`，将 `Manager.Uninstall` 和 `Service.Uninstall` 改为返回该结果及错误。初始缺失目标和 rename 期间被外部删除的目标均记录 `TargetMissing=true`，之后的提交、清单删除、清理或 journal 删除失败仍返回该事实；已有目标及确认前失败返回 false。仅更新 Search、List、Install 测试替身以符合新接口。
+
+验证结果或限制：
+
+`go test -count=1 ./internal/transaction -run '^TestUninstall'` 与 `go test -count=1 ./internal/transaction ./internal/lifecycle` 均以退出码 0 完成。
+
 ## 2026-08-11
 
 分类：新增功能
