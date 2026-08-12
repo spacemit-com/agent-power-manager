@@ -664,7 +664,7 @@ Run: `go test ./internal/lifecycle -run 'Install' -count=1`
 
 Expected: PASS; existing Skill event order remains exact and MCP fakes show zero Cache calls.
 
-- [ ] **Step 6: Commit lifecycle Install support**
+- [x] **Step 6: Commit lifecycle Install support**
 
 ```bash
 git add internal/lifecycle
@@ -685,11 +685,11 @@ git commit -m "feat(mcp): wire install lifecycle"
 - Requires: add `CloudClient` to `UninstallService` and `NewUninstall` because MCP rollback definitions come from exact Cloud versions.
 - Preserves: local manifest resolution, Warn timing, TargetMissing handling, fail-fast, and result rendering.
 
-- [ ] **Step 1: Write constructor dependency tests for Uninstall Cloud**
+- [x] **Step 1: Write constructor dependency tests for Uninstall Cloud**
 
 Add nil/typed-nil Cloud cases at the same deterministic position used by the constructor, and update all valid fixture construction to pass the existing fake Cloud. Assert no Cloud call for a missing manifest record or Skill uninstall.
 
-- [ ] **Step 2: Write failing MCP uninstall lifecycle tests**
+- [x] **Step 2: Write failing MCP uninstall lifecycle tests**
 
 Cover:
 
@@ -701,17 +701,17 @@ Cover:
 - transaction returns `TargetMissing=true` plus error → Warn before Release and failed item;
 - mixed per-Agent manifests and `all` fail-fast preserve current behavior.
 
-- [ ] **Step 3: Run MCP uninstall tests and verify they fail**
+- [x] **Step 3: Run MCP uninstall tests and verify they fail**
 
 Run: `go test ./internal/lifecycle -run 'UninstallMCP' -count=1`
 
 Expected: FAIL because Uninstall has no Cloud dependency or MCP branch.
 
-- [ ] **Step 4: Implement Uninstall type dispatch and MCP flow**
+- [x] **Step 4: Implement Uninstall type dispatch and MCP flow**
 
 Keep manifest `List`/resolve in `uninstallOne`, then dispatch the resolved ref to unchanged `uninstallSkill` or new `uninstallMCP`. Only MCP present calls `GetMCP`; absent delegates single-entry repair to Transaction and logs the existing target-missing Warn from `UninstallResult`.
 
-- [ ] **Step 5: Run all lifecycle tests**
+- [x] **Step 5: Run all lifecycle tests**
 
 Run: `go test ./internal/lifecycle -count=1`
 

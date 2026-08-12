@@ -18,18 +18,25 @@ import (
 )
 
 type uninstallFixture struct {
-	recovery           transaction.RecoveryResult
-	snapshot           domain.AgentSnapshot
-	groups             map[domain.AgentID]domain.PowerGroups
-	transactionResults map[domain.AgentID]transaction.UninstallResult
+	recovery              transaction.RecoveryResult
+	snapshot              domain.AgentSnapshot
+	groups                map[domain.AgentID]domain.PowerGroups
+	transactionResults    map[domain.AgentID]transaction.UninstallResult
+	transactionMCPResults map[domain.AgentID]transaction.UninstallResult
+	mcpPresence           map[domain.AgentID]adapter.MCPPresence
+	mcpInspectErrors      map[domain.AgentID]error
+	mcpDefinitions        map[string]domain.MCPServer
+	mcpGetErrors          map[string]error
+	mcpRequests           []transaction.MCPUninstallRequest
 
-	acquireErr        error
-	recoverErr        error
-	refreshErr        error
-	releaseErr        error
-	configErrors      map[domain.AgentID]error
-	resolveErrors     map[domain.AgentID]error
-	transactionErrors map[domain.AgentID]error
+	acquireErr           error
+	recoverErr           error
+	refreshErr           error
+	releaseErr           error
+	configErrors         map[domain.AgentID]error
+	resolveErrors        map[domain.AgentID]error
+	transactionErrors    map[domain.AgentID]error
+	transactionMCPErrors map[domain.AgentID]error
 
 	beforeRelease func()
 	onEvent       func(string)
@@ -89,8 +96,22 @@ func (m *uninstallFakeTransactions) Uninstall(_ context.Context, request transac
 	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall:"+string(request.Agent))
 	return m.fixture.transactionResults[request.Agent], m.fixture.transactionErrors[request.Agent]
 }
-func (*uninstallFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
-	return transaction.UninstallResult{}, nil
+func (m *uninstallFakeTransactions) UninstallMCP(_ context.Context, request transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
+	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall-mcp:"+string(request.Agent))
+	m.fixture.mcpRequests = append(m.fixture.mcpRequests, request)
+	return m.fixture.transactionMCPResults[request.Agent], m.fixture.transactionMCPErrors[request.Agent]
+}
+
+type uninstallFakeCloud struct {
+	calls   *[]string
+	fixture *uninstallFixture
+}
+
+func (*uninstallFakeCloud) List() ([]domain.PowerRef, error) { return nil, nil }
+func (*uninstallFakeCloud) Get(domain.PowerRef) error        { return nil }
+func (c *uninstallFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error) {
+	recordUninstallEvent(c.calls, c.fixture, "cloud:get-mcp:"+ref.Version)
+	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
 type uninstallFakeRegistry struct {
@@ -102,7 +123,10 @@ func (r *uninstallFakeRegistry) ResolveSkill(agent domain.AgentID) (adapter.Adap
 	recordUninstallEvent(r.calls, r.fixture, "resolve:"+string(agent))
 	return uninstallFakeAdapter{}, r.fixture.resolveErrors[agent]
 }
-func (*uninstallFakeRegistry) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) { return nil, nil }
+func (r *uninstallFakeRegistry) ResolveMCP(agent domain.AgentID) (adapter.MCPAdapter, error) {
+	recordUninstallEvent(r.calls, r.fixture, "resolve-mcp:"+string(agent))
+	return uninstallFakeMCPAdapter{agent: agent, calls: r.calls, fixture: r.fixture}, r.fixture.resolveErrors[agent]
+}
 
 func (r *uninstallFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	recordUninstallEvent(r.calls, r.fixture, "refresh")
@@ -117,6 +141,23 @@ func (uninstallFakeAdapter) TargetPath(domain.PowerRef) (string, error) { return
 
 func (uninstallFakeAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
 	return adapter.InstallResult{Published: true}, nil
+}
+
+type uninstallFakeMCPAdapter struct {
+	agent   domain.AgentID
+	calls   *[]string
+	fixture *uninstallFixture
+}
+
+func (a uninstallFakeMCPAdapter) Inspect(context.Context, string) (adapter.MCPPresence, error) {
+	recordUninstallEvent(a.calls, a.fixture, "mcp:inspect:"+string(a.agent))
+	return a.fixture.mcpPresence[a.agent], a.fixture.mcpInspectErrors[a.agent]
+}
+func (uninstallFakeMCPAdapter) Add(context.Context, domain.PowerRef, domain.MCPServer) (adapter.MCPMutationResult, error) {
+	return adapter.MCPMutationResult{State: adapter.MCPMutationApplied}, nil
+}
+func (uninstallFakeMCPAdapter) Remove(context.Context, domain.PowerRef) (adapter.MCPMutationResult, error) {
+	return adapter.MCPMutationResult{State: adapter.MCPMutationApplied}, nil
 }
 
 type uninstallFakeConfig struct {
@@ -142,6 +183,7 @@ func TestNewUninstallRejectsNilDependencies(t *testing.T) {
 	fixture := &uninstallFixture{}
 	locker := &uninstallFakeLocker{calls: &calls, fixture: fixture}
 	transactions := &uninstallFakeTransactions{calls: &calls, fixture: fixture}
+	cloud := &uninstallFakeCloud{calls: &calls, fixture: fixture}
 	registry := &uninstallFakeRegistry{calls: &calls, fixture: fixture}
 	config := &uninstallFakeConfig{calls: &calls, fixture: fixture}
 
@@ -150,21 +192,25 @@ func TestNewUninstallRejectsNilDependencies(t *testing.T) {
 		new  func() (*UninstallService, error)
 		want string
 	}{
-		{name: "locker", new: func() (*UninstallService, error) { return NewUninstall(nil, transactions, registry, config) }, want: "create Uninstall lifecycle with nil locker"},
+		{name: "locker", new: func() (*UninstallService, error) { return NewUninstall(nil, transactions, cloud, registry, config) }, want: "create Uninstall lifecycle with nil locker"},
 		{name: "typed nil locker", new: func() (*UninstallService, error) {
-			return NewUninstall((*uninstallFakeLocker)(nil), transactions, registry, config)
+			return NewUninstall((*uninstallFakeLocker)(nil), transactions, cloud, registry, config)
 		}, want: "create Uninstall lifecycle with nil locker"},
-		{name: "transaction manager", new: func() (*UninstallService, error) { return NewUninstall(locker, nil, registry, config) }, want: "create Uninstall lifecycle with nil transaction manager"},
+		{name: "transaction manager", new: func() (*UninstallService, error) { return NewUninstall(locker, nil, cloud, registry, config) }, want: "create Uninstall lifecycle with nil transaction manager"},
 		{name: "typed nil transaction manager", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, (*uninstallFakeTransactions)(nil), registry, config)
+			return NewUninstall(locker, (*uninstallFakeTransactions)(nil), cloud, registry, config)
 		}, want: "create Uninstall lifecycle with nil transaction manager"},
-		{name: "adapter registry", new: func() (*UninstallService, error) { return NewUninstall(locker, transactions, nil, config) }, want: "create Uninstall lifecycle with nil adapter registry"},
+		{name: "Cloud client", new: func() (*UninstallService, error) { return NewUninstall(locker, transactions, nil, registry, config) }, want: "create Uninstall lifecycle with nil Cloud client"},
+		{name: "typed nil Cloud client", new: func() (*UninstallService, error) {
+			return NewUninstall(locker, transactions, (*uninstallFakeCloud)(nil), registry, config)
+		}, want: "create Uninstall lifecycle with nil Cloud client"},
+		{name: "adapter registry", new: func() (*UninstallService, error) { return NewUninstall(locker, transactions, cloud, nil, config) }, want: "create Uninstall lifecycle with nil adapter registry"},
 		{name: "typed nil adapter registry", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, (*uninstallFakeRegistry)(nil), config)
+			return NewUninstall(locker, transactions, cloud, (*uninstallFakeRegistry)(nil), config)
 		}, want: "create Uninstall lifecycle with nil adapter registry"},
-		{name: "config repository", new: func() (*UninstallService, error) { return NewUninstall(locker, transactions, registry, nil) }, want: "create Uninstall lifecycle with nil config repository"},
+		{name: "config repository", new: func() (*UninstallService, error) { return NewUninstall(locker, transactions, cloud, registry, nil) }, want: "create Uninstall lifecycle with nil config repository"},
 		{name: "typed nil config repository", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, registry, (*uninstallFakeConfig)(nil))
+			return NewUninstall(locker, transactions, cloud, registry, (*uninstallFakeConfig)(nil))
 		}, want: "create Uninstall lifecycle with nil config repository"},
 	}
 
@@ -592,6 +638,7 @@ func newUninstallService(t *testing.T, calls *[]string, fixture uninstallFixture
 	service, err := NewUninstall(
 		&uninstallFakeLocker{calls: calls, fixture: &fixture},
 		&uninstallFakeTransactions{calls: calls, fixture: &fixture},
+		&uninstallFakeCloud{calls: calls, fixture: &fixture},
 		&uninstallFakeRegistry{calls: calls, fixture: &fixture},
 		&uninstallFakeConfig{calls: calls, fixture: &fixture},
 	)

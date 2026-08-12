@@ -34,7 +34,7 @@ func (s *InstallService) fetchInstallStaging(ref domain.PowerRef) (string, error
 
 func (s *InstallService) installOne(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
 	switch ref.Type {
-	case domain.PowerTypeSkill:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin:
 		return s.installSkill(ctx, agent, ref)
 	case domain.PowerTypeMCP:
 		return s.installMCP(ctx, agent, ref)

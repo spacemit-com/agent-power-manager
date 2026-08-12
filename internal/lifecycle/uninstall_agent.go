@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"apm/internal/adapter"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/logging"
@@ -29,14 +30,15 @@ func (s *UninstallService) uninstallOne(ctx context.Context, agent domain.AgentI
 
 	copied := ref
 	item := cli.UninstallItem{Agent: agent, Power: &copied}
-	resolved, err := s.registry.ResolveSkill(agent)
-	if err != nil {
-		item.Outcome = cli.UninstallOutcomeFailed
-		return item, fmt.Errorf("resolve uninstall adapter for agent %q: %w", agent, err)
+	var transactionResult transaction.UninstallResult
+	switch ref.Type {
+	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+		transactionResult, err = s.uninstallSkill(ctx, agent, ref)
+	case domain.PowerTypeMCP:
+		transactionResult, err = s.uninstallMCP(ctx, agent, ref)
+	default:
+		err = fmt.Errorf("uninstall power type %q: %w", ref.Type, adapter.ErrUnsupportedAdapter)
 	}
-	transactionResult, err := s.transactions.Uninstall(ctx, transaction.UninstallRequest{
-		Agent: agent, Power: ref, Adapter: resolved,
-	})
 	if transactionResult.TargetMissing {
 		logUninstallMissingTarget(agent, ref)
 	}
@@ -46,6 +48,14 @@ func (s *UninstallService) uninstallOne(ctx context.Context, agent domain.AgentI
 	}
 	item.Outcome = cli.UninstallOutcomeCompleted
 	return item, nil
+}
+
+func (s *UninstallService) uninstallSkill(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (transaction.UninstallResult, error) {
+	resolved, err := s.registry.ResolveSkill(agent)
+	if err != nil {
+		return transaction.UninstallResult{}, fmt.Errorf("resolve uninstall adapter for agent %q: %w", agent, err)
+	}
+	return s.transactions.Uninstall(ctx, transaction.UninstallRequest{Agent: agent, Power: ref, Adapter: resolved})
 }
 
 func logUninstallNotInstalled(agent domain.AgentID, flags cli.Flags) {

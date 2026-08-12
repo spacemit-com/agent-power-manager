@@ -17,23 +17,26 @@ import (
 type UninstallService struct {
 	locker       Locker
 	transactions TransactionManager
+	cloud        CloudClient
 	registry     AdapterRegistry
 	config       ConfigRepository
 }
 
 // NewUninstall 创建持有完整共享状态区间的 Uninstall 生命周期。
-func NewUninstall(locker Locker, transactions TransactionManager, registry AdapterRegistry, config ConfigRepository) (*UninstallService, error) {
+func NewUninstall(locker Locker, transactions TransactionManager, cloud CloudClient, registry AdapterRegistry, config ConfigRepository) (*UninstallService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Uninstall lifecycle with nil locker")
 	case isNilInterface(transactions):
 		return nil, errors.New("create Uninstall lifecycle with nil transaction manager")
+	case isNilInterface(cloud):
+		return nil, errors.New("create Uninstall lifecycle with nil Cloud client")
 	case isNilInterface(registry):
 		return nil, errors.New("create Uninstall lifecycle with nil adapter registry")
 	case isNilInterface(config):
 		return nil, errors.New("create Uninstall lifecycle with nil config repository")
 	}
-	return &UninstallService{locker: locker, transactions: transactions, registry: registry, config: config}, nil
+	return &UninstallService{locker: locker, transactions: transactions, cloud: cloud, registry: registry, config: config}, nil
 }
 
 var _ cli.UninstallLifecycle = (*UninstallService)(nil)
