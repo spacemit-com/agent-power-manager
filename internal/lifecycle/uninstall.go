@@ -41,6 +41,7 @@ var _ cli.UninstallLifecycle = (*UninstallService)(nil)
 // Uninstall 在一次全局锁持有期间恢复共享状态，并按快照顺序串行卸载所选 Agent。
 // 可渲染结果仅在锁成功释放后返回；业务 Warn 则在相关事实发生时同步写出。
 func (s *UninstallService) Uninstall(ctx context.Context, flags cli.Flags) (cli.UninstallResult, error) {
+	// Recover、快照、本地清单解析和逐 Agent Transaction 都访问共享状态，必须位于同一锁区间。
 	unlock, err := s.locker.Acquire()
 	if err != nil {
 		return cli.UninstallResult{}, fmt.Errorf("acquire uninstall lock: %w", err)
@@ -63,6 +64,7 @@ func (s *UninstallService) Uninstall(ctx context.Context, flags cli.Flags) (cli.
 	items := make([]cli.UninstallItem, 0, len(agents))
 	var failedAgent domain.AgentID
 	var businessErr error
+	// 每个 Agent 的事实 Warn 在锁内实时记录；首个失败停止后续业务并补齐 unexecuted 汇总项。
 	for index, agent := range agents {
 		item, itemErr := s.uninstallOne(ctx, agent, flags)
 		items = append(items, item)
@@ -76,6 +78,7 @@ func (s *UninstallService) Uninstall(ctx context.Context, flags cli.Flags) (cli.
 		break
 	}
 
+	// 只有 Release 成功后才能返回可渲染汇总；Release 失败时保留业务错误但抑制结果。
 	if releaseErr := unlock.Release(); releaseErr != nil {
 		return cli.UninstallResult{}, errors.Join(businessErr, fmt.Errorf("release uninstall lock: %w", releaseErr))
 	}
