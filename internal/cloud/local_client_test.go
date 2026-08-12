@@ -36,9 +36,35 @@ func TestLocalClientListsCommittedSkillFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []domain.PowerRef{{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"}}
+	want := []domain.PowerRef{
+		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "checklist-first", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "code-comment-cn", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "commit-message-helper", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "commit-message-helper", Type: domain.PowerTypeSkill, Version: "v0.1.0"},
+		{Name: "error-context", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.1.0"},
+		{Name: "meeting-notes", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "plain-language", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "test-case-namer", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "test-case-namer", Type: domain.PowerTypeSkill, Version: "v0.1.0"},
+		{Name: "worklog-entry", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("List() = %#v, want %#v", got, want)
+	}
+	for _, ref := range want {
+		for _, filename := range []string{"SKILL.md", "skill-card.md"} {
+			path := filepath.Join(root, "skills", ref.Name, ref.Version, filename)
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("stat %q: %v", path, err)
+			}
+			if !info.Mode().IsRegular() {
+				t.Fatalf("%q is not a regular file", path)
+			}
+		}
 	}
 }
 

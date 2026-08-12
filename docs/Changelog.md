@@ -4,6 +4,26 @@
 
 ## 2026-08-12
 
+分类：功能变更
+
+用户需求：
+
+扩充 `internal/cloud/resources/skills/`，提供包含 `foo` 在内的 10 个简单 Skill，并覆盖多版本测试场景。
+
+相关提交：
+
+- `87e47c7 test(cloud): expand bundled skill fixtures`
+
+解决方案或完成结果：
+
+新增 `brief-status`、`checklist-first`、`code-comment-cn`、`commit-message-helper`、`error-context`、`meeting-notes`、`plain-language`、`test-case-namer` 与 `worklog-entry`，并为 `foo-before-summary`、`commit-message-helper` 和 `test-case-namer` 提供 `v0.0.1`、`v0.1.0` 两个版本。资源总计为 10 个 Skill 名称和 13 个版本目录；每个版本均含带名称和版本 frontmatter 的 `SKILL.md` 与 `skill-card.md`。Cloud fixture 测试断言完整的稳定排序资源矩阵及两个文件的存在性；依赖默认最新版本的 CLI 集成测试已对齐 `foo-before-summary@v0.1.0`，显式 `v0.0.1` 获取测试仍保留。
+
+验证结果或限制：
+
+`go test -count=1 ./cmd/apm ./internal/cloud`、`go test -race -count=1 ./...`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`test -z "$(gofmt -l cmd internal)"` 与 `git diff --check` 均以退出码 0 完成。
+
+## 2026-08-12
+
 分类：新增功能
 
 用户需求：

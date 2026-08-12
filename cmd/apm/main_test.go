@@ -32,7 +32,7 @@ func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
 	want := cli.SearchResult{Powers: []domain.PowerRef{{
 		Type:    domain.PowerTypeSkill,
 		Name:    "foo-before-summary",
-		Version: "v0.0.1",
+		Version: "v0.1.0",
 	}}}
 	if len(got.Powers) != len(want.Powers) || len(got.Powers) != 1 || got.Powers[0] != want.Powers[0] {
 		t.Fatalf("Search(summary) = %#v, want %#v", got, want)
@@ -111,7 +111,7 @@ func TestNewInstallLifecycleInstallsBundledSkillAndThenReturnsUnchanged(t *testi
 		t.Fatalf("newInstallLifecycle() error = %v", err)
 	}
 	flags := cli.Flags{Agent: "codex", Name: "foo-before-summary"}
-	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.0.1"}
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.1.0"}
 
 	installed, err := service.Install(context.Background(), flags)
 	if err != nil {
@@ -198,7 +198,7 @@ func TestNewUninstallLifecycleRemovesBundledSkillAndThenReportsNotInstalled(t *t
 		t.Fatalf("create Codex root: %v", err)
 	}
 	flags := cli.Flags{Agent: "codex", Name: "foo-before-summary"}
-	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.0.1"}
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.1.0"}
 	installer, err := newInstallLifecycle()
 	if err != nil {
 		t.Fatalf("newInstallLifecycle() error = %v", err)
