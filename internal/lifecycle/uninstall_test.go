@@ -32,6 +32,14 @@ type uninstallFixture struct {
 	transactionErrors map[domain.AgentID]error
 
 	beforeRelease func()
+	onEvent       func(string)
+}
+
+func recordUninstallEvent(calls *[]string, fixture *uninstallFixture, event string) {
+	*calls = append(*calls, event)
+	if fixture.onEvent != nil {
+		fixture.onEvent(event)
+	}
 }
 
 type uninstallFakeUnlock struct {
@@ -43,7 +51,7 @@ func (u *uninstallFakeUnlock) Release() error {
 	if u.fixture.beforeRelease != nil {
 		u.fixture.beforeRelease()
 	}
-	*u.calls = append(*u.calls, "release")
+	recordUninstallEvent(u.calls, u.fixture, "release")
 	return u.fixture.releaseErr
 }
 
@@ -53,7 +61,7 @@ type uninstallFakeLocker struct {
 }
 
 func (l *uninstallFakeLocker) Acquire() (lock.Unlock, error) {
-	*l.calls = append(*l.calls, "acquire")
+	recordUninstallEvent(l.calls, l.fixture, "acquire")
 	if l.fixture.acquireErr != nil {
 		return nil, l.fixture.acquireErr
 	}
@@ -66,7 +74,7 @@ type uninstallFakeTransactions struct {
 }
 
 func (m *uninstallFakeTransactions) Recover(context.Context) (transaction.RecoveryResult, error) {
-	*m.calls = append(*m.calls, "recover")
+	recordUninstallEvent(m.calls, m.fixture, "recover")
 	return m.fixture.recovery, m.fixture.recoverErr
 }
 
@@ -75,7 +83,7 @@ func (*uninstallFakeTransactions) Install(context.Context, transaction.InstallRe
 }
 
 func (m *uninstallFakeTransactions) Uninstall(_ context.Context, request transaction.UninstallRequest) (transaction.UninstallResult, error) {
-	*m.calls = append(*m.calls, "transaction:uninstall:"+string(request.Agent))
+	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall:"+string(request.Agent))
 	return m.fixture.transactionResults[request.Agent], m.fixture.transactionErrors[request.Agent]
 }
 
@@ -85,12 +93,12 @@ type uninstallFakeRegistry struct {
 }
 
 func (r *uninstallFakeRegistry) Resolve(agent domain.AgentID, _ domain.PowerType) (adapter.Adapter, error) {
-	*r.calls = append(*r.calls, "resolve:"+string(agent))
+	recordUninstallEvent(r.calls, r.fixture, "resolve:"+string(agent))
 	return uninstallFakeAdapter{}, r.fixture.resolveErrors[agent]
 }
 
 func (r *uninstallFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
-	*r.calls = append(*r.calls, "refresh")
+	recordUninstallEvent(r.calls, r.fixture, "refresh")
 	return r.fixture.snapshot, r.fixture.refreshErr
 }
 
@@ -110,7 +118,7 @@ type uninstallFakeConfig struct {
 }
 
 func (c *uninstallFakeConfig) List(agent domain.AgentID) (domain.PowerGroups, error) {
-	*c.calls = append(*c.calls, "config:"+string(agent))
+	recordUninstallEvent(c.calls, c.fixture, "config:"+string(agent))
 	return c.fixture.groups[agent], c.fixture.configErrors[agent]
 }
 
@@ -420,6 +428,361 @@ func TestUninstallMissingTargetWarnsSynchronouslyAndCompletes(t *testing.T) {
 	}
 }
 
+func TestUninstallAllConfigFailurePreventsLaterAgentLifecycleAccess(t *testing.T) {
+	cause := errors.New("read manifest")
+	laterAgents := []domain.AgentID{domain.AgentCodex, domain.AgentHermes}
+	fixture := uninstallFixture{
+		snapshot:     domain.AgentSnapshot{Agents: append([]domain.AgentID{domain.AgentClaudeCode}, laterAgents...)},
+		configErrors: map[domain.AgentID]error{domain.AgentClaudeCode: cause},
+	}
+	fixture.onEvent = rejectLaterUninstallEvents(t, laterAgents)
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "all", Name: "demo"})
+
+	assertUninstallItems(t, result, []cli.UninstallItem{
+		{Agent: domain.AgentClaudeCode, Outcome: cli.UninstallOutcomeFailed},
+		{Agent: domain.AgentCodex, Outcome: cli.UninstallOutcomeUnexecuted},
+		{Agent: domain.AgentHermes, Outcome: cli.UninstallOutcomeUnexecuted},
+	})
+	assertUninstallBatchError(t, err, domain.AgentClaudeCode, cause)
+	if !reflect.DeepEqual(calls, []string{"acquire", "recover", "refresh", "config:claude-code", "release"}) {
+		t.Fatalf("calls = %v, want no Resolve or Transaction after Config failure", calls)
+	}
+}
+
+func TestUninstallAllSameAgentTypeAmbiguityPreventsLaterAgentLifecycleAccess(t *testing.T) {
+	groups := domain.PowerGroups{
+		domain.PowerTypeSkill:  {{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}},
+		domain.PowerTypePlugin: {{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}},
+	}
+	fixture := uninstallFixture{
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
+		groups:   map[domain.AgentID]domain.PowerGroups{domain.AgentClaudeCode: groups},
+	}
+	fixture.onEvent = rejectLaterUninstallEvents(t, []domain.AgentID{domain.AgentCodex})
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "all", Name: "demo"})
+
+	assertUninstallItems(t, result, []cli.UninstallItem{
+		{Agent: domain.AgentClaudeCode, Outcome: cli.UninstallOutcomeFailed},
+		{Agent: domain.AgentCodex, Outcome: cli.UninstallOutcomeUnexecuted},
+	})
+	if err == nil || !strings.Contains(err.Error(), "specify --type") {
+		t.Fatalf("Uninstall() error = %v, want same-Agent type ambiguity with specify --type", err)
+	}
+	var batch *cli.UninstallBatchError
+	if !errors.As(err, &batch) || batch.Agent != domain.AgentClaudeCode {
+		t.Fatalf("Uninstall() error = %v, want batch error for %q", err, domain.AgentClaudeCode)
+	}
+	if !reflect.DeepEqual(calls, []string{"acquire", "recover", "refresh", "config:claude-code", "release"}) {
+		t.Fatalf("calls = %v, want no Resolve or Transaction after ambiguity", calls)
+	}
+}
+
+func TestUninstallAdapterResolutionFailureKeepsResolvedPowerInFailedItem(t *testing.T) {
+	cause := errors.New("adapter unavailable")
+	fixture := uninstallTargetFixture()
+	fixture.resolveErrors = map[domain.AgentID]error{domain.AgentCodex: cause}
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+
+	result, err := service.Uninstall(context.Background(), uninstallTargetFlags("codex"))
+
+	assertUninstallItems(t, result, []cli.UninstallItem{{
+		Agent: domain.AgentCodex, Power: powerPointer(uninstallTarget()), Outcome: cli.UninstallOutcomeFailed,
+	}})
+	assertUninstallBatchError(t, err, domain.AgentCodex, cause)
+	if containsEvent(calls, "transaction:uninstall:codex") {
+		t.Fatalf("calls = %v, want no transaction after adapter resolution failure", calls)
+	}
+}
+
+func TestUninstallTransactionFailureSuppressesLaterAgentAndKeepsResolvedPower(t *testing.T) {
+	cause := errors.New("manifest removal failed")
+	ref := uninstallTarget()
+	later := domain.AgentClaudeCode
+	fixture := uninstallFixture{
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex, later}},
+		groups: map[domain.AgentID]domain.PowerGroups{
+			domain.AgentCodex: {domain.PowerTypeSkill: {ref}},
+			later:             {domain.PowerTypeSkill: {ref}},
+		},
+		transactionErrors: map[domain.AgentID]error{domain.AgentCodex: cause},
+	}
+	fixture.onEvent = rejectLaterUninstallEvents(t, []domain.AgentID{later})
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "all", Type: "skill", Name: "demo"})
+
+	assertUninstallItems(t, result, []cli.UninstallItem{
+		{Agent: domain.AgentCodex, Power: powerPointer(ref), Outcome: cli.UninstallOutcomeFailed},
+		{Agent: later, Outcome: cli.UninstallOutcomeUnexecuted},
+	})
+	assertUninstallBatchError(t, err, domain.AgentCodex, cause)
+}
+
+func TestUninstallAllMissingThenSuccessfulRecordsPreserveSnapshotOrder(t *testing.T) {
+	ref := uninstallTarget()
+	fixture := uninstallFixture{
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
+		groups: map[domain.AgentID]domain.PowerGroups{
+			domain.AgentCodex: {domain.PowerTypeSkill: {ref}},
+		},
+	}
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "all", Type: "skill", Name: "demo"})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertUninstallItems(t, result, []cli.UninstallItem{
+		{Agent: domain.AgentClaudeCode, Outcome: cli.UninstallOutcomeUnexecuted},
+		{Agent: domain.AgentCodex, Power: powerPointer(ref), Outcome: cli.UninstallOutcomeCompleted},
+	})
+}
+
+func TestUninstallAllMissingRecordsReturnOnlyUnexecutedItems(t *testing.T) {
+	fixture := uninstallFixture{snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}}}
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "all", Name: "demo"})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertUninstallItems(t, result, []cli.UninstallItem{
+		{Agent: domain.AgentClaudeCode, Outcome: cli.UninstallOutcomeUnexecuted},
+		{Agent: domain.AgentCodex, Outcome: cli.UninstallOutcomeUnexecuted},
+	})
+}
+
+func TestUninstallDoesNotMutateAgentSnapshotAcrossSuccessAndFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture uninstallFixture
+		flags   cli.Flags
+	}{
+		{
+			name: "success",
+			fixture: uninstallFixture{groups: map[domain.AgentID]domain.PowerGroups{
+				domain.AgentClaudeCode: {domain.PowerTypeSkill: {uninstallTarget()}},
+				domain.AgentCodex:      {domain.PowerTypeSkill: {uninstallTarget()}},
+			}},
+			flags: cli.Flags{Agent: "all", Type: "skill", Name: "demo"},
+		},
+		{
+			name:    "first Agent failure",
+			fixture: uninstallFixture{configErrors: map[domain.AgentID]error{domain.AgentClaudeCode: errors.New("read manifest")}},
+			flags:   cli.Flags{Agent: "all", Name: "demo"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}}
+			wantSnapshot := domain.AgentSnapshot{Agents: append([]domain.AgentID(nil), snapshot.Agents...)}
+			tt.fixture.snapshot = snapshot
+			var calls []string
+			service := newUninstallService(t, &calls, tt.fixture)
+
+			_, _ = service.Uninstall(context.Background(), tt.flags)
+
+			if !reflect.DeepEqual(snapshot, wantSnapshot) {
+				t.Fatalf("Uninstall() mutated AgentSnapshot: got %#v, want %#v", snapshot, wantSnapshot)
+			}
+		})
+	}
+}
+
+func TestUninstallMissingTargetFactWarnsBeforeReleaseWhenTransactionAlsoFails(t *testing.T) {
+	transactionCause := errors.New("manifest removal failed")
+	var stdout, stderr bytes.Buffer
+	installTestLogger(t, &stdout, &stderr, false)
+	fixture := uninstallTargetFixture()
+	fixture.transactionResults = map[domain.AgentID]transaction.UninstallResult{
+		domain.AgentCodex: {TargetMissing: true},
+	}
+	fixture.transactionErrors = map[domain.AgentID]error{domain.AgentCodex: transactionCause}
+	fixture.beforeRelease = func() {
+		assertContainsAll(t, stderr.String(), []string{
+			`msg="installed power target is missing"`, "operation=uninstall",
+			"agent=codex", "power=demo", "type=skill", "version=v1.2.3",
+		})
+		if strings.Count(stderr.String(), "level=WARN") != 1 {
+			t.Fatalf("stderr = %q, want exactly one target-missing Warn before Release", stderr.String())
+		}
+	}
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+
+	result, err := service.Uninstall(context.Background(), uninstallTargetFlags("codex"))
+
+	assertUninstallItems(t, result, []cli.UninstallItem{{
+		Agent: domain.AgentCodex, Power: powerPointer(uninstallTarget()), Outcome: cli.UninstallOutcomeFailed,
+	}})
+	assertUninstallBatchError(t, err, domain.AgentCodex, transactionCause)
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestUninstallRecoverAndReleaseFailuresPreserveBothCauses(t *testing.T) {
+	recoverCause := errors.New("inspect journal")
+	releaseCause := errors.New("unlock filesystem")
+	var calls []string
+	service := newUninstallService(t, &calls, uninstallFixture{recoverErr: recoverCause, releaseErr: releaseCause})
+
+	result, err := service.Uninstall(context.Background(), uninstallTargetFlags("codex"))
+
+	assertZeroUninstallResult(t, result)
+	assertNoUninstallBatchError(t, err)
+	if !errors.Is(err, recoverCause) || !errors.Is(err, releaseCause) {
+		t.Fatalf("Uninstall() error = %v, want recover %v and release %v", err, recoverCause, releaseCause)
+	}
+	if !reflect.DeepEqual(calls, []string{"acquire", "recover", "release"}) {
+		t.Fatalf("calls = %v, want one Release and no Refresh", calls)
+	}
+}
+
+func TestUninstallFatalPreBatchFailuresSuppressResultsAndBatchMarker(t *testing.T) {
+	refreshCause := errors.New("refresh agents")
+	tests := []struct {
+		name    string
+		fixture uninstallFixture
+		flags   cli.Flags
+	}{
+		{
+			name:    "Refresh failure",
+			fixture: uninstallFixture{refreshErr: refreshCause},
+			flags:   uninstallTargetFlags("codex"),
+		},
+		{
+			name:    "unsupported concrete Agent",
+			fixture: uninstallFixture{snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}}},
+			flags:   uninstallTargetFlags("claude-code"),
+		},
+		{
+			name:    "empty all snapshot",
+			fixture: uninstallFixture{},
+			flags:   cli.Flags{Agent: "all", Name: "demo"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			service := newUninstallService(t, &calls, tt.fixture)
+
+			result, err := service.Uninstall(context.Background(), tt.flags)
+
+			assertZeroUninstallResult(t, result)
+			assertNoUninstallBatchError(t, err)
+			if err == nil {
+				t.Fatal("Uninstall() error = nil, want fatal pre-batch error")
+			}
+			if !containsEvent(calls, "release") {
+				t.Fatalf("calls = %v, want Release after fatal pre-batch error", calls)
+			}
+		})
+	}
+}
+
+func TestUninstallFactWarningsRemainVisibleWhenReleaseSuppressesResult(t *testing.T) {
+	releaseCause := errors.New("unlock filesystem")
+	tests := []struct {
+		name    string
+		fixture uninstallFixture
+		flags   cli.Flags
+		warning string
+	}{
+		{
+			name:    "missing record",
+			fixture: uninstallFixture{releaseErr: releaseCause, snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}}},
+			flags:   cli.Flags{Agent: "codex", Name: "demo"},
+			warning: `msg="power is not installed"`,
+		},
+		{
+			name: "missing target",
+			fixture: func() uninstallFixture {
+				fixture := uninstallTargetFixture()
+				fixture.releaseErr = releaseCause
+				fixture.transactionResults = map[domain.AgentID]transaction.UninstallResult{domain.AgentCodex: {TargetMissing: true}}
+				return fixture
+			}(),
+			flags:   uninstallTargetFlags("codex"),
+			warning: `msg="installed power target is missing"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			installTestLogger(t, &stdout, &stderr, false)
+			var calls []string
+			service := newUninstallService(t, &calls, tt.fixture)
+
+			result, err := service.Uninstall(context.Background(), tt.flags)
+
+			assertZeroUninstallResult(t, result)
+			assertNoUninstallBatchError(t, err)
+			if !errors.Is(err, releaseCause) {
+				t.Fatalf("Uninstall() error = %v, want release cause %v", err, releaseCause)
+			}
+			if !strings.Contains(stderr.String(), tt.warning) {
+				t.Fatalf("stderr = %q, want fact warning %q after Release failure", stderr.String(), tt.warning)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+		})
+	}
+}
+
+func TestUninstallRecoveryAndBusinessWarningsAreBothEmittedBeforeRelease(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	installTestLogger(t, &stdout, &stderr, false)
+	fixture := uninstallFixture{
+		recovery: transaction.RecoveryResult{
+			Recovered:     true,
+			Operation:     transaction.OperationInstall,
+			Agent:         domain.AgentCodex,
+			Power:         domain.PowerRef{Name: "interrupted", Type: domain.PowerTypeSkill, Version: "v1.0.0"},
+			OriginalPhase: transaction.PhasePublishing,
+			Direction:     transaction.RecoveryCommit,
+		},
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+	}
+	fixture.beforeRelease = func() {
+		assertContainsAll(t, stderr.String(), []string{
+			`msg="transaction recovered"`, "operation=install", "agent=codex", "power=interrupted",
+			`msg="power is not installed"`, "operation=uninstall", "power=demo",
+		})
+		if strings.Count(stderr.String(), "level=WARN") != 2 {
+			t.Fatalf("stderr = %q, want recovery and business Warns before Release", stderr.String())
+		}
+	}
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "codex", Name: "demo"})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Outcome: cli.UninstallOutcomeUnexecuted}})
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
 func newUninstallService(t *testing.T, calls *[]string, fixture uninstallFixture) *UninstallService {
 	t.Helper()
 	service, err := NewUninstall(
@@ -508,6 +871,21 @@ func assertContainsAll(t *testing.T, value string, wants []string) {
 	for _, want := range wants {
 		if !strings.Contains(value, want) {
 			t.Fatalf("value = %q, want it to contain %q", value, want)
+		}
+	}
+}
+
+func rejectLaterUninstallEvents(t *testing.T, agents []domain.AgentID) func(string) {
+	t.Helper()
+	forbidden := make(map[string]bool, len(agents)*3)
+	for _, agent := range agents {
+		forbidden["config:"+string(agent)] = true
+		forbidden["resolve:"+string(agent)] = true
+		forbidden["transaction:uninstall:"+string(agent)] = true
+	}
+	return func(event string) {
+		if forbidden[event] {
+			t.Fatalf("Uninstall() accessed later Agent after first failure: %s", event)
 		}
 	}
 }
