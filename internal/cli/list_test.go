@@ -39,6 +39,9 @@ func newListEntry(t *testing.T, stdout, stderr io.Writer, factory cli.ListLifecy
 	}, factory, func() (cli.InstallLifecycle, error) {
 		t.Fatal("List dispatched to Install factory")
 		return nil, nil
+	}, func() (cli.UninstallLifecycle, error) {
+		t.Fatal("List dispatched to Uninstall factory")
+		return nil, nil
 	})
 }
 

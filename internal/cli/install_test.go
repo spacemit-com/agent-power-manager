@@ -39,7 +39,10 @@ func newInstallEntry(t *testing.T, stdout, stderr io.Writer, factory cli.Install
 	}, func() (cli.ListLifecycle, error) {
 		t.Fatal("Install dispatched to List factory")
 		return nil, nil
-	}, factory)
+	}, factory, func() (cli.UninstallLifecycle, error) {
+		t.Fatal("Install dispatched to Uninstall factory")
+		return nil, nil
+	})
 }
 
 func TestInstallPassesOriginalAgentTypeNameAndVersion(t *testing.T) {
@@ -336,15 +339,14 @@ func TestInstallRepeatedExecutionDoesNotLeakFlagsLoggerOrService(t *testing.T) {
 	}
 }
 
-func TestUninstallDoesNotInvokeInstallFactory(t *testing.T) {
+func TestInstallDoesNotInvokeUninstallFactory(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	entry := newInstallEntry(t, &stdout, &stderr, func() (cli.InstallLifecycle, error) {
-		t.Fatal("Uninstall invoked Install factory")
-		return nil, nil
+		return &recordingInstallLifecycle{}, nil
 	})
 
-	if err := entry.Execute([]string{"uninstall", "demo", "--agent=all"}); err != nil {
-		t.Fatalf("Execute(uninstall) error = %v", err)
+	if err := entry.Execute([]string{"install", "demo", "--agent=all"}); err != nil {
+		t.Fatalf("Execute(install) error = %v", err)
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("output = stdout %q, stderr %q; want empty", stdout.String(), stderr.String())

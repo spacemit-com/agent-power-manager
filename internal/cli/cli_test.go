@@ -23,6 +23,8 @@ func newTestEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
 		return emptyListLifecycle{}, nil
 	}, func() (cli.InstallLifecycle, error) {
 		return emptyInstallLifecycle{}, nil
+	}, func() (cli.UninstallLifecycle, error) {
+		return emptyUninstallLifecycle{}, nil
 	})
 }
 
@@ -42,6 +44,12 @@ type emptyInstallLifecycle struct{}
 
 func (emptyInstallLifecycle) Install(context.Context, cli.Flags) (cli.InstallResult, error) {
 	return cli.InstallResult{Items: []cli.InstallItem{}}, nil
+}
+
+type emptyUninstallLifecycle struct{}
+
+func (emptyUninstallLifecycle) Uninstall(context.Context, cli.Flags) (cli.UninstallResult, error) {
+	return cli.UninstallResult{Items: []cli.UninstallItem{}}, nil
 }
 
 func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
