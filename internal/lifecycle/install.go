@@ -58,6 +58,7 @@ var _ cli.InstallLifecycle = (*InstallService)(nil)
 // Install 在一次全局锁持有期间恢复共享状态并串行安装所选 Agent。
 // 所有可渲染结果均在成功释放锁后返回，避免暴露仍受保护的中间状态。
 func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.InstallResult, error) {
+	// Recover、快照、Power 解析和逐 Agent Transaction 共同读写受保护状态，必须位于同一锁区间。
 	unlock, err := s.locker.Acquire()
 	if err != nil {
 		return cli.InstallResult{}, fmt.Errorf("acquire install lock: %w", err)
@@ -90,6 +91,7 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 	items := make([]cli.InstallItem, 0, len(agents))
 	var failedAgent domain.AgentID
 	var businessErr error
+	// 批处理首错即停止；后续 Agent 补为 unexecuted，使成功解锁后的汇总保持完整顺序。
 	for index, agent := range agents {
 		item, installErr := s.installOne(ctx, agent, ref)
 		if installErr != nil {
@@ -104,6 +106,7 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 		items = append(items, item)
 	}
 
+	// Release 失败时受保护状态不可确认，必须抑制全部可渲染结果并保留已发生的错误原因。
 	if releaseErr := unlock.Release(); releaseErr != nil {
 		return cli.InstallResult{}, errors.Join(
 			businessErr,
