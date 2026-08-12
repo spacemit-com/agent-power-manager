@@ -2,6 +2,9 @@ package adapter
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 
 	"apm/internal/domain"
 )
@@ -38,4 +41,51 @@ type MCPAdapter interface {
 	Inspect(context.Context, string) (MCPPresence, error)
 	Add(context.Context, domain.PowerRef, domain.MCPServer) (MCPMutationResult, error)
 	Remove(context.Context, domain.PowerRef) (MCPMutationResult, error)
+}
+
+func validateMCPRef(ref domain.PowerRef) error {
+	if ref.Type != domain.PowerTypeMCP || strings.TrimSpace(ref.Name) == "" || strings.TrimSpace(ref.Version) == "" {
+		return fmt.Errorf("MCP reference %+v: %w", ref, ErrInvalidMCP)
+	}
+	return nil
+}
+
+func validateMCPAdd(ref domain.PowerRef, server domain.MCPServer) error {
+	if err := validateMCPRef(ref); err != nil {
+		return err
+	}
+	if err := server.Validate(); err != nil {
+		return errors.Join(ErrInvalidMCP, err)
+	}
+	return nil
+}
+
+func mutationFromCommand(agent domain.AgentID, operation string, ref domain.PowerRef, result mcpCommandResult, runErr error, success bool) (MCPMutationResult, error) {
+	if !result.Started {
+		return MCPMutationResult{State: MCPMutationNotApplied}, fmt.Errorf("%s MCP %s %q did not start: %w", agent, operation, ref.Name, runErr)
+	}
+	if runErr == nil && success {
+		return MCPMutationResult{State: MCPMutationApplied}, nil
+	}
+	diagnostic := strings.TrimSpace(result.Stderr)
+	if diagnostic == "" {
+		diagnostic = strings.TrimSpace(result.Stdout)
+	}
+	return MCPMutationResult{State: MCPMutationUnknown}, fmt.Errorf(
+		"%s MCP %s %q via %q has unknown result (exit=%d, diagnostic=%q): %w",
+		agent, operation, ref.Name, result.Path, result.ExitCode, diagnostic,
+		errors.Join(ErrMCPMutationUnknown, runErr),
+	)
+}
+
+func inspectUnknown(agent domain.AgentID, name string, result mcpCommandResult, err error) (MCPPresence, error) {
+	diagnostic := strings.TrimSpace(result.Stderr)
+	if diagnostic == "" {
+		diagnostic = strings.TrimSpace(result.Stdout)
+	}
+	return "", fmt.Errorf(
+		"inspect %s MCP %q via %q (exit=%d, diagnostic=%q): %w",
+		agent, name, result.Path, result.ExitCode, diagnostic,
+		errors.Join(ErrMCPStateUnknown, err),
+	)
 }

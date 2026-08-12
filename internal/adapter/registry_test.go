@@ -47,9 +47,13 @@ func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentI
 		domain.AgentClaudeCode,
 		domain.AgentHermes,
 	} {
-		got, err := registry.Resolve(agent, domain.PowerTypeSkill)
+		got, err := registry.ResolveSkill(agent)
 		if err != nil || got == nil {
-			t.Fatalf("Resolve(%q, skill) = %v, %v", agent, got, err)
+			t.Fatalf("ResolveSkill(%q) = %v, %v", agent, got, err)
+		}
+		mcp, err := registry.ResolveMCP(agent)
+		if err != nil || mcp == nil {
+			t.Fatalf("ResolveMCP(%q) = %v, %v", agent, mcp, err)
 		}
 	}
 
@@ -67,11 +71,11 @@ func TestRegistryRefreshInstalledSortsDetectionAndSnapshotByAgentID(t *testing.T
 	var calls []domain.AgentID
 	registration := []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode}
 	registry := &Registry{
-		ordered: slices.Clone(registration),
-		byAgent: map[domain.AgentID]Adapter{},
+		ordered:      slices.Clone(registration),
+		skillByAgent: map[domain.AgentID]Adapter{},
 	}
 	for _, agent := range registry.ordered {
-		registry.byAgent[agent] = recordingDetectAdapter{agent: agent, calls: &calls, found: agent != domain.AgentCodex}
+		registry.skillByAgent[agent] = recordingDetectAdapter{agent: agent, calls: &calls, found: agent != domain.AgentCodex}
 	}
 
 	snapshot, err := registry.RefreshInstalled()
@@ -92,15 +96,15 @@ func TestRegistryRefreshInstalledStopsAfterFirstDetectionError(t *testing.T) {
 	var calls []domain.AgentID
 	detectErr := errors.New("permission denied")
 	registry := &Registry{
-		ordered: []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode},
-		byAgent: map[domain.AgentID]Adapter{},
+		ordered:      []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode},
+		skillByAgent: map[domain.AgentID]Adapter{},
 	}
 	for _, agent := range registry.ordered {
 		adapter := recordingDetectAdapter{agent: agent, calls: &calls, found: true}
 		if agent == domain.AgentClaudeCode {
 			adapter.err = detectErr
 		}
-		registry.byAgent[agent] = adapter
+		registry.skillByAgent[agent] = adapter
 	}
 
 	snapshot, err := registry.RefreshInstalled()
@@ -115,20 +119,13 @@ func TestRegistryRefreshInstalledStopsAfterFirstDetectionError(t *testing.T) {
 	}
 }
 
-func TestRegistryResolveRejectsUnsupportedAgentAndPower(t *testing.T) {
+func TestRegistryResolversRejectUnsupportedAgent(t *testing.T) {
 	registry := NewRegistry()
-	for _, request := range []struct {
-		agent domain.AgentID
-		power domain.PowerType
-	}{
-		{agent: "unknown", power: domain.PowerTypeSkill},
-		{agent: domain.AgentCodex, power: domain.PowerTypePlugin},
-		{agent: domain.AgentCodex, power: domain.PowerTypeMCP},
-	} {
-		got, err := registry.Resolve(request.agent, request.power)
-		if got != nil || !errors.Is(err, ErrUnsupportedAdapter) {
-			t.Fatalf("Resolve(%q, %q) = %v, %v; want nil, ErrUnsupportedAdapter", request.agent, request.power, got, err)
-		}
+	if got, err := registry.ResolveSkill("unknown"); got != nil || !errors.Is(err, ErrUnsupportedAdapter) {
+		t.Fatalf("ResolveSkill(unknown) = %v, %v; want nil, ErrUnsupportedAdapter", got, err)
+	}
+	if got, err := registry.ResolveMCP("unknown"); got != nil || !errors.Is(err, ErrUnsupportedAdapter) {
+		t.Fatalf("ResolveMCP(unknown) = %v, %v; want nil, ErrUnsupportedAdapter", got, err)
 	}
 }
 

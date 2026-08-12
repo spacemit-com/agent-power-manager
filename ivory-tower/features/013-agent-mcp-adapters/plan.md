@@ -247,7 +247,7 @@ Run: `go test ./internal/adapter -run 'MCPRunner|MCPAdapterContract' -count=1`
 
 Expected: PASS without invoking any real Agent binary.
 
-- [ ] **Step 6: Commit the contract and runner**
+- [x] **Step 6: Commit the contract and runner**
 
 ```bash
 git add internal/adapter/mcp_adapter.go internal/adapter/mcp_runner.go internal/adapter/mcp_runner_test.go internal/adapter/errors.go
@@ -271,7 +271,7 @@ git commit -m "feat(mcp): add safe Agent CLI runner"
 - Produces: `Registry.ResolveSkill(domain.AgentID) (Adapter, error)` and `Registry.ResolveMCP(domain.AgentID) (MCPAdapter, error)`.
 - Preserves: `Registry.RefreshInstalled()` root-directory detection and lexicographic Agent order.
 
-- [ ] **Step 1: Write failing exact-argv tests for all Agents**
+- [x] **Step 1: Write failing exact-argv tests for all Agents**
 
 Use a recording runner and assert these full arrays:
 
@@ -286,7 +286,7 @@ hermesHTTP := []string{"mcp", "add", "demo", "--url", "https://example.com/mcp"}
 
 Also prove empty stdio args omit Hermes `--args`, all Remove arrays are exact, and no Agent runs a post-mutation Inspect after an applied result.
 
-- [ ] **Step 2: Write failing Inspect parser tests**
+- [x] **Step 2: Write failing Inspect parser tests**
 
 Codex fixtures cover valid `get --json`, explicit not-found, invalid/trailing JSON, empty/duplicate names, and nonzero ambiguous errors. Claude fixtures cover confirmed `User scope`, absent, local/project-only, health-error ambiguity, and format changes. Hermes fixtures cover ANSI-stripped table rows, empty-list text, exact names, duplicate rows, malformed headers, truncation, and nonzero output.
 
@@ -297,21 +297,21 @@ presence, err := subject.Inspect(context.Background(), "demo")
 if presence != MCPPresent || err != nil { t.Fatalf("Inspect() = %q, %v", presence, err) }
 ```
 
-- [ ] **Step 3: Write failing Hermes interaction/result tests**
+- [x] **Step 3: Write failing Hermes interaction/result tests**
 
 Prove stdio scripted stdin begins with default acceptance, HTTP begins with `n\n`, Remove confirms with a blank default-yes line, applied requires an exact-name Saved/Removed marker, exit zero without a marker is unknown, and a connection failure is not applied only when output explicitly proves no save.
 
-- [ ] **Step 4: Run per-Agent tests and verify they fail**
+- [x] **Step 4: Run per-Agent tests and verify they fail**
 
 Run: `go test ./internal/adapter -run 'CodexMCP|ClaudeMCP|HermesMCP' -count=1`
 
 Expected: FAIL because the Agent implementations do not exist.
 
-- [ ] **Step 5: Implement Agent-specific adapters**
+- [x] **Step 5: Implement Agent-specific adapters**
 
 Keep parser/argv logic in its Agent file. Shared Add/Remove workflow validates `ref.Type == mcp`, version/name presence, and `server.Validate`; it maps pre-start errors to not-applied, explicit success to applied, and all post-start ambiguous results to unknown. Do not read Agent config files.
 
-- [ ] **Step 6: Write failing Registry tests**
+- [x] **Step 6: Write failing Registry tests**
 
 Replace the old generic Resolve expectations with:
 
@@ -324,11 +324,11 @@ for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode
 
 Retain detection ordering/error tests and prove unknown Agents fail both resolvers with `ErrUnsupportedAdapter`.
 
-- [ ] **Step 7: Implement the type-specific Registry**
+- [x] **Step 7: Implement the type-specific Registry**
 
 Store independent `skillByAgent` and `mcpByAgent` maps plus the existing ordered Agent IDs. `RefreshInstalled` must continue using Agent root detection only and must not call LookPath or an MCP CLI.
 
-- [ ] **Step 8: Run all Adapter tests**
+- [x] **Step 8: Run all Adapter tests**
 
 Run: `go test ./internal/adapter -count=1`
 
