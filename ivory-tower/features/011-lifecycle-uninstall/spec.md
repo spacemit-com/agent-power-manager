@@ -1,5 +1,7 @@
 # Lifecycle Uninstall 规格
 
+> **当前状态说明（2026-08-12）：** 本 spec 的本地消歧、单锁、Warn 与批处理契约继续有效；Feature 013 已新增 MCP 的 `GetMCP`、`ResolveMCP`、`UninstallMCP` 分支，见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+
 > **实现状态（2026-08-12）：** 本 spec 的已批准要求已实现。`Manager.Uninstall` 的 `TargetMissing` 事实返回与锁内同步消费边界由 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 记录。
 
 ## 目标

@@ -812,7 +812,7 @@ Run: `go test ./internal/lifecycle ./internal/cloud ./cmd/apm -count=1`
 
 Expected: PASS; the harness reports every executed Agent path inside fake-bin.
 
-- [ ] **Step 7: Commit production wiring and fixtures**
+- [x] **Step 7: Commit production wiring and fixtures**
 
 ```bash
 git add cmd/apm internal/cloud internal/lifecycle internal/cli
@@ -843,19 +843,19 @@ git commit -m "feat(mcp): enable end-to-end CLI lifecycle"
 - Consumes: final verified implementation and commit hashes.
 - Produces: current architecture/business documentation that cites ADR-010 and one reverse-chronological Changelog entry for this user request.
 
-- [ ] **Step 1: Update current-state architecture documentation**
+- [x] **Step 1: Update current-state architecture documentation**
 
 Replace “Plugin/MCP unsupported” with the actual matrix: Skill and MCP on all three Agents; Plugin unsupported. Show Cloud List/GetMCP direct flow, Skill-only Cache/Staging, type-specific Registry resolution, one filesystem/agent-cli journal envelope, and cross-type Recover routing. Update Install/Uninstall Mermaid flows with explicit Skill/MCP branches without changing outer lock/Release semantics.
 
-- [ ] **Step 2: Add historical supersession notes to related Features**
+- [x] **Step 2: Add historical supersession notes to related Features**
 
 Do not rewrite past scopes as if MCP existed then. Add dated current-state notes linking Feature 013 and ADR-010 wherever Feature 006/007/010/011 says MCP is unsupported or Transaction only has a filesystem target.
 
-- [ ] **Step 3: Update BUILD usage examples**
+- [x] **Step 3: Update BUILD usage examples**
 
 Add MCP search/list/install/uninstall examples, describe stdio/http Cloud definitions, three-Agent support, user-scope Claude behavior, fail-closed CLI checks, no MCP Cache/Staging, and test-environment isolation. Keep Plugin explicitly unsupported.
 
-- [ ] **Step 4: Run formatting and focused tests before Changelog**
+- [x] **Step 4: Run formatting and focused tests before Changelog**
 
 ```bash
 test -z "$(gofmt -l cmd internal)"
@@ -865,7 +865,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 ```bash
 go test -count=1 ./...
@@ -877,15 +877,15 @@ git diff --check
 
 Expected: every command exits 0 with no real Agent CLI invocation.
 
-- [ ] **Step 6: Audit Feature 013 requirement-by-requirement**
+- [x] **Step 6: Audit Feature 013 requirement-by-requirement**
 
 Create `verification.md` with columns `Spec requirement`, `Evidence`, and `Status`. Use every `spec.md` heading and each table row as the checklist. For every scope item, domain/Cloud rule, Agent argv/parser rule, state-table row, journal phase, cross-type recovery case, error boundary, and environment-isolation condition, record the exact proving test name or source/document path and mark only `proved` or `missing`. Treat every `missing` row as unfinished work and add the missing test or implementation; final verification requires zero `missing` rows.
 
-- [ ] **Step 7: Add one Changelog entry after verification passes**
+- [x] **Step 7: Add one Changelog entry after verification passes**
 
 Use `/home/liangff/.codex/docs/Changelog.md` exactly. Add a top `## 2026-08-12` entry classified `新增功能`, describe this single user request, list every related implementation commit including the design/plan commits, summarize type-specific adapters/shared journal/Cloud direct definitions, and paste the exact successful verification commands plus remaining limitations.
 
-- [ ] **Step 8: Mark plan checkboxes from actual evidence and commit docs**
+- [x] **Step 8: Mark plan checkboxes from actual evidence and commit docs**
 
 Only check steps whose commands/actions actually completed. Then commit:
 
@@ -894,7 +894,7 @@ git add BUILD.md docs/Changelog.md ivory-tower
 git commit -m "docs(mcp): document Agent CLI lifecycle"
 ```
 
-- [ ] **Step 9: Re-run post-commit smoke verification**
+- [x] **Step 9: Re-run post-commit smoke verification**
 
 Run:
 

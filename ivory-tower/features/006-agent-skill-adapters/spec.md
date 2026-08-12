@@ -1,5 +1,7 @@
 # Codex、Claude Code 与 Hermes Agent Skill Adapter 规格
 
+> **当前状态说明（2026-08-12）：** 本 spec 的 Skill Adapter 契约继续有效；其中“Registry 只支持 Skill，MCP 不支持”的表述是历史范围。当前 Registry 并列解析 Skill 与 MCP 类型专属 Adapter，见 [Feature 013](../013-agent-mcp-adapters/spec.md) 和 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+
 ## 目标
 
 APM 为 Codex、Claude Code 和 Hermes Agent 提供首批可用 Adapter。Adapter 负责单个 Agent、单个 Skill 的目标路径差异，并拥有从公共 staging 原地适配、复制安装、原子发布到 staging 清理的完整过程。

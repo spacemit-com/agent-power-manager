@@ -1,49 +1,28 @@
 flowchart TD
-    UninstallStart([Uninstall lifecycle]) --> UninstallAcquire[Acquire 全局锁]
-    UninstallAcquire -->|failure| UninstallFatal([fatal error；无业务汇总])
-    UninstallAcquire -->|success| UninstallRecover[TransactionManager.Recover]
-    UninstallRecover -->|recovered| UninstallRecoverWarn[锁内同步 recovery Warn]
-    UninstallRecover -->|no journal| UninstallRefresh[RefreshInstalled]
-    UninstallRecoverWarn --> UninstallRefresh
-    UninstallRecover -->|failure| UninstallReleaseFatal[Release]
-    UninstallRefresh -->|failure / invalid target / empty all| UninstallReleaseFatal
-    UninstallRefresh -->|success| UninstallNext{next Agent?}
-
-    UninstallNext -->|yes| UninstallList[ConfigRepository.List]
-    UninstallList -->|no record| UninstallNotInstalledWarn[锁内同步 not-installed Warn]
-    UninstallNotInstalledWarn --> UninstallAgentOnlyUnexecuted[Agent-only unexecuted]
-    UninstallAgentOnlyUnexecuted --> UninstallNext
-
-    UninstallList -->|read failure / ambiguity| UninstallAgentOnlyFailed[Agent-only failed]
-    UninstallAgentOnlyFailed --> UninstallFillLater[后续 Agent-only unexecuted]
-    UninstallList -->|unique local PowerRef| UninstallResolve[AdapterRegistry.Resolve]
-    UninstallResolve -->|failure| UninstallFullFailed[full-ref failed]
-    UninstallResolve -->|success| UninstallTransaction[TransactionManager.Uninstall]
-
-    subgraph UninstallTx[TransactionManager；ADR-009]
-        UninstallTransaction --> UninstallTargetPath[Adapter.TargetPath]
-        UninstallTargetPath --> UninstallJournal[验证路径并驱动 removing / rolling-back / committing journal]
-        UninstallJournal --> UninstallTxReturn[返回 Transaction UninstallResult.TargetMissing + error]
-    end
-
-    UninstallTxReturn -->|TargetMissing=true| UninstallMissingWarn[锁内同步 full-ref target-missing Warn]
-    UninstallMissingWarn --> UninstallTxError{error?}
-    UninstallTxReturn -->|TargetMissing=false| UninstallTxError
-    UninstallTxError -->|no| UninstallCompleted[full-ref completed]
-    UninstallTxError -->|yes| UninstallFullFailed
-    UninstallCompleted --> UninstallNext
-    UninstallFullFailed --> UninstallFillLater
-    UninstallFillLater --> UninstallReleaseBatch[Release]
-
-    UninstallNext -->|no| UninstallReleaseSuccess[Release]
-    UninstallReleaseFatal -->|success| UninstallFatal
-    UninstallReleaseFatal -->|failure| UninstallSuppress[返回 zero result；抑制 summary]
-    UninstallReleaseBatch -->|success| UninstallRenderBatch[CLI render completed / failed / unexecuted]
-    UninstallRenderBatch --> UninstallBatchError([return UninstallBatchError])
-    UninstallReleaseBatch -->|failure| UninstallSuppress
-    UninstallReleaseSuccess -->|success| UninstallRender[CLI render completed / unexecuted]
-    UninstallReleaseSuccess -->|failure| UninstallSuppress
-    UninstallRender --> UninstallOK([success])
-    UninstallSuppress --> UninstallReleaseError([Release error])
-
-    style UninstallTx fill:#fff4e5,stroke:#d97706,stroke-width:2px
+    Start([Uninstall]) --> Lock[Acquire]
+    Lock --> Recover[Recover shared journal]
+    Recover --> Refresh[RefreshInstalled]
+    Refresh --> Manifest[Config List + local resolve]
+    Manifest -->|no record| WarnNone[Warn + Agent-only unexecuted]
+    Manifest -->|record| Type{Power type}
+    Type -->|Skill| Skill[ResolveSkill + filesystem Uninstall]
+    Skill --> FSJournal[schema v2 filesystem removing/committing/rolling-back]
+    Type -->|MCP| MCP[ResolveMCP + Agent CLI Inspect]
+    MCP -->|present| Def[Cloud GetMCP exact manifest version]
+    Def --> MCPTx[UninstallMCP with definition]
+    MCP -->|absent| MCPStale[UninstallMCP with nil definition]
+    MCPTx --> CLIJournal[schema v2 agent-cli removing/committing/rolling-back]
+    MCPStale --> Missing[remove only matching MCP manifest entry]
+    FSJournal --> Result{TargetMissing? / error?}
+    CLIJournal --> Result
+    Missing --> Result
+    Result -->|missing| WarnMissing[lock-held target-missing Warn]
+    Result -->|error| Fail[full-ref failed + fail-fast]
+    Result -->|success| Done[full-ref completed]
+    WarnMissing -->|error| Fail
+    WarnMissing -->|success| Done
+    WarnNone --> Next{next Agent}
+    Done --> Next
+    Next -->|yes| Manifest
+    Next -->|no| Release[Release then render]
+    Fail --> Release

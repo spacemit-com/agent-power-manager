@@ -1,23 +1,22 @@
 classDiagram
-    note for CloudClient "Cloud 接口：List 返回带版本的全部 PowerRef；Get 将版本已确定的 PowerRef 原子写入缓存"
+    note for CloudClient "List 返回全部精确 PowerRef；Skill Get 写缓存；GetMCP 直接返回互斥的 stdio/http 定义"
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
         +Get(PowerRef) error
+        +GetMCP(PowerRef) (MCPServer, error)
     }
-
-    note for PowerRef "Power 引用：类别 + 名称 + 版本；Get/Fetch 前版本必须已确定"
-    class PowerRef {
-        +Name string
-        +Type PowerType
-        +Version string
+    class MCPServer {
+        +Transport MCPTransport
+        +Command string
+        +Args []string
+        +URL string
+        +Validate() error
     }
-
-    note for LocalClient "开发期本地实现：扫描绝对路径资源根，Get 经缓存根内临时目录原子发布"
     class LocalClient {
         +List() ([]PowerRef, error)
         +Get(PowerRef) error
+        +GetMCP(PowerRef) (MCPServer, error)
     }
-
     LocalClient ..|> CloudClient
-    CloudClient --> PowerRef
+    CloudClient --> MCPServer : direct, no cache/staging

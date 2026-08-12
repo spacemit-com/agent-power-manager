@@ -4,6 +4,41 @@
 
 ## 2026-08-12
 
+分类：新增功能
+
+用户需求：
+
+在 APM 现有 Skill 生命周期基础上增加 MCP 适配：Cloud 按 MCP 名称和精确版本返回 stdio 启动命令或 HTTP URL；APM 不为 MCP 使用 Cache/Staging，通过 Codex、Claude Code、Hermes Agent CLI 完成用户级安装、升级、卸载和状态检查；manifest 只记录由 APM 安装的 MCP 条目，Skill/MCP 共用可串行恢复的唯一 journal，并确保自动化测试不影响真实 Agent 环境。
+
+相关提交：
+
+- `b6066e8 docs(mcp): define adapters and recoverable transactions`
+- `2ed36a8 docs(mcp): plan Agent CLI lifecycle implementation`
+- `525b002 feat(mcp): add versioned Cloud definitions`
+- `97cd079 feat(mcp): add safe Agent CLI runner`
+- `1070b1b feat(mcp): add Agent-specific adapters`
+- `8d12b2c refactor(transaction): add typed journal drivers`
+- `8465ff8 feat(mcp): add recoverable install transactions`
+- `5007a57 feat(mcp): add uninstall and cross-type recovery`
+- `afca331 feat(mcp): wire install lifecycle`
+- `e3fcff4 feat(mcp): wire uninstall lifecycle`
+- `cc8ac74 feat(mcp): enable end-to-end CLI lifecycle`
+- `848f7d0 fix(mcp): enforce fail-closed adapter boundaries`
+
+解决方案或完成结果：
+
+新增严格互斥的 stdio/HTTP `MCPServer` 领域模型和 Cloud `GetMCP` 精确版本接口；MCP 定义直接从 Cloud 进入 lifecycle，不写 Cache/Staging。Registry 分别提供 Skill 与 MCP Adapter，三个 MCP Adapter 使用 argv 直接调用目标 Agent CLI，其中 Claude Code 固定 user scope，Hermes 使用受控 stdin。CLI runner 动态解析 PATH、限制 30 秒和输出大小；结构、scope、重复项、截断或退出结果不明确时 fail closed。未纳管同名 MCP 返回稳定的 `ErrMCPConflict`，同时保留旧 `ErrTargetConflict` 的 `errors.Is` 兼容性；Plugin 明确返回不支持，不进入 Skill 文件系统事务。
+
+manifest 的 `mcps` 分组只保存 APM 成功安装的精确 `PowerRef`；卸载和 stale 修复只删除对应 Type/Name 条目，不删除整个清单。唯一 journal 升级为 schema v2 信封，由 `filesystem` 与 `agent-cli` driver 分别承载 Skill 和 MCP 状态，并继续读取 schema v1 Skill journal。每条需要恢复的后续命令按 journal driver 串行恢复；MCP 更新采用先移除旧定义、再添加新定义的可恢复阶段，已应用但报错时保留确定的恢复方向。
+
+验证结果或限制：
+
+`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go test -race -count=1 ./internal/adapter ./internal/cloud ./internal/lifecycle ./internal/transaction`、`go vet ./...`、`go build -o /dev/null ./cmd/apm` 与 `git diff --check` 均以退出码 0 完成。集成测试把 `PATH` 指向临时 fake-bin，并把 `APM_HOME`、`XDG_CACHE_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME` 全部隔离到 `t.TempDir()`，还断言所有已执行程序均来自 fake-bin；未调用 `/home/liangff/.local/bin/hermes` 或其他真实 Agent CLI，也未改动真实 Agent 配置。
+
+当前限制：Plugin Adapter 不在本功能范围内；MCP 正常写操作按设计不追加 list 验证；认证、环境变量、preset 和自定义工具筛选尚不支持；Agent CLI 或其他进程绕过 APM 并发修改配置不在一致性保证范围内。
+
+## 2026-08-12
+
 分类：功能变更
 
 用户需求：

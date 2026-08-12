@@ -1,8 +1,19 @@
 flowchart TD
-    RecoveryStart([需要 APM 共享状态的生命周期入口]) --> RecoveryLock[获取全局 APM 锁]
-    RecoveryLock -->|失败| RecoveryLockFail[返回错误] --> RecoveryLockExit([CLI 记录一次 Error、打印 usage、非零退出])
-    RecoveryLock -->|成功| RecoveryManager[调用 TransactionManager.Recover 检查集中 active journal]
-    RecoveryManager -->|无活动 journal| RecoveryResume[进入调用方共享状态业务；锁只保持到该业务结束]
-    RecoveryManager -->|恢复成功| RecoveryLog[锁内同步记录恢复 Warn] --> RecoveryResume
-    RecoveryManager -->|journal 非法或恢复失败| RecoveryRelease[尝试释放锁] --> RecoveryExitError([CLI 记录一次 Error、打印 usage、非零退出])
-    RecoveryManager -.进程中断.-> RecoveryInterrupted([内核释放锁；集中 journal 保留；下次共享状态业务重新预检])
+    Start([需要共享状态的命令]) --> Lock[Acquire 全局 APM 锁]
+    Lock --> Inspect[Inspect 唯一 transactions/active.json]
+    Inspect -->|无 journal| Resume[继续当前命令]
+    Inspect -->|schema v1| Normalize[归一化为 v2 filesystem]
+    Inspect -->|schema v2| Driver{driver}
+    Normalize --> FS[filesystem Skill 恢复]
+    Driver -->|filesystem| FS
+    Driver -->|agent-cli| CLI[按 journal Agent ResolveMCP]
+    FS --> Converge[按持久化 phase 提交或回滚]
+    CLI --> InspectMCP[Agent CLI Inspect 同名 MCP]
+    InspectMCP --> Converge
+    Converge --> Delete[收敛后删除同一个 journal]
+    Delete --> Warn[锁内同步恢复 Warn]
+    Warn --> Resume
+    Inspect -->|非法 schema/driver/payload| Fail[fail closed；保留 journal]
+    InspectMCP -->|CLI/输出不确定| Fail
+    Converge -->|失败或不确定| Fail
+    Fail --> Release[Release 并阻止当前业务]

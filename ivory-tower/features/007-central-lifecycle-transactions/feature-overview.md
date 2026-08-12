@@ -1,5 +1,7 @@
 # Feature Overview
 
+> **当前状态说明（2026-08-12）：** 本文保留 Feature 007 文件系统事务的历史范围。Feature 013 已将新事务升级为 schema v2 共享信封，以 `filesystem`/`agent-cli` driver 并列恢复 Skill 与 MCP，并保留 schema v1 Skill 只读兼容；见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+
 ## Goal
 
 - 特性名称：集中式 Lifecycle Transaction

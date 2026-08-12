@@ -1,5 +1,7 @@
 # Lifecycle Install 规格
 
+> **当前状态说明（2026-08-12）：** 本 spec 的外层锁、批处理与 Skill Cache 流程继续有效；Feature 013 在同一 lifecycle 中新增不使用 Cache/Staging 的 MCP CLI 分支，参见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+
 ## 目标
 
 完成 `install` 的 lifecycle 与 CLI 端到端接线。Install 在同一次全局 APM 锁内完成 transaction 恢复、Agent 快照、Cloud 解析、Cache staging 物化及全部目标 Agent 的串行安装；只有成功释放锁后，才把结构化结果交给 CLI 渲染。

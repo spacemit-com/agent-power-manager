@@ -1,72 +1,34 @@
 flowchart TD
-    Start([CLI 已解析 Install 参数]) --> Acquire[Acquire 全局 APM 锁]
-    Acquire --> Recover[TransactionManager.Recover]
-    Recover -->|失败| FatalRelease[尝试 Release；返回零结果]
-    Recover -->|成功| RecoveryLog{Recovered?}
-    RecoveryLog -->|是| Warn[锁内同步 slog.Warn transaction recovered]
-    RecoveryLog -->|否| Debug[锁内 Install 专属 Debug]
-    Warn --> Refresh[AdapterRegistry.RefreshInstalled]
-    Debug --> Refresh
-    Refresh -->|失败| FatalRelease
-    Refresh --> Validate{具体 Agent 在快照中，或 all 非空?}
-    Validate -->|否| FatalRelease
-    Validate -->|是| CloudList[CloudClient.List]
-    CloudList -->|失败| FatalRelease
-    CloudList --> ExactName[按区分大小写的 Name 精确收集候选]
-    ExactName -->|无候选| FatalRelease
-    ExactName --> TypeAmbiguous{省略 Type 且跨 Type 同名?}
-    TypeAmbiguous -->|是| FatalRelease
-    TypeAmbiguous -->|否| Version[在确定 Type 后选择显式版本或最大 SemVer]
-    Version -->|失败| FatalRelease
-    Version --> NextAgent{按快照顺序还有目标 Agent?}
+    Start([Install]) --> Lock[Acquire]
+    Lock --> Recover[Recover shared journal]
+    Recover --> Refresh[RefreshInstalled]
+    Refresh --> List[Cloud List + resolve exact PowerRef]
+    List --> Agent{next Agent}
+    Agent --> Type{Power type}
+    Type -->|Skill| SkillResolve[ResolveSkill + Config Find]
+    SkillResolve --> SkillSame{same manifest version?}
+    SkillSame -->|yes| Unchanged[unchanged]
+    SkillSame -->|no| Cache[Cache Fetch / Cloud Get / Fetch]
+    Cache --> FSTx[filesystem Install transaction]
+    FSTx --> FSJournal[schema v2 driver=filesystem]
 
-    NextAgent -->|否且无业务失败| ReleaseSuccess[Release]
-    NextAgent -->|是| Resolve[Resolve 当前 Agent/Type Adapter]
-    Resolve -->|失败| FailFast[追加当前 failed；剩余按顺序追加 unexecuted]
-    Resolve -->|成功| Find[ConfigRepository.Find 当前 Type/Name]
-    Find -->|失败| FailFast
-    Find --> Same{Previous.Version 等于目标版本?}
-    Same -->|是| Unchanged[追加 unchanged；不检查 target、不 Fetch、不调用 Transaction]
-    Unchanged --> NextAgent
-    Same -->|否| Fetch[Cache.Fetch 当前 Agent 的公共 staging root]
-    Fetch -->|命中| TxInstall[TransactionManager.Install]
-    Fetch -->|ErrMiss| Get[Cloud.Get 精确 PowerRef]
-    Fetch -->|其他错误| FailFast
-    Get -->|失败| FailFast
-    Get -->|成功| ReFetch[再次 Cache.Fetch]
-    ReFetch -->|失败| FailFast
-    ReFetch -->|成功| TxInstall
+    Type -->|MCP| MCPResolve[ResolveMCP + Config Find]
+    MCPResolve --> MCPInspect[Agent CLI Inspect]
+    MCPInspect --> MCPState{manifest / presence / version}
+    MCPState -->|same + present| Unchanged
+    MCPState -->|no manifest + present| Fail[unmanaged conflict]
+    MCPState -->|manifest + absent| MCPStale[InstallMCP nil definitions]
+    MCPState -->|first absent| NewDef[Cloud GetMCP new]
+    MCPState -->|update present| OldDef[Cloud GetMCP old] --> NewDef
+    NewDef --> MCPTx[agent-cli InstallMCP transaction]
+    MCPStale --> MCPTx
+    MCPTx --> MCPJournal[schema v2 driver=agent-cli]
+    MCPJournal --> Phases[removing-old / adding-new / committing / rolling-back]
 
-    subgraph Transaction[Install Transaction：不打印业务输出]
-        TxInstall --> TargetState{Previous 非空且 target 缺失?}
-        TargetState -->|是| Remove[ManifestWriter.Remove(agent,type,name)]
-        Remove --> CleanStaging[安全清理 canonical staging]
-        CleanStaging --> StaleAbort[返回 ErrStaleManifest；不生成 ID、不创建 journal、不调用 Adapter、不安装]
-        StaleAbort --> FailFast
-        TargetState -->|否| TargetConflict{Previous 为空且 target 存在?}
-        TargetConflict -->|是| TxError[返回清单外冲突]
-        TxError --> FailFast
-        TargetConflict -->|否| Journal[生成 ID，创建 preparing journal]
-        Journal --> Publish[持久化 publishing；Adapter 安装/原子发布]
-        Publish --> Commit[持久化 committing；Set 清单；清理；删除 journal]
-        Commit -->|失败| TxError
-        Commit -->|成功| TxOK[返回事务成功]
-    end
-    TxOK --> Outcome{Previous 存在?}
-    Outcome -->|否| Installed[追加 installed]
-    Outcome -->|是且目标更高| Upgraded[追加 upgraded]
-    Outcome -->|是且目标更低| Downgraded[追加 downgraded]
-    Installed --> NextAgent
-    Upgraded --> NextAgent
-    Downgraded --> NextAgent
-
-    FailFast --> ReleaseBatch[Release]
-    ReleaseBatch -->|成功| BatchResult[返回完整结果 + InstallBatchError]
-    ReleaseBatch -->|失败| Suppress[返回零结果和 joined error；抑制结果]
-    ReleaseSuccess -->|成功| SuccessResult[返回完整成功结果]
-    ReleaseSuccess -->|失败| Suppress
-    FatalRelease -->|Release 成功或失败| Fatal[返回零结果；无业务行]
-    BatchResult --> RenderBatch[CLI renderer 写每个 outcome 行，然后统一 Error/usage、非零]
-    SuccessResult --> RenderSuccess[CLI renderer 写每个 outcome 行，正常退出]
-    Suppress --> ErrorOnly[CLI 统一 Error/usage；不渲染 stdout]
-    Fatal --> ErrorOnly
+    FSJournal --> Outcome[installed/upgraded/downgraded]
+    Phases --> Outcome
+    Unchanged --> Agent
+    Outcome --> Agent
+    Fail --> Batch[fail-fast + remaining unexecuted]
+    Agent -->|done| Release[Release then render]
+    Batch --> Release

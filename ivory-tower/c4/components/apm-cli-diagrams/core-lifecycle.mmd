@@ -71,7 +71,8 @@ classDiagram
 
     class AdapterRegistry {
         <<interface>>
-        +Resolve(AgentID, PowerType) (Adapter, error)
+        +ResolveSkill(AgentID) (Adapter, error)
+        +ResolveMCP(AgentID) (MCPAdapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
     }
     note for Adapter "不定义 Uninstall 方法；Transaction 使用 TargetPath 管理 quarantine"
@@ -95,12 +96,14 @@ classDiagram
         +Set(AgentID, PowerRef) error
         +Remove(AgentID, PowerType, name) error
     }
-    note for TransactionManager "集中 journal；Uninstall 依 ADR-009 返回可与 error 并存的 target 事实，不记录 Warn"
+    note for TransactionManager "唯一 schema v2 journal；filesystem/agent-cli driver 可跨命令串行恢复（ADR-010）"
     class TransactionManager {
         <<interface>>
         +Recover(Context) (RecoveryResult, error)
         +Install(Context, InstallRequest) error
+        +InstallMCP(Context, MCPInstallRequest) error
         +Uninstall(Context, UninstallRequest) (TransactionUninstallResult, error)
+        +UninstallMCP(Context, MCPUninstallRequest) (TransactionUninstallResult, error)
     }
     class TransactionUninstallResult {
         +TargetMissing bool
@@ -117,6 +120,7 @@ classDiagram
         <<interface>>
         +List() ([]PowerRef, error)
         +Get(PowerRef) error
+        +GetMCP(PowerRef) (MCPServer, error)
     }
     class VersionSelector {
         <<interface>>
@@ -142,10 +146,10 @@ classDiagram
     installService --> InstallResult : returns
     installService --> InstallBatchError : successful Release only
     installService --> Locker : one lock interval
-    installService --> TransactionManager : Recover / Install
-    installService --> CloudClient : List / Get
-    installService --> PowerCache : Fetch
-    installService --> AdapterRegistry : Refresh / Resolve
+    installService --> TransactionManager : Recover / Install / InstallMCP
+    installService --> CloudClient : List / Skill Get / MCP GetMCP
+    installService --> PowerCache : Skill Fetch only
+    installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP
     installService --> ConfigRepository : Find
     installService --> VersionSelector : resolve version
 
@@ -153,9 +157,10 @@ classDiagram
     uninstallService --> UninstallResult : returns after Release
     uninstallService --> UninstallBatchError : successful Release only
     uninstallService --> Locker : one lock interval
-    uninstallService --> TransactionManager : Recover / Uninstall
-    uninstallService --> AdapterRegistry : Refresh / Resolve
+    uninstallService --> TransactionManager : Recover / Uninstall / UninstallMCP
+    uninstallService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP
     uninstallService --> ConfigRepository : List
+    uninstallService --> CloudClient : MCP GetMCP only when present
 
     AdapterRegistry --> Adapter : resolves
     AdapterRegistry --> AgentSnapshot : returns

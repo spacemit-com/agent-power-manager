@@ -1,5 +1,7 @@
 # Feature Overview
 
+> **当前状态说明（2026-08-12）：** 本文保留 Feature 011 的 filesystem Uninstall 历史范围。Feature 013 已为 Uninstall 增加 Cloud 精确 MCP 定义和 Agent CLI 删除/恢复分支，同时沿用单条清单移除及 `TargetMissing` 事实；见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+
 ## Goal
 
 - 特性名称：Lifecycle Uninstall

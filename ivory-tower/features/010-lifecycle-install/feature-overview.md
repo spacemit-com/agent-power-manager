@@ -1,5 +1,7 @@
 # Feature Overview
 
+> **当前状态说明（2026-08-12）：** 本文保留 Feature 010 的 Skill Install 历史范围。Feature 013 已增加 MCP 分支：Cloud `GetMCP` 直接取定义、不经 Cache/Staging，并由 agent-cli Transaction 安装或切换版本；见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+
 ## Goal
 
 - 特性名称：Lifecycle Install

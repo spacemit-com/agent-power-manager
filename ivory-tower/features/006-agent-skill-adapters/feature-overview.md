@@ -1,5 +1,7 @@
 # Feature Overview
 
+> **当前状态说明（2026-08-12）：** 本文保留 Feature 006 的 Skill-only 历史范围。Feature 013 已为三个 Agent 增加独立 MCP CLI Adapter，并把 Registry 拆为 `ResolveSkill`/`ResolveMCP`；参见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。Plugin 仍不支持。
+
 ## Goal
 
 - 特性名称：Codex、Claude Code 与 Hermes Agent Skill Adapter

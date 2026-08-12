@@ -5,7 +5,7 @@ cliEntry = component "CLI Entry" "cobra 命令路由；Search、List、Install�
         "classDiagram" "apm-cli-diagrams/cli-entry.mmd"
     }
 }
-lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install、Uninstall 生命周期端口，均返回结构化结果且不直接渲染。Cloud List 无锁；installed List 依 ADR-003 持锁；Install 以一个锁区间覆盖 Recover 到串行 Transaction；Uninstall 以一个锁区间覆盖 Recover、刷新、本地清单解析和串行 Transaction，并同步消费 ADR-009 的 TargetMissing 事实。" "Go" {
+lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install、Uninstall 生命周期端口。Install/Uninstall 按 Skill/MCP 分支调用 filesystem 或 agent-cli Transaction；所有恢复型命令先按 ADR-010 路由并串行恢复唯一活动 journal。" "Go" {
     properties {
         "classDiagram" "apm-cli-diagrams/core-lifecycle.mmd"
         "journalRecovery" "apm-cli-lifecycle-diagrams/common-journal-recovery.mmd"
@@ -16,7 +16,7 @@ lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install�
         "uninstallLifecycle" "apm-cli-lifecycle-diagrams/uninstall.mmd"
     }
 }
-adapterRegistry = component "Adapter Registry" "管理编译期唯一 Agent 注册；RefreshInstalled 对注册副本按 Agent ID 字典序检测并返回同序快照（ADR-004）。Adapter 依据 PowerRef 定位 staging 叶子和目标路径；不定义 Uninstall 方法，Power 卸载由 Transaction 通过 TargetPath 完成（ADR-009）。Plugin/MCP Adapter 仍不支持。" "Go" {
+adapterRegistry = component "Adapter Registry" "管理三个内置 Agent；分别 ResolveSkill 与 ResolveMCP。Skill Adapter 管理 staging/目标路径；MCP Adapter 只通过 Agent CLI Inspect/Add/Remove。Plugin 不支持（ADR-010）。" "Go" {
     properties {
         "classDiagram" "apm-cli-diagrams/adapter-registry.mmd"
     }
@@ -31,12 +31,12 @@ lockManager = component "Lock Manager" "基于 flock 实现防重入文件锁；
         "classDiagram" "apm-cli-diagrams/lock-manager.mmd"
     }
 }
-cacheManager = component "Cache Manager" "从 type/name/version 版本化缓存向干净公共 staging 物化版本已确定的 PowerRef，并返回 staging root。" "Go" {
+cacheManager = component "Cache Manager" "仅供 Skill：从 type/name/version 版本化缓存向干净公共 staging 物化版本已确定的 PowerRef。MCP 不访问 Cache/Staging。" "Go" {
     properties {
         "classDiagram" "apm-cli-diagrams/cache-manager.mmd"
     }
 }
-cloudClient = component "Cloud Client" "开发期扫描本地 Power fixture，并将 Get 的版本已确定 PowerRef 原子写入缓存。" "Go (local filesystem)" {
+cloudClient = component "Cloud Client" "List 扫描全部 Power；Skill Get 原子写入缓存；MCP GetMCP 直接返回精确版本 stdio/http 定义，不写 Cache/Staging。" "Go (local filesystem)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cloud-client.mmd"
     }
@@ -46,10 +46,10 @@ cliEntry -> lifecycle "通过四个独立 factory 调用 Search/List/Install/Uni
 lifecycle -> adapterRegistry "installed List/Install/Uninstall 刷新快照；Install/Uninstall 按 Agent 与 Power 类型解析 Adapter"
 lifecycle -> configModel "installed List 和 Uninstall 读取安装记录；Install Find；Transaction Set/Remove"
 lifecycle -> lockManager "Search、installed List、Install、Uninstall 在各自边界获取/释放；Cloud List 不获取"
-lifecycle -> cacheManager "Install 为每个实际安装 Agent fetch 版本已确定 PowerRef 到公共 staging"
-lifecycle -> cloudClient "Search/List/Install list 全量 PowerRef；Install 缓存 miss 时 get"
-adapterRegistry -> targetAgent "检查 Agent 根目录；安装 Power 并为 Transaction 解析 TargetPath" "本地文件系统"
+lifecycle -> cacheManager "仅 Skill Install：为每个实际安装 Agent fetch 到公共 staging"
+lifecycle -> cloudClient "Search/List/Install list；Skill cache miss Get；MCP Install/Uninstall GetMCP"
+adapterRegistry -> targetAgent "Skill 访问 Agent 文件根；MCP 通过 Agent CLI 检查和变更用户配置" "本地文件系统 / CLI"
 configModel -> apm.installedPower "读写 JSON 清单"
 cacheManager -> apm.powerCache "读取版本化缓存"
-cloudClient -> apm.powerCache "经临时目录原子写入目标 Power"
-cloudClient -> cloudRegistry "扫描/get 开发期 Power fixture" "本地文件系统"
+cloudClient -> apm.powerCache "仅 Skill Get：经临时目录原子写入"
+cloudClient -> cloudRegistry "扫描 Skill/MCP fixture；读取精确 MCP 定义" "本地文件系统"

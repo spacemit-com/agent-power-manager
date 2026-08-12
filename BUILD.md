@@ -60,13 +60,17 @@ gofmt -w cmd internal
 ./apm --verbose search summary
 ./apm list
 ./apm list --type skill
+./apm list --type mcp
 ./apm list --installed --agent codex
 ./apm list --installed --agent all --type skill
 ./apm install foo-before-summary --agent codex
 ./apm install foo-before-summary=v0.0.1 --agent codex --type skill
 ./apm install foo-before-summary --agent all
+./apm install filesystem=v0.0.1 --agent codex --type mcp
+./apm install company-tools=v0.0.1 --agent claude-code --type mcp
 ./apm uninstall foo-before-summary --agent codex
 ./apm uninstall foo-before-summary --agent all --type skill
+./apm uninstall filesystem --agent hermes-agent --type mcp
 ```
 
 Search 已实现：它按名称搜索 Cloud Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
@@ -91,7 +95,7 @@ Installed List 必须同时提供 `--installed --agent=<agent-id|all>`，在成�
 
 例如 `./apm list --agent all` 是无效组合：它会非零退出，并在 stderr 报告 `--agent requires --installed` 和 usage。`--agent=all` 的 installed 读取若出现部分失败，会输出成功记录后以非零状态报告错误；fatal 或 Release error 不输出业务行。已安装清单版本必须精确为 `vMAJOR.MINOR.PATCH`，APM 不会迁移或清理非法旧清单（[ADR-007](ivory-tower/adr/ADR-007-use-stateless-config-repository.md)）；Agent 刷新顺序见 [ADR-004](ivory-tower/adr/ADR-004-discover-installed-agents-before-local-operations.md)。
 
-Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名 Cloud 候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、Cloud、Cache 和串行 Transaction；只有成功 Release 后 CLI 才渲染。
+Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名 Cloud 候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、Cloud 和串行 Transaction；Skill 使用 Cache/Staging，MCP 直接读取 Cloud 精确版本定义并调用目标 Agent CLI，不创建 Cache/Staging。只有成功 Release 后 CLI 才渲染。
 
 每个目标 Agent 的 stdout 精确为以下六种 outcome 之一：
 
@@ -117,7 +121,13 @@ stdout 只有两种精确行形式：
 <agent> <failed|unexecuted>
 ```
 
-例如成功卸载可输出 `codex/skill/foo-before-summary@v0.0.1 completed`；重复执行时可输出 `codex unexecuted`。`--agent=all` 按 Agent ID 字典序 fail-fast：首个业务失败后，当前 Agent 记为 `failed`、剩余 Agent 记为 `unexecuted`。只有成功 Release 后才渲染汇总；Release error 抑制全部业务行。当前只有 Skill Adapter 可执行真实安装/卸载；Plugin/MCP Adapter 仍不支持。
+例如成功卸载可输出 `codex/skill/foo-before-summary@v0.0.1 completed` 或 `codex/mcp/filesystem@v0.0.1 completed`；重复执行时可输出 `codex unexecuted`。`--agent=all` 按 Agent ID 字典序 fail-fast：首个业务失败后，当前 Agent 记为 `failed`、剩余 Agent 记为 `unexecuted`。只有成功 Release 后才渲染汇总；Release error 抑制全部业务行。
+
+MCP 支持 Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互斥结构：本地 stdio 使用 `transport=stdio`、`command`、`args`，远程端点使用 `transport=http`、`url`。Claude Code 固定写入 user scope；所有同名检查、安装、卸载和恢复都通过目标 Agent CLI 完成。CLI 从当前 `PATH` 动态解析，不经 shell，30 秒超时，输出有界；解析或状态不清晰时 fail closed 并保留共享 journal。Hermes 正常 Add/Remove 后按设计不额外执行 list。
+
+Skill 与 MCP 共用唯一活动 journal，schema v2 通过 `filesystem` 与 `agent-cli` driver 路由；旧 schema v1 Skill journal 仍可恢复。下一条 Search、installed List、Install 或 Uninstall 会先恢复未完成的 Skill/MCP 事务。Plugin 仍明确不支持。
+
+自动化测试绝不能调用真实 Agent CLI。MCP 测试应把临时 fake-bin 前置到 `PATH`，将 `APM_HOME`、`XDG_CACHE_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME` 全部指向 `t.TempDir()` 下的隔离路径，并断言每次执行路径都位于 fake-bin。仓库集成测试已按此约束覆盖三个 Agent 的安装、升级、卸载和跨命令恢复。
 
 ## 清理本地构建产物
 

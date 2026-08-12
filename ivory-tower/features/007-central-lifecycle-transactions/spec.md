@@ -1,5 +1,7 @@
 # 集中式 Lifecycle Transaction 规格
 
+> **当前状态说明（2026-08-12）：** 本 spec 的 filesystem Transaction 行为继续有效，但“journal 只含文件路径、MCP 不在范围”的描述已由 Feature 013 扩展。当前唯一活动 journal 使用类型专属载荷并支持跨 Skill/MCP 命令串行恢复，见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+
 ## 目标
 
 实现 `internal/transaction` 的真实接口与默认文件系统实现，使安装和卸载在 Agent 目标目录、Config Repository 清单与集中 journal 之间保持可恢复的一致性。
