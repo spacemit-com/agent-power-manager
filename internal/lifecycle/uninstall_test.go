@@ -114,6 +114,10 @@ func (c *uninstallFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, erro
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
+func (*uninstallFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
+	return domain.PluginDefinition{}, nil
+}
+
 type uninstallFakeRegistry struct {
 	calls   *[]string
 	fixture *uninstallFixture

@@ -54,6 +54,11 @@ func (c *LocalClient) List() ([]domain.PowerRef, error) {
 		return nil, err
 	}
 	refs = append(refs, mcpRefs...)
+	pluginRefs, err := c.listPlugins()
+	if err != nil {
+		return nil, err
+	}
+	refs = append(refs, pluginRefs...)
 	sort.Slice(refs, func(i, j int) bool {
 		if refs[i].Type != refs[j].Type {
 			return refs[i].Type < refs[j].Type

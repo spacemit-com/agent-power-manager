@@ -129,6 +129,10 @@ func (c *installFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error)
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
+func (*installFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
+	return domain.PluginDefinition{}, nil
+}
+
 type installFakeCache struct {
 	calls   *[]string
 	fixture *installFixture

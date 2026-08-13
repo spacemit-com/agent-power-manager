@@ -1,0 +1,17 @@
+{
+  "name": "apm",
+  "owner": {
+    "name": "APM"
+  },
+  "metadata": {
+    "description": "APM Cloud plugin marketplace"
+  },
+  "plugins": [
+    {
+      "name": "demo-plugin-v0.0.1",
+      "version": "0.0.1",
+      "source": "./plugins/demo-plugin-v0.0.1",
+      "description": "Minimal plugin fixture managed by APM Cloud"
+    }
+  ]
+}

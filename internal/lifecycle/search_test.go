@@ -84,6 +84,10 @@ func (*stubCloudClient) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
 
+func (*stubCloudClient) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
+	return domain.PluginDefinition{}, nil
+}
+
 func TestSearchRecoversWarnsUnlocksThenListsCloud(t *testing.T) {
 	var calls []string
 	var stdout, stderr bytes.Buffer

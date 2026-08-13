@@ -94,6 +94,10 @@ func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
 
+func (*listFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
+	return domain.PluginDefinition{}, nil
+}
+
 type listFakeRegistry struct {
 	calls   *[]string
 	fixture *listFixture

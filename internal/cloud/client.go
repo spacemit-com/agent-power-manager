@@ -8,4 +8,5 @@ type Client interface {
 	List() ([]domain.PowerRef, error)
 	Get(domain.PowerRef) error
 	GetMCP(domain.PowerRef) (domain.MCPServer, error)
+	GetPlugin(domain.PowerRef) (domain.PluginDefinition, error)
 }
