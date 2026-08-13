@@ -1,9 +1,12 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -128,4 +131,68 @@ func pluginMutationFromCommand(agent domain.AgentID, operation string, target Pl
 		agent, operation, target.ActualName, result.Path, result.ExitCode, diagnostic,
 		errors.Join(ErrPluginMutationUnknown, runErr),
 	)
+}
+
+func decodePluginJSON(document string, target any) error {
+	decoder := json.NewDecoder(bytes.NewBufferString(document))
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("unexpected second JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func normalizePluginMarketplaceSource(source string, local bool) (string, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "", fmt.Errorf("empty marketplace source: %w", ErrPluginStateUnknown)
+	}
+	if !local {
+		return source, nil
+	}
+	absolute, err := filepath.Abs(source)
+	if err != nil {
+		return "", fmt.Errorf("resolve marketplace source %q: %w", source, err)
+	}
+	return filepath.Clean(absolute), nil
+}
+
+func isLocalPluginMarketplaceSource(source string) bool {
+	trimmed := strings.TrimSpace(source)
+	return filepath.IsAbs(trimmed) || trimmed == "." || trimmed == ".." ||
+		strings.HasPrefix(trimmed, "./") || strings.HasPrefix(trimmed, "../")
+}
+
+func pluginStateUnknown(agent domain.AgentID, operation string, result agentCLIResult, cause error) error {
+	diagnostic := strings.TrimSpace(result.Stderr)
+	if diagnostic == "" {
+		diagnostic = strings.TrimSpace(result.Stdout)
+	}
+	if result.StdoutTruncated || result.StderrTruncated {
+		cause = errors.Join(cause, fmt.Errorf(
+			"Agent CLI output was truncated (stdout=%t, stderr=%t)",
+			result.StdoutTruncated,
+			result.StderrTruncated,
+		))
+	}
+	return fmt.Errorf(
+		"inspect %s Plugin %s via %q (exit=%d, diagnostic=%q): %w",
+		agent, operation, result.Path, result.ExitCode, diagnostic,
+		errors.Join(ErrPluginStateUnknown, cause),
+	)
+}
+
+func pluginPreparationCommandError(agent domain.AgentID, operation string, result agentCLIResult, runErr error) error {
+	if result.StdoutTruncated || result.StderrTruncated {
+		return pluginStateUnknown(agent, operation, result, runErr)
+	}
+	if runErr == nil {
+		return nil
+	}
+	return fmt.Errorf("prepare %s Plugin marketplace %s via %q: %w", agent, operation, result.Path, runErr)
 }
