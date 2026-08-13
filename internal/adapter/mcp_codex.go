@@ -13,10 +13,10 @@ import (
 )
 
 type codexMCPAdapter struct {
-	runner mcpRunner
+	runner agentCLIRunner
 }
 
-func newCodexMCPAdapter(runner mcpRunner) *codexMCPAdapter {
+func newCodexMCPAdapter(runner agentCLIRunner) *codexMCPAdapter {
 	return &codexMCPAdapter{runner: runner}
 }
 

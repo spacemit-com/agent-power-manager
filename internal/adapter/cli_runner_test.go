@@ -35,7 +35,7 @@ printf 'ok'
 	t.Setenv("FAKE_ARGV", argvPath)
 	t.Setenv("FAKE_STDIN", stdinPath)
 
-	result, err := newDefaultMCPRunner().Run(
+	result, err := newDefaultAgentCLIRunner().Run(
 		context.Background(),
 		"codex",
 		[]string{"mcp", "add", "demo", "--", "cmd", "a b", "$HOME", "x;y", "路径🚀"},
@@ -69,7 +69,7 @@ printf 'ok'
 
 func TestMCPRunnerReportsUnavailableBeforeStarting(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	result, err := newDefaultMCPRunner().Run(context.Background(), "missing-agent", nil, "")
+	result, err := newDefaultAgentCLIRunner().Run(context.Background(), "missing-agent", nil, "")
 	if !errors.Is(err, ErrAgentCLIUnavailable) {
 		t.Fatalf("Run() error = %v, want ErrAgentCLIUnavailable", err)
 	}
@@ -86,7 +86,7 @@ printf 'abcdefghij' >&2
 /bin/sleep 5
 `)
 	t.Setenv("PATH", fakeBin)
-	runner := newDefaultMCPRunner()
+	runner := newDefaultAgentCLIRunner()
 	runner.timeout = 20 * time.Millisecond
 	runner.outputLimit = 5
 
@@ -114,7 +114,7 @@ func TestMCPRunnerHonorsCanceledParentContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := newDefaultMCPRunner().Run(ctx, "claude", nil, "")
+	result, err := newDefaultAgentCLIRunner().Run(ctx, "claude", nil, "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
@@ -128,7 +128,7 @@ func TestMCPRunnerCapturesNonzeroExitWithoutDiscardingDiagnostics(t *testing.T) 
 	writeRunnerFake(t, fakeBin, "codex", "#!/bin/sh\nprintf 'bad' >&2\nexit 7\n")
 	t.Setenv("PATH", fakeBin)
 
-	result, err := newDefaultMCPRunner().Run(context.Background(), "codex", []string{"mcp"}, "")
+	result, err := newDefaultAgentCLIRunner().Run(context.Background(), "codex", []string{"mcp"}, "")
 	if err == nil || !result.Started || result.ExitCode != 7 || !strings.Contains(result.Stderr, "bad") {
 		t.Fatalf("Run() = %+v, %v; want exit 7 diagnostics", result, err)
 	}

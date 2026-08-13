@@ -12,10 +12,10 @@ import (
 var ansiControlPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 type hermesMCPAdapter struct {
-	runner mcpRunner
+	runner agentCLIRunner
 }
 
-func newHermesMCPAdapter(runner mcpRunner) *hermesMCPAdapter {
+func newHermesMCPAdapter(runner agentCLIRunner) *hermesMCPAdapter {
 	return &hermesMCPAdapter{runner: runner}
 }
 

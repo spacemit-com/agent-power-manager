@@ -60,7 +60,7 @@ func validateMCPAdd(ref domain.PowerRef, server domain.MCPServer) error {
 	return nil
 }
 
-func mutationFromCommand(agent domain.AgentID, operation string, ref domain.PowerRef, result mcpCommandResult, runErr error, success bool) (MCPMutationResult, error) {
+func mutationFromCommand(agent domain.AgentID, operation string, ref domain.PowerRef, result agentCLIResult, runErr error, success bool) (MCPMutationResult, error) {
 	if !result.Started {
 		return MCPMutationResult{State: MCPMutationNotApplied}, fmt.Errorf("%s MCP %s %q did not start: %w", agent, operation, ref.Name, runErr)
 	}
@@ -86,7 +86,7 @@ func mutationFromCommand(agent domain.AgentID, operation string, ref domain.Powe
 	)
 }
 
-func inspectUnknown(agent domain.AgentID, name string, result mcpCommandResult, err error) (MCPPresence, error) {
+func inspectUnknown(agent domain.AgentID, name string, result agentCLIResult, err error) (MCPPresence, error) {
 	diagnostic := strings.TrimSpace(result.Stderr)
 	if diagnostic == "" {
 		diagnostic = strings.TrimSpace(result.Stdout)
@@ -98,7 +98,7 @@ func inspectUnknown(agent domain.AgentID, name string, result mcpCommandResult, 
 	)
 }
 
-func inspectTruncated(agent domain.AgentID, name string, result mcpCommandResult) (MCPPresence, error) {
+func inspectTruncated(agent domain.AgentID, name string, result agentCLIResult) (MCPPresence, error) {
 	return inspectUnknown(agent, name, result, fmt.Errorf(
 		"Agent CLI output was truncated (stdout=%t, stderr=%t)",
 		result.StdoutTruncated,

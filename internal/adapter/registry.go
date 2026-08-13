@@ -21,7 +21,7 @@ func NewRegistry() *Registry {
 		skillByAgent: make(map[domain.AgentID]Adapter, len(builtInAgentConfigs)),
 		mcpByAgent:   make(map[domain.AgentID]MCPAdapter, len(builtInAgentConfigs)),
 	}
-	runner := newDefaultMCPRunner()
+	runner := newDefaultAgentCLIRunner()
 	for _, config := range builtInAgentConfigs {
 		registry.ordered = append(registry.ordered, config.id)
 		registry.skillByAgent[config.id] = newSkillAdapter(config)

@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	defaultMCPCommandTimeout = 30 * time.Second
-	defaultMCPOutputLimit    = 64 * 1024
+	defaultAgentCLICommandTimeout = 30 * time.Second
+	defaultAgentCLIOutputLimit    = 64 * 1024
 )
 
-type mcpCommandResult struct {
+type agentCLIResult struct {
 	Path            string
 	Stdout          string
 	Stderr          string
@@ -28,26 +28,26 @@ type mcpCommandResult struct {
 	StderrTruncated bool
 }
 
-type mcpRunner interface {
-	Run(context.Context, string, []string, string) (mcpCommandResult, error)
+type agentCLIRunner interface {
+	Run(context.Context, string, []string, string) (agentCLIResult, error)
 }
 
-type mcpCommandRunner struct {
+type agentCLICommandRunner struct {
 	timeout     time.Duration
 	outputLimit int
 	lookPath    func(string) (string, error)
 }
 
-func newDefaultMCPRunner() *mcpCommandRunner {
-	return &mcpCommandRunner{
-		timeout:     defaultMCPCommandTimeout,
-		outputLimit: defaultMCPOutputLimit,
+func newDefaultAgentCLIRunner() *agentCLICommandRunner {
+	return &agentCLICommandRunner{
+		timeout:     defaultAgentCLICommandTimeout,
+		outputLimit: defaultAgentCLIOutputLimit,
 		lookPath:    exec.LookPath,
 	}
 }
 
-func (runner *mcpCommandRunner) Run(ctx context.Context, executable string, args []string, stdin string) (mcpCommandResult, error) {
-	result := mcpCommandResult{ExitCode: -1}
+func (runner *agentCLICommandRunner) Run(ctx context.Context, executable string, args []string, stdin string) (agentCLIResult, error) {
+	result := agentCLIResult{ExitCode: -1}
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -132,4 +132,4 @@ func (writer *boundedWriter) Truncated() bool {
 	return writer.truncated
 }
 
-var _ mcpRunner = (*mcpCommandRunner)(nil)
+var _ agentCLIRunner = (*agentCLICommandRunner)(nil)

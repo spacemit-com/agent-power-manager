@@ -9,10 +9,10 @@ import (
 )
 
 type claudeMCPAdapter struct {
-	runner mcpRunner
+	runner agentCLIRunner
 }
 
-func newClaudeMCPAdapter(runner mcpRunner) *claudeMCPAdapter {
+func newClaudeMCPAdapter(runner agentCLIRunner) *claudeMCPAdapter {
 	return &claudeMCPAdapter{runner: runner}
 }
 
