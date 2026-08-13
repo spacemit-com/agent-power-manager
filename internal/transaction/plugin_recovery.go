@@ -2,7 +2,9 @@ package transaction
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 
 	"apm/internal/adapter"
 )
@@ -146,10 +148,22 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 }
 
 func (s *Service) commitRecoveredFilesystemPlugin(journal Journal, result *RecoveryResult) error {
+	filesystem := journal.Plugin.Filesystem
+	if journal.Operation == OperationInstall {
+		info, err := s.files.lstat(filesystem.TargetPath)
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("committing filesystem Plugin target %q is missing: %w", filesystem.TargetPath, ErrIndeterminateState)
+		}
+		if err != nil {
+			return fmt.Errorf("inspect committing filesystem Plugin target %q: %w", filesystem.TargetPath, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("committing filesystem Plugin target %q is not a physical directory: %w", filesystem.TargetPath, ErrUnsafePath)
+		}
+	}
 	if err := s.commitRecoveredPluginManifest(journal, result); err != nil {
 		return err
 	}
-	filesystem := journal.Plugin.Filesystem
 	for _, path := range []string{filesystem.PreviousQuarantinePath, filesystem.TargetQuarantinePath} {
 		if path != "" {
 			if err := s.files.removeAll(path); err != nil {
