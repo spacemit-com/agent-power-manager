@@ -136,6 +136,12 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 			if err := s.files.rename(filesystem.TargetQuarantinePath, filesystem.TargetPath); err != nil {
 				return err
 			}
+			targetExists = true
+		}
+		if journal.Plugin.TargetPresent {
+			if !targetExists {
+				return fmt.Errorf("originally present uninstalled Plugin target %q is missing: %w", filesystem.TargetPath, ErrIndeterminateState)
+			}
 			mutation, err := pluginAdapter.Add(ctx, journal.Plugin.Target)
 			if err := requireAppliedPluginMutation("restore uninstalled filesystem Plugin", mutation, err); err != nil {
 				return err

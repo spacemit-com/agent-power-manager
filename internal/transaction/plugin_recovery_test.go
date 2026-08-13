@@ -145,6 +145,41 @@ func TestPluginRecoveryFilesystemRemovingOldReenablesUnmovedPreviousTarget(t *te
 	}
 }
 
+func TestPluginRecoveryFilesystemUninstallReenablesUnmovedTarget(t *testing.T) {
+	events := []string{}
+	id := "00112233445566778899aabbccddeeff"
+	pluginsRoot := filepath.Join(t.TempDir(), "plugins")
+	target := filepath.Join(pluginsRoot, "demo-v1.0.0")
+	tx := filepath.Join(pluginsRoot, ".apm-transactions", id)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(tx, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	journal := Journal{
+		SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationUninstall, Phase: PhaseRemoving,
+		Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+		Plugin: &PluginJournalPayload{Deployment: domain.PluginDeploymentFilesystem, TargetPresent: true,
+			Target:     adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0"},
+			Filesystem: &PluginFilesystemJournalPayload{TargetPath: target, TransactionDir: tx, TargetQuarantinePath: filepath.Join(tx, "target")}},
+	}
+	store := &recordingJournalStore{journal: journal, found: true, events: &events, fail: map[string]error{}}
+	plugin := &recordingPluginAdapter{events: &events, mode: domain.PluginDeploymentFilesystem, facts: map[string]adapter.PluginFact{
+		"demo-v1.0.0": {Presence: adapter.PluginPresent, ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0"},
+	}, addAnswers: []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}}}
+	resolver := &recordingPluginResolver{events: &events, plugin: plugin}
+	service := newService(&recordingManifestWriter{events: &events}, store, resolver)
+	result, err := service.Recover(context.Background())
+	if err != nil || result.Direction != RecoveryRollback || !result.Recovered {
+		t.Fatalf("Recover() = %+v, %v", result, err)
+	}
+	want := []string{"resolver:hermes-agent", "adapter:inspect:demo-v1.0.0", "update:rolling-back", "adapter:add:demo-v1.0.0", "delete:journal"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+}
+
 func (*recordingPluginResolver) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) {
 	return nil, nil
 }
