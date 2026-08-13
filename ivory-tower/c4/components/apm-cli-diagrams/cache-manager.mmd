@@ -1,5 +1,5 @@
 classDiagram
-    note for PowerCache "版本化缓存接口：每次 Fetch 清理并原子物化公共 staging 根"
+    note for PowerCache "Skill 与 Hermes Plugin 使用版本化 Cache/Staging；Codex/Claude Plugin 和 MCP 不使用"
     class PowerCache {
         <<interface>>
         +Fetch(PowerRef) (stagingRoot string, error)

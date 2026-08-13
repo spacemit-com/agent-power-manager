@@ -73,6 +73,7 @@ classDiagram
         <<interface>>
         +ResolveSkill(AgentID) (Adapter, error)
         +ResolveMCP(AgentID) (MCPAdapter, error)
+        +ResolvePlugin(AgentID) (PluginAdapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
     }
     note for Adapter "不定义 Uninstall 方法；Transaction 使用 TargetPath 管理 quarantine"
@@ -96,7 +97,7 @@ classDiagram
         +Set(AgentID, PowerRef) error
         +Remove(AgentID, PowerType, name) error
     }
-    note for TransactionManager "唯一 schema v1 shared envelope；filesystem/agent-cli driver 可跨命令串行恢复；其他格式 ErrInvalidJournal 并保留（ADR-010/ADR-011）"
+    note for TransactionManager "唯一 schema v1 shared envelope；filesystem/agent-cli/plugin driver 可跨命令串行恢复；其他格式 ErrInvalidJournal 并保留（ADR-010/011/012）"
     class TransactionManager {
         <<interface>>
         +Recover(Context) (RecoveryResult, error)
@@ -147,9 +148,9 @@ classDiagram
     installService --> InstallBatchError : successful Release only
     installService --> Locker : one lock interval
     installService --> TransactionManager : Recover / Install / InstallMCP
-    installService --> CloudClient : List / Skill Get / MCP GetMCP
+    installService --> CloudClient : List / Skill Get / MCP GetMCP / Plugin GetPlugin
     installService --> PowerCache : Skill Fetch only
-    installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP
+    installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
     installService --> ConfigRepository : Find
     installService --> VersionSelector : resolve version
 
@@ -158,7 +159,7 @@ classDiagram
     uninstallService --> UninstallBatchError : successful Release only
     uninstallService --> Locker : one lock interval
     uninstallService --> TransactionManager : Recover / Uninstall / UninstallMCP
-    uninstallService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP
+    uninstallService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
     uninstallService --> ConfigRepository : List
     uninstallService --> CloudClient : MCP GetMCP only when present
 

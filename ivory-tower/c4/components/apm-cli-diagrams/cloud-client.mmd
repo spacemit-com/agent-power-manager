@@ -1,10 +1,11 @@
 classDiagram
-    note for CloudClient "List 返回全部精确 PowerRef；Skill Get 写缓存；GetMCP 直接返回互斥的 stdio/http 定义"
+    note for CloudClient "List 返回全部精确 PowerRef；Get 写 Skill/Hermes Plugin 缓存；GetMCP/GetPlugin 返回类型定义"
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
         +Get(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
+        +GetPlugin(PowerRef) (PluginDefinition, error)
     }
     class MCPServer {
         +Transport MCPTransport
@@ -17,6 +18,8 @@ classDiagram
         +List() ([]PowerRef, error)
         +Get(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
+        +GetPlugin(PowerRef) (PluginDefinition, error)
     }
     LocalClient ..|> CloudClient
     CloudClient --> MCPServer : direct, no cache/staging
+    CloudClient --> PluginDefinition : actual name + marketplace source

@@ -25,8 +25,16 @@ flowchart TD
     MCPTx --> MCPJournal[schema v1 driver=agent-cli]
     MCPJournal --> Phases[removing-old / adding-new / committing / rolling-back]
 
+    Type -->|Plugin| PluginResolve[ResolvePlugin + Config Find + Cloud GetPlugin]
+    PluginResolve --> Prepare[Codex/Claude marketplace add/update; Hermes no-op]
+    Prepare --> PluginInspect[Inspect versioned actual name]
+    PluginInspect -->|marketplace| PluginTx[plugin transaction with exact selector]
+    PluginInspect -->|Hermes filesystem| PluginCache[Cache Fetch / Cloud Get / Fetch] --> PluginTx
+    PluginTx --> PluginJournal[schema v1 driver=plugin]
+
     FSJournal --> Outcome[installed/upgraded/downgraded]
     Phases --> Outcome
+    PluginJournal --> Outcome
     Unchanged --> Agent
     Outcome --> Agent
     Fail --> Batch[fail-fast + remaining unexecuted]

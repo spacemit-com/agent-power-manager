@@ -4,6 +4,42 @@
 
 ## 2026-08-13
 
+分类：新增功能
+
+用户需求：
+
+在 APM 现有 Skill/MCP lifecycle 基础上增加 Plugin：Cloud 以 `.claude-plugin/marketplace.json` 为权威索引托管稳定全量 marketplace；Codex/Claude 注册或更新 marketplace 后安装版本化实际插件，Hermes 复用 Cache/Staging 发布到 `~/.hermes/plugins/` 并通过 CLI enable/disable；安装、升级、降级、离线卸载和中断恢复复用现有锁、manifest、批处理与唯一 schema v1 journal，模块职责和文件布局保持类型专属且清晰。
+
+相关提交：
+
+- `5953d09 docs(plugin): design lifecycle support`
+- `6955ecd docs(plugin): plan lifecycle implementation`
+- `d15f199 feat(plugin): add cloud marketplace discovery`
+- `3f0cf3b feat(plugin): stage hermes plugin resources`
+- `0c7baf8 refactor(adapter): share agent cli runner`
+- `eed855a feat(plugin): add codex and claude adapters`
+- `fb28504 feat(plugin): add hermes adapter registry`
+- `503a0c2 feat(plugin): define recoverable transactions`
+- `19fb350 feat(plugin): transact marketplace installs`
+- `c39a22a feat(plugin): publish hermes plugin files`
+- `ce4adfd feat(plugin): wire lifecycle install uninstall`
+- `d446eb2 test(plugin): cover isolated agent lifecycle`
+- `b8bad3f test(plugin): align lifecycle test layout`
+
+解决方案或完成结果：
+
+新增版本化实际名、marketplace definition 与双部署模式领域规则；Local Cloud 只解析 Claude marketplace 权威索引并提供 `GetPlugin`，Codex/Claude 不进入 Plugin Cache，Hermes 才按逻辑名和精确版本缓存并物化 staging。Registry 保持 `ResolveSkill`、`ResolveMCP`、`ResolvePlugin` 三张独立映射；三 Agent Plugin Adapter 各自封装原生 argv、JSON 和 source/selector 判定，共用有界超时 CLI runner，不执行写后 list 验证。
+
+Plugin 使用独立 transaction driver/payload，与 filesystem Skill 和 agent-cli MCP 共用唯一 schema v1 journal。marketplace 安装、Hermes 文件发布、版本切换、离线卸载和恢复都只删除精确清单项或受控事务产物；卸载不连接 Cloud、不更新 marketplace。ADR-012 记录稳定 marketplace、版本化实际名、双部署模式和 Plugin 专属 driver 决策。
+
+验证结果或限制：
+
+`test -z "$(gofmt -l cmd internal)"`、focused package tests、`go test -count=1 ./...`、`go test -race -count=1 ./internal/adapter ./internal/cloud ./internal/lifecycle ./internal/transaction`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`git diff --check` 及 schema/边界静态扫描均以退出码 0 完成。三 Agent 集成测试将 CLI、APM home、Cache 和 Agent home 全部隔离到 `t.TempDir()`；Codex、Claude、Hermes 均覆盖首装、unchanged、升级、降级和卸载，所有记录的可执行路径均位于 fake-bin，未调用 `/home/liangff/.local/bin/hermes` 或改动真实 Agent 环境。
+
+当前 Local Cloud 使用仓库内最小双版本 Plugin fixture；生产 Cloud 的发布、签名、授权、认证与 marketplace 内容规范由 Cloud 管理方负责。
+
+## 2026-08-13
+
 分类：功能变更
 
 用户需求：

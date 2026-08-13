@@ -1,6 +1,6 @@
 # Feature Overview
 
-> **当前状态说明（2026-08-12）：** 本文保留 Feature 010 的 Skill Install 历史范围。Feature 013 已增加 MCP 分支：Cloud `GetMCP` 直接取定义、不经 Cache/Staging，并由 agent-cli Transaction 安装或切换版本；见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+> **当前状态说明（2026-08-13）：** 本文保留 Feature 010 的 Skill Install 历史范围。Feature 013 增加 MCP 分支；Feature 014 增加 Plugin 分支，Cloud `GetPlugin` 返回 marketplace 定义，Codex/Claude 不经 Cache，Hermes 条件使用 Cache/Staging；见 [Feature 014](../014-lifecycle-plugin/spec.md) 与 [ADR-012](../../adr/ADR-012-manage-versioned-plugins-through-marketplace-and-filesystem.md)。
 
 ## Goal
 

@@ -13,8 +13,12 @@ flowchart TD
     MCP -->|absent| MCPStale[UninstallMCP with nil definition]
     MCPTx --> CLIJournal[schema v1 agent-cli removing/committing/rolling-back]
     MCPStale --> Missing[remove only matching MCP manifest entry]
+    Type -->|Plugin| Plugin[ResolvePlugin + derive actual name + Inspect]
+    Plugin --> PluginTx[offline UninstallPlugin; no Cloud/marketplace update/Cache]
+    PluginTx --> PluginJournal[schema v1 plugin removing/committing/rolling-back]
     FSJournal --> Result{TargetMissing? / error?}
     CLIJournal --> Result
+    PluginJournal --> Result
     Missing --> Result
     Result -->|missing| WarnMissing[lock-held target-missing Warn]
     Result -->|error| Fail[full-ref failed + fail-fast]

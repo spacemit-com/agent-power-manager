@@ -1,9 +1,10 @@
 classDiagram
-    note for AdapterRegistry "按 Agent 分别解析 Skill/MCP；RefreshInstalled 只检查 Agent 根，不执行 MCP CLI（ADR-004/010）"
+    note for AdapterRegistry "按 Agent 分别解析 Skill/MCP/Plugin；RefreshInstalled 只检查 Agent 根，不执行能力 CLI（ADR-004/010/012）"
     class AdapterRegistry {
         <<interface>>
         +ResolveSkill(AgentID) (Adapter, error)
         +ResolveMCP(AgentID) (MCPAdapter, error)
+        +ResolvePlugin(AgentID) (PluginAdapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
     }
     class Adapter {
@@ -20,6 +21,13 @@ classDiagram
         +Remove(Context, PowerRef) (MCPMutationResult, error)
     }
     class Registry
+    class PluginAdapter {
+        <<interface>>
+        +PrepareInstall(Context, PluginDefinition) error
+        +Inspect(Context, actualName) (PluginFact, error)
+        +Add(Context, PluginTarget) (PluginMutationResult, error)
+        +Remove(Context, PluginTarget) (PluginMutationResult, error)
+    }
     class skillAdapter
     class codexMCPAdapter
     class claudeMCPAdapter
@@ -31,6 +39,7 @@ classDiagram
     Registry --> codexMCPAdapter : ResolveMCP(codex)
     Registry --> claudeMCPAdapter : ResolveMCP(claude-code user scope)
     Registry --> hermesMCPAdapter : ResolveMCP(hermes-agent)
+    Registry --> PluginAdapter : ResolvePlugin(codex/claude/hermes)
     skillAdapter ..|> Adapter
     codexMCPAdapter ..|> MCPAdapter
     claudeMCPAdapter ..|> MCPAdapter

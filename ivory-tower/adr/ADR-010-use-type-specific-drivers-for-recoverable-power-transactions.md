@@ -28,6 +28,8 @@ Agent CLI 变更结果使用 `applied`、`not-applied`、`unknown` 三态。只�
 
 Recover 先读取唯一 journal，再按 driver 路由到类型专属恢复器。恢复成功并删除 journal 后，当前命令才可继续。因此 MCP 中断可以由后续 Skill 命令恢复，Skill 中断也可以由后续 MCP 命令恢复；系统不建立多个 journal 或恢复队列。
 
+[ADR-012](ADR-012-manage-versioned-plugins-through-marketplace-and-filesystem.md) 在本决策之上增加第三个 `plugin` driver、独立 `PluginAdapter` 与 marketplace/filesystem 双部署模式；全局唯一 journal 和类型专属恢复路由不变。版本条款由 [ADR-011](ADR-011-reset-journal-schema-before-release.md) 统一为唯一 schema v1。
+
 MCP 正常升级/降级在任何 CLI 写操作前，从 Cloud 按旧清单版本和新目标版本获取两个完整定义；卸载获取旧定义。journal 保存恢复所需定义，不保存 CLI 绝对路径或预拼 argv。Recover 根据 Agent ID 从 Registry 重新解析 MCP Adapter，并通过 `PATH` 动态解析目标 CLI。
 
 APM manifest 仍只保存版本已确定的 PowerRef。manifest 有 MCP 记录但 Agent CLI 明确报告同名不存在时，只删除对应 `agent/mcp/name` 条目，不删除 manifest 文件或其他 Power。manifest 无记录但 Agent CLI 报告同名存在时视为清单外冲突，不覆盖或接管。
