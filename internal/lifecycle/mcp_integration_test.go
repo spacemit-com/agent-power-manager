@@ -243,7 +243,7 @@ func TestMCPIntegrationSearchRecoversInterruptedAgentCLIJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal := transaction.Journal{
-		SchemaVersion: 2,
+		SchemaVersion: 1,
 		TransactionID: "00112233445566778899aabbccddeeff",
 		Driver:        transaction.DriverAgentCLI,
 		Operation:     transaction.OperationInstall,

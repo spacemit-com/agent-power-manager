@@ -174,7 +174,7 @@ func (s *Service) newMCPInstallJournal(request MCPInstallRequest, phase Phase) (
 		previousServer = &clone
 	}
 	return Journal{
-		SchemaVersion: 2,
+		SchemaVersion: 1,
 		TransactionID: transactionID,
 		Driver:        DriverAgentCLI,
 		Operation:     OperationInstall,

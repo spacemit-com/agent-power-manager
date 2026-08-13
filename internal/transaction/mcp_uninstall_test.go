@@ -49,6 +49,9 @@ func TestMCPUninstallPresentOrder(t *testing.T) {
 	if err != nil || result.TargetMissing {
 		t.Fatalf("UninstallMCP() = %+v, %v", result, err)
 	}
+	if got := fixture.journals.journal.SchemaVersion; got != 1 {
+		t.Fatalf("journal schema = %d, want 1", got)
+	}
 	want := []string{"adapter:inspect", "create:removing", "adapter:remove", "update:committing", "manifest:remove", "delete:journal"}
 	if !reflect.DeepEqual(fixture.events, want) {
 		t.Fatalf("events = %v, want %v", fixture.events, want)

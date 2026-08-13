@@ -38,7 +38,7 @@ func newMCPRecoveryFixture(t *testing.T, operation Operation, phase Phase, previ
 	fixture := &mcpRecoveryFixture{}
 	server := domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://new.example/mcp"}
 	fixture.journal = Journal{
-		SchemaVersion: 2,
+		SchemaVersion: 1,
 		TransactionID: "00112233445566778899aabbccddeeff",
 		Driver:        DriverAgentCLI,
 		Operation:     operation,

@@ -40,7 +40,7 @@ func (s *Service) Uninstall(ctx context.Context, request UninstallRequest) (Unin
 		return result, err
 	}
 	journal := Journal{
-		SchemaVersion: 2,
+		SchemaVersion: 1,
 		TransactionID: transactionID,
 		Driver:        DriverFilesystem,
 		Operation:     OperationUninstall,

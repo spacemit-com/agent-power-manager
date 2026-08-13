@@ -85,7 +85,7 @@ func (s *Service) newMCPUninstallJournal(request MCPUninstallRequest) (Journal, 
 		return Journal{}, err
 	}
 	return Journal{
-		SchemaVersion: 2,
+		SchemaVersion: 1,
 		TransactionID: transactionID,
 		Driver:        DriverAgentCLI,
 		Operation:     OperationUninstall,

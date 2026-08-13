@@ -56,6 +56,9 @@ func TestUninstallReportsExistingTargetWasQuarantined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := fixture.journals.journal.SchemaVersion; got != 1 {
+		t.Fatalf("journal schema = %d, want 1", got)
+	}
 	if result.TargetMissing {
 		t.Fatalf("Uninstall() result = %+v, want TargetMissing false", result)
 	}

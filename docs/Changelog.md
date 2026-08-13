@@ -2,6 +2,26 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-13
+
+分类：功能变更
+
+用户需求：
+
+将 Skill 与 MCP 的全部事务生产者和恢复 fixture 统一为 journal schema v1，与严格 schema v1 解码契约对齐。
+
+相关提交：
+
+- 无（本记录随当前提交维护）
+
+解决方案或完成结果：
+
+Skill Install/Uninstall 与 MCP Install/Update/Uninstall 现在都写入 `SchemaVersion: 1`；MCP 恢复和 lifecycle 集成 fixture 同步为 v1。四类 producer 测试直接断言持久化 journal 的 schema 为 1，driver、payload、phase 与恢复语义保持不变。
+
+验证结果或限制：
+
+`go test -count=1 ./internal/transaction -run 'TestInstall|TestUninstall|TestMCPInstall|TestMCPUninstall'`、`go test -count=1 ./internal/transaction ./internal/lifecycle`、过时 schema v2 字面量扫描与 `git diff --check` 均以退出码 0 完成。
+
 ## 2026-08-12
 
 分类：新增功能

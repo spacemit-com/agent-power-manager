@@ -168,6 +168,9 @@ func TestInstallFirstInstallPublishesSetsManifestAndCleansJournal(t *testing.T) 
 	if err := fixture.service.Install(context.Background(), fixture.request); err != nil {
 		t.Fatal(err)
 	}
+	if got := fixture.journals.journal.SchemaVersion; got != 1 {
+		t.Fatalf("journal schema = %d, want 1", got)
+	}
 	if fixture.journals.found {
 		t.Fatal("journal remains after successful install")
 	}

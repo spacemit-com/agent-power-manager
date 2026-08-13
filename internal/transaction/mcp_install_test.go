@@ -122,6 +122,9 @@ func TestMCPInstallFirstInstallOrderAndClonesServer(t *testing.T) {
 	if err := fixture.service.InstallMCP(context.Background(), fixture.request); err != nil {
 		t.Fatal(err)
 	}
+	if got := fixture.journals.journal.SchemaVersion; got != 1 {
+		t.Fatalf("journal schema = %d, want 1", got)
+	}
 	wantEvents := []string{"adapter:inspect", "create:adding-new", "adapter:add", "update:committing", "manifest:set", "delete:journal"}
 	if !reflect.DeepEqual(fixture.events, wantEvents) {
 		t.Fatalf("events = %v, want %v", fixture.events, wantEvents)

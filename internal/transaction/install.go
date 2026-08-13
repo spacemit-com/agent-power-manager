@@ -69,7 +69,7 @@ func (s *Service) Install(ctx context.Context, request InstallRequest) error {
 		return err
 	}
 	journal := Journal{
-		SchemaVersion: 2,
+		SchemaVersion: 1,
 		TransactionID: transactionID,
 		Driver:        DriverFilesystem,
 		Operation:     OperationInstall,
