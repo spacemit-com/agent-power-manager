@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
+	"apm/internal/paths"
 	"apm/internal/transaction"
 	"apm/internal/version"
 )
@@ -129,6 +132,25 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 		if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != target.outcome {
 			t.Fatalf("install %s = %+v, %v", target.version, result, err)
 		}
+		actualName, err := domain.ActualPluginName(domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: target.version})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info, err := os.Stat(filepath.Join(hermesHome, "plugins", actualName)); err != nil || !info.IsDir() {
+			t.Fatalf("Hermes target %q is not a directory: %v", actualName, err)
+		}
+		for _, otherVersion := range []string{"v0.0.1", "v0.1.0"} {
+			if otherVersion == target.version {
+				continue
+			}
+			otherName, _ := domain.ActualPluginName(domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: otherVersion})
+			if _, err := os.Lstat(filepath.Join(hermesHome, "plugins", otherName)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("old Hermes target %q remains: %v", otherName, err)
+			}
+		}
+		if _, err := os.Lstat(filepath.Join(root, "apm-home", ".apm", "staging")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Hermes staging remains after %s: %v", target.version, err)
+		}
 	}
 	result, err := uninstaller.Uninstall(context.Background(), cli.Flags{Agent: string(domain.AgentHermes), Type: "plugin", Name: "demo-plugin"})
 	if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.UninstallOutcomeCompleted {
@@ -136,6 +158,15 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(hermesHome, "plugins", "demo-plugin-v0.0.1")); !os.IsNotExist(err) {
 		t.Fatalf("Hermes target remains: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, "calls.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		if !strings.HasPrefix(line, fakeBin+string(filepath.Separator)) || strings.Contains(line, "/home/liangff/.local/bin/hermes") {
+			t.Fatalf("unsafe CLI call %q", line)
+		}
 	}
 }
 
@@ -217,5 +248,261 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 				t.Fatalf("marketplace install touched Plugin cache: %v", err)
 			}
 		})
+	}
+}
+
+type isolatedPluginHarness struct {
+	t          *testing.T
+	root       string
+	fakeBin    string
+	state      string
+	calls      string
+	cacheHome  string
+	repository *config.JSONRepository
+	registry   *adapter.Registry
+	cloud      cloud.Client
+	install    *InstallService
+	uninstall  *UninstallService
+}
+
+func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *isolatedPluginHarness {
+	t.Helper()
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "fake-bin")
+	state := filepath.Join(root, "state")
+	for _, path := range []string{fakeBin, state} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for executable, script := range map[string]string{
+		"codex": fakeMarketplacePluginScript, "claude": fakeMarketplacePluginScript, "hermes": fakeHermesPluginScript,
+	} {
+		if err := os.WriteFile(filepath.Join(fakeBin, executable), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agentRoots := map[domain.AgentID]string{
+		domain.AgentCodex:      filepath.Join(root, "agents", "codex"),
+		domain.AgentClaudeCode: filepath.Join(root, "agents", "claude"),
+		domain.AgentHermes:     filepath.Join(root, "agents", "hermes"),
+	}
+	for _, agent := range installedAgents {
+		if err := os.MkdirAll(agentRoots[agent], 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resources, err := filepath.Abs(filepath.Join("..", "cloud", "resources"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(root, "calls.log")
+	cacheHome := filepath.Join(root, "cache")
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	t.Setenv("FAKE_PLUGIN_BIN", fakeBin)
+	t.Setenv("FAKE_PLUGIN_STATE", state)
+	t.Setenv("FAKE_PLUGIN_CALLS", calls)
+	t.Setenv("FAKE_PLUGIN_MARKETPLACE", filepath.Join(resources, "plugins"))
+	t.Setenv("APM_HOME", filepath.Join(root, "apm-home"))
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	t.Setenv("CODEX_HOME", agentRoots[domain.AgentCodex])
+	t.Setenv("CLAUDE_CONFIG_DIR", agentRoots[domain.AgentClaudeCode])
+	t.Setenv("HERMES_HOME", agentRoots[domain.AgentHermes])
+	cloudClient, err := cloud.NewLocalClient(resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := config.NewJSONRepository()
+	registry := adapter.NewRegistry()
+	transactions, err := transaction.NewManager(repository, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := lock.NewDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	powerCache, err := cache.NewFilesystem()
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, registry, repository, version.NewSelector())
+	if err != nil {
+		t.Fatal(err)
+	}
+	uninstaller, err := NewUninstall(locker, transactions, cloudClient, registry, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &isolatedPluginHarness{
+		t: t, root: root, fakeBin: fakeBin, state: state, calls: calls, cacheHome: cacheHome,
+		repository: repository, registry: registry, cloud: cloudClient, install: installer, uninstall: uninstaller,
+	}
+}
+
+func TestPluginIntegrationRejectsUnmanagedTargetAndMarketplaceConflict(t *testing.T) {
+	t.Run("unmanaged target", func(t *testing.T) {
+		harness := newIsolatedPluginHarness(t, domain.AgentCodex)
+		if err := os.WriteFile(filepath.Join(harness.state, "plugin-codex"), []byte("demo-plugin-v0.0.1@foreign"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"})
+		if !errors.Is(err, adapter.ErrPluginConflict) || !errors.Is(err, adapter.ErrTargetConflict) {
+			t.Fatalf("Install() error = %v, want Plugin and target conflict", err)
+		}
+		if _, found, findErr := harness.repository.Find(domain.AgentCodex, domain.PowerTypePlugin, "demo-plugin"); findErr != nil || found {
+			t.Fatalf("manifest found/error = %v/%v, want absent", found, findErr)
+		}
+		harness.assertOnlyFakeExecutables()
+	})
+
+	t.Run("marketplace source conflict", func(t *testing.T) {
+		harness := newIsolatedPluginHarness(t, domain.AgentCodex)
+		if err := os.WriteFile(filepath.Join(harness.state, "marketplace-codex"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FAKE_PLUGIN_MARKETPLACE", filepath.Join(harness.root, "foreign-marketplace"))
+		_, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"})
+		if !errors.Is(err, adapter.ErrMarketplaceConflict) {
+			t.Fatalf("Install() error = %v, want ErrMarketplaceConflict", err)
+		}
+		if _, statErr := os.Lstat(filepath.Join(harness.state, "plugin-codex")); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("conflicting marketplace mutated Plugin state: %v", statErr)
+		}
+		harness.assertMarketplaceCacheAndStagingAbsent()
+		harness.assertOnlyFakeExecutables()
+	})
+}
+
+func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
+	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
+	keep := domain.PowerRef{Name: "keep-plugin", Type: domain.PowerTypePlugin, Version: "v9.9.9"}
+	if err := harness.repository.Set(domain.AgentCodex, ref); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.repository.Set(domain.AgentCodex, keep); err != nil {
+		t.Fatal(err)
+	}
+	result, err := harness.uninstall.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo-plugin"})
+	if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.UninstallOutcomeCompleted {
+		t.Fatalf("Uninstall() = %+v, %v", result, err)
+	}
+	if _, found, findErr := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); findErr != nil || found {
+		t.Fatalf("missing target manifest found/error = %v/%v", found, findErr)
+	}
+	if got, found, findErr := harness.repository.Find(domain.AgentCodex, keep.Type, keep.Name); findErr != nil || !found || got != keep {
+		t.Fatalf("unrelated manifest = %+v, %v, %v", got, found, findErr)
+	}
+	harness.assertOnlyFakeExecutables()
+}
+
+func TestPluginIntegrationSearchRecoversInterruptedJournal(t *testing.T) {
+	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
+	definition, err := harness.cloud.GetPlugin(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := definition.ActualName + "@" + definition.Marketplace.Name
+	if err := os.WriteFile(filepath.Join(harness.state, "plugin-codex"), []byte(selector), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journal := transaction.Journal{
+		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: transaction.DriverPlugin,
+		Operation: transaction.OperationInstall, Phase: transaction.PhaseAddingNew, Agent: domain.AgentCodex, Power: ref,
+		Plugin: &transaction.PluginJournalPayload{
+			Deployment: domain.PluginDeploymentMarketplace,
+			Target:     adapter.PluginTarget{ActualName: definition.ActualName, Selector: selector},
+		},
+	}
+	contents, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journalPath, err := paths.JournalPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(journalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journalPath, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	transactions, err := transaction.NewManager(harness.repository, harness.registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := lock.NewDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	search, err := NewSearch(locker, transactions, harness.cloud)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := search.Search(context.Background(), cli.Flags{Keyword: "demo-plugin"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, found, findErr := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); findErr != nil || !found || got != ref {
+		t.Fatalf("recovered manifest = %+v, %v, %v", got, found, findErr)
+	}
+	if _, statErr := os.Lstat(journalPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("journal remains: %v", statErr)
+	}
+	harness.assertOnlyFakeExecutables()
+}
+
+func TestPluginIntegrationMultiAgentInstallFailsFast(t *testing.T) {
+	harness := newIsolatedPluginHarness(t, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes)
+	if err := os.WriteFile(filepath.Join(harness.state, "marketplace-claude"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_PLUGIN_MARKETPLACE", filepath.Join(harness.root, "foreign-marketplace"))
+	result, err := harness.install.Install(context.Background(), cli.Flags{Agent: string(domain.AllAgents), Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"})
+	if !errors.Is(err, adapter.ErrMarketplaceConflict) {
+		t.Fatalf("Install(all) error = %v, want ErrMarketplaceConflict", err)
+	}
+	if len(result.Items) != 3 || result.Items[0].Agent != domain.AgentClaudeCode || result.Items[0].Outcome != cli.InstallOutcomeFailed ||
+		result.Items[1].Outcome != cli.InstallOutcomeUnexecuted || result.Items[2].Outcome != cli.InstallOutcomeUnexecuted {
+		t.Fatalf("Install(all) result = %+v, want failed then unexecuted", result)
+	}
+	contents, readErr := os.ReadFile(harness.calls)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(contents), filepath.Join(harness.fakeBin, "codex")+"|") || strings.Contains(string(contents), filepath.Join(harness.fakeBin, "hermes")+"|") {
+		t.Fatalf("fail-fast invoked later Agent CLI:\n%s", contents)
+	}
+	harness.assertMarketplaceCacheAndStagingAbsent()
+	harness.assertOnlyFakeExecutables()
+}
+
+func (h *isolatedPluginHarness) assertMarketplaceCacheAndStagingAbsent() {
+	h.t.Helper()
+	for _, path := range []string{
+		filepath.Join(h.cacheHome, "apm", "plugins"),
+		filepath.Join(h.root, "apm-home", ".apm", "staging"),
+		filepath.Join(h.root, "apm-home", ".apm", ".tmp", "staging"),
+	} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			h.t.Fatalf("marketplace Plugin path %q exists or cannot be inspected: %v", path, err)
+		}
+	}
+}
+
+func (h *isolatedPluginHarness) assertOnlyFakeExecutables() {
+	h.t.Helper()
+	contents, err := os.ReadFile(h.calls)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	prefix := h.fakeBin + string(filepath.Separator)
+	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		path, _, found := strings.Cut(line, "|")
+		if !found || !strings.HasPrefix(path, prefix) || strings.Contains(line, "/home/liangff/.local/bin/hermes") {
+			h.t.Fatalf("Agent CLI invocation escaped fake-bin: %q", line)
+		}
 	}
 }
