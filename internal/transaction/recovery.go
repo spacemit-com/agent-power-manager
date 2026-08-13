@@ -40,6 +40,13 @@ func (s *Service) Recover(ctx context.Context) (RecoveryResult, error) {
 		result.Recovered = true
 		return result, nil
 	}
+	if journal.Driver == DriverPlugin {
+		if err := s.recoverPlugin(ctx, journal, &result); err != nil {
+			return result, recoveryError(err)
+		}
+		result.Recovered = true
+		return result, nil
+	}
 	state, err := inspectPathState(journal)
 	if err != nil {
 		return result, recoveryError(err)

@@ -123,6 +123,9 @@ const (
 	RecoveryActionRemoveTransactionDir RecoveryActionKind = "remove-transaction-dir"
 	RecoveryActionAddMCP               RecoveryActionKind = "add-mcp"
 	RecoveryActionRemoveMCP            RecoveryActionKind = "remove-mcp"
+	RecoveryActionAddPlugin            RecoveryActionKind = "add-plugin"
+	RecoveryActionRemovePlugin         RecoveryActionKind = "remove-plugin"
+	RecoveryActionRestorePlugin        RecoveryActionKind = "restore-plugin"
 )
 
 // RecoveryAction 描述一次已完成的结构化恢复动作。

@@ -122,8 +122,7 @@ func validatePluginInstallRequest(request PluginInstallRequest) error {
 	}
 	if request.Previous != nil {
 		if err := validatePower(*request.Previous, ErrInvalidRequest); err != nil ||
-			request.Previous.Type != domain.PowerTypePlugin || request.Previous.Name != request.Power.Name ||
-			request.Previous.Version == request.Power.Version {
+			request.Previous.Type != domain.PowerTypePlugin || request.Previous.Name != request.Power.Name {
 			return fmt.Errorf("invalid previous Plugin reference: %w", ErrInvalidRequest)
 		}
 	}

@@ -144,16 +144,6 @@ func NewManager(manifests ManifestWriter, adapters AdapterResolver) (*Service, e
 	return newService(manifests, newFilesystemJournalStore(journalPath), adapters), nil
 }
 
-// InstallPlugin 将在后续 Plugin 状态机中实现；当前先暴露稳定事务契约。
-func (s *Service) InstallPlugin(context.Context, PluginInstallRequest) error {
-	return fmt.Errorf("Plugin transaction is not initialized: %w", ErrInvalidRequest)
-}
-
-// UninstallPlugin 将在后续 Plugin 状态机中实现；当前先暴露稳定事务契约。
-func (s *Service) UninstallPlugin(context.Context, PluginUninstallRequest) (UninstallResult, error) {
-	return UninstallResult{}, fmt.Errorf("Plugin transaction is not initialized: %w", ErrInvalidRequest)
-}
-
 type fileOps struct {
 	lstat     func(string) (os.FileInfo, error)
 	mkdir     func(string, os.FileMode) error
