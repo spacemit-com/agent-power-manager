@@ -25,6 +25,10 @@
 - `ce4adfd feat(plugin): wire lifecycle install uninstall`
 - `d446eb2 test(plugin): cover isolated agent lifecycle`
 - `b8bad3f test(plugin): align lifecycle test layout`
+- `5f9ae45 fix(plugin): fail closed on missing commit target`
+- `3022995 fix(plugin): reenable previous hermes plugin`
+- `abcb7fa fix(plugin): reenable rolled back hermes uninstall`
+- `410a8f3 test(plugin): cover lifecycle edge cases`
 
 解决方案或完成结果：
 
@@ -34,7 +38,7 @@ Plugin 使用独立 transaction driver/payload，与 filesystem Skill 和 agent-
 
 验证结果或限制：
 
-`test -z "$(gofmt -l cmd internal)"`、focused package tests、`go test -count=1 ./...`、`go test -race -count=1 ./internal/adapter ./internal/cloud ./internal/lifecycle ./internal/transaction`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`git diff --check` 及 schema/边界静态扫描均以退出码 0 完成。三 Agent 集成测试将 CLI、APM home、Cache 和 Agent home 全部隔离到 `t.TempDir()`；Codex、Claude、Hermes 均覆盖首装、unchanged、升级、降级和卸载，所有记录的可执行路径均位于 fake-bin，未调用 `/home/liangff/.local/bin/hermes` 或改动真实 Agent 环境。
+`test -z "$(gofmt -l cmd internal)"`、focused package tests、`go test -count=1 ./...`、`go test -race -count=1 ./internal/adapter ./internal/cloud ./internal/lifecycle ./internal/transaction`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`git diff --check` 及 schema/边界静态扫描均以退出码 0 完成。三 Agent 集成测试将 CLI、APM home、Cache 和 Agent home 全部隔离到 `t.TempDir()`；Codex、Claude、Hermes 均覆盖首装、unchanged、升级、降级和卸载，并覆盖未纳管目标、marketplace 异源、目标缺失清单修复、Search 恢复中断 journal 与多 Agent 首错停止；所有记录的可执行路径均位于 fake-bin，未调用 `/home/liangff/.local/bin/hermes` 或改动真实 Agent 环境。
 
 当前 Local Cloud 使用仓库内最小双版本 Plugin fixture；生产 Cloud 的发布、签名、授权、认证与 marketplace 内容规范由 Cloud 管理方负责。
 
