@@ -18,7 +18,7 @@ func (s *Service) InstallPlugin(ctx context.Context, request PluginInstallReques
 		return err
 	}
 	if request.Adapter.DeploymentMode() != domain.PluginDeploymentMarketplace {
-		return fmt.Errorf("filesystem Plugin transaction is not implemented: %w", ErrInvalidRequest)
+		return s.installFilesystemPlugin(ctx, request)
 	}
 	if isNilInterface(s.manifests) || isNilInterface(s.journals) {
 		return fmt.Errorf("Plugin install dependencies are nil: %w", ErrInvalidRequest)

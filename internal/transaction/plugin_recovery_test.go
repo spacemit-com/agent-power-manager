@@ -2,16 +2,64 @@ package transaction
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"apm/internal/adapter"
 	"apm/internal/domain"
+	"apm/internal/paths"
 )
 
 type recordingPluginResolver struct {
 	events *[]string
 	plugin adapter.PluginAdapter
+}
+
+func TestPluginRecoveryFilesystemPublishedTargetEnablesAndCommits(t *testing.T) {
+	events := []string{}
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	staging, _ := paths.StagingPath()
+	if err := os.MkdirAll(filepath.Join(staging, "plugins", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := "00112233445566778899aabbccddeeff"
+	pluginsRoot := filepath.Join(t.TempDir(), "plugins")
+	target := filepath.Join(pluginsRoot, "demo-v1.0.0")
+	tx := filepath.Join(pluginsRoot, ".apm-transactions", id)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(tx, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	journal := Journal{
+		SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationInstall, Phase: PhaseAddingNew,
+		Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+		Plugin: &PluginJournalPayload{Deployment: domain.PluginDeploymentFilesystem, Target: adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0"}, Filesystem: &PluginFilesystemJournalPayload{
+			StagingRoot: staging, SourcePath: filepath.Join(staging, "plugins", "demo"), TargetPath: target,
+			TransactionDir: tx, PublishPath: filepath.Join(tx, "publish"),
+		}},
+	}
+	store := &recordingJournalStore{journal: journal, found: true, events: &events, fail: map[string]error{}}
+	plugin := &recordingPluginAdapter{events: &events, mode: domain.PluginDeploymentFilesystem, facts: map[string]adapter.PluginFact{
+		"demo-v1.0.0": {Presence: adapter.PluginAbsent, ActualName: "demo-v1.0.0"},
+	}, addAnswers: []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}}}
+	resolver := &recordingPluginResolver{events: &events, plugin: plugin}
+	service := newService(&recordingManifestWriter{events: &events}, store, resolver)
+	result, err := service.Recover(context.Background())
+	if err != nil || result.Direction != RecoveryCommit || !result.Recovered {
+		t.Fatalf("Recover() = %+v, %v", result, err)
+	}
+	want := []string{"resolver:hermes-agent", "adapter:inspect:demo-v1.0.0", "adapter:add:demo-v1.0.0", "update:committing", "manifest:set", "delete:journal"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Fatalf("staging remains: %v", err)
+	}
 }
 
 func (*recordingPluginResolver) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) {

@@ -19,7 +19,7 @@ func (s *Service) UninstallPlugin(ctx context.Context, request PluginUninstallRe
 		return result, err
 	}
 	if request.Adapter.DeploymentMode() != domain.PluginDeploymentMarketplace {
-		return result, fmt.Errorf("filesystem Plugin transaction is not implemented: %w", ErrInvalidRequest)
+		return s.uninstallFilesystemPlugin(ctx, request)
 	}
 	if _, found, err := s.journals.Inspect(); err != nil {
 		return result, fmt.Errorf("inspect active transaction: %w", err)
