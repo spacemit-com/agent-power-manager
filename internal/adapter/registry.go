@@ -9,17 +9,19 @@ import (
 
 // Registry 按内置配置顺序保存类型专属适配器。
 type Registry struct {
-	ordered      []domain.AgentID
-	skillByAgent map[domain.AgentID]Adapter
-	mcpByAgent   map[domain.AgentID]MCPAdapter
+	ordered       []domain.AgentID
+	skillByAgent  map[domain.AgentID]Adapter
+	mcpByAgent    map[domain.AgentID]MCPAdapter
+	pluginByAgent map[domain.AgentID]PluginAdapter
 }
 
-// NewRegistry 创建内置 Skill 与 MCP 适配器注册表。
+// NewRegistry 创建内置 Skill、MCP 与 Plugin 类型专属适配器注册表。
 func NewRegistry() *Registry {
 	registry := &Registry{
-		ordered:      make([]domain.AgentID, 0, len(builtInAgentConfigs)),
-		skillByAgent: make(map[domain.AgentID]Adapter, len(builtInAgentConfigs)),
-		mcpByAgent:   make(map[domain.AgentID]MCPAdapter, len(builtInAgentConfigs)),
+		ordered:       make([]domain.AgentID, 0, len(builtInAgentConfigs)),
+		skillByAgent:  make(map[domain.AgentID]Adapter, len(builtInAgentConfigs)),
+		mcpByAgent:    make(map[domain.AgentID]MCPAdapter, len(builtInAgentConfigs)),
+		pluginByAgent: make(map[domain.AgentID]PluginAdapter, len(builtInAgentConfigs)),
 	}
 	runner := newDefaultAgentCLIRunner()
 	for _, config := range builtInAgentConfigs {
@@ -28,13 +30,25 @@ func NewRegistry() *Registry {
 		switch config.id {
 		case domain.AgentCodex:
 			registry.mcpByAgent[config.id] = newCodexMCPAdapter(runner)
+			registry.pluginByAgent[config.id] = newCodexPluginAdapter(runner)
 		case domain.AgentClaudeCode:
 			registry.mcpByAgent[config.id] = newClaudeMCPAdapter(runner)
+			registry.pluginByAgent[config.id] = newClaudePluginAdapter(runner)
 		case domain.AgentHermes:
 			registry.mcpByAgent[config.id] = newHermesMCPAdapter(runner)
+			registry.pluginByAgent[config.id] = newHermesPluginAdapter(runner, config)
 		}
 	}
 	return registry
+}
+
+// ResolvePlugin 解析指定智能体的 Plugin 类型专属 Adapter。
+func (r *Registry) ResolvePlugin(agent domain.AgentID) (PluginAdapter, error) {
+	adapter, ok := r.pluginByAgent[agent]
+	if !ok {
+		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, domain.PowerTypePlugin, ErrUnsupportedAdapter)
+	}
+	return adapter, nil
 }
 
 // ResolveSkill 解析指定智能体的文件型 Skill Adapter。

@@ -77,6 +77,18 @@ func (c agentConfig) targetPath(ref domain.PowerRef) (string, error) {
 	return filepath.Join(root, "skills", ref.Name), nil
 }
 
+// pluginTargetPath 返回文件系统型 Plugin 的受控安装路径，不创建目录。
+func (c agentConfig) pluginTargetPath(actualName string) (string, error) {
+	if !isSafePluginActualName(actualName) {
+		return "", fmt.Errorf("target path for agent %q plugin %q: %w", c.id, actualName, ErrInvalidPlugin)
+	}
+	root, err := c.rootPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "plugins", actualName), nil
+}
+
 // isSafeSkillName 报告名称是否为安全且未经清洗的单个路径段。
 func isSafeSkillName(name string) bool {
 	if strings.TrimSpace(name) == "" || name == "." || name == ".." {

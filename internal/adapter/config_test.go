@@ -157,6 +157,21 @@ func TestTargetPath(t *testing.T) {
 	}
 }
 
+func TestPluginTargetPath(t *testing.T) {
+	config := configForAgent(t, domain.AgentHermes)
+	root := filepath.Join(t.TempDir(), "agent-root")
+	t.Setenv("HERMES_HOME", root)
+	got, err := config.pluginTargetPath("demo-plugin-v0.0.1")
+	if err != nil || got != filepath.Join(root, "plugins", "demo-plugin-v0.0.1") {
+		t.Fatalf("pluginTargetPath() = %q, %v", got, err)
+	}
+	for _, name := range []string{"", ".", "..", "nested/demo", `nested\demo`} {
+		if _, err := config.pluginTargetPath(name); !errors.Is(err, ErrInvalidPlugin) {
+			t.Fatalf("pluginTargetPath(%q) error = %v", name, err)
+		}
+	}
+}
+
 func configForAgent(t *testing.T, agent domain.AgentID) agentConfig {
 	t.Helper()
 	for _, config := range builtInAgentConfigs {

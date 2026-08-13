@@ -55,6 +55,10 @@ func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentI
 		if err != nil || mcp == nil {
 			t.Fatalf("ResolveMCP(%q) = %v, %v", agent, mcp, err)
 		}
+		plugin, err := registry.ResolvePlugin(agent)
+		if err != nil || plugin == nil {
+			t.Fatalf("ResolvePlugin(%q) = %v, %v", agent, plugin, err)
+		}
 	}
 
 	snapshot, err := registry.RefreshInstalled()
@@ -126,6 +130,9 @@ func TestRegistryResolversRejectUnsupportedAgent(t *testing.T) {
 	}
 	if got, err := registry.ResolveMCP("unknown"); got != nil || !errors.Is(err, ErrUnsupportedAdapter) {
 		t.Fatalf("ResolveMCP(unknown) = %v, %v; want nil, ErrUnsupportedAdapter", got, err)
+	}
+	if got, err := registry.ResolvePlugin("unknown"); got != nil || !errors.Is(err, ErrUnsupportedAdapter) {
+		t.Fatalf("ResolvePlugin(unknown) = %v, %v; want nil, ErrUnsupportedAdapter", got, err)
 	}
 }
 
