@@ -1,4 +1,4 @@
-# Architecture Decision Record
+# Reset Journal Schema Before Release
 
 - Status：Accepted
 - Date：2026-08-13
