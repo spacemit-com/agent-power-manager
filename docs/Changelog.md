@@ -19,6 +19,7 @@ APM 尚未发布，无需为开发期 journal 保留向后兼容；将现有 dri
 - `a23e1c4 refactor(transaction): write one journal schema`
 - `8373062 docs(changelog): defer journal schema record`
 - `11f7044 docs(transaction): record single journal schema`
+- `9a8e411 docs(adr): name journal schema reset decision`
 
 解决方案或完成结果：
 
