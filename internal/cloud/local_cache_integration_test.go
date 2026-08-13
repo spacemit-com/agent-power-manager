@@ -63,3 +63,51 @@ func TestLocalCloudAndCacheFetchGetFetch(t *testing.T) {
 		t.Fatalf("HOME touched: entries=%v err=%v", entries, err)
 	}
 }
+
+func TestLocalCloudAndCachePluginFetchGetFetch(t *testing.T) {
+	realHome := t.TempDir()
+	stateHome := t.TempDir()
+	cacheHome := t.TempDir()
+	t.Setenv("HOME", realHome)
+	t.Setenv("APM_HOME", stateHome)
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	resourcesRoot, err := filepath.Abs("resources")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := cloud.NewLocalClient(resourcesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := cache.NewFilesystem()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
+	if _, err = store.Fetch(ref); !errors.Is(err, cache.ErrMiss) {
+		t.Fatalf("first Fetch() error = %v, want ErrMiss", err)
+	}
+	if err = client.Get(ref); err != nil {
+		t.Fatal(err)
+	}
+	stagingRoot, err := store.Fetch(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cachePath := filepath.Join(cacheHome, "apm", "plugins", ref.Name, ref.Version)
+	stagingPath := filepath.Join(stagingRoot, "plugins", ref.Name)
+	for _, root := range []string{cachePath, stagingPath} {
+		for _, name := range []string{
+			filepath.Join(".codex-plugin", "plugin.json"),
+			filepath.Join(".claude-plugin", "plugin.json"),
+			filepath.Join("skills", "demo-plugin", "SKILL.md"),
+		} {
+			if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+				t.Fatalf("stat %s/%s: %v", root, name, err)
+			}
+		}
+	}
+	if entries, err := os.ReadDir(realHome); err != nil || len(entries) != 0 {
+		t.Fatalf("HOME touched: entries=%v err=%v", entries, err)
+	}
+}

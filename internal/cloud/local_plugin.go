@@ -60,6 +60,52 @@ func (c *LocalClient) listPlugins() ([]domain.PowerRef, error) {
 	return refs, nil
 }
 
+func (c *LocalClient) getPlugin(ref domain.PowerRef) (resultErr error) {
+	records, err := c.pluginRecords()
+	if err != nil {
+		return err
+	}
+	var source string
+	for _, record := range records {
+		if record.ref == ref {
+			source = record.sourcePath
+			break
+		}
+	}
+	if source == "" {
+		return ErrNotFound
+	}
+	if err := os.RemoveAll(c.cacheTempRoot); err != nil {
+		return fmt.Errorf("clean cache temporary path %q: %w", c.cacheTempRoot, err)
+	}
+	defer func() {
+		if err := os.RemoveAll(c.cacheTempRoot); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("clean cache temporary path %q: %w", c.cacheTempRoot, err))
+		}
+	}()
+
+	final := filepath.Join(c.cacheRoot, "plugins", ref.Name, ref.Version)
+	temporary := filepath.Join(c.cacheTempRoot, "plugins", ref.Name, ref.Version)
+	if info, err := os.Stat(final); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("cached Plugin %q is not a directory", final)
+		}
+		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("stat cached Plugin %q: %w", final, err)
+	}
+	if err := filesystem.CopyDir(source, temporary); err != nil {
+		return fmt.Errorf("copy source Plugin %q: %w", source, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
+		return fmt.Errorf("create Plugin cache parent %q: %w", filepath.Dir(final), err)
+	}
+	if err := os.Rename(temporary, final); err != nil {
+		return fmt.Errorf("commit cached Plugin %q: %w", final, err)
+	}
+	return nil
+}
+
 func (c *LocalClient) pluginRecords() ([]localPluginRecord, error) {
 	marketplaceRoot := filepath.Join(c.resourcesRoot, "plugins")
 	indexPath := filepath.Join(marketplaceRoot, ".claude-plugin", "marketplace.json")

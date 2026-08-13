@@ -87,8 +87,35 @@ func TestFilesystemCacheFetchesVersionAndReturnsStagingRoot(t *testing.T) {
 	}
 }
 
+func TestFilesystemCacheFetchesPluginIntoTypeSpecificStaging(t *testing.T) {
+	stateHome, cacheHome := setCacheEnvironment(t)
+	source := filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
+	if err := os.MkdirAll(filepath.Join(source, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, ".claude-plugin", "plugin.json"), []byte(`{"name":"demo-v1.0.0"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeStaleStaging(t, stateHome)
+	store, err := cache.NewFilesystem()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := store.Fetch(domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "plugins", "demo", ".claude-plugin", "plugin.json")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("stat staged Plugin %q: %v", want, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "old.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old staging remains: %v", err)
+	}
+}
+
 func TestFilesystemCacheUnsupportedTypesMissAndClearStagingAndTemporaryStaging(t *testing.T) {
-	for _, powerType := range []domain.PowerType{domain.PowerTypePlugin, domain.PowerTypeMCP} {
+	for _, powerType := range []domain.PowerType{domain.PowerTypeMCP, "unknown"} {
 		t.Run(string(powerType), func(t *testing.T) {
 			stateHome, _ := setCacheEnvironment(t)
 			staleStagingPaths := writeStaleStaging(t, stateHome)
