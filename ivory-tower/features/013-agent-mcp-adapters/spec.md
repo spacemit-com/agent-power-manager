@@ -6,7 +6,7 @@
 
 MCP 的启动定义由 Cloud 按精确版本保存和返回。APM 不为 MCP 使用 Cache 或 staging，而是由类型专属 MCP Adapter 调用目标 Agent CLI 完成同名检查、安装和卸载。MCP CLI 副作用纳入现有唯一活动 journal 和集中 TransactionManager，使任意后续选择恢复阶段的命令都能先恢复上一次 Skill 或 MCP 事务。
 
-本 feature 关联并落实 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。现有 Skill 文件事务继续遵守 [ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md) 与 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。
+本 feature 关联并落实 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)；journal 正式版本与严格兼容边界由 [ADR-011](../../adr/ADR-011-reset-journal-schema-before-release.md) 修订。现有 Skill 文件事务继续遵守 [ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md) 与 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。
 
 ## 范围与非目标
 
@@ -346,14 +346,14 @@ active.json
     └── agent-cli：旧/新 MCP 定义和 CLI 变更阶段
 ```
 
-兼容规则：
+格式规则：
 
-- 现有 schema v1 被明确识别为 legacy filesystem Skill journal，并继续可恢复；
-- 新事务写入 schema v2，必须显式包含 `driver=filesystem` 或 `driver=agent-cli`；
-- v2 必须且只能包含与 driver 匹配的一份载荷；
+- 当前共享信封是唯一正式格式，编号为 schema v1；旧平铺开发期 journal 不兼容；
+- 新事务必须显式包含 `driver=filesystem` 或 `driver=agent-cli`；
+- schema v1 必须且只能包含与 driver 匹配的一份载荷；
 - 不通过字段是否为空猜测 driver；
-- 未知 schema/driver、矛盾 phase、缺失定义或两份载荷同时存在均 fail closed 并保留 journal；
-- 实现完成后新 Skill 与 MCP 事务均写 v2，v1 只读兼容。
+- 未知 schema/driver、旧平铺格式、矛盾 phase、缺失定义或两份载荷同时存在均返回 `ErrInvalidJournal`，fail closed 并原样保留 journal；
+- 新 Skill 与 MCP 事务均写 schema v1；发布前遗留的旧开发格式由开发者检查后人工处理，不自动迁移或清理。
 
 任一时刻只能存在一个活动 journal。正常的多 Agent 批处理必须在前一个 Agent 事务完成并删除 journal 后，才可开始下一个 Agent；不建立多个 journal 的队列。
 
@@ -538,8 +538,8 @@ MCP 定义不允许密钥字段。活动 journal 延续现有严格权限和原�
 - 每次 CLI 写操作前 phase 已持久化；
 - 提交只 Set/Remove 对应 MCP 条目，回滚恢复旧配置和旧 manifest；
 - 重复 Recover 幂等，失败保留唯一 journal；
-- schema v1 Skill journal 继续恢复，v2 filesystem 与 agent-cli 正确路由；
-- 未知 driver、双载荷、缺失定义、非法 phase 和矛盾字段 fail closed；
+- schema v1 shared envelope 按 filesystem 与 agent-cli 正确路由；
+- 旧平铺格式、未知 schema/driver、双载荷、缺失定义、非法 phase 和矛盾字段返回 `ErrInvalidJournal`，原样保留文件并 fail closed；
 - MCP journal 可由 Skill 命令先恢复，Skill journal 可由 MCP 命令先恢复；
 - 前一事务未删除时拒绝任何下一事务；多 Agent 始终串行；
 - 外部竞态模拟产生不可解释状态时保留现场。
@@ -564,11 +564,11 @@ git diff --check
 - MCP CLI 副作用没有文件 rename 提交点：每次写前持久化 phase，以三态 mutation 结果和后续 Inspect 判定提交/回滚方向。
 - Claude/Hermes 无法反向验证完整定义：APM 以 manifest 中的名称身份纳管，恢复依赖 phase；外部并发修改明确不在保证范围内。
 - 每次 CLI 最长 30 秒且在全局锁内执行，可能拉长锁持有时间：首版优先一致性，不引入并行或可配置 timeout。
-- schema v2 会触及稳定 Skill journal：保留 v1 只读恢复兼容，并以跨版本 fixture 和现有 transaction 全量回归控制风险。
+- schema v1 严格格式会拒绝发布前遗留的旧平铺开发 journal：错误统一为 `ErrInvalidJournal` 并原样保留现场，由开发者人工处理；以严格格式 fixture 和现有 transaction 全量回归控制风险。
 - Cloud 定义中的命令具有执行能力：首版信任 Cloud 契约，始终以 argv 调用且不经 shell；来源信任、签名与审计留待后续设计。
 
 ## 文档与决策
 
-本 feature 的重大决策由 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md) 记录。实现完成时应在项目概览、C4 组件和生命周期流程、BUILD 及相关 Feature 006/007/010/011 文档中引用 ADR-010，并把“当前仅支持 Skill Adapter”的历史状态更新为实际支持矩阵。
+本 feature 的类型专属 driver、共享信封与恢复决策由 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md) 记录；唯一 schema v1 与不兼容旧平铺格式的修订由 [ADR-011](../../adr/ADR-011-reset-journal-schema-before-release.md) 记录。实现完成时应在项目概览、C4 组件和生命周期流程、BUILD 及相关 Feature 006/007/010/011 文档中引用对应 ADR，并把“当前仅支持 Skill Adapter”的历史状态更新为实际支持矩阵。
 
 实现属于行为变更，完成后按仓库规则在 `docs/Changelog.md` 增加一条覆盖本用户请求的记录；当前设计与文档提交本身不新增 Changelog 条目。

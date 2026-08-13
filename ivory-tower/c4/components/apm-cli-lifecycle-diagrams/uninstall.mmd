@@ -6,12 +6,12 @@ flowchart TD
     Manifest -->|no record| WarnNone[Warn + Agent-only unexecuted]
     Manifest -->|record| Type{Power type}
     Type -->|Skill| Skill[ResolveSkill + filesystem Uninstall]
-    Skill --> FSJournal[schema v2 filesystem removing/committing/rolling-back]
+    Skill --> FSJournal[schema v1 filesystem removing/committing/rolling-back]
     Type -->|MCP| MCP[ResolveMCP + Agent CLI Inspect]
     MCP -->|present| Def[Cloud GetMCP exact manifest version]
     Def --> MCPTx[UninstallMCP with definition]
     MCP -->|absent| MCPStale[UninstallMCP with nil definition]
-    MCPTx --> CLIJournal[schema v2 agent-cli removing/committing/rolling-back]
+    MCPTx --> CLIJournal[schema v1 agent-cli removing/committing/rolling-back]
     MCPStale --> Missing[remove only matching MCP manifest entry]
     FSJournal --> Result{TargetMissing? / error?}
     CLIJournal --> Result

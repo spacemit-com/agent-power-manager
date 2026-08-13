@@ -1,6 +1,6 @@
 # Feature 013 验收审计
 
-审计日期：2026-08-12。状态仅使用 `proved` 或 `missing`；最终审计没有 `missing`。
+审计日期：2026-08-12；journal schema 证据于 2026-08-13 按 [ADR-011](../../adr/ADR-011-reset-journal-schema-before-release.md) 更新。状态仅使用 `proved` 或 `missing`；最终审计没有 `missing`。
 
 | Spec requirement | Evidence | Status |
 | --- | --- | --- |
@@ -39,9 +39,9 @@
 | Uninstall absent：不 GetMCP，单项修复与 TargetMissing Warn | `TestUninstallMCPAbsentSkipsCloudAndWarns`、`TestMCPUninstallAbsentRemovesOnlyManifestEntry` | proved |
 | Uninstall error 与 TargetMissing 可并存并在 Release 前 Warn | `TestUninstallMCPMissingFactWithErrorWarnsBeforeRelease`、`TestMCPUninstallAbsentPreservesFactWithManifestError` | proved |
 | 唯一活动 journal：共享信封 + 类型载荷 | `Journal`、`FilesystemJournalPayload`、`AgentCLIJournalPayload` | proved |
-| Journal schema v1 归一化为 v2 filesystem | `TestDecodeJournalConvertsLegacyFilesystemSchemaToV2` | proved |
-| Journal v2 必须显式 driver 且只有匹配载荷 | `TestValidateJournalAcceptsOnlyOneMatchingV2DriverPayload` | proved |
-| Journal 未知字段、schema、trailing JSON fail closed | `TestDecodeJournalRejectsUnknownV2FieldsAndTrailingJSON`、`filesystem_journal_store_test.go` | proved |
+| Journal 仅接受当前 schema v1 shared envelope | `TestDecodeJournalAcceptsOnlyCurrentSchemaV1Envelope` | proved |
+| Journal schema v1 必须显式 driver 且只有匹配载荷 | `TestValidateJournalAcceptsOnlyOneMatchingV1DriverPayload` | proved |
+| 旧平铺、未知字段/schema、trailing JSON 返回 `ErrInvalidJournal` 且原样保留 | `TestDecodeJournalAcceptsOnlyCurrentSchemaV1Envelope`、`TestFilesystemJournalStoreRejectsInvalidDocuments` | proved |
 | TransactionManager 类型专属接口 | `Manager.InstallMCP`、`Manager.UninstallMCP`、`MCPAdapterResolver` | proved |
 | MCP 首装阶段 adding-new → committing/rolling-back | `TestMCPInstallFirstInstallOrderAndClonesServer`、`TestMCPInstallFirstAddMutationStates` | proved |
 | MCP 更新阶段 removing-old → adding-new → committing/rolling-back | `TestMCPInstallUpdateOrder`、`TestMCPInstallUpdateFailureDirections` | proved |
@@ -66,6 +66,6 @@
 | 测试与验收 / Transaction 与恢复 | `mcp_install_test.go`、`mcp_uninstall_test.go`、`mcp_recovery_test.go` | proved |
 | 测试与验收 / 最终验证 | `test -z "$(gofmt -l cmd internal)"`、全量测试、四包 race、vet、build 与 `git diff --check` 均以退出码 0 完成；结果记录在 Changelog | proved |
 | 风险与控制 | 有界 runner、严格 parser、journal 保留、无 post-write list 与隔离集成测试均已实现 | proved |
-| 文档与决策 | ADR-010、Feature 013 spec/plan、本审计、C4、BUILD 与历史 supersession notes | proved |
+| 文档与决策 | ADR-010、ADR-011、Feature 013 spec/plan、本审计、C4、BUILD 与历史 supersession notes | proved |
 
 结论：零个 `missing`，Feature 013 的批准范围均有源代码或自动化测试证据。

@@ -125,7 +125,7 @@ stdout 只有两种精确行形式：
 
 MCP 支持 Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互斥结构：本地 stdio 使用 `transport=stdio`、`command`、`args`，远程端点使用 `transport=http`、`url`。Claude Code 固定写入 user scope；所有同名检查、安装、卸载和恢复都通过目标 Agent CLI 完成。CLI 从当前 `PATH` 动态解析，不经 shell，30 秒超时，输出有界；解析或状态不清晰时 fail closed 并保留共享 journal。Hermes 正常 Add/Remove 后按设计不额外执行 list。
 
-Skill 与 MCP 共用唯一活动 journal，schema v2 通过 `filesystem` 与 `agent-cli` driver 路由；旧 schema v1 Skill journal 仍可恢复。下一条 Search、installed List、Install 或 Uninstall 会先恢复未完成的 Skill/MCP 事务。Plugin 仍明确不支持。
+Skill 与 MCP 共用唯一活动 journal。唯一正式 schema v1 shared envelope 通过 `filesystem` 与 `agent-cli` driver 路由，并且只允许与 driver 匹配的互斥载荷；旧平铺或其他格式返回 `ErrInvalidJournal`，文件原样保留。下一条 Search、installed List、Install 或 Uninstall 会先恢复未完成的 Skill/MCP 事务。版本边界见 [ADR-011](ivory-tower/adr/ADR-011-reset-journal-schema-before-release.md)；Plugin 仍明确不支持。
 
 自动化测试绝不能调用真实 Agent CLI。MCP 测试应把临时 fake-bin 前置到 `PATH`，将 `APM_HOME`、`XDG_CACHE_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME` 全部指向 `t.TempDir()` 下的隔离路径，并断言每次执行路径都位于 fake-bin。仓库集成测试已按此约束覆盖三个 Agent 的安装、升级、卸载和跨命令恢复。
 

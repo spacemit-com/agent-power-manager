@@ -4,6 +4,8 @@
 - Date：2026-08-12
 - Decision Makers：liangjunzhao
 
+> **局部取代说明（2026-08-13）：** [ADR-011](ADR-011-reset-journal-schema-before-release.md) 仅取代本文中“旧平铺 schema v1 继续可读、新共享信封写 schema v2”的版本兼容条款。本文确定的类型专属 driver、共享信封、互斥载荷、唯一活动 journal、phase 与恢复路由继续有效；文中其他 schema v2/legacy 表述保留为本决策当时的历史记录。
+
 ## Context
 
 APM 当前通过 [ADR-008](ADR-008-let-adapters-own-staging-to-installation.md) 和 [ADR-009](ADR-009-centralize-lifecycle-transactions.md) 管理 Skill：Adapter 从公共 staging 复制并原子发布目标目录，TransactionManager 以 target、backup/quarantine 和唯一活动 journal 保证 manifest 与文件系统一致。

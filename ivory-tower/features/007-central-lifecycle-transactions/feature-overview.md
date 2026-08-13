@@ -1,6 +1,6 @@
 # Feature Overview
 
-> **当前状态说明（2026-08-12）：** 本文保留 Feature 007 文件系统事务的历史范围。Feature 013 已将新事务升级为 schema v2 共享信封，以 `filesystem`/`agent-cli` driver 并列恢复 Skill 与 MCP，并保留 schema v1 Skill 只读兼容；见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+> **当前状态说明（2026-08-13）：** 本文保留 Feature 007 文件系统事务的历史范围。Feature 013 当前使用唯一 schema v1 shared envelope，以 `filesystem`/`agent-cli` driver 和互斥载荷并列恢复 Skill 与 MCP；其他格式返回 `ErrInvalidJournal` 并原样保留。见 [Feature 013](../013-agent-mcp-adapters/spec.md)、[ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md) 与 [ADR-011](../../adr/ADR-011-reset-journal-schema-before-release.md)。
 
 ## Goal
 

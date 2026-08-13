@@ -1,5 +1,7 @@
 # Agent MCP Adapter and Recoverable CLI Transactions Implementation Plan
 
+> **版本兼容步骤已被取代（2026-08-13）：** 本 plan 是 Feature 013 在 2026-08-12 完成时的实施记录，原有 checkbox 与 schema v2/legacy 文字保留用于说明当时的交付过程。[ADR-011](../../adr/ADR-011-reset-journal-schema-before-release.md) 已取代其中“读取旧平铺 schema v1、写入共享信封 schema v2”的版本兼容方案；当前正式格式是唯一 schema v1 shared envelope，其他格式返回 `ErrInvalidJournal` 并原样保留。类型专属 driver、载荷、phase 与恢复路由不变。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add versioned stdio/HTTP MCP installation and uninstallation for Codex, Claude Code, and Hermes through their CLIs while preserving APM manifests with one cross-type recoverable journal.

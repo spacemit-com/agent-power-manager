@@ -2,10 +2,8 @@ flowchart TD
     Start([需要共享状态的命令]) --> Lock[Acquire 全局 APM 锁]
     Lock --> Inspect[Inspect 唯一 transactions/active.json]
     Inspect -->|无 journal| Resume[继续当前命令]
-    Inspect -->|schema v1| Normalize[归一化为 v2 filesystem]
-    Inspect -->|schema v2| Driver{driver}
-    Normalize --> FS[filesystem Skill 恢复]
-    Driver -->|filesystem| FS
+    Inspect -->|schema v1 shared envelope| Driver{driver}
+    Driver -->|filesystem| FS[filesystem Skill 恢复]
     Driver -->|agent-cli| CLI[按 journal Agent ResolveMCP]
     FS --> Converge[按持久化 phase 提交或回滚]
     CLI --> InspectMCP[Agent CLI Inspect 同名 MCP]
@@ -13,7 +11,7 @@ flowchart TD
     Converge --> Delete[收敛后删除同一个 journal]
     Delete --> Warn[锁内同步恢复 Warn]
     Warn --> Resume
-    Inspect -->|非法 schema/driver/payload| Fail[fail closed；保留 journal]
+    Inspect -->|其他格式或非法 driver/payload| Fail[ErrInvalidJournal；原样保留 journal]
     InspectMCP -->|CLI/输出不确定| Fail
     Converge -->|失败或不确定| Fail
     Fail --> Release[Release 并阻止当前业务]

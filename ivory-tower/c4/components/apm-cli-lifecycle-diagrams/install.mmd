@@ -10,7 +10,7 @@ flowchart TD
     SkillSame -->|yes| Unchanged[unchanged]
     SkillSame -->|no| Cache[Cache Fetch / Cloud Get / Fetch]
     Cache --> FSTx[filesystem Install transaction]
-    FSTx --> FSJournal[schema v2 driver=filesystem]
+    FSTx --> FSJournal[schema v1 driver=filesystem]
 
     Type -->|MCP| MCPResolve[ResolveMCP + Config Find]
     MCPResolve --> MCPInspect[Agent CLI Inspect]
@@ -22,7 +22,7 @@ flowchart TD
     MCPState -->|update present| OldDef[Cloud GetMCP old] --> NewDef
     NewDef --> MCPTx[agent-cli InstallMCP transaction]
     MCPStale --> MCPTx
-    MCPTx --> MCPJournal[schema v2 driver=agent-cli]
+    MCPTx --> MCPJournal[schema v1 driver=agent-cli]
     MCPJournal --> Phases[removing-old / adding-new / committing / rolling-back]
 
     FSJournal --> Outcome[installed/upgraded/downgraded]

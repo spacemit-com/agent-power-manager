@@ -96,7 +96,7 @@ classDiagram
         +Set(AgentID, PowerRef) error
         +Remove(AgentID, PowerType, name) error
     }
-    note for TransactionManager "唯一 schema v2 journal；filesystem/agent-cli driver 可跨命令串行恢复（ADR-010）"
+    note for TransactionManager "唯一 schema v1 shared envelope；filesystem/agent-cli driver 可跨命令串行恢复；其他格式 ErrInvalidJournal 并保留（ADR-010/ADR-011）"
     class TransactionManager {
         <<interface>>
         +Recover(Context) (RecoveryResult, error)
