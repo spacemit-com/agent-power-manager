@@ -13,20 +13,23 @@ import (
 	"apm/internal/transaction"
 )
 
-func TestInstallPluginDoesNotDispatchThroughSkillAdapter(t *testing.T) {
+func TestInstallPluginDispatchesThroughPluginAdapterOnly(t *testing.T) {
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 	var calls []string
 	service := newInstallService(t, &calls, installFixture{
-		snapshot:  domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		cloudRefs: []domain.PowerRef{ref},
-		selected:  ref.Version,
+		snapshot:         domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		cloudRefs:        []domain.PowerRef{ref},
+		selected:         ref.Version,
+		pluginDefinition: domain.PluginDefinition{ActualName: "demo-v1.0.0", Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: "/marketplace"}},
+		pluginFact:       adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo-v1.0.0"},
+		pluginMode:       domain.PluginDeploymentMarketplace,
 	})
 
 	result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})
-	if !errors.Is(err, adapter.ErrUnsupportedAdapter) {
-		t.Fatalf("Install() error = %v, want ErrUnsupportedAdapter", err)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
 	}
-	assertInstallItems(t, result, []cli.InstallItem{{Agent: domain.AgentCodex, Power: ref, Outcome: cli.InstallOutcomeFailed}})
+	assertInstallItems(t, result, []cli.InstallItem{{Agent: domain.AgentCodex, Power: ref, Outcome: cli.InstallOutcomeInstalled}})
 	if containsEvent(calls, "resolve:codex") || containsEvent(calls, "transaction:install:codex") {
 		t.Fatalf("calls = %v, want no Skill adapter or filesystem transaction", calls)
 	}

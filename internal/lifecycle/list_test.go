@@ -113,6 +113,9 @@ func (*listFakeRegistry) ResolveSkill(domain.AgentID) (adapter.Adapter, error) {
 	return nil, nil
 }
 func (*listFakeRegistry) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) { return nil, nil }
+func (*listFakeRegistry) ResolvePlugin(domain.AgentID) (adapter.PluginAdapter, error) {
+	return nil, nil
+}
 
 func (r *listFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	if r.fixture.beforeRefresh != nil {

@@ -16,6 +16,7 @@ import (
 type AdapterRegistry interface {
 	ResolveSkill(domain.AgentID) (adapter.Adapter, error)
 	ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error)
+	ResolvePlugin(domain.AgentID) (adapter.PluginAdapter, error)
 	RefreshInstalled() (domain.AgentSnapshot, error)
 }
 

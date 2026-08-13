@@ -28,6 +28,8 @@ type uninstallFixture struct {
 	mcpDefinitions        map[string]domain.MCPServer
 	mcpGetErrors          map[string]error
 	mcpRequests           []transaction.MCPUninstallRequest
+	pluginFact            adapter.PluginFact
+	pluginRequests        []transaction.PluginUninstallRequest
 
 	acquireErr           error
 	recoverErr           error
@@ -104,8 +106,10 @@ func (m *uninstallFakeTransactions) UninstallMCP(_ context.Context, request tran
 func (*uninstallFakeTransactions) InstallPlugin(context.Context, transaction.PluginInstallRequest) error {
 	return errors.New("unexpected InstallPlugin call")
 }
-func (*uninstallFakeTransactions) UninstallPlugin(context.Context, transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
-	return transaction.UninstallResult{}, errors.New("unexpected UninstallPlugin call")
+func (m *uninstallFakeTransactions) UninstallPlugin(_ context.Context, request transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
+	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall-plugin:"+string(request.Agent))
+	m.fixture.pluginRequests = append(m.fixture.pluginRequests, request)
+	return transaction.UninstallResult{}, nil
 }
 
 type uninstallFakeCloud struct {
@@ -137,6 +141,10 @@ func (r *uninstallFakeRegistry) ResolveMCP(agent domain.AgentID) (adapter.MCPAda
 	recordUninstallEvent(r.calls, r.fixture, "resolve-mcp:"+string(agent))
 	return uninstallFakeMCPAdapter{agent: agent, calls: r.calls, fixture: r.fixture}, r.fixture.resolveErrors[agent]
 }
+func (r *uninstallFakeRegistry) ResolvePlugin(agent domain.AgentID) (adapter.PluginAdapter, error) {
+	recordUninstallEvent(r.calls, r.fixture, "resolve-plugin:"+string(agent))
+	return uninstallFakePluginAdapter{agent: agent, calls: r.calls, fixture: r.fixture}, r.fixture.resolveErrors[agent]
+}
 
 func (r *uninstallFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	recordUninstallEvent(r.calls, r.fixture, "refresh")
@@ -158,6 +166,30 @@ type uninstallFakeMCPAdapter struct {
 	calls   *[]string
 	fixture *uninstallFixture
 }
+
+type uninstallFakePluginAdapter struct {
+	agent   domain.AgentID
+	calls   *[]string
+	fixture *uninstallFixture
+}
+
+func (uninstallFakePluginAdapter) DeploymentMode() domain.PluginDeploymentMode {
+	return domain.PluginDeploymentMarketplace
+}
+func (uninstallFakePluginAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
+	return errors.New("unexpected PrepareInstall call")
+}
+func (a uninstallFakePluginAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
+	recordUninstallEvent(a.calls, a.fixture, "plugin:inspect:"+string(a.agent))
+	return a.fixture.pluginFact, nil
+}
+func (uninstallFakePluginAdapter) Add(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+func (uninstallFakePluginAdapter) Remove(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+func (uninstallFakePluginAdapter) TargetPath(string) (string, error) { return "", nil }
 
 func (a uninstallFakeMCPAdapter) Inspect(context.Context, string) (adapter.MCPPresence, error) {
 	recordUninstallEvent(a.calls, a.fixture, "mcp:inspect:"+string(a.agent))
@@ -415,6 +447,24 @@ func TestUninstallAllSameAgentTypeAmbiguityPreventsLaterAgentLifecycleAccess(t *
 	}
 	if !reflect.DeepEqual(calls, []string{"acquire", "recover", "refresh", "config:claude-code", "release"}) {
 		t.Fatalf("calls = %v, want no Resolve or Transaction after ambiguity", calls)
+	}
+}
+
+func TestUninstallPluginUsesLocalActualNameWithoutCloud(t *testing.T) {
+	var calls []string
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	service := newUninstallService(t, &calls, uninstallFixture{
+		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		groups:     map[domain.AgentID]domain.PowerGroups{domain.AgentCodex: {domain.PowerTypePlugin: {ref}}},
+		pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm"},
+	})
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: string(domain.AgentCodex), Type: string(domain.PowerTypePlugin), Name: "demo"})
+	if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.UninstallOutcomeCompleted {
+		t.Fatalf("Uninstall() = %+v, %v", result, err)
+	}
+	want := []string{"acquire", "recover", "refresh", "config:codex", "resolve-plugin:codex", "plugin:inspect:codex", "transaction:uninstall-plugin:codex", "release"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 }
 

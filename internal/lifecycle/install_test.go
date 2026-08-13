@@ -40,6 +40,10 @@ type installFixture struct {
 	mcpDefinitions           map[string]domain.MCPServer
 	mcpGetErrors             map[string]error
 	mcpRequests              []transaction.MCPInstallRequest
+	pluginDefinition         domain.PluginDefinition
+	pluginFact               adapter.PluginFact
+	pluginMode               domain.PluginDeploymentMode
+	pluginRequests           []transaction.PluginInstallRequest
 	versionErr               error
 
 	currentAgent domain.AgentID
@@ -108,8 +112,10 @@ func (*installFakeTransactions) Uninstall(context.Context, transaction.Uninstall
 func (*installFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
-func (*installFakeTransactions) InstallPlugin(context.Context, transaction.PluginInstallRequest) error {
-	return errors.New("unexpected InstallPlugin call")
+func (m *installFakeTransactions) InstallPlugin(_ context.Context, request transaction.PluginInstallRequest) error {
+	*m.calls = append(*m.calls, "transaction:install-plugin:"+string(request.Agent))
+	m.fixture.pluginRequests = append(m.fixture.pluginRequests, request)
+	return nil
 }
 func (*installFakeTransactions) UninstallPlugin(context.Context, transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, errors.New("unexpected UninstallPlugin call")
@@ -135,8 +141,9 @@ func (c *installFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error)
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
-func (*installFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
-	return domain.PluginDefinition{}, nil
+func (c *installFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
+	*c.calls = append(*c.calls, "cloud:get-plugin")
+	return c.fixture.pluginDefinition, nil
 }
 
 type installFakeCache struct {
@@ -175,6 +182,11 @@ func (r *installFakeRegistry) ResolveMCP(agent domain.AgentID) (adapter.MCPAdapt
 	*r.calls = append(*r.calls, "resolve-mcp:"+string(agent))
 	return installFakeMCPAdapter{agent: agent, calls: r.calls, fixture: r.fixture}, r.fixture.resolveErrors[agent]
 }
+func (r *installFakeRegistry) ResolvePlugin(agent domain.AgentID) (adapter.PluginAdapter, error) {
+	r.fixture.currentAgent = agent
+	*r.calls = append(*r.calls, "resolve-plugin:"+string(agent))
+	return installFakePluginAdapter{agent: agent, calls: r.calls, fixture: r.fixture}, r.fixture.resolveErrors[agent]
+}
 
 func (r *installFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	if r.fixture.beforeRefresh != nil {
@@ -199,6 +211,31 @@ type installFakeMCPAdapter struct {
 	calls   *[]string
 	fixture *installFixture
 }
+
+type installFakePluginAdapter struct {
+	agent   domain.AgentID
+	calls   *[]string
+	fixture *installFixture
+}
+
+func (a installFakePluginAdapter) DeploymentMode() domain.PluginDeploymentMode {
+	return a.fixture.pluginMode
+}
+func (a installFakePluginAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
+	*a.calls = append(*a.calls, "plugin:prepare:"+string(a.agent))
+	return nil
+}
+func (a installFakePluginAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
+	*a.calls = append(*a.calls, "plugin:inspect:"+string(a.agent))
+	return a.fixture.pluginFact, nil
+}
+func (installFakePluginAdapter) Add(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, nil
+}
+func (installFakePluginAdapter) Remove(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, nil
+}
+func (installFakePluginAdapter) TargetPath(string) (string, error) { return "/plugins/demo", nil }
 
 func (a installFakeMCPAdapter) Inspect(context.Context, string) (adapter.MCPPresence, error) {
 	*a.calls = append(*a.calls, "mcp:inspect:"+string(a.agent))
@@ -269,6 +306,24 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 		{Agent: domain.AgentCodex, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeUnchanged},
 		{Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeInstalled},
 	})
+}
+
+func TestInstallPluginMarketplacePreparesBeforeInspectAndSkipsCache(t *testing.T) {
+	var calls []string
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
+	service := newInstallService(t, &calls, installFixture{
+		pluginDefinition: domain.PluginDefinition{ActualName: "demo-v2.0.0", Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: "/marketplace"}},
+		pluginFact:       adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo-v2.0.0"},
+		pluginMode:       domain.PluginDeploymentMarketplace,
+	})
+	item, err := service.installOne(context.Background(), domain.AgentCodex, ref)
+	if err != nil || item.Outcome != cli.InstallOutcomeInstalled {
+		t.Fatalf("installOne() = %+v, %v", item, err)
+	}
+	want := []string{"resolve-plugin:codex", "config:find:codex", "cloud:get-plugin", "plugin:prepare:codex", "plugin:inspect:codex", "transaction:install-plugin:codex"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
 }
 
 func TestInstallAllFailsFastAndCompletesResultAfterRelease(t *testing.T) {

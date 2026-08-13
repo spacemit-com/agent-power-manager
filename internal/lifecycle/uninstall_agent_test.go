@@ -14,7 +14,7 @@ import (
 	"apm/internal/transaction"
 )
 
-func TestUninstallPluginDoesNotDispatchThroughSkillAdapter(t *testing.T) {
+func TestUninstallPluginDispatchesThroughPluginAdapterOnly(t *testing.T) {
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 	var calls []string
 	service := newUninstallService(t, &calls, uninstallFixture{
@@ -22,13 +22,14 @@ func TestUninstallPluginDoesNotDispatchThroughSkillAdapter(t *testing.T) {
 		groups: map[domain.AgentID]domain.PowerGroups{
 			domain.AgentCodex: {domain.PowerTypePlugin: {ref}},
 		},
+		pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm"},
 	})
 
 	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})
-	if !errors.Is(err, adapter.ErrUnsupportedAdapter) {
-		t.Fatalf("Uninstall() error = %v, want ErrUnsupportedAdapter", err)
+	if err != nil {
+		t.Fatalf("Uninstall() error = %v", err)
 	}
-	assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Power: powerPointer(ref), Outcome: cli.UninstallOutcomeFailed}})
+	assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Power: powerPointer(ref), Outcome: cli.UninstallOutcomeCompleted}})
 	if containsEvent(calls, "resolve:codex") || containsEvent(calls, "transaction:uninstall:codex") {
 		t.Fatalf("calls = %v, want no Skill adapter or filesystem transaction", calls)
 	}

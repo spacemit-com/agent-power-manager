@@ -38,6 +38,8 @@ func (s *InstallService) installOne(ctx context.Context, agent domain.AgentID, r
 		return s.installSkill(ctx, agent, ref)
 	case domain.PowerTypeMCP:
 		return s.installMCP(ctx, agent, ref)
+	case domain.PowerTypePlugin:
+		return s.installPlugin(ctx, agent, ref)
 	default:
 		return cli.InstallItem{}, fmt.Errorf("install power type %q: %w", ref.Type, adapter.ErrUnsupportedAdapter)
 	}
