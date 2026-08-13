@@ -162,26 +162,9 @@ func (s *filesystemJournalStore) writeAtomic(journal Journal) (resultErr error) 
 }
 
 func decodeJournal(contents []byte) (Journal, error) {
-	var probe struct {
-		SchemaVersion int `json:"schema_version"`
-	}
-	if err := json.Unmarshal(contents, &probe); err != nil {
-		return Journal{}, fmt.Errorf("decode schema: %w: %w", err, ErrInvalidJournal)
-	}
 	var journal Journal
-	switch probe.SchemaVersion {
-	case 1:
-		var legacy legacyFilesystemJournal
-		if err := decodeExactJSON(contents, &legacy); err != nil {
-			return Journal{}, err
-		}
-		journal = legacy.normalize()
-	case 2:
-		if err := decodeExactJSON(contents, &journal); err != nil {
-			return Journal{}, err
-		}
-	default:
-		return Journal{}, fmt.Errorf("schema version %d: %w", probe.SchemaVersion, ErrInvalidJournal)
+	if err := decodeExactJSON(contents, &journal); err != nil {
+		return Journal{}, err
 	}
 	if err := validateJournal(journal); err != nil {
 		return Journal{}, err

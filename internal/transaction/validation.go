@@ -130,7 +130,7 @@ func validatePower(power domain.PowerRef, sentinel error) error {
 }
 
 func validateJournal(journal Journal) error {
-	if journal.SchemaVersion != 2 {
+	if journal.SchemaVersion != 1 {
 		return fmt.Errorf("schema version %d: %w", journal.SchemaVersion, ErrInvalidJournal)
 	}
 	if !validTransactionID(journal.TransactionID) {

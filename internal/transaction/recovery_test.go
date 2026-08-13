@@ -1,6 +1,7 @@
 package transaction
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -259,7 +260,8 @@ func TestRecoverCorruptJournalFailsClosed(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(fixture.journalPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(fixture.journalPath, []byte(`{"schema_version":2}`), 0o600); err != nil {
+	contents := []byte(legacyFlatJournalJSON(fixture.journal))
+	if err := os.WriteFile(fixture.journalPath, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,6 +271,10 @@ func TestRecoverCorruptJournalFailsClosed(t *testing.T) {
 	}
 	if fixture.manifests.setRef.Name != "" || fixture.manifests.removed.Name != "" {
 		t.Fatalf("manifest mutated: set=%+v remove=%+v", fixture.manifests.setRef, fixture.manifests.removed)
+	}
+	after, readErr := os.ReadFile(fixture.journalPath)
+	if readErr != nil || !bytes.Equal(after, contents) {
+		t.Fatalf("corrupt journal changed: %v, %q", readErr, after)
 	}
 }
 

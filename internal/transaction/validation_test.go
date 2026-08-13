@@ -168,7 +168,7 @@ func validInstallJournal(t *testing.T) Journal {
 	id := "00112233445566778899aabbccddeeff"
 	dir := filepath.Join(filepath.Dir(target), ".apm-transactions", id)
 	return Journal{
-		SchemaVersion: 2,
+		SchemaVersion: 1,
 		TransactionID: id,
 		Driver:        DriverFilesystem,
 		Operation:     OperationInstall,

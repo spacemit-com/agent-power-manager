@@ -1,6 +1,8 @@
 package transaction
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -56,7 +58,8 @@ func TestFilesystemJournalStoreRejectsInvalidDocuments(t *testing.T) {
 		"invalid JSON":   `{`,
 		"trailing JSON":  validJournalJSON(t) + ` {}`,
 		"unknown field":  strings.Replace(validJournalJSON(t), `"phase"`, `"unknown":true,"phase"`, 1),
-		"unknown schema": strings.Replace(validJournalJSON(t), `"schema_version": 1`, `"schema_version": 3`, 1),
+		"unknown schema": strings.Replace(validJournalJSON(t), `"schema_version":1`, `"schema_version":3`, 1),
+		"legacy flat":    legacyFlatJournalJSON(validInstallJournal(t)),
 	}
 	for name, contents := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -67,9 +70,14 @@ func TestFilesystemJournalStoreRejectsInvalidDocuments(t *testing.T) {
 			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			before := []byte(contents)
 			_, found, err := newFilesystemJournalStore(path).Inspect()
 			if !found || !errors.Is(err, ErrInvalidJournal) {
 				t.Fatalf("Inspect() = found %v, error %v; want invalid journal", found, err)
+			}
+			after, readErr := os.ReadFile(path)
+			if readErr != nil || !bytes.Equal(after, before) {
+				t.Fatalf("invalid journal changed: %v, %q", readErr, after)
 			}
 		})
 	}
@@ -261,21 +269,9 @@ func assertPermission(t *testing.T, path string, want os.FileMode) {
 
 func validJournalJSON(t *testing.T) string {
 	t.Helper()
-	return legacyJournalJSON(validInstallJournal(t))
-}
-
-func legacyJournalJSON(journal Journal) string {
-	return `{
-  "schema_version": 1,
-  "transaction_id": "` + journal.TransactionID + `",
-  "operation": "install",
-  "phase": "preparing",
-  "agent": "codex",
-  "power": {"Name":"demo","Type":"skill","Version":"2.0.0"},
-  "previous": {"Name":"demo","Type":"skill","Version":"1.0.0"},
-	"staging_root": "` + journal.Filesystem.StagingRoot + `",
-	"target_path": "` + journal.Filesystem.TargetPath + `",
-	"transaction_dir": "` + journal.Filesystem.TransactionDir + `",
-	"backup_path": "` + journal.Filesystem.BackupPath + `"
-}`
+	contents, err := json.Marshal(validInstallJournal(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(contents)
 }
