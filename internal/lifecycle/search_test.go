@@ -63,6 +63,12 @@ func (*stubTransactionManager) Uninstall(context.Context, transaction.UninstallR
 func (*stubTransactionManager) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
+func (*stubTransactionManager) InstallPlugin(context.Context, transaction.PluginInstallRequest) error {
+	return errors.New("unexpected InstallPlugin call")
+}
+func (*stubTransactionManager) UninstallPlugin(context.Context, transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, errors.New("unexpected UninstallPlugin call")
+}
 
 type stubCloudClient struct {
 	calls  *[]string

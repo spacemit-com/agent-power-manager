@@ -1,7 +1,10 @@
 // Package transaction 提供能力安装和卸载的一致性事务与恢复能力。
 package transaction
 
-import "apm/internal/domain"
+import (
+	"apm/internal/adapter"
+	"apm/internal/domain"
+)
 
 // Operation 表示事务操作类型。
 type Operation string
@@ -21,6 +24,8 @@ const (
 	DriverFilesystem Driver = "filesystem"
 	// DriverAgentCLI 表示通过目标 Agent CLI 恢复 MCP 注册。
 	DriverAgentCLI Driver = "agent-cli"
+	// DriverPlugin 表示通过 Plugin Adapter 和可选文件发布恢复 Plugin。
+	DriverPlugin Driver = "plugin"
 )
 
 // Phase 表示事务所处阶段。
@@ -58,6 +63,28 @@ type AgentCLIJournalPayload struct {
 	PreviousServer *domain.MCPServer `json:"previous_server,omitempty"`
 }
 
+// PluginFilesystemJournalPayload 保存 Hermes Plugin 发布的全部受控路径。
+type PluginFilesystemJournalPayload struct {
+	StagingRoot            string `json:"staging_root,omitempty"`
+	SourcePath             string `json:"source_path,omitempty"`
+	TargetPath             string `json:"target_path,omitempty"`
+	PreviousTargetPath     string `json:"previous_target_path,omitempty"`
+	TransactionDir         string `json:"transaction_dir,omitempty"`
+	PublishPath            string `json:"publish_path,omitempty"`
+	PreviousQuarantinePath string `json:"previous_quarantine_path,omitempty"`
+	TargetQuarantinePath   string `json:"target_quarantine_path,omitempty"`
+}
+
+// PluginJournalPayload 保存 Plugin 恢复所需的部署模式、实际名和 CLI selector。
+type PluginJournalPayload struct {
+	Deployment      domain.PluginDeploymentMode     `json:"deployment"`
+	Target          adapter.PluginTarget            `json:"target"`
+	Previous        *adapter.PluginTarget           `json:"previous,omitempty"`
+	TargetPresent   bool                            `json:"target_present"`
+	PreviousPresent bool                            `json:"previous_present"`
+	Filesystem      *PluginFilesystemJournalPayload `json:"filesystem,omitempty"`
+}
+
 // Journal 表示恢复唯一活动事务所需的持久化状态。
 type Journal struct {
 	SchemaVersion int                       `json:"schema_version"`
@@ -70,6 +97,7 @@ type Journal struct {
 	Previous      *domain.PowerRef          `json:"previous,omitempty"`
 	Filesystem    *FilesystemJournalPayload `json:"filesystem,omitempty"`
 	AgentCLI      *AgentCLIJournalPayload   `json:"agent_cli,omitempty"`
+	Plugin        *PluginJournalPayload     `json:"plugin,omitempty"`
 }
 
 // RecoveryDirection 表示恢复器固定的收敛方向。

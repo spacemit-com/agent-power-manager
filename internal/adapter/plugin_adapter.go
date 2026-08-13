@@ -25,15 +25,15 @@ const (
 
 // PluginFact 是 Adapter 从目标 Agent 或文件系统读取的安装事实。
 type PluginFact struct {
-	Presence   PluginPresence
-	ActualName string
-	Selector   string
+	Presence   PluginPresence `json:"presence"`
+	ActualName string         `json:"actual_name"`
+	Selector   string         `json:"selector"`
 }
 
 // PluginTarget 描述一次安装或卸载所使用的稳定实际名和 CLI selector。
 type PluginTarget struct {
-	ActualName string
-	Selector   string
+	ActualName string `json:"actual_name"`
+	Selector   string `json:"selector"`
 }
 
 // PluginMutationState 表示 Agent CLI 写操作产生副作用的确定程度。

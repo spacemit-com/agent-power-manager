@@ -78,6 +78,12 @@ func (*listFakeTransactions) Uninstall(context.Context, transaction.UninstallReq
 func (*listFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
+func (*listFakeTransactions) InstallPlugin(context.Context, transaction.PluginInstallRequest) error {
+	return errors.New("unexpected InstallPlugin call")
+}
+func (*listFakeTransactions) UninstallPlugin(context.Context, transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, errors.New("unexpected UninstallPlugin call")
+}
 
 type listFakeCloud struct {
 	calls   *[]string

@@ -23,6 +23,10 @@ func (r *recordingMCPResolver) ResolveMCP(agent domain.AgentID) (adapter.MCPAdap
 	return r.adapter, r.err
 }
 
+func (r *recordingMCPResolver) ResolvePlugin(domain.AgentID) (adapter.PluginAdapter, error) {
+	return nil, r.err
+}
+
 type mcpRecoveryFixture struct {
 	events    []string
 	journals  *recordingJournalStore

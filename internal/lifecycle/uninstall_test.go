@@ -101,6 +101,12 @@ func (m *uninstallFakeTransactions) UninstallMCP(_ context.Context, request tran
 	m.fixture.mcpRequests = append(m.fixture.mcpRequests, request)
 	return m.fixture.transactionMCPResults[request.Agent], m.fixture.transactionMCPErrors[request.Agent]
 }
+func (*uninstallFakeTransactions) InstallPlugin(context.Context, transaction.PluginInstallRequest) error {
+	return errors.New("unexpected InstallPlugin call")
+}
+func (*uninstallFakeTransactions) UninstallPlugin(context.Context, transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, errors.New("unexpected UninstallPlugin call")
+}
 
 type uninstallFakeCloud struct {
 	calls   *[]string
