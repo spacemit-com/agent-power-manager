@@ -42,7 +42,7 @@ func newRecoveryFixture(t *testing.T, operation Operation, phase Phase) *recover
 		t.Fatal(err)
 	}
 	journal := Journal{
-		SchemaVersion: 2,
+		SchemaVersion: 1,
 		TransactionID: id,
 		Driver:        DriverFilesystem,
 		Operation:     operation,

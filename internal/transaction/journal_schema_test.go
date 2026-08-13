@@ -52,7 +52,7 @@ func TestValidateJournalAcceptsOnlyOneMatchingV1DriverPayload(t *testing.T) {
 		"missing payload": func(j *Journal) { j.Filesystem = nil },
 		"both payloads":   func(j *Journal) { j.AgentCLI = &AgentCLIJournalPayload{} },
 		"wrong payload": func(j *Journal) {
-			j.Driver, j.Filesystem, j.AgentCLI = DriverAgentCLI, nil, &AgentCLIJournalPayload{}
+			j.Filesystem, j.AgentCLI = nil, &AgentCLIJournalPayload{}
 		},
 		"illegal phase": func(j *Journal) { j.Phase = PhaseRemovingOld },
 	}
