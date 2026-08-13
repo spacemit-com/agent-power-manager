@@ -12,6 +12,12 @@
       "version": "0.0.1",
       "source": "./plugins/demo-plugin-v0.0.1",
       "description": "Minimal plugin fixture managed by APM Cloud"
+    },
+    {
+      "name": "demo-plugin-v0.1.0",
+      "version": "0.1.0",
+      "source": "./plugins/demo-plugin-v0.1.0",
+      "description": "Second minimal plugin fixture managed by APM Cloud"
     }
   ]
 }
