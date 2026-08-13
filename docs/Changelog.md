@@ -2,6 +2,34 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-13
+
+分类：功能变更
+
+用户需求：
+
+APM 尚未发布，无需为开发期 journal 保留向后兼容；将现有 driver-based shared envelope 重置为首个正式 schema，并严格拒绝旧平铺格式及其他无效格式。
+
+相关提交：
+
+- `1bdb41c docs(transaction): design journal schema reset`
+- `cee6da1 docs(transaction): plan journal schema reset`
+- `c9a8b1d refactor(transaction): reset journal envelope to schema v1`
+- `99b4390 test(transaction): align recovery fixture with schema v1`
+- `a23e1c4 refactor(transaction): write one journal schema`
+- `8373062 docs(changelog): defer journal schema record`
+- `11f7044 docs(transaction): record single journal schema`
+
+解决方案或完成结果：
+
+删除旧平铺 Skill journal 的兼容类型、探测、归一化和成功恢复路径，将带显式 `filesystem`/`agent-cli` driver 及互斥类型载荷的 shared envelope 定为唯一 schema v1。Skill Install、Skill Uninstall、MCP Install/Update 和 MCP Uninstall 四类 producer 均只写 schema v1。解码继续严格拒绝未知字段、尾随 JSON、未知版本、非法 driver/payload/phase 等无效输入，所有格式和语义错误均保持包装 `ErrInvalidJournal`；`Inspect` 与 `Recover` fail closed，并原样保留无效活动 journal。ADR-011 记录该发布前 schema reset，当前 Feature、C4、BUILD 和项目概览已同步引用。
+
+验证结果或限制：
+
+`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./internal/transaction ./internal/lifecycle`、`git diff --check`、`go test -count=1 ./...`、`go test -race -count=1 ./internal/transaction ./internal/lifecycle`、`go vet ./...`、`go build -o /dev/null ./cmd/apm`、`! rg -n 'legacyFilesystemJournal|legacyJournalJSON|journal_v2|SchemaVersion:\s*2|SchemaVersion != 2' internal --glob '*.go'`、`rg -n 'SchemaVersion:\s*1|SchemaVersion != 1' internal/transaction internal/lifecycle --glob '*.go'` 与 `git status --short` 均以退出码 0 完成。MCP 集成测试把 `codex`、`claude`、`hermes` fake CLI 建在 `t.TempDir()/fake-bin`，隔离 Agent 配置目录，并逐条断言实际执行路径没有逃逸 fake-bin。
+
+发布前遗留的旧开发 journal 需要开发者检查后人工处理；本变更不迁移、不改写也不删除这些文件。
+
 ## 2026-08-12
 
 分类：新增功能

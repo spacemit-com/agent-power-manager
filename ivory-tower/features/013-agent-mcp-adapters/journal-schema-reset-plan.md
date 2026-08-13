@@ -52,7 +52,7 @@
 - Consumes: `decodeExactJSON(contents []byte, target any) error`, `validateJournal(Journal) error`, `ErrInvalidJournal`.
 - Produces: `decodeJournal(contents []byte) (Journal, error)` that accepts only the current schema v1 envelope.
 
-- [ ] **Step 1: Replace legacy-success tests with failing strict-format tests**
+- [x] **Step 1: Replace legacy-success tests with failing strict-format tests**
 
 Delete the legacy normalization success test. Add a table in `journal_schema_test.go` that starts from JSON-marshaled `validInstallJournal(t)` and mutates these cases:
 
@@ -102,7 +102,7 @@ func legacyFlatJournalJSON(journal Journal) string {
 
 Keep the existing driver/payload table and set its valid fixture to schema 1. Cover missing/unknown driver, missing/both/wrong payload, unknown fields, illegal phases, and trailing JSON. Change the shared `validInstallJournal(t)` fixture to schema 1 in this task because strict store tests persist it directly.
 
-- [ ] **Step 2: Add a failing preservation test at the store boundary**
+- [x] **Step 2: Add a failing preservation test at the store boundary**
 
 In `filesystem_journal_store_test.go`, write each invalid document to `active.json`, retain a copy, call `Inspect`, and prove both the sentinel and bytes remain:
 
@@ -119,7 +119,7 @@ Include the old flat format as one case. Change `validJournalJSON` to marshal `v
 
 Extend `TestRecoverCorruptJournalFailsClosed` in `recovery_test.go`: write the old flat bytes, call `Recover`, assert both `ErrRecoveryFailed` and `ErrInvalidJournal`, then read `journalPath` and compare it byte-for-byte with the original. This proves the high-level recovery boundary also preserves malformed files.
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
 Run:
 
@@ -129,7 +129,7 @@ go test -count=1 ./internal/transaction -run 'TestDecodeJournalAcceptsOnlyCurren
 
 Expected: FAIL because the current envelope still requires version 2 and the legacy flat document is still normalized successfully.
 
-- [ ] **Step 4: Implement the single-format decoder and validator**
+- [x] **Step 4: Implement the single-format decoder and validator**
 
 Delete `journal_legacy.go`. Replace `decodeJournal` with direct strict decoding:
 
@@ -156,7 +156,7 @@ if journal.SchemaVersion != 1 {
 
 Remove legacy-only helpers from tests. Ensure every JSON decoding or semantic validation failure continues to wrap `ErrInvalidJournal`.
 
-- [ ] **Step 5: Run focused tests and verify GREEN**
+- [x] **Step 5: Run focused tests and verify GREEN**
 
 Run:
 
@@ -166,7 +166,7 @@ go test -count=1 ./internal/transaction -run 'TestDecodeJournalAcceptsOnlyCurren
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the decoder boundary**
+- [x] **Step 6: Commit the decoder boundary**
 
 ```bash
 git add internal/transaction
@@ -194,7 +194,7 @@ git commit -m "refactor(transaction): reset journal envelope to schema v1"
 - Consumes: `Journal{SchemaVersion, Driver, ...}` and the schema-v1-only store from Task 1.
 - Produces: all new filesystem and agent-cli transactions persist `SchemaVersion: 1`.
 
-- [ ] **Step 1: Add failing producer assertions**
+- [x] **Step 1: Add failing producer assertions**
 
 In each transaction family’s existing journal-creation test, assert:
 
@@ -206,7 +206,7 @@ if got.SchemaVersion != 1 {
 
 The four required producers are Skill Install, Skill Uninstall, MCP Install/Update, and MCP Uninstall. Change static recovery and integration fixtures to schema 1 only after observing the producer failures.
 
-- [ ] **Step 2: Run producer tests and verify RED**
+- [x] **Step 2: Run producer tests and verify RED**
 
 Run:
 
@@ -216,7 +216,7 @@ go test -count=1 ./internal/transaction -run 'TestInstall|TestUninstall|TestMCPI
 
 Expected: FAIL with journal schema 2 where producers still construct `SchemaVersion: 2`.
 
-- [ ] **Step 3: Change all producers and fixtures to schema 1**
+- [x] **Step 3: Change all producers and fixtures to schema 1**
 
 Change exactly these constructors:
 
@@ -227,7 +227,7 @@ Journal{SchemaVersion: 1, Driver: DriverAgentCLI, ...}   // MCP install/uninstal
 
 Update hand-built journal fixtures in `recovery_test.go`, `mcp_recovery_test.go`, `validation_test.go`, and `mcp_integration_test.go` to version 1. Do not change driver, payload, phase, or recovery expectations.
 
-- [ ] **Step 4: Prove both recovery drivers still work serially**
+- [x] **Step 4: Prove both recovery drivers still work serially**
 
 Run:
 
@@ -237,7 +237,7 @@ go test -count=1 ./internal/transaction ./internal/lifecycle
 
 Expected: PASS, including `TestCrossTypeRecoveryKeepsFilesystemDriverIndependentOfMCPResolver` and `TestMCPIntegrationSearchRecoversInterruptedAgentCLIJournal`.
 
-- [ ] **Step 5: Scan for obsolete production/test version literals**
+- [x] **Step 5: Scan for obsolete production/test version literals**
 
 Run:
 
@@ -247,7 +247,7 @@ Run:
 
 Expected: no matches and exit 0.
 
-- [ ] **Step 6: Commit producer changes**
+- [x] **Step 6: Commit producer changes**
 
 ```bash
 git add internal/transaction internal/lifecycle/mcp_integration_test.go
@@ -276,7 +276,7 @@ git commit -m "refactor(transaction): write one journal schema"
 - Consumes: the verified single schema v1 implementation from Tasks 1–2.
 - Produces: ADR-011 and current-state documentation that cites it without rewriting historical task records.
 
-- [ ] **Step 1: Write ADR-011**
+- [x] **Step 1: Write ADR-011**
 
 Use the repository ADR template with:
 
@@ -294,11 +294,11 @@ APM 在开发阶段不兼容旧平铺 journal。当前带显式 driver 和互斥
 
 Document consequences: less compatibility code, clean future versioning, developer must manually handle stale development journals. Alternatives: keep v2 only, keep compatibility, remove version field.
 
-- [ ] **Step 2: Mark ADR-010’s compatibility clause as superseded**
+- [x] **Step 2: Mark ADR-010’s compatibility clause as superseded**
 
 Add a dated note near the top of ADR-010 linking ADR-011. Preserve the driver/shared-envelope decision; explicitly state only the legacy-version paragraph is superseded.
 
-- [ ] **Step 3: Align Feature and architecture documents**
+- [x] **Step 3: Align Feature and architecture documents**
 
 Replace current-state claims as follows:
 
@@ -309,11 +309,11 @@ Replace current-state claims as follows:
 
 In `verification.md`, replace the legacy-normalization evidence row with strict schema and invalid-file-preservation test names. In Feature 013’s original plan, add a dated supersession note rather than falsifying completed historical checkboxes. Update C4 recovery flow to route schema v1 directly to `driver`; remove the normalization branch.
 
-- [ ] **Step 4: Preserve historical Changelog text**
+- [x] **Step 4: Preserve historical Changelog text**
 
 Do not edit the completed 2026-08-12 MCP entry. It remains evidence of what that task delivered at the time. The new behavior is recorded only in Task 4’s new entry.
 
-- [ ] **Step 5: Verify documentation consistency**
+- [x] **Step 5: Verify documentation consistency**
 
 Run:
 
@@ -324,7 +324,7 @@ git diff --check
 
 Manually classify remaining `schema v2`/legacy matches: only historical Changelog text, the reset design’s background, or explicitly superseded historical plan text may remain. Current-state prose and diagrams must have none.
 
-- [ ] **Step 6: Commit ADR and documentation**
+- [x] **Step 6: Commit ADR and documentation**
 
 ```bash
 git add BUILD.md ivory-tower
@@ -343,7 +343,7 @@ git commit -m "docs(transaction): record single journal schema"
 - Consumes: all implementation and documentation commits from Tasks 1–3.
 - Produces: one reverse-chronological completion record and checked plan evidence.
 
-- [ ] **Step 1: Run formatting and focused verification**
+- [x] **Step 1: Run formatting and focused verification**
 
 ```bash
 test -z "$(gofmt -l cmd internal)"
@@ -353,7 +353,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 ```bash
 go test -count=1 ./...
@@ -365,7 +365,7 @@ git diff --check
 
 Expected: every command exits 0; integration tests resolve only temporary fake Agent CLI executables.
 
-- [ ] **Step 3: Audit requirements and stale compatibility code**
+- [x] **Step 3: Audit requirements and stale compatibility code**
 
 Run:
 
@@ -377,7 +377,7 @@ git status --short
 
 Expected: the negative scan exits 0; positive scan shows the four producers, validators, and schema-v1 test fixtures; only intended documentation changes remain uncommitted.
 
-- [ ] **Step 4: Add one Changelog entry**
+- [x] **Step 4: Add one Changelog entry**
 
 Add a top `## 2026-08-13` entry using `/home/liangff/.codex/docs/Changelog.md`:
 
@@ -388,7 +388,7 @@ Add a top `## 2026-08-13` entry using `/home/liangff/.codex/docs/Changelog.md`:
 - validation: paste the exact successful commands from Steps 1–3;
 - limitation: old development journals require manual handling; no migration or deletion is performed.
 
-- [ ] **Step 5: Check completed plan boxes and commit completion docs**
+- [x] **Step 5: Check completed plan boxes and commit completion docs**
 
 Mark only steps supported by actual command output, then:
 
@@ -397,7 +397,7 @@ git add docs/Changelog.md ivory-tower/features/013-agent-mcp-adapters/journal-sc
 git commit -m "docs(changelog): record journal schema reset"
 ```
 
-- [ ] **Step 6: Run post-commit smoke verification**
+- [x] **Step 6: Run post-commit smoke verification**
 
 ```bash
 git status --short
