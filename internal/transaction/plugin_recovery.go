@@ -97,12 +97,16 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 				if err := s.files.rename(filesystem.PreviousQuarantinePath, filesystem.PreviousTargetPath); err != nil {
 					return err
 				}
-				mutation, err := pluginAdapter.Add(ctx, *journal.Plugin.Previous)
-				if err := requireAppliedPluginMutation("restore previous filesystem Plugin", mutation, err); err != nil {
-					return err
-				}
-				result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRestorePlugin, Path: filesystem.PreviousTargetPath})
+				previousExists = true
 			}
+			if !previousExists {
+				return fmt.Errorf("originally present previous Plugin target %q is missing: %w", filesystem.PreviousTargetPath, ErrIndeterminateState)
+			}
+			mutation, err := pluginAdapter.Add(ctx, *journal.Plugin.Previous)
+			if err := requireAppliedPluginMutation("restore previous filesystem Plugin", mutation, err); err != nil {
+				return err
+			}
+			result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRestorePlugin, Path: filesystem.PreviousTargetPath})
 		}
 		artifacts, _ := filesystemPluginArtifacts(filesystem.TargetPath, journal.TransactionID)
 		if err := s.cleanupPluginTransactionDir(artifacts); err != nil {
