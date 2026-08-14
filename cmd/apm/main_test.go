@@ -39,6 +39,28 @@ func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
 	}
 }
 
+func TestNewSearchLifecycleSearchesWithoutLockPath(t *testing.T) {
+	lockPathBlocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(lockPathBlocker, nil, 0o600); err != nil {
+		t.Fatalf("create lock path blocker: %v", err)
+	}
+	t.Setenv("APM_HOME", lockPathBlocker)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	changeToRepositoryRoot(t)
+
+	service, err := newSearchLifecycle()
+	if err != nil {
+		t.Fatalf("newSearchLifecycle() error = %v", err)
+	}
+	result, err := service.Search(context.Background(), cli.Flags{Keyword: "summary"})
+	if err != nil {
+		t.Fatalf("Search(summary) error = %v", err)
+	}
+	if len(result.Powers) != 1 || result.Powers[0].Name != "foo-before-summary" {
+		t.Fatalf("Search(summary) = %#v, want the bundled summary Skill", result)
+	}
+}
+
 func TestDefaultLifecycleFactoriesConstructWithMCPRecoveryResolver(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("APM_HOME", root)

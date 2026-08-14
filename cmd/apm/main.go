@@ -34,10 +34,6 @@ func main() {
 
 // newSearchLifecycle 创建 Search 命令所需的默认生命周期依赖。
 func newSearchLifecycle() (cli.SearchLifecycle, error) {
-	locker, err := lock.NewDefault()
-	if err != nil {
-		return nil, fmt.Errorf("create default lock: %w", err)
-	}
 	repository := config.NewJSONRepository()
 	registry := adapter.NewRegistry()
 	transactions, err := transaction.NewManager(repository, registry)
@@ -48,7 +44,7 @@ func newSearchLifecycle() (cli.SearchLifecycle, error) {
 	if err != nil {
 		return nil, err
 	}
-	return lifecycle.NewSearch(locker, transactions, cloudClient)
+	return lifecycle.NewSearch(transactions, cloudClient)
 }
 
 // newListLifecycle 创建 List 命令所需的默认生命周期依赖，并让恢复与清单读取共享同一 Repository。
