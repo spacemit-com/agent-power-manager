@@ -12,7 +12,7 @@ func (s *Service) UninstallSkill(ctx context.Context, request SkillUninstallRequ
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if err := validateUninstallRequest(request); err != nil {
+	if err := validateSkillUninstallRequest(request); err != nil {
 		return result, err
 	}
 	if isNilInterface(s.manifests) || isNilInterface(s.journals) {

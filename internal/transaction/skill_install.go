@@ -17,7 +17,7 @@ func (s *Service) InstallSkill(ctx context.Context, request SkillInstallRequest)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := validateInstallRequest(request); err != nil {
+	if err := validateSkillInstallRequest(request); err != nil {
 		return err
 	}
 	if isNilInterface(s.manifests) || isNilInterface(s.journals) {

@@ -6,10 +6,10 @@ type PowerType string
 const (
 	// PowerTypeSkill 表示 Skill 能力。
 	PowerTypeSkill PowerType = "skill"
-	// PowerTypePlugin 表示插件能力。
-	PowerTypePlugin PowerType = "plugin"
 	// PowerTypeMCP 表示 MCP 能力。
 	PowerTypeMCP PowerType = "mcp"
+	// PowerTypePlugin 表示插件能力。
+	PowerTypePlugin PowerType = "plugin"
 )
 
 // PowerRef 表示能力的类别、名称和可选版本。

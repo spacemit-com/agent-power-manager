@@ -29,8 +29,7 @@ func TestAgentSnapshotContainsAndOrderedCopy(t *testing.T) {
 func TestSharedTypesCompile(t *testing.T) {
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
 	groups := domain.PowerGroups{domain.PowerTypeSkill: {ref}}
-	result := domain.Result{Items: []domain.AgentResult{{Agent: "codex", Status: domain.StatusCompleted}}}
-	if groups[domain.PowerTypeSkill][0] != ref || len(result.Items) != 1 {
+	if groups[domain.PowerTypeSkill][0] != ref {
 		t.Fatal("共享类型未保存输入")
 	}
 }

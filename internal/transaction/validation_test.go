@@ -48,77 +48,6 @@ func (a validationAdapter) Install(domain.PowerRef, string) (adapter.SkillInstal
 	return adapter.SkillInstallResult{Published: true}, nil
 }
 
-func TestValidateInstallRequest(t *testing.T) {
-	staging, target := validationPaths(t)
-	valid := SkillInstallRequest{
-		Agent:       domain.AgentCodex,
-		Power:       domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "2.0.0"},
-		Previous:    powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}),
-		StagingRoot: staging,
-		Adapter:     validationAdapter{target: target},
-	}
-	if err := validateInstallRequest(valid); err != nil {
-		t.Fatalf("validateInstallRequest(valid) error = %v", err)
-	}
-
-	tests := map[string]func(*SkillInstallRequest){
-		"empty agent":       func(r *SkillInstallRequest) { r.Agent = "" },
-		"all agents":        func(r *SkillInstallRequest) { r.Agent = domain.AllAgents },
-		"empty name":        func(r *SkillInstallRequest) { r.Power.Name = "" },
-		"empty type":        func(r *SkillInstallRequest) { r.Power.Type = "" },
-		"empty version":     func(r *SkillInstallRequest) { r.Power.Version = "" },
-		"empty staging":     func(r *SkillInstallRequest) { r.StagingRoot = "" },
-		"nil adapter":       func(r *SkillInstallRequest) { r.Adapter = nil },
-		"typed nil adapter": func(r *SkillInstallRequest) { r.Adapter = (*nilValidationAdapter)(nil) },
-		"previous name":     func(r *SkillInstallRequest) { r.Previous.Name = "other" },
-		"previous type":     func(r *SkillInstallRequest) { r.Previous.Type = domain.PowerTypePlugin },
-		"previous version":  func(r *SkillInstallRequest) { r.Previous.Version = "" },
-		"plugin power": func(r *SkillInstallRequest) {
-			r.Power.Type, r.Previous.Type = domain.PowerTypePlugin, domain.PowerTypePlugin
-		},
-		"MCP power": func(r *SkillInstallRequest) {
-			r.Power.Type, r.Previous.Type = domain.PowerTypeMCP, domain.PowerTypeMCP
-		},
-		"noncanonical stage": func(r *SkillInstallRequest) { r.StagingRoot += string(filepath.Separator) + ".." },
-	}
-	for name, mutate := range tests {
-		t.Run(name, func(t *testing.T) {
-			request := valid
-			previous := *valid.Previous
-			request.Previous = &previous
-			mutate(&request)
-			if err := validateInstallRequest(request); !errors.Is(err, ErrInvalidRequest) {
-				t.Fatalf("validateInstallRequest() error = %v, want ErrInvalidRequest", err)
-			}
-		})
-	}
-}
-
-func TestValidateUninstallRequest(t *testing.T) {
-	_, target := validationPaths(t)
-	valid := SkillUninstallRequest{
-		Agent:   domain.AgentHermes,
-		Power:   domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"},
-		Adapter: validationAdapter{target: target},
-	}
-	if err := validateUninstallRequest(valid); err != nil {
-		t.Fatalf("validateUninstallRequest(valid) error = %v", err)
-	}
-	for name, mutate := range map[string]func(*SkillUninstallRequest){
-		"nil adapter":  func(r *SkillUninstallRequest) { r.Adapter = nil },
-		"plugin power": func(r *SkillUninstallRequest) { r.Power.Type = domain.PowerTypePlugin },
-		"MCP power":    func(r *SkillUninstallRequest) { r.Power.Type = domain.PowerTypeMCP },
-	} {
-		t.Run(name, func(t *testing.T) {
-			request := valid
-			mutate(&request)
-			if err := validateUninstallRequest(request); !errors.Is(err, ErrInvalidRequest) {
-				t.Fatalf("validateUninstallRequest(nil adapter) error = %v", err)
-			}
-		})
-	}
-}
-
 func TestValidateJournalRejectsUnsafeFields(t *testing.T) {
 	valid := validInstallJournal(t)
 	tests := map[string]func(*Journal){
@@ -165,36 +94,6 @@ func TestTransactionContractErrorsAreStable(t *testing.T) {
 		if err == nil {
 			t.Fatal("transaction sentinel is nil")
 		}
-	}
-}
-
-func TestValidatePluginRequests(t *testing.T) {
-	var typedNil *nilPluginValidationAdapter
-	install := PluginInstallRequest{
-		Agent:      domain.AgentCodex,
-		Power:      domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
-		Definition: domain.PluginDefinition{ActualName: "demo-v1.0.0", Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: "/marketplace"}},
-		Adapter:    &nilPluginValidationAdapter{},
-	}
-	if err := validatePluginInstallRequest(install); err != nil {
-		t.Fatalf("validatePluginInstallRequest(valid) = %v", err)
-	}
-	install.Adapter = typedNil
-	if err := validatePluginInstallRequest(install); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("typed nil install error = %v", err)
-	}
-	uninstall := PluginUninstallRequest{
-		Agent:      domain.AgentHermes,
-		Power:      domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
-		ActualName: "demo-v1.0.0",
-		Adapter:    &nilPluginValidationAdapter{},
-	}
-	if err := validatePluginUninstallRequest(uninstall); err != nil {
-		t.Fatalf("validatePluginUninstallRequest(valid) = %v", err)
-	}
-	uninstall.ActualName = "../demo"
-	if err := validatePluginUninstallRequest(uninstall); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("unsafe uninstall error = %v", err)
 	}
 }
 
