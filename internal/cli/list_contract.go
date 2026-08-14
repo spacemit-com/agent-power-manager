@@ -25,7 +25,7 @@ type AgentFailure struct {
 	Err   error
 }
 
-// PartialListError 表示 --agent=all 已完成全部 Agent 读取尝试且全局锁已成功释放；因此成功记录可由 CLI 渲染，但部分 Agent 读取失败。
+// PartialListError 表示 --agent=all 已完成全部 Agent 读取尝试；成功记录可由 CLI 渲染，但部分 Agent 读取失败。
 type PartialListError struct {
 	Failures []AgentFailure
 }

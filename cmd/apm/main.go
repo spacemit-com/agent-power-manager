@@ -26,6 +26,7 @@ func main() {
 		newListLifecycle,
 		newInstallLifecycle,
 		newUninstallLifecycle,
+		newFixLifecycle,
 	)
 	if err := entry.Execute(os.Args[1:]); err != nil {
 		os.Exit(1)
@@ -110,6 +111,21 @@ func newUninstallLifecycle() (cli.UninstallLifecycle, error) {
 		return nil, err
 	}
 	return lifecycle.NewUninstall(locker, transactions, cloudClient, registry, repository)
+}
+
+// newFixLifecycle 创建修复中断事务所需的锁、清单和事务恢复依赖。
+func newFixLifecycle() (cli.FixLifecycle, error) {
+	locker, err := lock.NewDefault()
+	if err != nil {
+		return nil, fmt.Errorf("create default lock: %w", err)
+	}
+	repository := config.NewJSONRepository()
+	registry := adapter.NewRegistry()
+	transactions, err := transaction.NewManager(repository, registry)
+	if err != nil {
+		return nil, fmt.Errorf("create transaction manager: %w", err)
+	}
+	return lifecycle.NewFix(locker, transactions)
 }
 
 func newLocalCloudClient() (cloud.Client, error) {

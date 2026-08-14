@@ -75,12 +75,30 @@ func TestDefaultLifecycleFactoriesConstructWithMCPRecoveryResolver(t *testing.T)
 		func() (any, error) { return newListLifecycle() },
 		func() (any, error) { return newInstallLifecycle() },
 		func() (any, error) { return newUninstallLifecycle() },
+		func() (any, error) { return newFixLifecycle() },
 	}
 	for index, factory := range factories {
 		got, err := factory()
 		if err != nil || got == nil {
 			t.Fatalf("factory %d = %v, %v", index, got, err)
 		}
+	}
+}
+
+func TestNewFixLifecycleSucceedsWithoutActiveJournal(t *testing.T) {
+	t.Setenv("APM_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	changeToRepositoryRoot(t)
+
+	service, err := newFixLifecycle()
+	if err != nil {
+		t.Fatalf("newFixLifecycle() error = %v", err)
+	}
+	if err := service.Fix(context.Background()); err != nil {
+		t.Fatalf("Fix() error = %v", err)
 	}
 }
 

@@ -25,6 +25,8 @@ func newTestEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
 		return emptyInstallLifecycle{}, nil
 	}, func() (cli.UninstallLifecycle, error) {
 		return emptyUninstallLifecycle{}, nil
+	}, func() (cli.FixLifecycle, error) {
+		return emptyFixLifecycle{}, nil
 	})
 }
 
@@ -52,6 +54,10 @@ func (emptyUninstallLifecycle) Uninstall(context.Context, cli.Flags) (cli.Uninst
 	return cli.UninstallResult{Items: []cli.UninstallItem{}}, nil
 }
 
+type emptyFixLifecycle struct{}
+
+func (emptyFixLifecycle) Fix(context.Context) error { return nil }
+
 func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -64,6 +70,7 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 		{name: "installed list", args: []string{"list", "--agent=codex", "--installed"}},
 		{name: "install", args: []string{"install", "demo=v1.2.3", "--agent=codex", "--type=skill"}},
 		{name: "uninstall", args: []string{"uninstall", "demo", "--agent=codex"}},
+		{name: "fix", args: []string{"fix"}},
 		{name: "plugin type", args: []string{"search", "foo", "--type=plugin"}},
 		{name: "mcp type", args: []string{"list", "--type=mcp"}},
 		{name: "missing installed agent", args: []string{"list", "--installed"}, wantErr: true, wantMessage: "--agent is required"},
@@ -77,6 +84,7 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 		{name: "extra list arg", args: []string{"list", "extra"}, wantErr: true, wantMessage: "accepts 0 arg(s), received 1"},
 		{name: "extra install arg", args: []string{"install", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
 		{name: "extra uninstall arg", args: []string{"uninstall", "demo", "extra", "--agent=all"}, wantErr: true, wantMessage: "accepts 1 arg(s), received 2"},
+		{name: "extra fix arg", args: []string{"fix", "extra"}, wantErr: true, wantMessage: "accepts 0 arg(s), received 1"},
 		{name: "invalid verbose", args: []string{"search", "foo", "--verbose=invalid"}, wantErr: true, wantMessage: "invalid argument \"invalid\" for \"--verbose\" flag"},
 	}
 
@@ -183,7 +191,7 @@ func TestCLIHelpListsCommandsOnStdout(t *testing.T) {
 	if err := entry.Execute([]string{"--help"}); err != nil {
 		t.Fatalf("Execute(--help) error = %v", err)
 	}
-	for _, command := range []string{"search", "list", "install", "uninstall"} {
+	for _, command := range []string{"search", "list", "install", "uninstall", "fix"} {
 		if !strings.Contains(stdout.String(), command) {
 			t.Errorf("help stdout = %q, want command %q", stdout.String(), command)
 		}

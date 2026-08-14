@@ -42,7 +42,10 @@ func newUninstallEntry(t *testing.T, stdout, stderr io.Writer, factory cli.Unins
 	}, func() (cli.InstallLifecycle, error) {
 		t.Fatal("Uninstall dispatched to Install factory")
 		return nil, nil
-	}, factory)
+	}, factory, func() (cli.FixLifecycle, error) {
+		t.Fatal("Uninstall dispatched to Fix factory")
+		return nil, nil
+	})
 }
 
 func TestUninstallPassesOriginalAgentTypeAndName(t *testing.T) {

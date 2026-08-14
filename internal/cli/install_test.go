@@ -42,6 +42,9 @@ func newInstallEntry(t *testing.T, stdout, stderr io.Writer, factory cli.Install
 	}, factory, func() (cli.UninstallLifecycle, error) {
 		t.Fatal("Install dispatched to Uninstall factory")
 		return nil, nil
+	}, func() (cli.FixLifecycle, error) {
+		t.Fatal("Install dispatched to Fix factory")
+		return nil, nil
 	})
 }
 

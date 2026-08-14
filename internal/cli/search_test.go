@@ -51,6 +51,9 @@ func newSearchEntry(t *testing.T, stdout, stderr io.Writer, factory cli.SearchLi
 	}, func() (cli.UninstallLifecycle, error) {
 		t.Fatal("Search dispatched to Uninstall factory")
 		return nil, nil
+	}, func() (cli.FixLifecycle, error) {
+		t.Fatal("Search dispatched to Fix factory")
+		return nil, nil
 	})
 }
 
