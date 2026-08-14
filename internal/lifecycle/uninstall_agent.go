@@ -12,8 +12,8 @@ import (
 	"apm/internal/transaction"
 )
 
-// uninstallOne 解析并执行单个 Agent 的卸载；返回项中的 Power 始终使用独立副本。
-func (s *UninstallService) uninstallOne(ctx context.Context, agent domain.AgentID, flags cli.Flags) (cli.UninstallItem, error) {
+// uninstallForAgent 解析并执行单个 Agent 的卸载；返回项中的 Power 始终使用独立副本。
+func (s *UninstallService) uninstallForAgent(ctx context.Context, agent domain.AgentID, flags cli.Flags) (cli.UninstallItem, error) {
 	groups, err := s.config.List(agent)
 	if err != nil {
 		return cli.UninstallItem{Agent: agent, Outcome: cli.UninstallOutcomeFailed},
@@ -50,14 +50,6 @@ func (s *UninstallService) uninstallOne(ctx context.Context, agent domain.AgentI
 	}
 	item.Outcome = cli.UninstallOutcomeCompleted
 	return item, nil
-}
-
-func (s *UninstallService) uninstallSkill(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (transaction.UninstallResult, error) {
-	resolved, err := s.registry.ResolveSkill(agent)
-	if err != nil {
-		return transaction.UninstallResult{}, fmt.Errorf("resolve uninstall adapter for agent %q: %w", agent, err)
-	}
-	return s.transactions.Uninstall(ctx, transaction.UninstallRequest{Agent: agent, Power: ref, Adapter: resolved})
 }
 
 func logUninstallNotInstalled(agent domain.AgentID, flags cli.Flags) {

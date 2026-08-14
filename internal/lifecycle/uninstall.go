@@ -7,6 +7,8 @@ import (
 	"log/slog"
 
 	"apm/internal/cli"
+	"apm/internal/cloud"
+	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
 	"apm/internal/logging"
@@ -15,15 +17,15 @@ import (
 
 // UninstallService 实现 Uninstall 命令在单个全局锁区间内的本地卸载生命周期。
 type UninstallService struct {
-	locker       Locker
-	transactions TransactionManager
-	cloud        CloudClient
+	locker       lock.Locker
+	transactions transaction.Manager
+	cloud        cloud.Client
 	registry     AdapterRegistry
-	config       ConfigRepository
+	config       config.Repository
 }
 
 // NewUninstall 创建持有完整共享状态区间的 Uninstall 生命周期。
-func NewUninstall(locker Locker, transactions TransactionManager, cloud CloudClient, registry AdapterRegistry, config ConfigRepository) (*UninstallService, error) {
+func NewUninstall(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, registry AdapterRegistry, config config.Repository) (*UninstallService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Uninstall lifecycle with nil locker")
@@ -69,7 +71,7 @@ func (s *UninstallService) Uninstall(ctx context.Context, flags cli.Flags) (cli.
 	var businessErr error
 	// 每个 Agent 的事实 Warn 在锁内实时记录；首个失败停止后续业务并补齐 unexecuted 汇总项。
 	for index, agent := range agents {
-		item, itemErr := s.uninstallOne(ctx, agent, flags)
+		item, itemErr := s.uninstallForAgent(ctx, agent, flags)
 		items = append(items, item)
 		if itemErr == nil {
 			continue

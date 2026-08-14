@@ -18,9 +18,9 @@ func TestInstallPluginMarketplacePreparesBeforeInspectAndSkipsCache(t *testing.T
 		pluginFact:       adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo-v2.0.0"},
 		pluginMode:       domain.PluginDeploymentMarketplace,
 	})
-	item, err := service.installOne(context.Background(), domain.AgentCodex, ref)
+	item, err := service.installForAgent(context.Background(), domain.AgentCodex, ref)
 	if err != nil || item.Outcome != cli.InstallOutcomeInstalled {
-		t.Fatalf("installOne() = %+v, %v", item, err)
+		t.Fatalf("installForAgent() = %+v, %v", item, err)
 	}
 	want := []string{"resolve-plugin:codex", "config:find:codex", "cloud:get-plugin", "plugin:prepare:codex", "plugin:inspect:codex", "transaction:install-plugin:codex"}
 	if !reflect.DeepEqual(calls, want) {

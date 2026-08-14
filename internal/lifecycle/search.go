@@ -7,18 +7,21 @@ import (
 	"log/slog"
 
 	"apm/internal/cli"
+	"apm/internal/cloud"
+	"apm/internal/lock"
 	"apm/internal/logging"
+	"apm/internal/transaction"
 )
 
 // SearchService 实现 Search 命令的恢复与 Cloud 查询生命周期。
 type SearchService struct {
-	locker       Locker
-	transactions TransactionManager
-	cloud        CloudClient
+	locker       lock.Locker
+	transactions transaction.Manager
+	cloud        cloud.Client
 }
 
 // NewSearch 创建具有恢复、锁和 Cloud 依赖的 Search 生命周期。
-func NewSearch(locker Locker, transactions TransactionManager, cloud CloudClient) (*SearchService, error) {
+func NewSearch(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client) (*SearchService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Search lifecycle with nil locker")

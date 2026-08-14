@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"apm/internal/cache"
 	"apm/internal/cli"
+	"apm/internal/cloud"
+	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
 	"apm/internal/logging"
@@ -15,17 +18,17 @@ import (
 
 // InstallService 实现 Install 命令在单个全局锁区间内的完整成功生命周期。
 type InstallService struct {
-	locker       Locker
-	transactions TransactionManager
-	cloud        CloudClient
-	cache        PowerCache
+	locker       lock.Locker
+	transactions transaction.Manager
+	cloud        cloud.Client
+	cache        cache.PowerCache
 	registry     AdapterRegistry
-	config       ConfigRepository
+	config       config.Repository
 	versions     VersionSelector
 }
 
 // NewInstall 创建持有完整共享状态区间的 Install 生命周期。
-func NewInstall(locker Locker, transactions TransactionManager, cloud CloudClient, cache PowerCache, registry AdapterRegistry, config ConfigRepository, versions VersionSelector) (*InstallService, error) {
+func NewInstall(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, cache cache.PowerCache, registry AdapterRegistry, config config.Repository, versions VersionSelector) (*InstallService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Install lifecycle with nil locker")
@@ -93,7 +96,7 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 	var businessErr error
 	// 批处理首错即停止；后续 Agent 补为 unexecuted，使成功解锁后的汇总保持完整顺序。
 	for index, agent := range agents {
-		item, installErr := s.installOne(ctx, agent, ref)
+		item, installErr := s.installForAgent(ctx, agent, ref)
 		if installErr != nil {
 			failedAgent = agent
 			businessErr = installErr

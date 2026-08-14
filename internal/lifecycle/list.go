@@ -6,19 +6,23 @@ import (
 	"fmt"
 
 	"apm/internal/cli"
+	"apm/internal/cloud"
+	"apm/internal/config"
+	"apm/internal/lock"
+	"apm/internal/transaction"
 )
 
 // ListService 实现无锁 Cloud 查询和锁内已安装清单查询两条独立分支。
 type ListService struct {
-	locker       Locker
-	transactions TransactionManager
-	cloud        CloudClient
+	locker       lock.Locker
+	transactions transaction.Manager
+	cloud        cloud.Client
 	registry     AdapterRegistry
-	config       ConfigRepository
+	config       config.Repository
 }
 
 // NewList 创建 List 生命周期；默认 Cloud 分支不得调用共享状态依赖。
-func NewList(locker Locker, transactions TransactionManager, cloud CloudClient, registry AdapterRegistry, config ConfigRepository) (*ListService, error) {
+func NewList(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, registry AdapterRegistry, config config.Repository) (*ListService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create List lifecycle with nil locker")

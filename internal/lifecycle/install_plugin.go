@@ -14,8 +14,8 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-// fetchPluginInstallStaging 按“缓存、Cloud、缓存”的既定顺序准备文件型 Plugin staging。
-func (s *InstallService) fetchPluginInstallStaging(ref domain.PowerRef) (string, error) {
+// stagePlugin 按“缓存、Cloud、缓存”的既定顺序准备文件型 Plugin staging。
+func (s *InstallService) stagePlugin(ref domain.PowerRef) (string, error) {
 	staging, err := s.cache.StagePlugin(ref)
 	if err == nil {
 		return staging, nil
@@ -78,7 +78,7 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 		request.Previous = &copied
 	}
 	if pluginAdapter.DeploymentMode() == domain.PluginDeploymentFilesystem {
-		staging, err := s.fetchPluginInstallStaging(ref)
+		staging, err := s.stagePlugin(ref)
 		if err != nil {
 			return cli.InstallItem{}, err
 		}
