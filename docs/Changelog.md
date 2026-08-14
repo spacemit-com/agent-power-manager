@@ -4,6 +4,41 @@
 
 ## 2026-08-14
 
+分类：新增功能
+
+用户需求：
+
+将 journal 的“观察恢复需求”与“执行恢复”分离：新增显式 `apm fix` 命令；Install/Uninstall 保持全局锁内恢复和写事务；Search、默认 List 和 Installed List 改为无锁只读 Inspect，对合法活动 journal 提示运行 Fix，对损坏或不可读 journal 只警告并继续原查询；同步 ADR、Project Overview 和 C4，明确无锁 best-effort 观测不是跨 Agent、manifest、journal 与目标状态的全局一致快照。
+
+相关提交：
+
+- `ed49463 docs(fix): design explicit journal recovery command`
+- `b1e7aa0 docs(fix): plan explicit recovery lifecycle`
+- `f35ad8f feat(transaction): separate journal inspection from recovery`
+- `286c32f test(transaction): guard recovery journal inspection`
+- `406f730 refactor(search): inspect journal without recovery lock`
+- `7cc6764 fix(search): wire default factory without lock`
+- `d321b71 refactor(list): use unlocked journal observation`
+- `edda969 feat(lifecycle): add one-shot journal fix`
+- `b5a5921 feat(cli): expose explicit fix command`
+- `b5279d4 test(fix): cover isolated cross-driver recovery`
+- `6a85b07 test(fix): cover read-only active journals`
+- `e6e4859 docs(fix): define explicit recovery lifecycle`
+- `18a2671 docs(fix): align recovery ports and current semantics`
+- `99e1758 test(lifecycle): lock down recovery boundaries`
+
+解决方案或完成结果：
+
+Transaction 新增对外分离的 `Inspector` 与 `Recoverer`，`Inspect` 和 `Recover` 复用一次 Store 读取、统一校验和结果投影的私有原语；只读 Inspect 不创建、更新或删除 journal，不访问 manifest、Adapter 或目标文件。Search 与两种 List 共用无锁检查和 Warn/Debug 记录，检查失败不改变原业务结果或退出状态。Fix 在单次 Acquire/Release 区间内恰好 Recover 一次，不接受 Agent/Type/方向等选择；Install/Uninstall 仍直接在锁内 Recover，不先调用公开 Inspect。既有 schema v1、driver、phase、恢复方向、actions、批处理和输出语义保持不变。
+
+验证结果或限制：
+
+`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`verify_dir="$(mktemp -d)"`后的 `go build -o "$verify_dir/apm" ./cmd/apm`与 `test -x "$verify_dir/apm"`、`git diff --check`、`go test -count=1 -v ./internal/lifecycle -run 'Test(Fix|MCP|Plugin|Search|List)'` 均以退出码 0 完成。MCP/Plugin 隔离集成测试把 `PATH`、APM/Cache/Agent home 限定在 `t.TempDir()`，并逐条断言实际可执行路径位于临时 fake-bin；未调用或修改真实 Codex、Claude Code 或 Hermes 环境。
+
+当前限制：损坏、未知或不可读 journal 可被只读命令警告，但无法自动恢复；Fix 和写命令继续严格校验、保留现场并 fail closed，不删除、跳过校验或猜测恢复方向。
+
+## 2026-08-14
+
 分类：其他
 
 用户需求：
