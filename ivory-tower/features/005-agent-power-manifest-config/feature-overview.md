@@ -1,5 +1,7 @@
 # Feature Overview
 
+> **Feature 016 supersession（2026-08-14）：** 本 feature 的 Repository 设计继续有效，但 installed List 的锁前提已被取代。当前 installed List 无锁读取 Config，结果只是 best-effort 观察；Install/Uninstall 与 transaction 的 manifest 变更仍位于各自全局锁区间内。见 [Feature 016](../016-lifecycle-fix/spec.md) 与 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。
+
 ## Goal
 
 - 特性名称：Agent Power 安装清单与无状态 Config Repository
@@ -20,4 +22,4 @@
 ## Acceptance
 
 - 验收条件：每个 Agent 的清单按固定 JSON 分组读写；`List/Find/Set/Remove` 在缺失文件、重复项、无效输入和读写失败场景下符合规格；写入使用 `0700` 目录、`0600` 文件及同目录原子替换；Repository 不保存跨调用状态；config 不获取全局锁且不直接打印；全量测试、vet、构建和 CLI 解析 smoke test 通过，CLI 功能不变。
-- 已知风险或待决问题：未知 JSON 字段在读取时忽略并可能在后续写入时丢失；任何版本不合规的历史条目都会使完整读取失败，用户需在外部修正，Repository 不迁移或清理；Repository 的读改写依赖 lifecycle 已持有全局 APM 锁（当前 installed List 锁范围见 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)）。
+- 已知风险或待决问题：未知 JSON 字段在读取时忽略并可能在后续写入时丢失；任何版本不合规的历史条目都会使完整读取失败，用户需在外部修正，Repository 不迁移或清理；Repository 自身不获取全局锁，当前 installed List 无锁读取，而 Install/Uninstall 与 transaction 的清单变更依赖 lifecycle 持锁（见 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)）。

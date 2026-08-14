@@ -106,11 +106,19 @@ classDiagram
         +Set(AgentID, PowerRef) error
         +Remove(AgentID, PowerType, name) error
     }
-    note for TransactionManager "Inspect 只读统一校验；Recover 复用同次读取继续 driver 收敛。唯一 schema v1 shared envelope；非法格式保留"
-    class TransactionManager {
+    note for Inspector "只读读取并统一校验 journal；不恢复、不写状态"
+    class Inspector {
         <<interface>>
         +Inspect(Context) (InspectionResult, error)
+    }
+    note for Recoverer "在调用方持锁时收敛唯一 journal"
+    class Recoverer {
+        <<interface>>
         +Recover(Context) (RecoveryResult, error)
+    }
+    note for TransactionManager "组合 Inspector 与 Recoverer，并提供 Skill/MCP/Plugin 变更事务；非法 journal 保留"
+    class TransactionManager {
+        <<interface>>
         +InstallSkill(Context, SkillInstallRequest) error
         +InstallMCP(Context, MCPInstallRequest) error
         +InstallPlugin(Context, PluginInstallRequest) error
@@ -140,8 +148,10 @@ classDiagram
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
-        +Get(PowerRef) error
+        +DownloadSkill(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
+        +GetPlugin(PowerRef) (PluginDefinition, error)
+        +DownloadPlugin(PowerRef) error
     }
     class VersionSelector {
         <<interface>>
@@ -150,28 +160,28 @@ classDiagram
 
     searchService ..|> SearchLifecycle
     searchService --> SearchResult : returns
-    searchService --> TransactionManager : Inspect only
-    searchService --> CloudClient
+    searchService --> Inspector : Inspect only
+    searchService --> CloudClient : List
 
     listService ..|> ListLifecycle
     listService --> ListResult : returns
     listService --> PartialListError : all-mode Config failures
     listService --> AdapterRegistry : installed only
     listService --> ConfigRepository : installed only
-    listService --> TransactionManager : Inspect only, both modes
-    listService --> CloudClient : Cloud only
+    listService --> Inspector : Inspect only, both modes
+    listService --> CloudClient : List, Cloud mode
 
     fixService ..|> FixLifecycle
     fixService --> Locker : one lock interval
-    fixService --> TransactionManager : Recover exactly once
+    fixService --> Recoverer : Recover exactly once
 
     installService ..|> InstallLifecycle
     installService --> InstallResult : returns
     installService --> InstallBatchError : successful Release only
     installService --> Locker : one lock interval
     installService --> TransactionManager : Recover / InstallSkill / InstallMCP / InstallPlugin
-    installService --> CloudClient : List / Skill Get / MCP GetMCP / Plugin GetPlugin
-    installService --> PowerCache : Skill Fetch only
+    installService --> CloudClient : List / DownloadSkill / GetMCP / GetPlugin / DownloadPlugin
+    installService --> PowerCache : Skill / Hermes filesystem Plugin Fetch
     installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
     installService --> ConfigRepository : Find
     installService --> VersionSelector : resolve version
@@ -190,5 +200,7 @@ classDiagram
     Adapter --> AdapterInstallResult : Install returns
     TransactionManager --> Adapter : TargetPath / Install
     TransactionManager --> TransactionUninstallResult : returns
-    TransactionManager --> InspectionResult : Inspect returns
+    TransactionManager --|> Inspector : embeds
+    TransactionManager --|> Recoverer : embeds
+    Inspector --> InspectionResult : returns
     TransactionManager --> ConfigRepository : Set / Remove

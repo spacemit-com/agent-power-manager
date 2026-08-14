@@ -38,7 +38,7 @@ cacheManager = component "Cache Manager" "供 Skill 与 Hermes Plugin 从 type/n
         "classDiagram" "apm-cli-diagrams/cache-manager.mmd"
     }
 }
-cloudClient = component "Cloud Client" "List 扫描全部 Power；Get 写 Skill/Hermes Plugin 缓存；GetMCP 返回启动定义；GetPlugin 返回实际名和 marketplace。" "Go (local filesystem)" {
+cloudClient = component "Cloud Client" "List 扫描全部 Power；DownloadSkill/DownloadPlugin 写文件型缓存；GetMCP/GetPlugin 返回安装定义。" "Go (local filesystem)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cloud-client.mmd"
     }
@@ -48,10 +48,10 @@ cliEntry -> lifecycle "通过五个独立 factory 调用 Search/List/Install/Uni
 lifecycle -> adapterRegistry "installed List/Install/Uninstall 刷新快照；Install/Uninstall 按 Agent 与 Power 类型解析 Adapter"
 lifecycle -> configModel "installed List 和 Uninstall 读取安装记录；Install Find；Transaction Set/Remove"
 lifecycle -> lockManager "仅 Fix、Install、Uninstall 在各自边界获取/释放；Search 与两种 List 不获取"
-lifecycle -> cacheManager "仅 Skill Install：为每个实际安装 Agent fetch 到公共 staging"
-lifecycle -> cloudClient "Search/List/Install list；Skill/Hermes Plugin cache miss Get；GetMCP/GetPlugin"
+lifecycle -> cacheManager "Skill 与 Hermes filesystem Plugin Install：为每个实际安装 Agent fetch 到公共 staging"
+lifecycle -> cloudClient "Search/List/Install List；Skill DownloadSkill；Hermes Plugin DownloadPlugin；MCP/Plugin GetMCP/GetPlugin"
 adapterRegistry -> targetAgent "Skill 访问文件根；MCP/Plugin 通过 Agent CLI；Hermes Plugin 发布本地目录" "本地文件系统 / CLI"
 configModel -> apm.installedPower "读写 JSON 清单"
 cacheManager -> apm.powerCache "读取版本化缓存"
-cloudClient -> apm.powerCache "仅 Skill Get：经临时目录原子写入"
+cloudClient -> apm.powerCache "DownloadSkill/DownloadPlugin 经临时目录原子写入文件型缓存"
 cloudClient -> cloudRegistry "扫描 Skill/MCP/Plugin fixture；读取 MCP 与 marketplace 定义" "本地文件系统"

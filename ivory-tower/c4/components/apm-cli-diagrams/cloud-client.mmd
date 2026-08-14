@@ -1,11 +1,12 @@
 classDiagram
-    note for CloudClient "List 返回全部精确 PowerRef；Get 写 Skill/Hermes Plugin 缓存；GetMCP/GetPlugin 返回类型定义"
+    note for CloudClient "List 返回全部精确 PowerRef；DownloadSkill/DownloadPlugin 写文件型缓存；GetMCP/GetPlugin 返回类型定义"
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
-        +Get(PowerRef) error
+        +DownloadSkill(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
         +GetPlugin(PowerRef) (PluginDefinition, error)
+        +DownloadPlugin(PowerRef) error
     }
     class MCPServer {
         +Transport MCPTransport
@@ -16,9 +17,10 @@ classDiagram
     }
     class LocalClient {
         +List() ([]PowerRef, error)
-        +Get(PowerRef) error
+        +DownloadSkill(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
         +GetPlugin(PowerRef) (PluginDefinition, error)
+        +DownloadPlugin(PowerRef) error
     }
     LocalClient ..|> CloudClient
     CloudClient --> MCPServer : direct, no cache/staging

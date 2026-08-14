@@ -8,7 +8,7 @@ flowchart TD
     Type -->|Skill| SkillResolve[ResolveSkill + Config Find]
     SkillResolve --> SkillSame{same manifest version?}
     SkillSame -->|yes| Unchanged[unchanged]
-    SkillSame -->|no| Cache[Cache Fetch / Cloud Get / Fetch]
+    SkillSame -->|no| Cache[Cache Fetch / Cloud DownloadSkill / Fetch]
     Cache --> FSTx[filesystem Install transaction]
     FSTx --> FSJournal[schema v1 driver=filesystem]
 
@@ -29,7 +29,7 @@ flowchart TD
     PluginResolve --> Prepare[Codex/Claude marketplace add/update; Hermes no-op]
     Prepare --> PluginInspect[Inspect versioned actual name]
     PluginInspect -->|marketplace| PluginTx[plugin transaction with exact selector]
-    PluginInspect -->|Hermes filesystem| PluginCache[Cache Fetch / Cloud Get / Fetch] --> PluginTx
+    PluginInspect -->|Hermes filesystem| PluginCache[Cache Fetch / Cloud DownloadPlugin / Fetch] --> PluginTx
     PluginTx --> PluginJournal[schema v1 driver=plugin]
 
     FSJournal --> Outcome[installed/upgraded/downgraded]

@@ -1,5 +1,7 @@
 # Lifecycle 代码结构整理规格
 
+> **Feature 016 supersession（2026-08-14）：** 本文是 Feature 012 的历史结构整理规格，文件归属与命名结论继续有效，但其 Search/installed List 锁内 Recover/Release 契约及“Feature 008–011 定义当前边界”的表述已被 Feature 016 取代。当前 Search 与两种 List 都只依赖 Inspector 并无锁执行；Fix 是后来新增的第五个独立 lifecycle；Install/Uninstall 仍使用 Manager 并锁内 Recover。见 [Feature 016](../016-lifecycle-fix/spec.md)、[ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md) 与 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。下文涉及 Feature 012 验收基线的旧锁与恢复顺序均为历史记录，不是当前契约。
+
 ## 目标
 
 重整 `internal/lifecycle` 中 Search、List、Install、Uninstall 四个命令的生产代码与测试文件，使文件名能够直接表达所属命令和职责，使公开入口、主流程、单 Agent 操作、Power 解析及结果整理更容易定位。
@@ -92,7 +94,7 @@ internal/lifecycle/
 
 `list.go` 保存 `ListService`、`NewList`、接口断言和 Cloud/installed 分支入口。Cloud 分支继续不访问锁或其他共享状态依赖。
 
-`list_installed.go` 保存 installed 分支的锁内 Recover、恢复日志、Registry 刷新、Agent 选择、Config 读取、部分失败收集与 Release。`agentPowerGroups` 是 installed 分支与结果转换之间的私有传递结构，保存在本文件，不提升为公共类型。
+`list_installed.go` 保存 installed 分支。Feature 012 当时的内容包括锁内 Recover、恢复日志、Registry 刷新、Agent 选择、Config 读取、部分失败收集与 Release；该流程已由 Feature 016 supersede，当前文件只保留无锁 Refresh、Agent 选择、Config 读取与部分失败收集。`agentPowerGroups` 是 installed 分支与结果转换之间的私有传递结构，保存在本文件，不提升为公共类型。
 
 `list_result.go` 由 `list_filter.go` 改名而来，保存 Cloud/installed 结果复制、Type 过滤、展平及排序。它不读取依赖或修改输入。
 
@@ -117,7 +119,7 @@ internal/lifecycle/
 中文注释解释业务原因和约束，不逐行翻译代码。至少覆盖以下边界：
 
 - Search（已由 Feature 016 supersede 的历史边界）：当时 Recover 为什么必须持锁，以及 Cloud 查询为什么必须在 Release 成功后执行；
-- List：Cloud 分支为什么无锁，installed 分支的恢复、快照和所有 Config 读取为什么属于同一锁区间，以及为何 Release 成功后才生成可渲染结果；
+- List（已由 Feature 016 supersede 的历史边界）：当时 Cloud 分支为什么无锁，installed 分支的恢复、快照和 Config 读取为什么属于同一锁区间，以及为何 Release 成功后才生成可渲染结果；当前两种 List 均无锁 Inspect，installed 分支也无 Release gate。
 - Install：恢复、Agent/Power 解析、Cache/Transaction 和串行批处理为什么处于同一锁区间，首错后为何补齐 unexecuted，以及为何 Release 失败抑制结果；
 - Uninstall：恢复、本地逐 Agent 解析和 Transaction 为什么处于同一锁区间，事实 Warn 为什么实时记录，首错后为何停止，以及为何 Release 成功后才返回汇总。
 
@@ -130,7 +132,7 @@ internal/lifecycle/
 1. 四个 Service、构造函数、CLI lifecycle 接口和依赖集合；
 2. nil 与 typed-nil 依赖拒绝顺序及精确错误文本；
 3. `Acquire`、`Recover`、Registry、Config、Cloud、Cache、Adapter、Transaction 和 `Release` 的调用条件、次数与顺序；
-4. Search、Cloud List、installed List、Install、Uninstall 各自既有锁区间；
+4. Feature 012 当时 Search、Cloud List、installed List、Install、Uninstall 各自既有锁区间；其中 Search/installed List 已由 Feature 016 supersede；
 5. `slog.Debug`/`slog.Warn` 的消息、级别、字段、字段值和相对于 Release/后续业务的实时位置；
 6. 错误包装文本、`errors.Join` 组成、`errors.Is/As` 可见原因及 batch/partial marker；
 7. fatal error、业务失败和 Release 失败时结构化结果是否可返回；
@@ -177,7 +179,7 @@ internal/lifecycle/
 
 ## 文档与决策边界
 
-Feature 008–011 和 ADR-002/003/004/007/008/009 继续定义当前业务与架构边界。本 feature 只改变同一个 Go package 内声明所在文件，不改变组件关系、公开接口或重大决策，因此不创建或修订 ADR，也不更新 C4、BUILD 或项目概览。
+Feature 012 实施时由 Feature 008–011 和 ADR-002/003/004/007/008/009 定义业务与架构边界；其后 Search/List 恢复与锁语义由 Feature 016 和修订后的 ADR-002/003/004/009 取代。本 feature 本身只改变同一个 Go package 内声明所在文件，不改变当时的组件关系、公开接口或重大决策，因此当时未创建或修订 ADR，也未更新 C4、BUILD 或项目概览。
 
 根据项目 Changelog 规则，只有通过源码、构建/运行配置或脚本实质改变项目行为的任务才新增记录。本 feature 不改变行为，因此不新增 `docs/Changelog.md` 条目。
 
@@ -195,5 +197,5 @@ Feature 008–011 和 ADR-002/003/004/007/008/009 继续定义当前业务与架
 
 - 移动同 package 声明本身不改变 Go 语义，但大文件拆分可能遗漏 build 所需的 import、fixture 或 helper；通过小步移动、gofmt 和每步定向测试控制。
 - 测试重新分组可能误删看似重复但实际保护不同边界的用例；实现时保留所有原测试函数名，并对移动前后测试清单做静态比对。
-- 新增注释可能错误描述流程；注释必须以既有测试和 Feature 008–011 当前规格为依据，不用注释引入新行为承诺。
+- 新增注释可能错误描述流程；Feature 012 当时要求以既有测试和 Feature 008–011 规格为依据。当前注释与行为边界以 Feature 016 和修订后的 ADR 为准，不用历史规格引入旧行为承诺。
 - 文件数量过多会降低导航效率；本设计明确把短小恢复、Release 和构造 helper 留在主文件，仅对独立业务职责拆文件。
