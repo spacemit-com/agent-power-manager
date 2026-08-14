@@ -2,15 +2,10 @@ package lifecycle
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 
 	"apm/internal/cli"
 	"apm/internal/domain"
-	"apm/internal/lock"
-	"apm/internal/logging"
-	"apm/internal/transaction"
 )
 
 // agentPowerGroups 保存单个 Agent 的已安装能力分组。
@@ -30,40 +25,15 @@ func installedListAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]doma
 	return []domain.AgentID{target}, nil
 }
 
-func releaseInstalledList(unlock lock.Unlock, businessErr error) error {
-	if err := unlock.Release(); err != nil {
-		return errors.Join(businessErr, fmt.Errorf("release installed list lock: %w", err))
-	}
-	return businessErr
-}
-
-// listInstalled 的 Recover、快照刷新和全部 Config 读取共享同一锁区间；恢复日志也在锁内记录。
-// 结果转换等待成功 Release 后才执行。
+// listInstalled 读取快照和配置生成已安装清单；读取失败按单个或全部 Agent 语义返回。
 func (s *ListService) listInstalled(ctx context.Context, flags cli.Flags) (cli.ListResult, error) {
-	unlock, err := s.locker.Acquire()
-	if err != nil {
-		return cli.ListResult{}, fmt.Errorf("acquire installed list lock: %w", err)
-	}
-
-	recovery, err := s.transactions.Recover(ctx)
-	if err != nil {
-		return cli.ListResult{}, releaseInstalledList(
-			unlock,
-			fmt.Errorf("recover transaction before installed list: %w", err),
-		)
-	}
-	logInstalledListRecovery(recovery)
-
 	snapshot, err := s.registry.RefreshInstalled()
 	if err != nil {
-		return cli.ListResult{}, releaseInstalledList(
-			unlock,
-			fmt.Errorf("refresh installed agents for list: %w", err),
-		)
+		return cli.ListResult{}, fmt.Errorf("refresh installed agents for list: %w", err)
 	}
 	agents, err := installedListAgents(flags, snapshot)
 	if err != nil {
-		return cli.ListResult{}, releaseInstalledList(unlock, err)
+		return cli.ListResult{}, err
 	}
 
 	inputs := make([]agentPowerGroups, 0, len(agents))
@@ -73,7 +43,7 @@ func (s *ListService) listInstalled(ctx context.Context, flags cli.Flags) (cli.L
 		if listErr != nil {
 			wrapped := fmt.Errorf("list installed powers for agent %q: %w", agent, listErr)
 			if domain.AgentID(flags.Agent) != domain.AllAgents {
-				return cli.ListResult{}, releaseInstalledList(unlock, wrapped)
+				return cli.ListResult{}, wrapped
 			}
 			failures = append(failures, cli.AgentFailure{Agent: agent, Err: wrapped})
 			continue
@@ -81,34 +51,9 @@ func (s *ListService) listInstalled(ctx context.Context, flags cli.Flags) (cli.L
 		inputs = append(inputs, agentPowerGroups{agent: agent, groups: groups})
 	}
 
-	if releaseErr := unlock.Release(); releaseErr != nil {
-		causes := []error{fmt.Errorf("release installed list lock: %w", releaseErr)}
-		for _, failure := range failures {
-			causes = append(causes, failure.Err)
-		}
-		return cli.ListResult{}, errors.Join(causes...)
-	}
-
 	result := makeInstalledListResult(flags, inputs)
 	if len(failures) != 0 {
 		return result, &cli.PartialListError{Failures: failures}
 	}
 	return result, nil
-}
-
-func logInstalledListRecovery(result transaction.RecoveryResult) {
-	if !result.Recovered {
-		slog.Debug("no active transaction before installed list")
-		return
-	}
-	slog.Warn(
-		"transaction recovered",
-		slog.String("operation", string(result.Operation)),
-		logging.Agent(result.Agent),
-		logging.Power(result.Power.Name),
-		logging.Version(result.Power.Version),
-		logging.Phase(string(result.OriginalPhase)),
-		slog.String("direction", string(result.Direction)),
-		slog.Any("actions", result.Actions),
-	)
 }

@@ -12,83 +12,32 @@ import (
 	"apm/internal/adapter"
 	"apm/internal/cli"
 	"apm/internal/domain"
-	"apm/internal/lock"
 	"apm/internal/logging"
 	"apm/internal/transaction"
 )
 
 type listFixture struct {
-	acquireErr error
-	recoverErr error
-	releaseErr error
+	inspectErr error
 	refreshErr error
 	cloudErr   error
 
-	recovery   transaction.RecoveryResult
+	inspection transaction.InspectionResult
 	snapshot   domain.AgentSnapshot
 	groups     map[domain.AgentID]domain.PowerGroups
 	configErrs map[domain.AgentID]error
 	cloudRefs  []domain.PowerRef
 
 	beforeRefresh func()
-	beforeRelease func()
 }
 
-type listFakeUnlock struct {
+type listFakeInspector struct {
 	calls   *[]string
 	fixture *listFixture
 }
 
-func (u *listFakeUnlock) Release() error {
-	if u.fixture.beforeRelease != nil {
-		u.fixture.beforeRelease()
-	}
-	*u.calls = append(*u.calls, "release")
-	return u.fixture.releaseErr
-}
-
-type listFakeLocker struct {
-	calls   *[]string
-	fixture *listFixture
-}
-
-func (l *listFakeLocker) Acquire() (lock.Unlock, error) {
-	*l.calls = append(*l.calls, "acquire")
-	return &listFakeUnlock{calls: l.calls, fixture: l.fixture}, l.fixture.acquireErr
-}
-
-type listFakeTransactions struct {
-	calls   *[]string
-	fixture *listFixture
-}
-
-func (*listFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
-	return transaction.InspectionResult{}, nil
-}
-
-func (m *listFakeTransactions) Recover(context.Context) (transaction.RecoveryResult, error) {
-	*m.calls = append(*m.calls, "recover")
-	return m.fixture.recovery, m.fixture.recoverErr
-}
-
-func (*listFakeTransactions) InstallSkill(context.Context, transaction.SkillInstallRequest) error {
-	return nil
-}
-func (*listFakeTransactions) InstallMCP(context.Context, transaction.MCPInstallRequest) error {
-	return nil
-}
-
-func (*listFakeTransactions) UninstallSkill(context.Context, transaction.SkillUninstallRequest) (transaction.UninstallResult, error) {
-	return transaction.UninstallResult{}, nil
-}
-func (*listFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
-	return transaction.UninstallResult{}, nil
-}
-func (*listFakeTransactions) InstallPlugin(context.Context, transaction.PluginInstallRequest) error {
-	return errors.New("unexpected InstallPlugin call")
-}
-func (*listFakeTransactions) UninstallPlugin(context.Context, transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
-	return transaction.UninstallResult{}, errors.New("unexpected UninstallPlugin call")
+func (i *listFakeInspector) Inspect(context.Context) (transaction.InspectionResult, error) {
+	*i.calls = append(*i.calls, "inspect")
+	return i.fixture.inspection, i.fixture.inspectErr
 }
 
 type listFakeCloud struct {
@@ -100,12 +49,10 @@ func (c *listFakeCloud) List() ([]domain.PowerRef, error) {
 	*c.calls = append(*c.calls, "cloud-list")
 	return c.fixture.cloudRefs, c.fixture.cloudErr
 }
-
 func (*listFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
 func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-
 func (*listFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
 	return domain.PluginDefinition{}, nil
 }
@@ -116,14 +63,11 @@ type listFakeRegistry struct {
 	fixture *listFixture
 }
 
-func (*listFakeRegistry) ResolveSkill(domain.AgentID) (adapter.SkillAdapter, error) {
-	return nil, nil
-}
-func (*listFakeRegistry) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) { return nil, nil }
+func (*listFakeRegistry) ResolveSkill(domain.AgentID) (adapter.SkillAdapter, error) { return nil, nil }
+func (*listFakeRegistry) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error)     { return nil, nil }
 func (*listFakeRegistry) ResolvePlugin(domain.AgentID) (adapter.PluginAdapter, error) {
 	return nil, nil
 }
-
 func (r *listFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	if r.fixture.beforeRefresh != nil {
 		r.fixture.beforeRefresh()
@@ -141,20 +85,16 @@ func (c *listFakeConfig) List(agent domain.AgentID) (domain.PowerGroups, error) 
 	*c.calls = append(*c.calls, "config:"+string(agent))
 	return c.fixture.groups[agent], c.fixture.configErrs[agent]
 }
-
 func (*listFakeConfig) Find(domain.AgentID, domain.PowerType, string) (domain.PowerRef, bool, error) {
 	return domain.PowerRef{}, false, nil
 }
-
-func (*listFakeConfig) Set(domain.AgentID, domain.PowerRef) error { return nil }
-
+func (*listFakeConfig) Set(domain.AgentID, domain.PowerRef) error             { return nil }
 func (*listFakeConfig) Remove(domain.AgentID, domain.PowerType, string) error { return nil }
 
 func TestNewListRejectsNilDependencies(t *testing.T) {
 	var calls []string
 	fixture := &listFixture{}
-	locker := &listFakeLocker{calls: &calls, fixture: fixture}
-	transactions := &listFakeTransactions{calls: &calls, fixture: fixture}
+	inspector := &listFakeInspector{calls: &calls, fixture: fixture}
 	cloud := &listFakeCloud{calls: &calls, fixture: fixture}
 	registry := &listFakeRegistry{calls: &calls, fixture: fixture}
 	config := &listFakeConfig{calls: &calls, fixture: fixture}
@@ -164,28 +104,15 @@ func TestNewListRejectsNilDependencies(t *testing.T) {
 		new  func() (*ListService, error)
 		want string
 	}{
-		{name: "locker", new: func() (*ListService, error) { return NewList(nil, transactions, cloud, registry, config) }, want: "create List lifecycle with nil locker"},
-		{name: "typed nil locker", new: func() (*ListService, error) {
-			return NewList((*listFakeLocker)(nil), transactions, cloud, registry, config)
-		}, want: "create List lifecycle with nil locker"},
-		{name: "transaction manager", new: func() (*ListService, error) { return NewList(locker, nil, cloud, registry, config) }, want: "create List lifecycle with nil transaction manager"},
-		{name: "typed nil transaction manager", new: func() (*ListService, error) {
-			return NewList(locker, (*listFakeTransactions)(nil), cloud, registry, config)
-		}, want: "create List lifecycle with nil transaction manager"},
-		{name: "Cloud client", new: func() (*ListService, error) { return NewList(locker, transactions, nil, registry, config) }, want: "create List lifecycle with nil Cloud client"},
-		{name: "typed nil Cloud client", new: func() (*ListService, error) {
-			return NewList(locker, transactions, (*listFakeCloud)(nil), registry, config)
-		}, want: "create List lifecycle with nil Cloud client"},
-		{name: "adapter registry", new: func() (*ListService, error) { return NewList(locker, transactions, cloud, nil, config) }, want: "create List lifecycle with nil adapter registry"},
-		{name: "typed nil adapter registry", new: func() (*ListService, error) {
-			return NewList(locker, transactions, cloud, (*listFakeRegistry)(nil), config)
-		}, want: "create List lifecycle with nil adapter registry"},
-		{name: "config repository", new: func() (*ListService, error) { return NewList(locker, transactions, cloud, registry, nil) }, want: "create List lifecycle with nil config repository"},
-		{name: "typed nil config repository", new: func() (*ListService, error) {
-			return NewList(locker, transactions, cloud, registry, (*listFakeConfig)(nil))
-		}, want: "create List lifecycle with nil config repository"},
+		{"inspector", func() (*ListService, error) { return NewList(nil, cloud, registry, config) }, "create List lifecycle with nil transaction inspector"},
+		{"typed nil inspector", func() (*ListService, error) { return NewList((*listFakeInspector)(nil), cloud, registry, config) }, "create List lifecycle with nil transaction inspector"},
+		{"Cloud client", func() (*ListService, error) { return NewList(inspector, nil, registry, config) }, "create List lifecycle with nil Cloud client"},
+		{"typed nil Cloud client", func() (*ListService, error) { return NewList(inspector, (*listFakeCloud)(nil), registry, config) }, "create List lifecycle with nil Cloud client"},
+		{"adapter registry", func() (*ListService, error) { return NewList(inspector, cloud, nil, config) }, "create List lifecycle with nil adapter registry"},
+		{"typed nil adapter registry", func() (*ListService, error) { return NewList(inspector, cloud, (*listFakeRegistry)(nil), config) }, "create List lifecycle with nil adapter registry"},
+		{"config repository", func() (*ListService, error) { return NewList(inspector, cloud, registry, nil) }, "create List lifecycle with nil config repository"},
+		{"typed nil config repository", func() (*ListService, error) { return NewList(inspector, cloud, registry, (*listFakeConfig)(nil)) }, "create List lifecycle with nil config repository"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service, err := tt.new()
@@ -196,13 +123,8 @@ func TestNewListRejectsNilDependencies(t *testing.T) {
 	}
 }
 
-func TestListCloudDoesNotTouchSharedState(t *testing.T) {
+func TestListCloudInspectsBeforeListing(t *testing.T) {
 	var calls []string
-	var stdout, stderr bytes.Buffer
-	originalLogger := slog.Default()
-	slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
-	t.Cleanup(func() { slog.SetDefault(originalLogger) })
-
 	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}
 	service := newListService(t, &calls, listFixture{cloudRefs: []domain.PowerRef{ref}})
 
@@ -210,19 +132,15 @@ func TestListCloudDoesNotTouchSharedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"cloud-list"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"inspect", "cloud-list"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
-	want := cli.ListResult{Powers: []cli.ListedPower{{Power: ref}}}
-	if !reflect.DeepEqual(result, want) {
+	if want := (cli.ListResult{Powers: []cli.ListedPower{{Power: ref}}}); !reflect.DeepEqual(result, want) {
 		t.Fatalf("List() = %#v, want %#v", result, want)
-	}
-	if stdout.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("output = stdout %q stderr %q, want no output", stdout.String(), stderr.String())
 	}
 }
 
-func TestListCloudFailurePreservesCause(t *testing.T) {
+func TestListCloudFailurePreservesCauseAfterInspection(t *testing.T) {
 	var calls []string
 	wantErr := errors.New("Cloud unavailable")
 	service := newListService(t, &calls, listFixture{cloudErr: wantErr})
@@ -234,35 +152,55 @@ func TestListCloudFailurePreservesCause(t *testing.T) {
 	if len(result.Powers) != 0 {
 		t.Fatalf("List() result = %#v, want no powers", result)
 	}
-	if want := []string{"cloud-list"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"inspect", "cloud-list"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 }
 
-func TestListCloudVerboseDoesNotRecoverOrLog(t *testing.T) {
-	var calls []string
-	var stdout, stderr bytes.Buffer
-	originalLogger := slog.Default()
-	slog.SetDefault(logging.NewLogger(&stdout, &stderr, true))
-	t.Cleanup(func() { slog.SetDefault(originalLogger) })
+func TestListCloudJournalWarningsDoNotBlockListing(t *testing.T) {
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}
+	damagedErr := errors.New("damaged journal")
+	cloudErr := errors.New("Cloud unavailable")
+	tests := []struct {
+		name         string
+		fixture      listFixture
+		wantCloudErr error
+		wantLog      string
+	}{
+		{"active", listFixture{inspection: transaction.InspectionResult{Active: true, Operation: transaction.OperationInstall, Agent: domain.AgentCodex, Power: ref}, cloudRefs: []domain.PowerRef{ref}}, nil, "transaction recovery required"},
+		{"damaged", listFixture{inspectErr: damagedErr, cloudErr: cloudErr}, cloudErr, "transaction journal is damaged"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			var stdout, stderr bytes.Buffer
+			originalLogger := slog.Default()
+			slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
+			t.Cleanup(func() { slog.SetDefault(originalLogger) })
+			service := newListService(t, &calls, tt.fixture)
 
-	service := newListService(t, &calls, listFixture{recovery: transaction.RecoveryResult{Recovered: true}})
-	if _, err := service.List(context.Background(), cli.Flags{}); err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"cloud-list"}; !reflect.DeepEqual(calls, want) {
-		t.Fatalf("calls = %v, want %v", calls, want)
-	}
-	if stdout.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("output = stdout %q stderr %q, want no output", stdout.String(), stderr.String())
+			result, err := service.List(context.Background(), cli.Flags{})
+			if tt.name == "active" {
+				if err != nil || !reflect.DeepEqual(result, cli.ListResult{Powers: []cli.ListedPower{{Power: ref}}}) {
+					t.Fatalf("List() = (%#v, %v), want Cloud result without error", result, err)
+				}
+			} else if !errors.Is(err, tt.wantCloudErr) || !strings.Contains(err.Error(), "list Cloud powers") {
+				t.Fatalf("List() error = %v, want Cloud error", err)
+			}
+			if want := []string{"inspect", "cloud-list"}; !reflect.DeepEqual(calls, want) {
+				t.Fatalf("calls = %v, want %v", calls, want)
+			}
+			if !strings.Contains(stderr.String(), tt.wantLog) || stdout.Len() != 0 {
+				t.Fatalf("output = stdout %q stderr %q, want warning %q", stdout.String(), stderr.String(), tt.wantLog)
+			}
+		})
 	}
 }
 
 func newListService(t *testing.T, calls *[]string, fixture listFixture) *ListService {
 	t.Helper()
 	service, err := NewList(
-		&listFakeLocker{calls: calls, fixture: &fixture},
-		&listFakeTransactions{calls: calls, fixture: &fixture},
+		&listFakeInspector{calls: calls, fixture: &fixture},
 		&listFakeCloud{calls: calls, fixture: &fixture},
 		&listFakeRegistry{calls: calls, fixture: &fixture},
 		&listFakeConfig{calls: calls, fixture: &fixture},

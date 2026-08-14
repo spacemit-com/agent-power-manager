@@ -8,26 +8,22 @@ import (
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/config"
-	"apm/internal/lock"
 	"apm/internal/transaction"
 )
 
-// ListService 实现无锁 Cloud 查询和锁内已安装清单查询两条独立分支。
+// ListService 实现带只读日志检查的 Cloud 与已安装清单查询。
 type ListService struct {
-	locker       lock.Locker
-	transactions transaction.Manager
-	cloud        cloud.Client
-	registry     AdapterRegistry
-	config       config.Repository
+	inspector transaction.Inspector
+	cloud     cloud.Client
+	registry  AdapterRegistry
+	config    config.Repository
 }
 
-// NewList 创建 List 生命周期；默认 Cloud 分支不得调用共享状态依赖。
-func NewList(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, registry AdapterRegistry, config config.Repository) (*ListService, error) {
+// NewList 创建 List 生命周期；Inspector 仅用于只读检查，不得在查询中恢复事务。
+func NewList(inspector transaction.Inspector, cloud cloud.Client, registry AdapterRegistry, config config.Repository) (*ListService, error) {
 	switch {
-	case isNilInterface(locker):
-		return nil, errors.New("create List lifecycle with nil locker")
-	case isNilInterface(transactions):
-		return nil, errors.New("create List lifecycle with nil transaction manager")
+	case isNilInterface(inspector):
+		return nil, errors.New("create List lifecycle with nil transaction inspector")
 	case isNilInterface(cloud):
 		return nil, errors.New("create List lifecycle with nil Cloud client")
 	case isNilInterface(registry):
@@ -36,22 +32,21 @@ func NewList(locker lock.Locker, transactions transaction.Manager, cloud cloud.C
 		return nil, errors.New("create List lifecycle with nil config repository")
 	}
 	return &ListService{
-		locker:       locker,
-		transactions: transactions,
-		cloud:        cloud,
-		registry:     registry,
-		config:       config,
+		inspector: inspector,
+		cloud:     cloud,
+		registry:  registry,
+		config:    config,
 	}, nil
 }
 
 var _ cli.ListLifecycle = (*ListService)(nil)
 
-// List 根据 Installed 选择无锁 Cloud 查询或锁内本地清单查询，并只返回结构化结果。
+// List 先检查事务日志并告警，再查询目标清单；检查异常不阻断只读查询。
 func (s *ListService) List(ctx context.Context, flags cli.Flags) (cli.ListResult, error) {
+	inspectJournal(ctx, "list", s.inspector)
 	if flags.Installed {
 		return s.listInstalled(ctx, flags)
 	}
-	// Cloud 分支不读取本地共享状态，因此直接查询并返回结果，不获取全局锁。
 	refs, err := s.cloud.List()
 	if err != nil {
 		return cli.ListResult{}, fmt.Errorf("list Cloud powers: %w", err)
