@@ -1,5 +1,5 @@
 classDiagram
-    note for Flags "search/list/install/uninstall 分别解析自己的参数；uninstall 拒绝任何版本形式"
+    note for Flags "search/list/install/uninstall/fix 分别解析自己的参数；fix 只接受全局 verbose，不接收位置参数"
     class Flags {
         +Agent string
         +Type string
@@ -29,6 +29,10 @@ classDiagram
         <<function>>
         +Create() (UninstallLifecycle, error)
     }
+    class FixLifecycleFactory {
+        <<function>>
+        +Create() (FixLifecycle, error)
+    }
 
     class SearchLifecycle {
         <<interface>>
@@ -45,6 +49,10 @@ classDiagram
     class UninstallLifecycle {
         <<interface>>
         +Uninstall(Context, Flags) (UninstallResult, error)
+    }
+    class FixLifecycle {
+        <<interface>>
+        +Fix(Context) error
     }
 
     class SearchResult {
@@ -108,15 +116,18 @@ classDiagram
     CLIEntry --> ListLifecycleFactory : creates after logging setup
     CLIEntry --> InstallLifecycleFactory : creates after logging setup
     CLIEntry --> UninstallLifecycleFactory : creates after logging setup
+    CLIEntry --> FixLifecycleFactory : creates after logging setup
     SearchLifecycleFactory --> SearchLifecycle : returns
     ListLifecycleFactory --> ListLifecycle : returns
     InstallLifecycleFactory --> InstallLifecycle : returns
     UninstallLifecycleFactory --> UninstallLifecycle : returns
+    FixLifecycleFactory --> FixLifecycle : returns
 
     CLIEntry --> SearchLifecycle : invokes
     CLIEntry --> ListLifecycle : invokes
     CLIEntry --> InstallLifecycle : invokes
     CLIEntry --> UninstallLifecycle : invokes
+    CLIEntry --> FixLifecycle : invokes; no stdout result
     SearchLifecycle --> SearchResult : returns
     ListLifecycle --> ListResult : returns
     ListLifecycle --> PartialListError : may return with result

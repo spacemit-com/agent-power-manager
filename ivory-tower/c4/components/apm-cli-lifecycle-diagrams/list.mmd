@@ -1,28 +1,27 @@
 flowchart TD
-    ListStart([CLI 已解析/校验 List 参数]) --> ListInstalled{指定 --installed?}
-    ListInstalled -->|否：Cloud| CloudList[Cloud List：无锁、无 Recover、无 Registry/Config]
-    CloudList -->|失败| CloudFail[返回 fatal error：不渲染业务输出]
-    CloudList -->|成功| CloudCompute[按可选 type 过滤；Type/Name/Version 排序]
-    CloudCompute --> CloudRender[CLI 锁外渲染 `<type>/<name>@<version>`] --> CloudExit([退出])
+    ListStart([CLI 已解析/校验 List 参数]) --> Inspect[无锁 Inspect journal]
+    Inspect -->|无 journal| Debug[可选 Debug]
+    Inspect -->|合法活动 journal| Warn[Warn 并提示 apm fix]
+    Inspect -->|损坏或不可读| Damaged[Warn journal 已损坏]
+    Debug --> ListInstalled{指定 --installed?}
+    Warn --> ListInstalled
+    Damaged --> ListInstalled
 
-    ListInstalled -->|是| Acquire[Acquire 全局 APM 锁]
-    Acquire -->|失败| Fatal[返回 fatal error：不渲染业务输出]
-    Acquire -->|成功| Recover[Recover transaction]
-    Recover -->|失败| ReleaseFatal[尝试 Release]
-    Recover -->|成功| Warn[锁内实时 Warn；无 journal 时 Debug]
-    Warn --> Refresh[RefreshInstalled：复制注册 Agent、按字典序 Detect]
-    Refresh -->|失败| ReleaseFatal
+    ListInstalled -->|否：Cloud| CloudList[Cloud List]
+    CloudList -->|失败| Fatal[返回 fatal error：不渲染业务输出]
+    CloudList -->|成功| CloudCompute[按可选 type 过滤；Type/Name/Version 排序]
+    CloudCompute --> CloudRender[CLI 渲染 `<type>/<name>@<version>`] --> CloudExit([退出])
+
+    ListInstalled -->|是| Refresh[RefreshInstalled：复制注册 Agent、按字典序 Detect]
+    Refresh -->|失败| Fatal
     Refresh -->|成功| Select{具体 Agent 或 all?}
-    Select -->|具体 Agent 不在快照| ReleaseFatal
-    Select -->|具体 Agent| ReadOne[锁内 Config.List]
-    ReadOne -->|失败| ReleaseFatal
-    ReadOne -->|成功| ReleaseSuccess[Release 全局锁]
-    Select -->|all| ReadAll[锁内按快照字典序读取全部 Config]
-    ReadAll --> PartialStore[保留逐 Agent 失败并继续]
-    PartialStore --> ReleaseSuccess
-    ReleaseFatal -->|Release 成功或失败| Fatal
-    ReleaseSuccess -->|失败| Fatal
-    ReleaseSuccess -->|成功| InstalledCompute[锁外按可选 type 过滤并排序]
+    Select -->|具体 Agent 不在快照| Fatal
+    Select -->|具体 Agent| ReadOne[Config.List]
+    ReadOne -->|失败| Fatal
+    ReadOne -->|成功| InstalledCompute[按可选 type 过滤并排序]
+    Select -->|all| ReadAll[按快照字典序读取全部 Config]
+    ReadAll --> PartialStore[保留逐 Agent失败并继续]
+    PartialStore --> InstalledCompute
     InstalledCompute --> HasPartial{存在 all 的读取失败?}
     HasPartial -->|否| InstalledRender[CLI 渲染 `<agent>/<type>/<name>@<version>`] --> InstalledExit([成功退出])
-    HasPartial -->|是| PartialRender[唯一可渲染错误：先渲染成功记录] --> PartialError[CLI 记录一次 partial error、usage、非零退出]
+    HasPartial -->|是| PartialRender[先渲染成功记录] --> PartialError[CLI 记录一次 partial error、usage、非零退出]

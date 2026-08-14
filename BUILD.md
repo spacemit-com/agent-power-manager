@@ -74,6 +74,8 @@ gofmt -w cmd internal
 ./apm uninstall foo-before-summary --agent all --type skill
 ./apm uninstall filesystem --agent hermes-agent --type mcp
 ./apm uninstall demo-plugin --agent claude-code --type plugin
+./apm fix
+./apm --verbose fix
 ```
 
 Search 已实现：它按名称搜索 Cloud Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
@@ -82,21 +84,34 @@ Search 已实现：它按名称搜索 Cloud Power，为每个类别和名称选�
 skill/foo-before-summary@v0.0.1
 ```
 
-Search 只接受可选的 `--type`，不接受 `--agent`。全局选项 `--verbose` 输出解析和恢复诊断到标准错误；帮助信息可查看每个子命令支持的参数。
+Search 只接受可选的 `--type`，不接受 `--agent`。全局选项 `--verbose` 输出解析和 journal 检查诊断到标准错误；帮助信息可查看每个子命令支持的参数。
 
-List 已实现两种独立模式（命令与锁边界见 [ADR-002](ivory-tower/adr/ADR-002-cli-agent-and-power-type-as-flags.md) 和 [ADR-003](ivory-tower/adr/ADR-003-serialize-lifecycle-and-recover-journal.md)）：默认 Cloud List 不加锁、不 Recover，输出每个版本的精确行：
+Search 与两种 List 在原查询前都会无锁检查唯一活动 journal。合法活动 journal 会在 stderr Warn 并提示 `run apm fix`；journal 损坏或不可读时只 Warn，不附加 Fix 提示，随后继续原只读业务。检查错误不改变原命令的业务结果或退出状态。
+
+List 已实现两种独立模式（命令边界见 [ADR-002](ivory-tower/adr/ADR-002-cli-agent-and-power-type-as-flags.md) 和 [ADR-003](ivory-tower/adr/ADR-003-serialize-lifecycle-and-recover-journal.md)）：默认 Cloud List 在 Inspect 后输出每个版本的精确行：
 
 ```text
 <type>/<name>@<version>
 ```
 
-Installed List 必须同时提供 `--installed --agent=<agent-id|all>`，在成功 Release 后输出精确行：
+Installed List 必须同时提供 `--installed --agent=<agent-id|all>`，无锁刷新 Agent 并读取清单后输出精确行：
 
 ```text
 <agent>/<type>/<name>@<version>
 ```
 
-例如 `./apm list --agent all` 是无效组合：它会非零退出，并在 stderr 报告 `--agent requires --installed` 和 usage。`--agent=all` 的 installed 读取若出现部分失败，会输出成功记录后以非零状态报告错误；fatal 或 Release error 不输出业务行。已安装清单版本必须精确为 `vMAJOR.MINOR.PATCH`，APM 不会迁移或清理非法旧清单（[ADR-007](ivory-tower/adr/ADR-007-use-stateless-config-repository.md)）；Agent 刷新顺序见 [ADR-004](ivory-tower/adr/ADR-004-discover-installed-agents-before-local-operations.md)。
+例如 `./apm list --agent all` 是无效组合：它会非零退出，并在 stderr 报告 `--agent requires --installed` 和 usage。`--agent=all` 的 installed 读取若出现部分失败，会输出成功记录后以非零状态报告错误；fatal error 不输出业务行。已安装清单版本必须精确为 `vMAJOR.MINOR.PATCH`，APM 不会迁移或清理非法旧清单（[ADR-007](ivory-tower/adr/ADR-007-use-stateless-config-repository.md)）；Agent 刷新顺序见 [ADR-004](ivory-tower/adr/ADR-004-discover-installed-agents-before-local-operations.md)。
+
+只读输出是 best-effort 观察，不是全局一致快照：Inspect 前后可能并发创建或恢复 journal，`list --installed --agent=all` 也可能混合不同时间点的完整 manifest，并短暂观察到 target 与 manifest 不匹配。若业务需要全局一致读取，必须另行引入覆盖所有资源的锁或 MVCC；当前命令不提供该保证。
+
+Fix 是显式恢复命令。它不接受位置参数或 Agent/Type 等命令专属选项，在一次全局锁内恰好调用一次 Recover 后退出，stdout 始终为空：
+
+```bash
+./apm fix
+./apm --verbose fix
+```
+
+没有活动 journal 时普通模式静默成功，verbose 模式在 stderr 输出 Debug；恢复成功时输出 `transaction recovered` Warn。损坏、未知或不可读 journal 无法自动修复，Fix 会保留原文件和现场、记录 Error 并非零退出；不要手工删除 journal，除非已人工确认事务状态和数据所有权。
 
 Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名 Cloud 候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、Cloud 和串行 Transaction；Skill 使用 Cache/Staging，MCP 直接读取 Cloud 精确版本定义并调用目标 Agent CLI。Plugin 由 Cloud `GetPlugin` 返回版本化实际名和稳定 marketplace：Codex/Claude 注册或更新 marketplace 后安装，Hermes 才使用 Plugin Cache/Staging 发布目录并 enable。只有成功 Release 后 CLI 才渲染。
 
@@ -128,7 +143,7 @@ stdout 只有两种精确行形式：
 
 MCP 支持 Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互斥结构：本地 stdio 使用 `transport=stdio`、`command`、`args`，远程端点使用 `transport=http`、`url`。Claude Code 固定写入 user scope；所有同名检查、安装、卸载和恢复都通过目标 Agent CLI 完成。CLI 从当前 `PATH` 动态解析，不经 shell，30 秒超时，输出有界；解析或状态不清晰时 fail closed 并保留共享 journal。Hermes 正常 Add/Remove 后按设计不额外执行 list。
 
-Skill、MCP 与 Plugin 共用唯一活动 journal。唯一正式 schema v1 shared envelope 通过 `filesystem`、`agent-cli` 与 `plugin` driver 路由，并且只允许与 driver 匹配的互斥载荷；旧平铺或其他格式返回 `ErrInvalidJournal`，文件原样保留。下一条 Search、installed List、Install 或 Uninstall 会先串行恢复未完成事务。版本边界见 [ADR-011](ivory-tower/adr/ADR-011-reset-journal-schema-before-release.md)，Plugin 架构见 [ADR-012](ivory-tower/adr/ADR-012-manage-versioned-plugins-through-marketplace-and-filesystem.md)。
+Skill、MCP 与 Plugin 共用唯一活动 journal。唯一正式 schema v1 shared envelope 通过 `filesystem`、`agent-cli` 与 `plugin` driver 路由，并且只允许与 driver 匹配的互斥载荷；旧平铺或其他格式返回 `ErrInvalidJournal`，文件原样保留。Search 与两种 List 只告警；Fix、Install 或 Uninstall 才在全局锁内串行恢复未完成事务。版本边界见 [ADR-011](ivory-tower/adr/ADR-011-reset-journal-schema-before-release.md)，Plugin 架构见 [ADR-012](ivory-tower/adr/ADR-012-manage-versioned-plugins-through-marketplace-and-filesystem.md)。
 
 自动化测试绝不能调用真实 Agent CLI。MCP/Plugin 测试应把临时 fake-bin 前置到 `PATH`，将 `APM_HOME`、`XDG_CACHE_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME` 全部指向 `t.TempDir()` 下的隔离路径，并断言每次执行路径都位于 fake-bin。仓库集成测试已按此约束覆盖三个 Agent 的 Plugin 首装、幂等、升级、降级和卸载。
 

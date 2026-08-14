@@ -1,5 +1,7 @@
 # Feature Overview
 
+> **Feature 016 supersession（2026-08-14）：** 本文保留 Feature 008 的历史实现概览。当前 Search 无锁 Inspect journal，合法活动 journal 提示 `apm fix`、损坏 journal Warn 后继续 Cloud 查询；它不获取锁、不 Recover，结果只是 best-effort 观察。当前边界见 [Feature 016](../016-lifecycle-fix/spec.md) 与 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。下文关于锁内 Recover 的目标和验收均已 supersede。
+
 ## Goal
 
 - 特性名称：Lifecycle Search

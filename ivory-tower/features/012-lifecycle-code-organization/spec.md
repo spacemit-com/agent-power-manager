@@ -84,7 +84,7 @@ internal/lifecycle/
 
 ### Search
 
-`search.go` 合并当前 `service.go` 中的 `SearchService`、`NewSearch`、接口断言，以及当前 `search.go` 和 `preflight.go` 的主流程与恢复流程。合并只改变文件归属和声明顺序；Search 仍先锁内 Recover 并同步记录恢复日志，成功 Release 后才查询 Cloud。
+`search.go` 合并当时 `service.go` 中的 `SearchService`、`NewSearch`、接口断言，以及当时 `search.go` 和 `preflight.go` 的主流程与恢复流程。该文件归属记录保持有效；“Search 先锁内 Recover、成功 Release 后查询 Cloud”是已由 Feature 016 supersede 的历史边界，当前 Search 改为无锁 Inspect 后继续 Cloud。
 
 `search_result.go` 由 `search_filter.go` 改名而来，保存 Unicode 大小写折叠、Name 子串匹配、可选精确 Type 过滤、同 Type/Name 最大 SemVer 选择和最终稳定排序。
 
@@ -116,7 +116,7 @@ internal/lifecycle/
 
 中文注释解释业务原因和约束，不逐行翻译代码。至少覆盖以下边界：
 
-- Search：Recover 为什么必须持锁，以及 Cloud 查询为什么必须在 Release 成功后执行；
+- Search（已由 Feature 016 supersede 的历史边界）：当时 Recover 为什么必须持锁，以及 Cloud 查询为什么必须在 Release 成功后执行；
 - List：Cloud 分支为什么无锁，installed 分支的恢复、快照和所有 Config 读取为什么属于同一锁区间，以及为何 Release 成功后才生成可渲染结果；
 - Install：恢复、Agent/Power 解析、Cache/Transaction 和串行批处理为什么处于同一锁区间，首错后为何补齐 unexecuted，以及为何 Release 失败抑制结果；
 - Uninstall：恢复、本地逐 Agent 解析和 Transaction 为什么处于同一锁区间，事实 Warn 为什么实时记录，首错后为何停止，以及为何 Release 成功后才返回汇总。

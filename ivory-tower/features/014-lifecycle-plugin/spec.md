@@ -421,7 +421,7 @@ marketplace deployment 调用完整 selector 的 Remove。filesystem deployment 
 
 ### 恢复规则
 
-每个 Search、installed List、Install 或 Uninstall 的公共预检继续先恢复唯一 journal。恢复根据 driver 路由：
+历史边界（已由 Feature 016 supersede）：本 feature 实现时，Search、installed List、Install 或 Uninstall 的公共预检都会先恢复唯一 journal。当前只有 Fix、Install、Uninstall 锁内 Recover；Search 与两种 List 只无锁 Inspect。恢复根据 driver 路由：
 
 | Plugin 操作/phase | 事实 | 方向 |
 |---|---|---|

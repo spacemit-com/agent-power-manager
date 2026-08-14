@@ -1,0 +1,8 @@
+flowchart TD
+    Start([Search 或 List]) --> Inspect[无锁 Inspect journal]
+    Inspect -->|无 journal| Debug[可选 Debug]
+    Inspect -->|合法活动 journal| Warn[Warn 并提示 apm fix]
+    Inspect -->|损坏或不可读| Damaged[Warn journal 已损坏]
+    Debug --> Continue[继续原只读命令]
+    Warn --> Continue
+    Damaged --> Continue

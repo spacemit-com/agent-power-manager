@@ -1,0 +1,15 @@
+flowchart TD
+    Start([Fix CLI 参数已校验]) --> Acquire[Acquire 全局 APM 锁]
+    Acquire -->|失败| Error[返回错误]
+    Acquire -->|成功| Recover[恰好一次 Recover]
+    Recover -->|恢复成功| Warn[锁内同步 Warn]
+    Recover -->|无 journal| Debug[可选锁内 Debug]
+    Recover -->|失败并保留 journal| RecoverError[保存 recovery error]
+    Warn --> Release[Release]
+    Debug --> Release
+    RecoverError --> Release
+    Release -->|成功且 Recover 成功| ExitOK([退出 0])
+    Release -->|成功且 Recover 失败| Error
+    Release -->|失败| Join[errors.Join recovery 与 release error]
+    Join --> Error
+    Error --> ExitError([非零退出])

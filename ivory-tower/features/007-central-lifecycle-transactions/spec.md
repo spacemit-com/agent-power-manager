@@ -1,5 +1,7 @@
 # 集中式 Lifecycle Transaction 规格
 
+> **Feature 016 supersession（2026-08-14）：** 本文保留 Feature 007 的 Transaction 基础与当时的 lifecycle 预期。当前 Search、默认 List 和 installed List 都只在原只读业务前无锁 `Inspect`，合法活动 journal Warn 并提示 `apm fix`，损坏 journal Warn 后继续；只有 Fix、Install 和 Uninstall 在全局锁内 `Recover`。Fix 每次恰好 Recover 一次。当前权威边界见 [Feature 016](../016-lifecycle-fix/spec.md)、[ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md) 与 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md)。下文所有“四条命令恢复”及 Search/List 锁内 Recover 描述均为已 supersede 的历史设计。
+
 > **当前状态说明（2026-08-12）：** 本 spec 的 filesystem Transaction 行为继续有效，但“journal 只含文件路径、MCP 不在范围”的描述已由 Feature 013 扩展。当前唯一活动 journal 使用类型专属载荷并支持跨 Skill/MCP 命令串行恢复，见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
 
 ## 目标
@@ -10,7 +12,7 @@
 
 > **历史 Install 规则已被 Feature 010 supersede（2026-08-11）：** 本文原来允许“已纳管 Install target 缺失时继续安装”的自愈描述不再是当前契约。现在该分支在生成 transaction ID、创建 journal 或调用 Adapter 前，执行 `ManifestWriter.Remove(agent,type,name)`、清理 canonical staging、返回 `ErrStaleManifest` 并中止。本文 Uninstall target 缺失时继续清单删除的语义保持不变。
 
-> **Feature 007 的 lifecycle 边界已被 Feature 008–011 supersede：** Search 只在 Recover 期间持锁，随后释放锁再查询 Cloud；Cloud List 无锁，installed List 使用自己的 Recover/Refresh/Config 锁区间；Install 在一个锁区间内完成 Recover、刷新、Cloud、Cache 与 serial Transaction；Uninstall 在自己的单锁区间内完成 Recover、刷新、本地清单解析与 serial Transaction；二者都在成功 Release 后由 CLI 渲染结构化结果。本 feature 的 Transaction 公开接口是历史基础，当前 Uninstall 结果接口以 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 为准。
+> **Feature 007 的 lifecycle 边界已被 Feature 008–011、016 supersede：** Feature 008/009 曾引入 Search 与 installed List 锁内 Recover，Feature 016 又将两者修订为无锁 Inspect，并让默认 List 也检查 journal；Fix、Install、Uninstall 才执行锁内 Recover。本 feature 的 Transaction 公开接口是历史基础，当前接口与命令边界以 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 为准。
 
 本设计由 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 记录，并细化 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-007](../../adr/ADR-007-use-stateless-config-repository.md) 和 [ADR-008](../../adr/ADR-008-let-adapters-own-staging-to-installation.md)。
 
@@ -18,7 +20,7 @@
 
 ### Lifecycle（Feature 007 历史边界）
 
-以下列表记录 Feature 007 当时对后续 lifecycle 的预期，已由 Feature 008–011 的命令专属边界 supersede，不能理解为所有当前命令都采用同一锁或直接输出模型：
+以下列表记录 Feature 007 当时对后续 lifecycle 的预期，已由 Feature 008–011、016 的命令专属边界 supersede，不能理解为所有当前命令都采用同一锁或直接输出模型：
 
 - 获取并持有全局 APM 锁；
 - 在每个命令入口调用 transaction 恢复；

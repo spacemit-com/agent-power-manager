@@ -2,7 +2,7 @@
 
 - Status：Accepted
 - Date：2026-08-10
-- Revised：2026-08-12
+- Revised：2026-08-14
 - Decision Makers：liangjunzhao
 
 ## Context
@@ -15,11 +15,13 @@
 
 ## Decision
 
-APM 使用 transaction 高层 Manager 封装 `Recover`、`Install` 和 `Uninstall`。每个 lifecycle 自行定义是否以及何时执行共享状态恢复阶段；选择该阶段时负责持有全局锁并调用 Manager。除该边界外，lifecycle 负责业务预检、版本与 Adapter 解析、Cloud/Cache 和多 Agent 调度；它不直接读写 journal、backup 或 quarantine。transaction 在提交点后调用 Config Repository 的 `Set/Remove`，同时允许 Install 预检在发现陈旧清单时调用单条 `Remove`；该修复不创建 journal。
+APM 使用 transaction 高层 Manager 封装相互分离的 `Inspect`、`Recover`、`Install*` 和 `Uninstall*`。`Inspect` 只读取并校验唯一活动 journal，返回不含 driver payload 和路径的结构化观察结果；它不执行恢复或其他写入。`Recover` 复用同一个私有“一次读取、统一校验”原语，并在同一次读取后继续 driver 路由和收敛，不先调用公开 Inspect，也不重复读取 journal。
 
-唯一活动 journal 集中存放在 APM state 的 `transactions/active.json`。它记录 transaction ID、operation、phase、Agent、新旧 PowerRef、staging 和全部实际事务路径。需要恢复的 lifecycle 在其共享状态锁边界内调用 `Recover`，即可修复上一次事务，无需原命令参数、原 Adapter 实例或相同目标。
+每个 lifecycle 自行选择非变更观察或锁内恢复：Search 与两种 List 只依赖 Inspector 并无锁 Inspect；Fix 只依赖 Recoverer，在锁内 Recover 恰好一次后退出；Install/Uninstall 依赖完整 Manager，在各自共享状态锁边界内 Recover 后继续变更业务。除该边界外，lifecycle 负责业务预检、版本与 Adapter 解析、Cloud/Cache 和多 Agent 调度；它不直接读写 journal、backup 或 quarantine。transaction 在提交点后调用 Config Repository 的 `Set/Remove`，同时允许 Install 预检在发现陈旧清单时调用单条 `Remove`；该修复不创建 journal。
 
-[Feature 008](../features/008-lifecycle-search/feature-overview.md) 已将 Search 接入 Manager：Search 只在锁内执行恢复并记录同步 Warn，释放锁后才查询 Cloud 并把结构化结果交给 CLI 渲染，符合修订后的 ADR-003。Feature 009 已将 List 独立接线：Cloud List 不访问 Manager，installed List 仅在 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 的锁区间调用 `Recover`，再于成功 Release 后交给 CLI 渲染。Feature 010 已将 Install 接入：它在一个锁区间内恢复、刷新、解析、Cache/Cloud 和串行 Transaction，并只在成功 Release 后交给 CLI 渲染。[Feature 011](../features/011-lifecycle-uninstall/feature-overview.md) 已将 Uninstall 接入：它在一个锁区间内恢复、刷新、按 Agent 解析本地清单并串行调用 Transaction，并只在成功 Release 后交给 CLI 渲染。
+唯一活动 journal 集中存放在 APM state 的 `transactions/active.json`。它记录 transaction ID、operation、phase、Agent、新旧 PowerRef、staging 和全部实际事务路径。需要恢复的 Fix/Install/Uninstall 在其共享状态锁边界内调用 `Recover`，即可修复上一次事务，无需原命令参数、原 Adapter 实例或相同目标。Search/List 只观察是否需要恢复，并提示用户运行 `apm fix`。
+
+[Feature 016](../features/016-lifecycle-fix/spec.md) 已修订 Feature 008/009 的恢复边界：Search、默认 List 和 installed List 都在原只读业务前无锁 Inspect，合法活动 journal Warn 并提示 `apm fix`，损坏 journal Warn 后继续；三者均不加锁、不 Recover。Fix 在一次锁区间内 Recover 恰好一次后退出。Feature 010 的 Install 与 [Feature 011](../features/011-lifecycle-uninstall/feature-overview.md) 的 Uninstall 保持原边界：各自在一个锁区间内恢复、刷新和执行串行 Transaction，并只在成功 Release 后交给 CLI 渲染。
 
 backup/quarantine 存放在 target 同一父目录的 `.apm-transactions/<transaction-id>`，集中 journal 记录其绝对路径。该布局同时满足集中发现和同文件系统原子 rename；不使用跨文件系统 copy-delete 代替提交点。
 
@@ -37,13 +39,13 @@ Uninstall lifecycle 按 [ADR-007](ADR-007-use-stateless-config-repository.md) �
 
 Install 的清单有记录而 target 已被用户删除时，Transaction 在生成 transaction ID、创建 journal 或调用 Adapter 前执行 `ManifestWriter.Remove(agent,type,name)`，安全清理 canonical staging，返回 `ErrStaleManifest` 并中止本次命令；它不会自动安装新版本。Uninstall 的 target 缺失语义保持既有的完成清单删除。清单无记录但 target 存在仍是清单外冲突，不覆盖或删除。
 
-Journal 和所有待删除路径在使用前严格校验。损坏、未知版本、越界或不可判定状态 fail closed：保留 journal 和现场，不执行用户命令。
+Journal 和所有待删除路径在使用前严格校验。损坏、未知版本、越界或不可判定状态始终保留 journal 和现场。只读 Inspect 的 lifecycle 记录 damaged Warn 后继续原查询，因为它不会改变共享状态；Fix/Install/Uninstall 的 Recover 则 fail closed，不执行后续修复或写命令业务。
 
 ## Consequences
 
-- 正面影响：恢复入口集中且与当前命令解耦；正常事务和恢复共享提交/回滚规则；lifecycle 无法绕过 journal 顺序；Adapter 发布边界明确；目标内容仍使用同盘原子移动。
-- 代价与风险：集中 journal 仍需记录目标文件系统上的分散事务内容；transaction 依赖清单写接口与 Adapter 最小接口；外部进程仍可能在检查与原子操作之间修改路径；Install 与 Uninstall 的 Manager 接入都选择完整单锁边界，慢 I/O 会延长锁持有时间。
-- 后续动作：Feature 007 已实现 Manager、Journal Store、路径状态和 Adapter 发布结果；Feature 008 已完成 Search 接入与用户恢复日志；Feature 009 已完成 List 接入边界；Feature 010 已完成 Install 接入和陈旧清单修复；Feature 011 已完成 Uninstall 接入与 `TargetMissing` 事实传递。
+- 正面影响：观察与恢复入口集中但职责分离；只读命令不再隐式写状态；正常事务和恢复共享提交/回滚规则；lifecycle 无法绕过写命令的 journal 顺序；Adapter 发布边界明确；目标内容仍使用同盘原子移动。
+- 代价与风险：集中 journal 仍需记录目标文件系统上的分散事务内容；无锁 Inspect 只能提供 best-effort 观察，可能漏掉或过期，installed List 也可能混合跨 Agent manifest 及 target/manifest 窗口；外部进程仍可能在检查与原子操作之间修改路径；Install 与 Uninstall 的完整单锁边界可能延长锁持有时间。
+- 后续动作：Feature 007 已实现 Manager、Journal Store、路径状态和 Adapter 发布结果；Feature 016 已分离 Inspect/Recover 并增加显式 Fix；Feature 010/011 的 Install/Uninstall 恢复与事务边界保持不变。
 
 ## Alternatives Considered
 

@@ -2,7 +2,7 @@
 
 - Status：Accepted
 - Date：2026-08-05
-- Revised：2026-08-12
+- Revised：2026-08-14
 - Decision Makers：liangjunzhao
 
 ## Context
@@ -15,13 +15,15 @@ APM 通过编译期 Adapter Registry 确定已支持的 Agent，但仅知道“�
 
 Adapter Registry 中的 Agent ID 在编译期保证唯一。每个 Adapter 实现 `DetectAgent() (bool, error)`，只检查对应 Agent 根目录（例如 `~/.claude`）是否存在且为目录；目录存在即视为 Agent 已安装，不检查目录是否为空，也不验证配置、可执行文件、Power 子目录或运行状态。
 
-Adapter Registry 提供公共刷新流程：先复制已注册的唯一 Agent ID 列表并按原始字符串字典序排序，再按该顺序逐个调用 `DetectAgent`；成功快照只包含检测为已安装的 Agent，并保持同一字典序。Registry 的内置配置存储顺序不得成为公开检测或返回顺序。快照仅在当前命令内有效、不可变且不持久化。目录不存在是正常的未安装结果；路径存在但不是目录，或发生权限、I/O、路径解析错误时，刷新失败。失败日志必须包含 Agent 和原因，调用方释放全局锁并非零退出，不执行用户原命令。扫描期间进程中断时，内核释放锁，内存快照直接丢弃，下次命令重新扫描。
+Adapter Registry 提供公共刷新流程：先复制已注册的唯一 Agent ID 列表并按原始字符串字典序排序，再按该顺序逐个调用 `DetectAgent`；成功快照只包含检测为已安装的 Agent，并保持同一字典序。Registry 的内置配置存储顺序不得成为公开检测或返回顺序。快照仅在当前命令内有效、不可变且不持久化。目录不存在是正常的未安装结果；路径存在但不是目录，或发生权限、I/O、路径解析错误时，刷新失败。失败日志必须包含 Agent 和原因，调用方非零退出且不执行后续用户业务。扫描期间进程中断时，内存快照直接丢弃，下次命令重新扫描。
 
-公共刷新流程在全局锁内按以下位置调用：
+公共刷新流程按命令自己的共享状态边界调用：
 
-- `list --installed` 在 [ADR-003](ADR-003-serialize-lifecycle-and-recover-journal.md) 定义的锁区间内、Recover 与实时 Warn 后刷新；默认 Cloud `list` 不刷新。
+- `list --installed` 在无锁 Inspect journal 并记录 Warn/Debug 后刷新，不获取全局锁，也不执行 Recover；默认 Cloud `list` 不刷新。
 - 已接线的 `install` 和 `uninstall` 都在各自的单锁 lifecycle 内、Recover 与同步 Warn 之后刷新，并在解析或操作 Power 前固定当前命令的目标快照。
 - `search` 不刷新。
+
+installed List 的快照只是无锁、尽力而为的观测：逐个 `DetectAgent` 之间 Agent 根目录可能被外部创建或删除，随后逐 Agent 读取 manifest 时也可能看到不同时间点。该快照不承诺与 journal、manifest 或 target 构成全局一致时间点。Install/Uninstall 的刷新仍位于各自完整锁区间内，以串行化 APM 自身的恢复和变更；外部进程竞态仍不在保证范围内。
 
 指定具体 `--agent` 时，该 Agent 必须存在于快照，否则返回“未受支持或未安装”错误，由 CLI 统一记录并非零退出。`list --installed --agent=all` 遍历快照，空快照返回空结果并正常退出；`install/uninstall --agent=all` 在空快照时返回“没有已支持且已安装的 Agent”错误并非零退出，非空时按快照中的 Agent ID 升序串行执行。
 
@@ -30,7 +32,7 @@ Agent discovery 与 Power 类型无关：每条相关命令只刷新一次 Agent
 ## Consequences
 
 - 正面影响：APM 能在每次本地 Power 操作前响应 Agent 的外部安装或卸载，避免向未安装 Agent 写入 Power；快照不持久化，不会引入第二份易过期状态。
-- 代价与风险：相关命令每次都需要扫描全部注册 Agent；根目录存在只代表 Agent 已安装，不保证安装完整或运行正常；快照生成后发生的外部变化要到下一条命令才能感知。
+- 代价与风险：相关命令每次都需要扫描全部注册 Agent；根目录存在只代表 Agent 已安装，不保证安装完整或运行正常；installed List 的无锁快照可能混合不同检测时点，快照生成后发生的外部变化也要到下一条命令才能感知。
 - 后续动作：在 Adapter Registry 与 Core Lifecycle 类图、公共 Agent discovery 流程图、list/install/uninstall 生命周期、C4 properties 和项目概览中引用并表达本决策。
 
 ## Alternatives Considered

@@ -1,8 +1,8 @@
 flowchart TD
-    Start([需要共享状态的命令]) --> Lock[Acquire 全局 APM 锁]
-    Lock --> Inspect[Inspect 唯一 transactions/active.json]
-    Inspect -->|无 journal| Resume[继续当前命令]
-    Inspect -->|schema v1 shared envelope| Driver{driver}
+    Start([Fix / Install / Uninstall]) --> Lock[Acquire 全局 APM 锁]
+    Lock --> Recover[Recover：读取并校验唯一 transactions/active.json]
+    Recover -->|无 journal| Debug[可选锁内 Debug]
+    Recover -->|schema v1 shared envelope| Driver{driver}
     Driver -->|filesystem| FS[filesystem Skill 恢复]
     Driver -->|agent-cli| CLI[按 journal Agent ResolveMCP]
     Driver -->|plugin| Plugin[按 journal Agent ResolvePlugin]
@@ -13,9 +13,12 @@ flowchart TD
     InspectPlugin --> Converge
     Converge --> Delete[收敛后删除同一个 journal]
     Delete --> Warn[锁内同步恢复 Warn]
-    Warn --> Resume
-    Inspect -->|其他格式或非法 driver/payload| Fail[ErrInvalidJournal；原样保留 journal]
+    Debug --> Command{当前命令}
+    Warn --> Command
+    Command -->|Fix| FixRelease[Release 后退出]
+    Command -->|Install / Uninstall| Business[继续锁内变更业务，完成后 Release]
+    Recover -->|其他格式或非法 driver/payload| Fail[ErrInvalidJournal；原样保留 journal]
     InspectMCP -->|CLI/输出不确定| Fail
     InspectPlugin -->|CLI/路径不确定| Fail
     Converge -->|失败或不确定| Fail
-    Fail --> Release[Release 并阻止当前业务]
+    Fail --> ErrorRelease[Release 并阻止当前业务]

@@ -355,8 +355,8 @@ Uninstall factory 在 CLI 预解析 `--verbose` 并安装默认 logger 后创建
 
 本 feature 不修改 Search、List、Install 的生产 lifecycle、CLI 结果接口或业务流程：
 
-- Search 仍只通过 Manager 调用 Recover；
-- installed List 仍只通过 Manager 调用 Recover，Cloud List 仍不访问共享状态；
+- 历史边界（已由 Feature 016 supersede）：Search 当时只通过 Manager 调用 Recover；当前改为无锁 Inspect。
+- 历史边界（已由 Feature 016 supersede）：installed List 当时只通过 Manager 调用 Recover，Cloud List 不访问共享状态；当前两种 List 都无锁 Inspect，且不 Recover。
 - Install 仍通过 Manager 调用 Recover 和 Install。
 
 `transaction.Manager.Uninstall` 签名改变后，三个既有 lifecycle 测试中的 fake/stub 因实现完整 Manager 接口而需要返回零值 `transaction.UninstallResult`。这是编译兼容性的机械调整，不改变其测试场景或生产代码。

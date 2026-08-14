@@ -1,5 +1,7 @@
 # Lifecycle List 规格
 
+> **Feature 016 supersession（2026-08-14）：** 本文记录 Feature 009 当时 installed List 锁内 Recover/Refresh/Config/Release 的设计，该边界已经 supersede。当前默认 List 与 installed List 都先无锁 `Inspect` journal：合法活动 journal Warn 并提示 `run apm fix`，损坏或不可读 journal Warn 后继续；两种模式均不获取锁、不 Recover。installed List 随后无锁 Refresh 并逐 Agent 读取 manifest，结果是 best-effort、可能跨 Agent 混合时间点的观察，不存在 Release gate。当前规格见 [Feature 016](../016-lifecycle-fix/spec.md) 与 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)；下文相关锁内流程与验收仅代表历史 Feature 009 基线。
+
 ## 目标
 
 完成 `list` 的 lifecycle 与 CLI 接线，并明确 Cloud 列表与本地已安装列表的不同共享状态边界：默认 Cloud 列表不获取全局锁、不执行 transaction 恢复；`list --installed` 在全局锁内完成恢复、Agent 刷新和清单读取，释放锁后再过滤、排序和渲染。

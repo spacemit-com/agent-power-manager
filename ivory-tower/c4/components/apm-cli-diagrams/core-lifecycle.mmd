@@ -1,5 +1,5 @@
 classDiagram
-    note for SearchLifecycle "Search：Recover 后 Release，再查询 Cloud；返回结构化结果"
+    note for SearchLifecycle "Search：无锁 Inspect journal，Warn/Debug 后继续 Cloud；返回结构化结果"
     class SearchLifecycle {
         <<interface>>
         +Search(Context, Flags) (SearchResult, error)
@@ -11,7 +11,7 @@ classDiagram
         +Search(...)
     }
 
-    note for ListLifecycle "List：Cloud 无锁；installed 成功 Release 后才返回可渲染结果"
+    note for ListLifecycle "默认/installed 都无锁 Inspect；installed 的 Refresh 与 Config reads 是 best-effort 观察"
     class ListLifecycle {
         <<interface>>
         +List(Context, Flags) (ListResult, error)
@@ -24,6 +24,15 @@ classDiagram
     }
     class listService {
         +List(...)
+    }
+
+    note for FixLifecycle "Fix：一次锁内恰好 Recover 一次；同步 Warn/Debug 后 Release；无 stdout 结果"
+    class FixLifecycle {
+        <<interface>>
+        +Fix(Context) error
+    }
+    class fixService {
+        +Fix(Context) error
     }
 
     note for InstallLifecycle "Install 专属端口；只有成功 Release 的 batch error 可保留结果"
@@ -97,17 +106,28 @@ classDiagram
         +Set(AgentID, PowerRef) error
         +Remove(AgentID, PowerType, name) error
     }
-    note for TransactionManager "唯一 schema v1 shared envelope；filesystem/agent-cli/plugin driver 可跨命令串行恢复；其他格式 ErrInvalidJournal 并保留（ADR-010/011/012）"
+    note for TransactionManager "Inspect 只读统一校验；Recover 复用同次读取继续 driver 收敛。唯一 schema v1 shared envelope；非法格式保留"
     class TransactionManager {
         <<interface>>
+        +Inspect(Context) (InspectionResult, error)
         +Recover(Context) (RecoveryResult, error)
-        +Install(Context, InstallRequest) error
+        +InstallSkill(Context, SkillInstallRequest) error
         +InstallMCP(Context, MCPInstallRequest) error
-        +Uninstall(Context, UninstallRequest) (TransactionUninstallResult, error)
+        +InstallPlugin(Context, PluginInstallRequest) error
+        +UninstallSkill(Context, SkillUninstallRequest) (TransactionUninstallResult, error)
         +UninstallMCP(Context, MCPUninstallRequest) (TransactionUninstallResult, error)
+        +UninstallPlugin(Context, PluginUninstallRequest) (TransactionUninstallResult, error)
     }
     class TransactionUninstallResult {
         +TargetMissing bool
+    }
+    class InspectionResult {
+        +Active bool
+        +TransactionID string
+        +Operation Operation
+        +Agent AgentID
+        +Power PowerRef
+        +OriginalPhase Phase
     }
     class Locker {
         <<interface>>
@@ -130,24 +150,26 @@ classDiagram
 
     searchService ..|> SearchLifecycle
     searchService --> SearchResult : returns
-    searchService --> TransactionManager : Recover
-    searchService --> Locker
+    searchService --> TransactionManager : Inspect only
     searchService --> CloudClient
 
     listService ..|> ListLifecycle
     listService --> ListResult : returns
-    listService --> PartialListError : successful Release only
+    listService --> PartialListError : all-mode Config failures
     listService --> AdapterRegistry : installed only
     listService --> ConfigRepository : installed only
-    listService --> TransactionManager : Recover, installed only
-    listService --> Locker : installed only
+    listService --> TransactionManager : Inspect only, both modes
     listService --> CloudClient : Cloud only
+
+    fixService ..|> FixLifecycle
+    fixService --> Locker : one lock interval
+    fixService --> TransactionManager : Recover exactly once
 
     installService ..|> InstallLifecycle
     installService --> InstallResult : returns
     installService --> InstallBatchError : successful Release only
     installService --> Locker : one lock interval
-    installService --> TransactionManager : Recover / Install / InstallMCP
+    installService --> TransactionManager : Recover / InstallSkill / InstallMCP / InstallPlugin
     installService --> CloudClient : List / Skill Get / MCP GetMCP / Plugin GetPlugin
     installService --> PowerCache : Skill Fetch only
     installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
@@ -158,7 +180,7 @@ classDiagram
     uninstallService --> UninstallResult : returns after Release
     uninstallService --> UninstallBatchError : successful Release only
     uninstallService --> Locker : one lock interval
-    uninstallService --> TransactionManager : Recover / Uninstall / UninstallMCP
+    uninstallService --> TransactionManager : Recover / UninstallSkill / UninstallMCP / UninstallPlugin
     uninstallService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
     uninstallService --> ConfigRepository : List
     uninstallService --> CloudClient : MCP GetMCP only when present
@@ -168,4 +190,5 @@ classDiagram
     Adapter --> AdapterInstallResult : Install returns
     TransactionManager --> Adapter : TargetPath / Install
     TransactionManager --> TransactionUninstallResult : returns
+    TransactionManager --> InspectionResult : Inspect returns
     TransactionManager --> ConfigRepository : Set / Remove

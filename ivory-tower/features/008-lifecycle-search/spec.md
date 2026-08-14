@@ -1,5 +1,7 @@
 # Lifecycle Search 规格
 
+> **Feature 016 supersession（2026-08-14）：** 本文记录 Feature 008 当时的 Search 锁内 Recover 设计，该恢复与锁语义已经 supersede。当前 Search 在 Cloud 查询前只做无锁 `Inspect`：无 journal 时可 Debug，合法活动 journal 时 Warn 并提示 `run apm fix`，损坏或不可读 journal 时 Warn；所有检查结果都继续原 Search 业务。Search 不依赖 Locker/Recoverer，不承诺全局一致快照。当前规格见 [Feature 016](../016-lifecycle-fix/spec.md) 与 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)；下文锁内 Recover、Release gate 和恢复成功 Warn 均只代表历史 Feature 008 验收基线。
+
 ## 目标
 
 完成 `search` 的 lifecycle 与 CLI 接线。Search 在锁内恢复唯一活动 transaction，恢复成功时实时记录结构化 Warn；随后立即解锁，在锁外查询 Cloud、筛选匹配项、为每个 Power 选择最新版本并返回结构化结果。CLI 只在 lifecycle 返回后渲染业务结果。

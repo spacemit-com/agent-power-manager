@@ -1,16 +1,13 @@
 flowchart TD
     SearchStart([Search CLI]) --> SearchValidate[校验 keyword 与可选 type]
     SearchValidate -->|失败| SearchCLIError[CLI 记录一次 Error、打印 usage] --> SearchExitError([非零退出])
-    SearchValidate -->|成功| SearchAcquire[获取全局 APM 锁]
-    SearchAcquire -->|失败| SearchCLIError
-    SearchAcquire -->|成功| SearchRecover[TransactionManager.Recover]
-    SearchRecover -->|恢复成功| SearchWarn[锁内同步 Warn]
-    SearchRecover -->|无活动 journal| SearchDebug[可选锁内 Debug]
-    SearchWarn --> SearchRelease[释放锁]
-    SearchDebug --> SearchRelease
-    SearchRecover -->|失败| SearchAttemptRelease[尝试释放锁] --> SearchCLIError
-    SearchRelease -->|失败| SearchCLIError
-    SearchRelease -->|成功| SearchCloudList[Cloud List]
+    SearchValidate -->|成功| Inspect[无锁 Inspect journal]
+    Inspect -->|无 journal| Debug[可选 Debug]
+    Inspect -->|合法活动 journal| Warn[Warn 并提示 apm fix]
+    Inspect -->|损坏或不可读| Damaged[Warn journal 已损坏]
+    Debug --> SearchCloudList[继续 Cloud List]
+    Warn --> SearchCloudList
+    Damaged --> SearchCloudList
     SearchCloudList -->|失败| SearchCLIError
     SearchCloudList -->|成功| SearchFilter[按名称 fold 和可选 type 筛选]
     SearchFilter --> SearchLatest[每个 Type/Name 选择最新 SemVer]

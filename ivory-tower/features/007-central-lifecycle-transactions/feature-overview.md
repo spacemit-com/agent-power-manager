@@ -1,5 +1,7 @@
 # Feature Overview
 
+> **Feature 016 supersession（2026-08-14）：** 本文保留 Feature 007 的历史范围。当前 Search、默认 List 与 installed List 只无锁 `Inspect` journal 并在 Warn/Debug 后继续只读业务；Fix、Install、Uninstall 才在锁内 `Recover`，其中 Fix 恰好 Recover 一次。损坏 journal 不阻断只读命令，但 Fix/写命令仍 fail closed。当前边界见 [Feature 016](../016-lifecycle-fix/spec.md) 与 [ADR-003](../../adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。
+
 > **当前状态说明（2026-08-13）：** 本文保留 Feature 007 文件系统事务的历史范围。Feature 013 当前使用唯一 schema v1 shared envelope，以 `filesystem`/`agent-cli` driver 和互斥载荷并列恢复 Skill 与 MCP；其他格式返回 `ErrInvalidJournal` 并原样保留。见 [Feature 013](../013-agent-mcp-adapters/spec.md)、[ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md) 与 [ADR-011](../../adr/ADR-011-reset-journal-schema-before-release.md)。
 
 ## Goal
@@ -10,7 +12,7 @@
 
 > **历史 Install 规则已被修订（2026-08-11）：** Feature 010 取代“已纳管 Install target 缺失时直接安装”的自愈规则。当前 Install 只移除对应清单项、清理 canonical staging、返回 `ErrStaleManifest` 并中止，且不创建 journal 或调用 Adapter。Uninstall 的 target 缺失语义不变。
 
-> **Feature 007 的 lifecycle 边界是历史记录：** 本 feature 当时不接线 lifecycle/CLI，并预期四个命令在锁内恢复。该通用预期已被 Feature 008–011 取代：Search 只为 Recover 持锁后查询 Cloud，Cloud List 无锁、installed List 使用自己的锁区间，Install 和 Uninstall 各使用一个完整锁区间并由 CLI 渲染结构化结果。本文的 Uninstall transaction 契约是 Feature 011 接线的历史基础，当前结构化 `TargetMissing` 返回以 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 为准。
+> **Feature 007 的 lifecycle 边界是历史记录：** 本 feature 当时不接线 lifecycle/CLI，并预期四个命令在锁内恢复。Feature 008/009 曾建立 Search 与 installed List 的锁内 Recover，Feature 016 已再次取代该边界：三种只读查询均无锁 Inspect，Fix/Install/Uninstall 才锁内 Recover。本文的 Uninstall transaction 契约是 Feature 011 接线的历史基础，当前结构化 `TargetMissing` 返回以 [ADR-009](../../adr/ADR-009-centralize-lifecycle-transactions.md) 为准。
 
 ## Scope
 
