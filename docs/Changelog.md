@@ -2,6 +2,34 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-14
+
+分类：其他
+
+用户需求：
+
+在不改变 Skill、MCP、Plugin 现有实现和业务流程的前提下，统一 Power 与 Agent 的代码文件布局、接口名称和职责边界；公共 Agent CLI 执行设施保持为单包内独立的 `cli_runner`，主要接口与业务流程补充中文注释，并使结构便于后续新增 Power 类型和 Agent 适配。
+
+相关提交：
+
+- `5b50685 docs(refactor): specify code structure normalization`
+- `9ba0675 docs(refactor): plan structure normalization`
+- `9c5f869 refactor(adapter): name skill contract explicitly`
+- `2485476 refactor(adapter): align power and agent layout`
+- `8c11720 refactor(resource): expose power-specific cloud and cache operations`
+- `ebe758a refactor(lifecycle): align power handlers`
+- `3182992 refactor(transaction): name skill driver explicitly`
+- `52b425f refactor(transaction): separate driver validation`
+- `849ec90 fix(refactor): complete accepted structure layout`
+
+解决方案或完成结果：
+
+Adapter 保持单包并形成 Skill/MCP/Plugin 并列契约和 Codex/Claude/Hermes Agent×Power 文件矩阵，公共 CLI runner 独立承载进程调用；Agent 注册改为声明式 profile，检测职责收归 Registry。Cloud、Cache、Lifecycle 和 Transaction 分别改为类型显式的资源接口、命令优先处理器及 driver 优先恢复布局，删除未使用的通用 Result，并为主要接口、加锁边界、安装卸载流程、恢复和校验补充简要中文注释。重构保留既有 manifest、journal schema v1、事务阶段、恢复顺序、CLI 参数和错误语义；本次未引入新的架构决策，因此未新增 ADR，也未改动 C4、BUILD 或项目概览。
+
+验证结果或限制：
+
+`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`go build -o <temp>/apm ./cmd/apm`、`git diff --check` 均以退出码 0 完成。MCP/Plugin lifecycle 隔离集成测试覆盖 Codex、Claude Code 和 Hermes Agent，CLI 均来自 `t.TempDir()` 下的 fake-bin，测试后工作树保持干净，未调用或修改真实 Agent 环境。代码复审确认 443 个测试函数保持不变，且无 Critical/Important 问题。
+
 ## 2026-08-13
 
 分类：新增功能
