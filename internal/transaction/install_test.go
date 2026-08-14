@@ -95,18 +95,18 @@ func (w *recordingManifestWriter) Remove(agent domain.AgentID, powerType domain.
 type recordingAdapter struct {
 	target    string
 	events    *[]string
-	result    adapter.InstallResult
+	result    adapter.SkillInstallResult
 	err       error
 	onInstall func() error
 }
 
 func (a *recordingAdapter) DetectAgent() (bool, error)                 { return true, nil }
 func (a *recordingAdapter) TargetPath(domain.PowerRef) (string, error) { return a.target, nil }
-func (a *recordingAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
+func (a *recordingAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
 	*a.events = append(*a.events, "adapter:install")
 	if a.onInstall != nil {
 		if err := a.onInstall(); err != nil {
-			return adapter.InstallResult{}, err
+			return adapter.SkillInstallResult{}, err
 		}
 	}
 	return a.result, a.err
@@ -139,7 +139,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 	fixture := &installFixture{t: t, target: target, staging: staging}
 	fixture.journals = &recordingJournalStore{events: &fixture.events, fail: map[string]error{}}
 	fixture.manifests = &recordingManifestWriter{events: &fixture.events}
-	fixture.adapter = &recordingAdapter{target: target, events: &fixture.events, result: adapter.InstallResult{Published: true}}
+	fixture.adapter = &recordingAdapter{target: target, events: &fixture.events, result: adapter.SkillInstallResult{Published: true}}
 	fixture.adapter.onInstall = func() error {
 		if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
 			return errors.New("target is not empty before adapter")
@@ -283,7 +283,7 @@ func TestInstallPrePublicationFailureRestoresBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	installErr := errors.New("adapter failed")
-	fixture.adapter.result = adapter.InstallResult{}
+	fixture.adapter.result = adapter.SkillInstallResult{}
 	fixture.adapter.err = installErr
 	fixture.adapter.onInstall = nil
 
@@ -334,7 +334,7 @@ func TestInstallManifestFailurePreservesCommittingJournal(t *testing.T) {
 
 func TestInstallRejectsAdapterSuccessWithoutPublication(t *testing.T) {
 	fixture := newInstallFixture(t)
-	fixture.adapter.result = adapter.InstallResult{}
+	fixture.adapter.result = adapter.SkillInstallResult{}
 	fixture.adapter.onInstall = nil
 	err := fixture.service.Install(context.Background(), fixture.request)
 	if !errors.Is(err, ErrInvalidRequest) {
@@ -352,7 +352,7 @@ func TestInstallRollbackDirectionFailureDoesNotRestoreUnderPublishing(t *testing
 	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fixture.adapter.result = adapter.InstallResult{}
+	fixture.adapter.result = adapter.SkillInstallResult{}
 	fixture.adapter.err = errors.New("adapter failed")
 	fixture.adapter.onInstall = nil
 	phaseErr := errors.New("rolling-back update failed")
@@ -454,7 +454,7 @@ func TestInstallRestoreFailurePreservesRollingBackJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapterErr := errors.New("adapter failed")
-	fixture.adapter.result = adapter.InstallResult{}
+	fixture.adapter.result = adapter.SkillInstallResult{}
 	fixture.adapter.err = adapterErr
 	fixture.adapter.onInstall = nil
 	restoreErr := errors.New("restore failed")
@@ -617,7 +617,7 @@ func assertEventSubsequence(t *testing.T, got, want []string) {
 func TestRecordingManifestWriterShape(t *testing.T) {
 	var _ ManifestWriter = (*recordingManifestWriter)(nil)
 	var _ JournalStore = (*recordingJournalStore)(nil)
-	var _ adapter.Adapter = (*recordingAdapter)(nil)
+	var _ adapter.SkillAdapter = (*recordingAdapter)(nil)
 	if reflect.TypeOf((*Manager)(nil)).Elem().NumMethod() < 4 {
 		t.Fatal("Manager contract is incomplete")
 	}

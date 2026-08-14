@@ -43,7 +43,7 @@ func (a *skillAdapter) TargetPath(ref domain.PowerRef) (string, error) {
 }
 
 // Install 从公共 staging 复制并原子发布指定 Skill，随后清理 staging。
-func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (result InstallResult, resultErr error) {
+func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (result SkillInstallResult, resultErr error) {
 	stagingRoot, err := validateStagingIdentity(staging)
 	if err != nil {
 		return result, a.installError(ref, "staging", staging, err)
@@ -231,4 +231,4 @@ func ensureSkillsRoot(skillsRoot string) error {
 	return nil
 }
 
-var _ Adapter = (*skillAdapter)(nil)
+var _ SkillAdapter = (*skillAdapter)(nil)

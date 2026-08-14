@@ -38,16 +38,16 @@ func (*nilPluginValidationAdapter) TargetPath(string) (string, error) { return "
 
 func (*nilValidationAdapter) DetectAgent() (bool, error)                 { return false, nil }
 func (*nilValidationAdapter) TargetPath(domain.PowerRef) (string, error) { return "", nil }
-func (*nilValidationAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
-	return adapter.InstallResult{}, nil
+func (*nilValidationAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
+	return adapter.SkillInstallResult{}, nil
 }
 
 func (a validationAdapter) DetectAgent() (bool, error) { return true, nil }
 func (a validationAdapter) TargetPath(domain.PowerRef) (string, error) {
 	return a.target, nil
 }
-func (a validationAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
-	return adapter.InstallResult{Published: true}, nil
+func (a validationAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
+	return adapter.SkillInstallResult{Published: true}, nil
 }
 
 func TestValidateInstallRequest(t *testing.T) {

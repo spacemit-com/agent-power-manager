@@ -109,7 +109,7 @@ type listFakeRegistry struct {
 	fixture *listFixture
 }
 
-func (*listFakeRegistry) ResolveSkill(domain.AgentID) (adapter.Adapter, error) {
+func (*listFakeRegistry) ResolveSkill(domain.AgentID) (adapter.SkillAdapter, error) {
 	return nil, nil
 }
 func (*listFakeRegistry) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) { return nil, nil }

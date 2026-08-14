@@ -385,4 +385,4 @@ func TestUninstallInitialCancellationReportsNoMissingFact(t *testing.T) {
 	}
 }
 
-var _ adapter.Adapter = (*recordingAdapter)(nil)
+var _ adapter.SkillAdapter = (*recordingAdapter)(nil)

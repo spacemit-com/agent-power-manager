@@ -25,8 +25,8 @@ func (a recordingDetectAdapter) DetectAgent() (bool, error) {
 
 func (recordingDetectAdapter) TargetPath(domain.PowerRef) (string, error) { return "", nil }
 
-func (recordingDetectAdapter) Install(domain.PowerRef, string) (InstallResult, error) {
-	return InstallResult{}, nil
+func (recordingDetectAdapter) Install(domain.PowerRef, string) (SkillInstallResult, error) {
+	return SkillInstallResult{}, nil
 }
 
 func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentIDOrder(t *testing.T) {
@@ -76,7 +76,7 @@ func TestRegistryRefreshInstalledSortsDetectionAndSnapshotByAgentID(t *testing.T
 	registration := []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode}
 	registry := &Registry{
 		ordered:      slices.Clone(registration),
-		skillByAgent: map[domain.AgentID]Adapter{},
+		skillByAgent: map[domain.AgentID]SkillAdapter{},
 	}
 	for _, agent := range registry.ordered {
 		registry.skillByAgent[agent] = recordingDetectAdapter{agent: agent, calls: &calls, found: agent != domain.AgentCodex}
@@ -101,7 +101,7 @@ func TestRegistryRefreshInstalledStopsAfterFirstDetectionError(t *testing.T) {
 	detectErr := errors.New("permission denied")
 	registry := &Registry{
 		ordered:      []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode},
-		skillByAgent: map[domain.AgentID]Adapter{},
+		skillByAgent: map[domain.AgentID]SkillAdapter{},
 	}
 	for _, agent := range registry.ordered {
 		adapter := recordingDetectAdapter{agent: agent, calls: &calls, found: true}

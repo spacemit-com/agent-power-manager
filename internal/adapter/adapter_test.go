@@ -13,12 +13,12 @@ func (contractAdapter) DetectAgent() (bool, error) { return true, nil }
 
 func (contractAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
 
-func (contractAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
-	return adapter.InstallResult{Published: true}, nil
+func (contractAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
+	return adapter.SkillInstallResult{Published: true}, nil
 }
 
 func TestAdapterContractAndErrors(t *testing.T) {
-	var _ adapter.Adapter = contractAdapter{}
+	var _ adapter.SkillAdapter = contractAdapter{}
 	for _, err := range []error{
 		adapter.ErrAgentNotInstalled,
 		adapter.ErrUnsupportedAdapter,

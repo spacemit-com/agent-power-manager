@@ -43,7 +43,7 @@ type InstallRequest struct {
 	Power       domain.PowerRef
 	Previous    *domain.PowerRef
 	StagingRoot string
-	Adapter     adapter.Adapter
+	Adapter     adapter.SkillAdapter
 }
 
 // MCPInstallRequest 描述单个 Agent 的 MCP 安装或版本切换输入；定义允许为空以支持无副作用的冲突和漂移复查。
@@ -60,7 +60,7 @@ type MCPInstallRequest struct {
 type UninstallRequest struct {
 	Agent   domain.AgentID
 	Power   domain.PowerRef
-	Adapter adapter.Adapter
+	Adapter adapter.SkillAdapter
 }
 
 // MCPUninstallRequest 描述单个 Agent 的 MCP 卸载输入；Server 仅在 CLI 确认注册存在时必需。

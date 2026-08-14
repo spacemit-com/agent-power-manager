@@ -10,7 +10,7 @@ import (
 // Registry 按内置配置顺序保存类型专属适配器。
 type Registry struct {
 	ordered       []domain.AgentID
-	skillByAgent  map[domain.AgentID]Adapter
+	skillByAgent  map[domain.AgentID]SkillAdapter
 	mcpByAgent    map[domain.AgentID]MCPAdapter
 	pluginByAgent map[domain.AgentID]PluginAdapter
 }
@@ -19,7 +19,7 @@ type Registry struct {
 func NewRegistry() *Registry {
 	registry := &Registry{
 		ordered:       make([]domain.AgentID, 0, len(builtInAgentConfigs)),
-		skillByAgent:  make(map[domain.AgentID]Adapter, len(builtInAgentConfigs)),
+		skillByAgent:  make(map[domain.AgentID]SkillAdapter, len(builtInAgentConfigs)),
 		mcpByAgent:    make(map[domain.AgentID]MCPAdapter, len(builtInAgentConfigs)),
 		pluginByAgent: make(map[domain.AgentID]PluginAdapter, len(builtInAgentConfigs)),
 	}
@@ -52,7 +52,7 @@ func (r *Registry) ResolvePlugin(agent domain.AgentID) (PluginAdapter, error) {
 }
 
 // ResolveSkill 解析指定智能体的文件型 Skill Adapter。
-func (r *Registry) ResolveSkill(agent domain.AgentID) (Adapter, error) {
+func (r *Registry) ResolveSkill(agent domain.AgentID) (SkillAdapter, error) {
 	adapter, ok := r.skillByAgent[agent]
 	if !ok {
 		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, domain.PowerTypeSkill, ErrUnsupportedAdapter)

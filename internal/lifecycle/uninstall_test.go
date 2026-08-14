@@ -133,7 +133,7 @@ type uninstallFakeRegistry struct {
 	fixture *uninstallFixture
 }
 
-func (r *uninstallFakeRegistry) ResolveSkill(agent domain.AgentID) (adapter.Adapter, error) {
+func (r *uninstallFakeRegistry) ResolveSkill(agent domain.AgentID) (adapter.SkillAdapter, error) {
 	recordUninstallEvent(r.calls, r.fixture, "resolve:"+string(agent))
 	return uninstallFakeAdapter{}, r.fixture.resolveErrors[agent]
 }
@@ -157,8 +157,8 @@ func (uninstallFakeAdapter) DetectAgent() (bool, error) { return true, nil }
 
 func (uninstallFakeAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
 
-func (uninstallFakeAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
-	return adapter.InstallResult{Published: true}, nil
+func (uninstallFakeAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
+	return adapter.SkillInstallResult{Published: true}, nil
 }
 
 type uninstallFakeMCPAdapter struct {

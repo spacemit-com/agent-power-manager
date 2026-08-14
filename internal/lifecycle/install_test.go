@@ -171,7 +171,7 @@ type installFakeRegistry struct {
 	fixture *installFixture
 }
 
-func (r *installFakeRegistry) ResolveSkill(agent domain.AgentID) (adapter.Adapter, error) {
+func (r *installFakeRegistry) ResolveSkill(agent domain.AgentID) (adapter.SkillAdapter, error) {
 	r.fixture.currentAgent = agent
 	*r.calls = append(*r.calls, "resolve:"+string(agent))
 	return installFakeAdapter{}, r.fixture.resolveErrors[agent]
@@ -202,8 +202,8 @@ func (installFakeAdapter) DetectAgent() (bool, error) { return true, nil }
 
 func (installFakeAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
 
-func (installFakeAdapter) Install(domain.PowerRef, string) (adapter.InstallResult, error) {
-	return adapter.InstallResult{Published: true}, nil
+func (installFakeAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
+	return adapter.SkillInstallResult{Published: true}, nil
 }
 
 type installFakeMCPAdapter struct {

@@ -3,14 +3,14 @@ package adapter
 
 import "apm/internal/domain"
 
-// InstallResult 报告 Adapter 安装是否已经越过原子发布提交点。
-type InstallResult struct {
+// SkillInstallResult 报告 Skill Adapter 安装是否已经越过原子发布提交点。
+type SkillInstallResult struct {
 	Published bool
 }
 
-// Adapter 定义智能体 Skill 安装操作。
-type Adapter interface {
+// SkillAdapter 定义智能体的文件型 Skill 安装操作。
+type SkillAdapter interface {
 	DetectAgent() (bool, error)
 	TargetPath(domain.PowerRef) (string, error)
-	Install(domain.PowerRef, string) (InstallResult, error)
+	Install(domain.PowerRef, string) (SkillInstallResult, error)
 }
