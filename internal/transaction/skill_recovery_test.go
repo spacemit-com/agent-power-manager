@@ -243,6 +243,9 @@ func TestRecoverDirectionUpdateFailurePreservesArtifacts(t *testing.T) {
 	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, recording.fail["update:rolling-back"]) || result.Recovered {
 		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
+	if recording.inspectCalls != 1 {
+		t.Fatalf("journal Inspect calls = %d, want 1", recording.inspectCalls)
+	}
 	if _, statErr := os.Stat(fixture.journal.Filesystem.BackupPath); statErr != nil {
 		t.Fatalf("backup changed after phase update failure: %v", statErr)
 	}
