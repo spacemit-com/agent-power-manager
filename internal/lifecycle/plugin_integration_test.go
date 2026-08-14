@@ -1,11 +1,9 @@
 package lifecycle
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +16,6 @@ import (
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
-	"apm/internal/logging"
 	"apm/internal/paths"
 	"apm/internal/transaction"
 	"apm/internal/version"
@@ -433,35 +430,39 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJou
 	if err := os.WriteFile(journalPath, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	originalJournal := readJournalBytes(t, journalPath)
 	transactions, err := transaction.NewManager(harness.repository, harness.registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stdout, stderr bytes.Buffer
-	previousLogger := slog.Default()
-	slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
-	t.Cleanup(func() { slog.SetDefault(previousLogger) })
 	search, err := NewSearch(transactions, harness.cloud)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := search.Search(context.Background(), cli.Flags{Keyword: "demo-plugin"}); err != nil {
+	list, err := NewList(transactions, harness.cloud, harness.registry, harness.repository)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if inspection, err := transactions.Inspect(context.Background()); err != nil || !inspection.Active {
-		t.Fatalf("Search must preserve the active journal: active=%v err=%v", inspection.Active, err)
-	}
-	if _, found, findErr := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); findErr != nil || found {
-		t.Fatalf("Search must not recover the manifest: found=%v err=%v", found, findErr)
-	}
-	if contents, statErr := os.ReadFile(filepath.Join(harness.state, "plugin-codex")); statErr != nil || string(contents) != selector {
-		t.Fatalf("Search must not recover the target: contents=%q err=%v", contents, statErr)
-	}
-	if !strings.Contains(stderr.String(), "run apm fix") {
-		t.Fatalf("stderr = %q, want recovery hint", stderr.String())
-	}
+	assertActiveJournalReadOnly(t, journalPath, originalJournal, func() {
+		if _, found, findErr := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); findErr != nil || found {
+			t.Fatalf("read-only manifest found/error = %v/%v, want absent", found, findErr)
+		}
+		if contents, statErr := os.ReadFile(filepath.Join(harness.state, "plugin-codex")); statErr != nil || string(contents) != selector {
+			t.Fatalf("read-only command changed Plugin target: contents=%q err=%v", contents, statErr)
+		}
+	},
+		func() error {
+			_, err := search.Search(context.Background(), cli.Flags{Keyword: "demo-plugin"})
+			return err
+		},
+		func() error { _, err := list.List(context.Background(), cli.Flags{}); return err },
+		func() error {
+			_, err := list.List(context.Background(), cli.Flags{Installed: true, Agent: string(domain.AgentCodex)})
+			return err
+		},
+	)
 	if _, err := os.ReadFile(harness.calls); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Search must not invoke recovery target actions: %v", err)
+		t.Fatalf("read-only commands must not invoke recovery target actions: %v", err)
 	}
 
 	recoverer := &countingRecoverer{Recoverer: transactions}
@@ -538,6 +539,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesyst
 		},
 	}
 	journalPath := writeIntegrationJournal(t, journal)
+	originalJournal := readJournalBytes(t, journalPath)
 	transactions, err := transaction.NewManager(harness.repository, harness.registry)
 	if err != nil {
 		t.Fatal(err)
@@ -546,21 +548,28 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesyst
 	if err != nil {
 		t.Fatal(err)
 	}
-	warnings := captureLifecycleWarnings(t, func() {
-		if _, err := search.Search(context.Background(), cli.Flags{Keyword: "demo-plugin"}); err != nil {
-			t.Fatal(err)
+	list, err := NewList(transactions, harness.cloud, harness.registry, harness.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActiveJournalReadOnly(t, journalPath, originalJournal, func() {
+		if _, found, err := harness.repository.Find(domain.AgentHermes, ref.Type, ref.Name); err != nil || found {
+			t.Fatalf("read-only manifest found/error = %v/%v, want absent", found, err)
 		}
-	})
-	if !strings.Contains(warnings, "run apm fix") {
-		t.Fatalf("Search warnings = %q, want recovery hint", warnings)
-	}
-	assertJournalExists(t, journalPath)
-	if _, found, err := harness.repository.Find(domain.AgentHermes, ref.Type, ref.Name); err != nil || found {
-		t.Fatalf("Search manifest found/error = %v/%v, want absent", found, err)
-	}
-	assertFileContents(t, filepath.Join(target, "PLUGIN.md"), "interrupted target\n")
+		assertFileContents(t, filepath.Join(target, "PLUGIN.md"), "interrupted target\n")
+	},
+		func() error {
+			_, err := search.Search(context.Background(), cli.Flags{Keyword: "demo-plugin"})
+			return err
+		},
+		func() error { _, err := list.List(context.Background(), cli.Flags{}); return err },
+		func() error {
+			_, err := list.List(context.Background(), cli.Flags{Installed: true, Agent: string(domain.AgentHermes)})
+			return err
+		},
+	)
 	if _, err := os.ReadFile(harness.calls); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Search must not invoke recovery target actions: %v", err)
+		t.Fatalf("read-only commands must not invoke recovery target actions: %v", err)
 	}
 
 	recoverer := &countingRecoverer{Recoverer: transactions}

@@ -64,26 +64,36 @@ func TestFixIntegrationFilesystemSkillPreservesJournalUntilFixThenCommits(t *tes
 		},
 	}
 	journalPath := writeIntegrationJournal(t, journal)
-
-	search, err := NewSearch(harnessTransactions(t, harness), harness.cloud)
+	originalJournal := readJournalBytes(t, journalPath)
+	transactions := harnessTransactions(t, harness)
+	search, err := NewSearch(transactions, harness.cloud)
 	if err != nil {
 		t.Fatal(err)
 	}
-	warnings := captureLifecycleWarnings(t, func() {
-		if _, err := search.Search(context.Background(), cli.Flags{Keyword: "brief-status"}); err != nil {
-			t.Fatal(err)
+	list, err := NewList(transactions, harness.cloud, harness.registry, harness.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActiveJournalReadOnly(t, journalPath, originalJournal, func() {
+		if _, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || found {
+			t.Fatalf("read-only manifest found/error = %v/%v, want absent", found, err)
 		}
-	})
-	if !strings.Contains(warnings, "run apm fix") {
-		t.Fatalf("Search warnings = %q, want recovery hint", warnings)
+		assertFileContents(t, filepath.Join(target, "SKILL.md"), "interrupted target\n")
+	},
+		func() error {
+			_, err := search.Search(context.Background(), cli.Flags{Keyword: "brief-status"})
+			return err
+		},
+		func() error { _, err := list.List(context.Background(), cli.Flags{}); return err },
+		func() error {
+			_, err := list.List(context.Background(), cli.Flags{Installed: true, Agent: string(domain.AgentCodex)})
+			return err
+		},
+	)
+	if _, err := os.ReadFile(harness.calls); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only Skill commands unexpectedly invoked an Agent CLI: %v", err)
 	}
-	assertJournalExists(t, journalPath)
-	if _, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || found {
-		t.Fatalf("Search manifest found/error = %v/%v, want absent", found, err)
-	}
-	assertFileContents(t, filepath.Join(target, "SKILL.md"), "interrupted target\n")
 
-	transactions := harnessTransactions(t, harness)
 	recoverer := &countingRecoverer{Recoverer: transactions}
 	fixer := newIntegrationFixer(t, recoverer)
 	if err := fixer.Fix(context.Background()); err != nil {
@@ -244,6 +254,32 @@ func assertJournalBytes(t *testing.T, path string, want []byte) {
 	got, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(got, want) {
 		t.Fatalf("journal bytes = %q, err=%v, want %q", got, err, want)
+	}
+}
+
+func readJournalBytes(t *testing.T, path string) []byte {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
+}
+
+// assertActiveJournalReadOnly 断言每个只读命令均告警但不改变 journal 或目标状态。
+func assertActiveJournalReadOnly(t *testing.T, journalPath string, originalJournal []byte, assertState func(), operations ...func() error) {
+	t.Helper()
+	warnings := captureLifecycleWarnings(t, func() {
+		for _, operation := range operations {
+			if err := operation(); err != nil {
+				t.Fatal(err)
+			}
+			assertJournalBytes(t, journalPath, originalJournal)
+			assertState()
+		}
+	})
+	if got, want := strings.Count(warnings, "transaction recovery required"), len(operations); got != want {
+		t.Fatalf("recovery warnings = %d, want %d: %s", got, want, warnings)
 	}
 }
 
