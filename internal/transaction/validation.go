@@ -12,7 +12,7 @@ import (
 	"apm/internal/paths"
 )
 
-func validateInstallRequest(request InstallRequest) error {
+func validateInstallRequest(request SkillInstallRequest) error {
 	if err := validateAgentAndPower(request.Agent, request.Power); err != nil {
 		return fmt.Errorf("validate install request: %w", err)
 	}
@@ -36,7 +36,7 @@ func validateInstallRequest(request InstallRequest) error {
 	return nil
 }
 
-func validateUninstallRequest(request UninstallRequest) error {
+func validateUninstallRequest(request SkillUninstallRequest) error {
 	if err := validateAgentAndPower(request.Agent, request.Power); err != nil {
 		return fmt.Errorf("validate uninstall request: %w", err)
 	}

@@ -12,8 +12,8 @@ import (
 	"apm/internal/logging"
 )
 
-// Install 执行单个 Agent 的可恢复安装事务。
-func (s *Service) Install(ctx context.Context, request InstallRequest) error {
+// InstallSkill 执行单个 Agent 的可恢复文件型 Skill 安装事务。
+func (s *Service) InstallSkill(ctx context.Context, request SkillInstallRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

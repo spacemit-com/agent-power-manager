@@ -67,12 +67,14 @@ func (m *listFakeTransactions) Recover(context.Context) (transaction.RecoveryRes
 	return m.fixture.recovery, m.fixture.recoverErr
 }
 
-func (*listFakeTransactions) Install(context.Context, transaction.InstallRequest) error { return nil }
+func (*listFakeTransactions) InstallSkill(context.Context, transaction.SkillInstallRequest) error {
+	return nil
+}
 func (*listFakeTransactions) InstallMCP(context.Context, transaction.MCPInstallRequest) error {
 	return nil
 }
 
-func (*listFakeTransactions) Uninstall(context.Context, transaction.UninstallRequest) (transaction.UninstallResult, error) {
+func (*listFakeTransactions) UninstallSkill(context.Context, transaction.SkillUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
 func (*listFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {

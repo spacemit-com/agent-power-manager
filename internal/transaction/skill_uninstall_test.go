@@ -19,7 +19,7 @@ type uninstallFixture struct {
 	manifests *recordingManifestWriter
 	adapter   *recordingAdapter
 	service   *Service
-	request   UninstallRequest
+	request   SkillUninstallRequest
 }
 
 func newUninstallFixture(t *testing.T) *uninstallFixture {
@@ -35,7 +35,7 @@ func newUninstallFixture(t *testing.T) *uninstallFixture {
 	fixture.adapter.onInstall = func() error { return errors.New("uninstall called Adapter.Install") }
 	fixture.service = newService(fixture.manifests, fixture.journals)
 	fixture.service.newID = func() (string, error) { return "00112233445566778899aabbccddeeff", nil }
-	fixture.request = UninstallRequest{
+	fixture.request = SkillUninstallRequest{
 		Agent:   domain.AgentClaudeCode,
 		Power:   domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"},
 		Adapter: fixture.adapter,
@@ -52,7 +52,7 @@ func TestUninstallReportsExistingTargetWasQuarantined(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestUninstallReportsExistingTargetWasQuarantined(t *testing.T) {
 func TestUninstallReportsInitiallyMissingTarget(t *testing.T) {
 	fixture := newUninstallFixture(t)
 
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestUninstallRenameFailureRollsBackAndDeletesJournal(t *testing.T) {
 	renameErr := errors.New("rename failed")
 	fixture.service.files.rename = func(string, string) error { return renameErr }
 
-	_, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	_, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, renameErr) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -120,7 +120,7 @@ func TestUninstallManifestFailurePreservesCommittingJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.manifests.removeErr = errors.New("remove failed")
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, fixture.manifests.removeErr) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -140,7 +140,7 @@ func TestUninstallCommittingUpdateFailurePreservesRemovingEvidence(t *testing.T)
 	phaseErr := errors.New("committing update failed")
 	fixture.journals.fail["update:committing"] = phaseErr
 
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, phaseErr) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -160,7 +160,7 @@ func TestUninstallCreateFailureDoesNotTouchTarget(t *testing.T) {
 	createErr := errors.New("create failed")
 	fixture.journals.fail["create"] = createErr
 
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, createErr) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -183,7 +183,7 @@ func TestUninstallDirectoryCreationFailureRollsBack(t *testing.T) {
 	mkdirErr := errors.New("mkdir failed")
 	fixture.service.files.mkdir = func(string, os.FileMode) error { return mkdirErr }
 
-	_, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	_, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, mkdirErr) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -205,7 +205,7 @@ func TestUninstallRollbackPhaseFailurePreservesJournal(t *testing.T) {
 	fixture.service.files.rename = func(string, string) error { return renameErr }
 	fixture.journals.fail["update:rolling-back"] = phaseErr
 
-	_, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	_, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, renameErr) || !errors.Is(err, phaseErr) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -226,7 +226,7 @@ func TestUninstallRenameRaceWithExternalRemovalCommits(t *testing.T) {
 		return os.ErrNotExist
 	}
 
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestUninstallQuarantineCleanupFailurePreservesCommittingJournal(t *testing.
 		return os.RemoveAll(path)
 	}
 
-	_, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	_, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, cleanupErr) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -277,7 +277,7 @@ func TestUninstallTransactionDirectoryCleanupFailurePreservesCommittingJournal(t
 		return os.RemoveAll(path)
 	}
 
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, cleanupErr) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -292,7 +292,7 @@ func TestUninstallTransactionDirectoryCleanupFailurePreservesCommittingJournal(t
 func TestUninstallJournalDeleteFailurePreservesCommittingJournal(t *testing.T) {
 	fixture := newUninstallFixture(t)
 	fixture.journals.fail["delete"] = errors.New("delete failed")
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, fixture.journals.fail["delete"]) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -309,7 +309,7 @@ func TestUninstallCancellationBeforeCommitRollsBack(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	fixture.journals.onCreate = func(Journal) { cancel() }
 
-	result, err := fixture.service.Uninstall(ctx, fixture.request)
+	result, err := fixture.service.UninstallSkill(ctx, fixture.request)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -330,7 +330,7 @@ func TestUninstallCancellationAfterCommitPreservesJournal(t *testing.T) {
 		}
 	}
 
-	result, err := fixture.service.Uninstall(ctx, fixture.request)
+	result, err := fixture.service.UninstallSkill(ctx, fixture.request)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
@@ -349,7 +349,7 @@ func TestUninstallPreservesMissingFactWhenManifestRemovalFails(t *testing.T) {
 	fixture := newUninstallFixture(t)
 	fixture.manifests.removeErr = errors.New("remove failed")
 
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, fixture.manifests.removeErr) {
 		t.Fatalf("Uninstall() error = %v, want %v", err, fixture.manifests.removeErr)
 	}
@@ -362,7 +362,7 @@ func TestUninstallValidationFailureReportsNoMissingFact(t *testing.T) {
 	fixture := newUninstallFixture(t)
 	fixture.request.Adapter = nil
 
-	result, err := fixture.service.Uninstall(context.Background(), fixture.request)
+	result, err := fixture.service.UninstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("Uninstall() error = %v, want ErrInvalidRequest", err)
 	}
@@ -376,7 +376,7 @@ func TestUninstallInitialCancellationReportsNoMissingFact(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := fixture.service.Uninstall(ctx, fixture.request)
+	result, err := fixture.service.UninstallSkill(ctx, fixture.request)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Uninstall() error = %v, want context.Canceled", err)
 	}

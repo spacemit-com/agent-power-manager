@@ -100,7 +100,6 @@ type recordingAdapter struct {
 	onInstall func() error
 }
 
-func (a *recordingAdapter) DetectAgent() (bool, error)                 { return true, nil }
 func (a *recordingAdapter) TargetPath(domain.PowerRef) (string, error) { return a.target, nil }
 func (a *recordingAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
 	*a.events = append(*a.events, "adapter:install")
@@ -121,7 +120,7 @@ type installFixture struct {
 	manifests *recordingManifestWriter
 	adapter   *recordingAdapter
 	service   *Service
-	request   InstallRequest
+	request   SkillInstallRequest
 }
 
 func newInstallFixture(t *testing.T) *installFixture {
@@ -151,7 +150,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 	}
 	fixture.service = newService(fixture.manifests, fixture.journals)
 	fixture.service.newID = func() (string, error) { return "00112233445566778899aabbccddeeff", nil }
-	fixture.request = InstallRequest{
+	fixture.request = SkillInstallRequest{
 		Agent:       domain.AgentCodex,
 		Power:       domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "2.0.0"},
 		StagingRoot: staging,
@@ -165,7 +164,7 @@ func TestInstallFirstInstallPublishesSetsManifestAndCleansJournal(t *testing.T) 
 	if err := os.MkdirAll(fixture.staging, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.service.Install(context.Background(), fixture.request); err != nil {
+	if err := fixture.service.InstallSkill(context.Background(), fixture.request); err != nil {
 		t.Fatal(err)
 	}
 	if got := fixture.journals.journal.SchemaVersion; got != 1 {
@@ -190,7 +189,7 @@ func TestInstallUpgradeBacksUpOldTargetBeforePublishing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fixture.target, "version"), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.service.Install(context.Background(), fixture.request); err != nil {
+	if err := fixture.service.InstallSkill(context.Background(), fixture.request); err != nil {
 		t.Fatal(err)
 	}
 	contents, err := os.ReadFile(filepath.Join(fixture.target, "version"))
@@ -214,7 +213,7 @@ func TestInstallManagedMissingTargetRemovesManifestCleansStagingAndStops(t *test
 		t.Fatal(err)
 	}
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, ErrStaleManifest) {
 		t.Fatalf("Install() error = %v, want ErrStaleManifest", err)
 	}
@@ -246,7 +245,7 @@ func TestInstallManagedMissingTargetJoinsRemoveAndStagingCleanupFailures(t *test
 		return os.RemoveAll(path)
 	}
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, ErrStaleManifest) || !errors.Is(err, removeErr) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("Install() error = %v, want stale, remove, and cleanup errors", err)
 	}
@@ -263,7 +262,7 @@ func TestInstallRejectsUnmanagedTargetBeforeJournal(t *testing.T) {
 	if err := os.MkdirAll(fixture.target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, adapter.ErrTargetConflict) {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -287,7 +286,7 @@ func TestInstallPrePublicationFailureRestoresBackup(t *testing.T) {
 	fixture.adapter.err = installErr
 	fixture.adapter.onInstall = nil
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, installErr) {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -305,7 +304,7 @@ func TestInstallPublishedErrorPreservesJournalAndNewTarget(t *testing.T) {
 	fixture := newInstallFixture(t)
 	cleanupErr := errors.New("staging cleanup failed")
 	fixture.adapter.err = cleanupErr
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, cleanupErr) {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -323,7 +322,7 @@ func TestInstallPublishedErrorPreservesJournalAndNewTarget(t *testing.T) {
 func TestInstallManifestFailurePreservesCommittingJournal(t *testing.T) {
 	fixture := newInstallFixture(t)
 	fixture.manifests.setErr = errors.New("set failed")
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, fixture.manifests.setErr) {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -336,7 +335,7 @@ func TestInstallRejectsAdapterSuccessWithoutPublication(t *testing.T) {
 	fixture := newInstallFixture(t)
 	fixture.adapter.result = adapter.SkillInstallResult{}
 	fixture.adapter.onInstall = nil
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("Install() error = %v, want ErrInvalidRequest", err)
 	}
@@ -358,7 +357,7 @@ func TestInstallRollbackDirectionFailureDoesNotRestoreUnderPublishing(t *testing
 	phaseErr := errors.New("rolling-back update failed")
 	fixture.journals.fail["update:rolling-back"] = phaseErr
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, phaseErr) {
 		t.Fatalf("Install() error = %v, want phase error", err)
 	}
@@ -377,7 +376,7 @@ func TestInstallCommittingUpdateFailurePreservesPublishingEvidence(t *testing.T)
 	fixture := newInstallFixture(t)
 	phaseErr := errors.New("committing update failed")
 	fixture.journals.fail["update:committing"] = phaseErr
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, phaseErr) {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -399,7 +398,7 @@ func TestInstallCreateFailureDoesNotTouchManagedTarget(t *testing.T) {
 	createErr := errors.New("create failed")
 	fixture.journals.fail["create"] = createErr
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, createErr) {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -418,7 +417,7 @@ func TestInstallBackupRenameFailureRollsBack(t *testing.T) {
 	renameErr := errors.New("backup rename failed")
 	fixture.service.files.rename = func(string, string) error { return renameErr }
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, renameErr) || fixture.journals.found {
 		t.Fatalf("Install() error/journal = %v, %v", err, fixture.journals.found)
 	}
@@ -437,7 +436,7 @@ func TestInstallPublishingUpdateFailureRestoresBackup(t *testing.T) {
 	phaseErr := errors.New("publishing update failed")
 	fixture.journals.fail["update:publishing"] = phaseErr
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, phaseErr) || fixture.journals.found {
 		t.Fatalf("Install() error/journal = %v, %v", err, fixture.journals.found)
 	}
@@ -467,7 +466,7 @@ func TestInstallRestoreFailurePreservesRollingBackJournal(t *testing.T) {
 		return os.Rename(oldPath, newPath)
 	}
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, adapterErr) || !errors.Is(err, restoreErr) {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -494,7 +493,7 @@ func TestInstallBackupCleanupFailurePreservesCommittingJournal(t *testing.T) {
 		return os.RemoveAll(path)
 	}
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, cleanupErr) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
 		t.Fatalf("Install() error/journal = %v, %+v", err, fixture.journals.journal)
 	}
@@ -513,7 +512,7 @@ func TestInstallStagingCleanupFailurePreservesCommittingJournal(t *testing.T) {
 		return os.RemoveAll(path)
 	}
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, cleanupErr) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
 		t.Fatalf("Install() error/journal = %v, %+v", err, fixture.journals.journal)
 	}
@@ -524,7 +523,7 @@ func TestInstallJournalDeleteFailurePreservesCommittingJournal(t *testing.T) {
 	deleteErr := errors.New("delete failed")
 	fixture.journals.fail["delete"] = deleteErr
 
-	err := fixture.service.Install(context.Background(), fixture.request)
+	err := fixture.service.InstallSkill(context.Background(), fixture.request)
 	if !errors.Is(err, deleteErr) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
 		t.Fatalf("Install() error/journal = %v, %+v", err, fixture.journals.journal)
 	}
@@ -540,7 +539,7 @@ func TestInstallCancellationBeforeBackupRollsBack(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	fixture.journals.onCreate = func(Journal) { cancel() }
 
-	err := fixture.service.Install(ctx, fixture.request)
+	err := fixture.service.InstallSkill(ctx, fixture.request)
 	if !errors.Is(err, context.Canceled) || fixture.journals.found {
 		t.Fatalf("Install() error/journal = %v, %v", err, fixture.journals.found)
 	}
@@ -563,7 +562,7 @@ func TestInstallCancellationBeforeAdapterRestoresBackup(t *testing.T) {
 		}
 	}
 
-	err := fixture.service.Install(ctx, fixture.request)
+	err := fixture.service.InstallSkill(ctx, fixture.request)
 	if !errors.Is(err, context.Canceled) || fixture.journals.found {
 		t.Fatalf("Install() error/journal = %v, %v", err, fixture.journals.found)
 	}
@@ -583,7 +582,7 @@ func TestInstallCancellationAfterPublicationPreservesCommittingJournal(t *testin
 		return nil
 	}
 
-	err := fixture.service.Install(ctx, fixture.request)
+	err := fixture.service.InstallSkill(ctx, fixture.request)
 	if !errors.Is(err, context.Canceled) || !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting {
 		t.Fatalf("Install() error/journal = %v, %+v", err, fixture.journals.journal)
 	}
@@ -596,7 +595,7 @@ func TestInstallActiveJournalPreventsNewTransaction(t *testing.T) {
 	fixture := newInstallFixture(t)
 	fixture.journals.found = true
 	fixture.journals.journal = Journal{TransactionID: "ffeeddccbbaa99887766554433221100"}
-	if err := fixture.service.Install(context.Background(), fixture.request); !errors.Is(err, ErrActiveTransaction) {
+	if err := fixture.service.InstallSkill(context.Background(), fixture.request); !errors.Is(err, ErrActiveTransaction) {
 		t.Fatalf("Install() error = %v, want ErrActiveTransaction", err)
 	}
 }

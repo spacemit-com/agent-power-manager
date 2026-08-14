@@ -80,14 +80,14 @@ func (m *uninstallFakeTransactions) Recover(context.Context) (transaction.Recove
 	return m.fixture.recovery, m.fixture.recoverErr
 }
 
-func (*uninstallFakeTransactions) Install(context.Context, transaction.InstallRequest) error {
+func (*uninstallFakeTransactions) InstallSkill(context.Context, transaction.SkillInstallRequest) error {
 	return nil
 }
 func (*uninstallFakeTransactions) InstallMCP(context.Context, transaction.MCPInstallRequest) error {
 	return nil
 }
 
-func (m *uninstallFakeTransactions) Uninstall(_ context.Context, request transaction.UninstallRequest) (transaction.UninstallResult, error) {
+func (m *uninstallFakeTransactions) UninstallSkill(_ context.Context, request transaction.SkillUninstallRequest) (transaction.UninstallResult, error) {
 	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall:"+string(request.Agent))
 	return m.fixture.transactionResults[request.Agent], m.fixture.transactionErrors[request.Agent]
 }
@@ -146,8 +146,6 @@ func (r *uninstallFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error)
 }
 
 type uninstallFakeAdapter struct{}
-
-func (uninstallFakeAdapter) DetectAgent() (bool, error) { return true, nil }
 
 func (uninstallFakeAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
 

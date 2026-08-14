@@ -51,7 +51,7 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 		return cli.InstallItem{}, err
 	}
 
-	request := transaction.InstallRequest{
+	request := transaction.SkillInstallRequest{
 		Agent:       agent,
 		Power:       ref,
 		StagingRoot: staging,
@@ -60,7 +60,7 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 	if installed {
 		request.Previous = &previous
 	}
-	if err := s.transactions.Install(ctx, request); err != nil {
+	if err := s.transactions.InstallSkill(ctx, request); err != nil {
 		return cli.InstallItem{}, fmt.Errorf("install power %+v for agent %q: %w", ref, agent, err)
 	}
 

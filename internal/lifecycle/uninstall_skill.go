@@ -14,5 +14,5 @@ func (s *UninstallService) uninstallSkill(ctx context.Context, agent domain.Agen
 	if err != nil {
 		return transaction.UninstallResult{}, fmt.Errorf("resolve uninstall adapter for agent %q: %w", agent, err)
 	}
-	return s.transactions.Uninstall(ctx, transaction.UninstallRequest{Agent: agent, Power: ref, Adapter: resolved})
+	return s.transactions.UninstallSkill(ctx, transaction.SkillUninstallRequest{Agent: agent, Power: ref, Adapter: resolved})
 }

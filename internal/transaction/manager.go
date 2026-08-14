@@ -13,9 +13,9 @@ import (
 // Manager 定义 lifecycle 所需的高层事务操作。
 type Manager interface {
 	Recover(context.Context) (RecoveryResult, error)
-	Install(context.Context, InstallRequest) error
+	InstallSkill(context.Context, SkillInstallRequest) error
 	InstallMCP(context.Context, MCPInstallRequest) error
-	Uninstall(context.Context, UninstallRequest) (UninstallResult, error)
+	UninstallSkill(context.Context, SkillUninstallRequest) (UninstallResult, error)
 	UninstallMCP(context.Context, MCPUninstallRequest) (UninstallResult, error)
 	InstallPlugin(context.Context, PluginInstallRequest) error
 	UninstallPlugin(context.Context, PluginUninstallRequest) (UninstallResult, error)
@@ -37,8 +37,8 @@ type AdapterResolver interface {
 	PluginAdapterResolver
 }
 
-// InstallRequest 描述单个 Agent 的已解析安装事务输入。
-type InstallRequest struct {
+// SkillInstallRequest 描述单个 Agent 的已解析文件型 Skill 安装事务输入。
+type SkillInstallRequest struct {
 	Agent       domain.AgentID
 	Power       domain.PowerRef
 	Previous    *domain.PowerRef
@@ -56,8 +56,8 @@ type MCPInstallRequest struct {
 	Adapter        adapter.MCPAdapter
 }
 
-// UninstallRequest 描述单个 Agent 的已解析卸载事务输入。
-type UninstallRequest struct {
+// SkillUninstallRequest 描述单个 Agent 的已解析文件型 Skill 卸载事务输入。
+type SkillUninstallRequest struct {
 	Agent   domain.AgentID
 	Power   domain.PowerRef
 	Adapter adapter.SkillAdapter

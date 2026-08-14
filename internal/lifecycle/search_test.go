@@ -52,12 +52,14 @@ func (m *stubTransactionManager) Recover(context.Context) (transaction.RecoveryR
 	return m.result, m.err
 }
 
-func (*stubTransactionManager) Install(context.Context, transaction.InstallRequest) error { return nil }
+func (*stubTransactionManager) InstallSkill(context.Context, transaction.SkillInstallRequest) error {
+	return nil
+}
 func (*stubTransactionManager) InstallMCP(context.Context, transaction.MCPInstallRequest) error {
 	return nil
 }
 
-func (*stubTransactionManager) Uninstall(context.Context, transaction.UninstallRequest) (transaction.UninstallResult, error) {
+func (*stubTransactionManager) UninstallSkill(context.Context, transaction.SkillUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
 func (*stubTransactionManager) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {

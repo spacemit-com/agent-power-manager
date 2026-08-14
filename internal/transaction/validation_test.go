@@ -36,13 +36,11 @@ func (*nilPluginValidationAdapter) Remove(context.Context, adapter.PluginTarget)
 }
 func (*nilPluginValidationAdapter) TargetPath(string) (string, error) { return "", nil }
 
-func (*nilValidationAdapter) DetectAgent() (bool, error)                 { return false, nil }
 func (*nilValidationAdapter) TargetPath(domain.PowerRef) (string, error) { return "", nil }
 func (*nilValidationAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
 	return adapter.SkillInstallResult{}, nil
 }
 
-func (a validationAdapter) DetectAgent() (bool, error) { return true, nil }
 func (a validationAdapter) TargetPath(domain.PowerRef) (string, error) {
 	return a.target, nil
 }
@@ -52,7 +50,7 @@ func (a validationAdapter) Install(domain.PowerRef, string) (adapter.SkillInstal
 
 func TestValidateInstallRequest(t *testing.T) {
 	staging, target := validationPaths(t)
-	valid := InstallRequest{
+	valid := SkillInstallRequest{
 		Agent:       domain.AgentCodex,
 		Power:       domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "2.0.0"},
 		Previous:    powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}),
@@ -63,25 +61,25 @@ func TestValidateInstallRequest(t *testing.T) {
 		t.Fatalf("validateInstallRequest(valid) error = %v", err)
 	}
 
-	tests := map[string]func(*InstallRequest){
-		"empty agent":       func(r *InstallRequest) { r.Agent = "" },
-		"all agents":        func(r *InstallRequest) { r.Agent = domain.AllAgents },
-		"empty name":        func(r *InstallRequest) { r.Power.Name = "" },
-		"empty type":        func(r *InstallRequest) { r.Power.Type = "" },
-		"empty version":     func(r *InstallRequest) { r.Power.Version = "" },
-		"empty staging":     func(r *InstallRequest) { r.StagingRoot = "" },
-		"nil adapter":       func(r *InstallRequest) { r.Adapter = nil },
-		"typed nil adapter": func(r *InstallRequest) { r.Adapter = (*nilValidationAdapter)(nil) },
-		"previous name":     func(r *InstallRequest) { r.Previous.Name = "other" },
-		"previous type":     func(r *InstallRequest) { r.Previous.Type = domain.PowerTypePlugin },
-		"previous version":  func(r *InstallRequest) { r.Previous.Version = "" },
-		"plugin power": func(r *InstallRequest) {
+	tests := map[string]func(*SkillInstallRequest){
+		"empty agent":       func(r *SkillInstallRequest) { r.Agent = "" },
+		"all agents":        func(r *SkillInstallRequest) { r.Agent = domain.AllAgents },
+		"empty name":        func(r *SkillInstallRequest) { r.Power.Name = "" },
+		"empty type":        func(r *SkillInstallRequest) { r.Power.Type = "" },
+		"empty version":     func(r *SkillInstallRequest) { r.Power.Version = "" },
+		"empty staging":     func(r *SkillInstallRequest) { r.StagingRoot = "" },
+		"nil adapter":       func(r *SkillInstallRequest) { r.Adapter = nil },
+		"typed nil adapter": func(r *SkillInstallRequest) { r.Adapter = (*nilValidationAdapter)(nil) },
+		"previous name":     func(r *SkillInstallRequest) { r.Previous.Name = "other" },
+		"previous type":     func(r *SkillInstallRequest) { r.Previous.Type = domain.PowerTypePlugin },
+		"previous version":  func(r *SkillInstallRequest) { r.Previous.Version = "" },
+		"plugin power": func(r *SkillInstallRequest) {
 			r.Power.Type, r.Previous.Type = domain.PowerTypePlugin, domain.PowerTypePlugin
 		},
-		"MCP power": func(r *InstallRequest) {
+		"MCP power": func(r *SkillInstallRequest) {
 			r.Power.Type, r.Previous.Type = domain.PowerTypeMCP, domain.PowerTypeMCP
 		},
-		"noncanonical stage": func(r *InstallRequest) { r.StagingRoot += string(filepath.Separator) + ".." },
+		"noncanonical stage": func(r *SkillInstallRequest) { r.StagingRoot += string(filepath.Separator) + ".." },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -98,7 +96,7 @@ func TestValidateInstallRequest(t *testing.T) {
 
 func TestValidateUninstallRequest(t *testing.T) {
 	_, target := validationPaths(t)
-	valid := UninstallRequest{
+	valid := SkillUninstallRequest{
 		Agent:   domain.AgentHermes,
 		Power:   domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"},
 		Adapter: validationAdapter{target: target},
@@ -106,10 +104,10 @@ func TestValidateUninstallRequest(t *testing.T) {
 	if err := validateUninstallRequest(valid); err != nil {
 		t.Fatalf("validateUninstallRequest(valid) error = %v", err)
 	}
-	for name, mutate := range map[string]func(*UninstallRequest){
-		"nil adapter":  func(r *UninstallRequest) { r.Adapter = nil },
-		"plugin power": func(r *UninstallRequest) { r.Power.Type = domain.PowerTypePlugin },
-		"MCP power":    func(r *UninstallRequest) { r.Power.Type = domain.PowerTypeMCP },
+	for name, mutate := range map[string]func(*SkillUninstallRequest){
+		"nil adapter":  func(r *SkillUninstallRequest) { r.Adapter = nil },
+		"plugin power": func(r *SkillUninstallRequest) { r.Power.Type = domain.PowerTypePlugin },
+		"MCP power":    func(r *SkillUninstallRequest) { r.Power.Type = domain.PowerTypeMCP },
 	} {
 		t.Run(name, func(t *testing.T) {
 			request := valid

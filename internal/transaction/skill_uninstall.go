@@ -6,8 +6,8 @@ import (
 	"fmt"
 )
 
-// Uninstall 执行单个 Agent 的可恢复卸载事务。
-func (s *Service) Uninstall(ctx context.Context, request UninstallRequest) (UninstallResult, error) {
+// UninstallSkill 执行单个 Agent 的可恢复文件型 Skill 卸载事务。
+func (s *Service) UninstallSkill(ctx context.Context, request SkillUninstallRequest) (UninstallResult, error) {
 	result := UninstallResult{}
 	if err := ctx.Err(); err != nil {
 		return result, err

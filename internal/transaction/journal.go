@@ -1,4 +1,3 @@
-// Package transaction 提供能力安装和卸载的一致性事务与恢复能力。
 package transaction
 
 import (
