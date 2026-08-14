@@ -1,9 +1,11 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
+	"apm/internal/logging"
 	"apm/internal/paths"
 	"apm/internal/transaction"
 	"apm/internal/version"
@@ -397,7 +400,7 @@ func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
 	harness.assertOnlyFakeExecutables()
 }
 
-func TestPluginIntegrationSearchRecoversInterruptedJournal(t *testing.T) {
+func TestPluginIntegrationSearchReportsAndPreservesInterruptedJournal(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
 	definition, err := harness.cloud.GetPlugin(ref)
@@ -434,24 +437,32 @@ func TestPluginIntegrationSearchRecoversInterruptedJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	locker, err := lock.NewDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-	search, err := NewSearch(locker, transactions, harness.cloud)
+	var stdout, stderr bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+	search, err := NewSearch(transactions, harness.cloud)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := search.Search(context.Background(), cli.Flags{Keyword: "demo-plugin"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, found, findErr := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); findErr != nil || !found || got != ref {
-		t.Fatalf("recovered manifest = %+v, %v, %v", got, found, findErr)
+	if inspection, err := transactions.Inspect(context.Background()); err != nil || !inspection.Active {
+		t.Fatalf("Search must preserve the active journal: active=%v err=%v", inspection.Active, err)
 	}
-	if _, statErr := os.Lstat(journalPath); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("journal remains: %v", statErr)
+	if _, found, findErr := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); findErr != nil || found {
+		t.Fatalf("Search must not recover the manifest: found=%v err=%v", found, findErr)
 	}
-	harness.assertOnlyFakeExecutables()
+	if contents, statErr := os.ReadFile(filepath.Join(harness.state, "plugin-codex")); statErr != nil || string(contents) != selector {
+		t.Fatalf("Search must not recover the target: contents=%q err=%v", contents, statErr)
+	}
+	if !strings.Contains(stderr.String(), "run apm fix") {
+		t.Fatalf("stderr = %q, want recovery hint", stderr.String())
+	}
+	if _, err := os.ReadFile(harness.calls); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Search must not invoke recovery target actions: %v", err)
+	}
 }
 
 func TestPluginIntegrationMultiAgentInstallFailsFast(t *testing.T) {

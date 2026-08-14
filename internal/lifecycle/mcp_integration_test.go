@@ -1,9 +1,11 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
+	"apm/internal/logging"
 	"apm/internal/paths"
 	"apm/internal/transaction"
 	"apm/internal/version"
@@ -232,7 +235,7 @@ func TestMCPIntegrationHTTPConflictAndStaleRepair(t *testing.T) {
 	})
 }
 
-func TestMCPIntegrationSearchRecoversInterruptedAgentCLIJournal(t *testing.T) {
+func TestMCPIntegrationSearchReportsAndPreservesInterruptedAgentCLIJournal(t *testing.T) {
 	harness := newIsolatedMCPHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}
 	server, err := harness.cloud.GetMCP(ref)
@@ -270,24 +273,32 @@ func TestMCPIntegrationSearchRecoversInterruptedAgentCLIJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	locker, err := lock.NewDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-	search, err := NewSearch(locker, transactions, harness.cloud)
+	var stdout, stderr bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+	search, err := NewSearch(transactions, harness.cloud)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := search.Search(context.Background(), cli.Flags{Keyword: "filesystem"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || !found {
-		t.Fatalf("recovered manifest found/error = %v/%v", found, err)
+	if inspection, err := transactions.Inspect(context.Background()); err != nil || !inspection.Active {
+		t.Fatalf("Search must preserve the active journal: active=%v err=%v", inspection.Active, err)
 	}
-	if _, err := os.Lstat(journalPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("journal remains: %v", err)
+	if _, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || found {
+		t.Fatalf("Search must not recover the manifest: found=%v err=%v", found, err)
 	}
-	harness.assertOnlyFakeExecutables()
+	if _, err := os.Stat(filepath.Join(harness.state, "codex-filesystem")); err != nil {
+		t.Fatalf("Search must not recover the target: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "run apm fix") {
+		t.Fatalf("stderr = %q, want recovery hint", stderr.String())
+	}
+	if _, err := os.ReadFile(harness.calls); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Search must not invoke recovery target actions: %v", err)
+	}
 }
 
 func (h *isolatedMCPHarness) assertManagedMCP(agent domain.AgentID, name, version string, statePresent bool) {
