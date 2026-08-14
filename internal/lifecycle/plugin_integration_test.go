@@ -400,7 +400,7 @@ func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
 	harness.assertOnlyFakeExecutables()
 }
 
-func TestPluginIntegrationSearchReportsAndPreservesInterruptedJournal(t *testing.T) {
+func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJournal(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
 	definition, err := harness.cloud.GetPlugin(ref)
@@ -463,6 +463,131 @@ func TestPluginIntegrationSearchReportsAndPreservesInterruptedJournal(t *testing
 	if _, err := os.ReadFile(harness.calls); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Search must not invoke recovery target actions: %v", err)
 	}
+
+	recoverer := &countingRecoverer{Recoverer: transactions}
+	fixer := newIntegrationFixer(t, recoverer)
+	if err := fixer.Fix(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if recoverer.calls != 1 {
+		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
+	}
+	assertJournalAbsent(t, journalPath)
+	if got, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || !found || got != ref {
+		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
+	}
+	if contents, statErr := os.ReadFile(filepath.Join(harness.state, "plugin-codex")); statErr != nil || string(contents) != selector {
+		t.Fatalf("Fix changed committed Plugin target: contents=%q err=%v", contents, statErr)
+	}
+	contents, err = os.ReadFile(harness.calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(strings.Split(strings.TrimSpace(string(contents)), "\n")); got != 1 {
+		t.Fatalf("Fix CLI calls = %d, want exactly 1 recovery inspection: %s", got, contents)
+	}
+	manifestPath, err := paths.ManifestPath(domain.AgentCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPathsWithinRoot(t, harness.root, journalPath, manifestPath, filepath.Join(harness.state, "plugin-codex"))
+	harness.assertOnlyFakeExecutables()
+}
+
+func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesystemJournal(t *testing.T) {
+	harness := newIsolatedPluginHarness(t, domain.AgentHermes)
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
+	definition, err := harness.cloud.GetPlugin(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugin, err := harness.registry.ResolvePlugin(domain.AgentHermes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := plugin.TargetPath(definition.ActualName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "PLUGIN.md"), []byte("interrupted target\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(staging, "plugins", ref.Name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	id := "00112233445566778899aabbccddeeff"
+	txDir := filepath.Join(filepath.Dir(target), ".apm-transactions", id)
+	journal := transaction.Journal{
+		SchemaVersion: 1, TransactionID: id, Driver: transaction.DriverPlugin,
+		Operation: transaction.OperationInstall, Phase: transaction.PhaseAddingNew,
+		Agent: domain.AgentHermes, Power: ref,
+		Plugin: &transaction.PluginJournalPayload{
+			Deployment: domain.PluginDeploymentFilesystem,
+			Target:     adapter.PluginTarget{ActualName: definition.ActualName, Selector: definition.ActualName},
+			Filesystem: &transaction.PluginFilesystemJournalPayload{
+				StagingRoot: staging, SourcePath: filepath.Join(staging, "plugins", ref.Name),
+				TargetPath: target, TransactionDir: txDir, PublishPath: filepath.Join(txDir, "publish"),
+			},
+		},
+	}
+	journalPath := writeIntegrationJournal(t, journal)
+	transactions, err := transaction.NewManager(harness.repository, harness.registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	search, err := NewSearch(transactions, harness.cloud)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warnings := captureLifecycleWarnings(t, func() {
+		if _, err := search.Search(context.Background(), cli.Flags{Keyword: "demo-plugin"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(warnings, "run apm fix") {
+		t.Fatalf("Search warnings = %q, want recovery hint", warnings)
+	}
+	assertJournalExists(t, journalPath)
+	if _, found, err := harness.repository.Find(domain.AgentHermes, ref.Type, ref.Name); err != nil || found {
+		t.Fatalf("Search manifest found/error = %v/%v, want absent", found, err)
+	}
+	assertFileContents(t, filepath.Join(target, "PLUGIN.md"), "interrupted target\n")
+	if _, err := os.ReadFile(harness.calls); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Search must not invoke recovery target actions: %v", err)
+	}
+
+	recoverer := &countingRecoverer{Recoverer: transactions}
+	if err := newIntegrationFixer(t, recoverer).Fix(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if recoverer.calls != 1 {
+		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
+	}
+	assertJournalAbsent(t, journalPath)
+	if got, found, err := harness.repository.Find(domain.AgentHermes, ref.Type, ref.Name); err != nil || !found || got != ref {
+		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
+	}
+	assertFileContents(t, filepath.Join(target, "PLUGIN.md"), "interrupted target\n")
+	contents, err := os.ReadFile(harness.calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(strings.Split(strings.TrimSpace(string(contents)), "\n")); got != 2 {
+		t.Fatalf("Fix CLI calls = %d, want exactly 2 recovery calls: %s", got, contents)
+	}
+	manifestPath, err := paths.ManifestPath(domain.AgentHermes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPathsWithinRoot(t, harness.root, journalPath, manifestPath, target, txDir)
+	harness.assertOnlyFakeExecutables()
 }
 
 func TestPluginIntegrationMultiAgentInstallFailsFast(t *testing.T) {

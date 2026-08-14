@@ -235,7 +235,7 @@ func TestMCPIntegrationHTTPConflictAndStaleRepair(t *testing.T) {
 	})
 }
 
-func TestMCPIntegrationSearchReportsAndPreservesInterruptedAgentCLIJournal(t *testing.T) {
+func TestMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t *testing.T) {
 	harness := newIsolatedMCPHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}
 	server, err := harness.cloud.GetMCP(ref)
@@ -299,6 +299,35 @@ func TestMCPIntegrationSearchReportsAndPreservesInterruptedAgentCLIJournal(t *te
 	if _, err := os.ReadFile(harness.calls); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Search must not invoke recovery target actions: %v", err)
 	}
+
+	recoverer := &countingRecoverer{Recoverer: transactions}
+	fixer := newIntegrationFixer(t, recoverer)
+	if err := fixer.Fix(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if recoverer.calls != 1 {
+		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
+	}
+	assertJournalAbsent(t, journalPath)
+	if got, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || !found || got != ref {
+		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
+	}
+	if _, err := os.Stat(filepath.Join(harness.state, "codex-filesystem")); err != nil {
+		t.Fatalf("Fix changed committed MCP target: %v", err)
+	}
+	contents, err = os.ReadFile(harness.calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(strings.Split(strings.TrimSpace(string(contents)), "\n")); got != 1 {
+		t.Fatalf("Fix CLI calls = %d, want exactly 1 recovery inspection: %s", got, contents)
+	}
+	manifestPath, err := paths.ManifestPath(domain.AgentCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPathsWithinRoot(t, harness.root, journalPath, manifestPath, filepath.Join(harness.state, "codex-filesystem"))
+	harness.assertOnlyFakeExecutables()
 }
 
 func (h *isolatedMCPHarness) assertManagedMCP(agent domain.AgentID, name, version string, statePresent bool) {
