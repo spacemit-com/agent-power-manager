@@ -9,8 +9,6 @@ import (
 
 type contractAdapter struct{}
 
-func (contractAdapter) DetectAgent() (bool, error) { return true, nil }
-
 func (contractAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
 
 func (contractAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {

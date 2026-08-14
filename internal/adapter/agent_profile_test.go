@@ -9,7 +9,7 @@ import (
 	"apm/internal/domain"
 )
 
-func TestAgentConfigRootPath(t *testing.T) {
+func TestAgentProfileRootPath(t *testing.T) {
 	tests := []struct {
 		name, env, defaultDir string
 		agent                 domain.AgentID
@@ -48,7 +48,7 @@ func TestAgentConfigRootPath(t *testing.T) {
 	}
 }
 
-func TestAgentConfigDetectAgent(t *testing.T) {
+func TestAgentProfileDetectInstalled(t *testing.T) {
 	tests := []struct {
 		name, env, defaultDir string
 		agent                 domain.AgentID
@@ -66,9 +66,9 @@ func TestAgentConfigDetectAgent(t *testing.T) {
 				root := filepath.Join(t.TempDir(), "missing")
 				t.Setenv(tt.env, root)
 
-				got, err := config.detectAgent()
+				got, err := config.detectInstalled()
 				if err != nil || got {
-					t.Fatalf("detectAgent() = %t, %v; want false, nil", got, err)
+					t.Fatalf("detectInstalled() = %t, %v; want false, nil", got, err)
 				}
 			})
 
@@ -79,9 +79,9 @@ func TestAgentConfigDetectAgent(t *testing.T) {
 				}
 				t.Setenv(tt.env, root)
 
-				got, err := config.detectAgent()
+				got, err := config.detectInstalled()
 				if err != nil || !got {
-					t.Fatalf("detectAgent() = %t, %v; want true, nil", got, err)
+					t.Fatalf("detectInstalled() = %t, %v; want true, nil", got, err)
 				}
 				if _, err := os.Stat(filepath.Join(root, "skills")); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("skills directory changed: Stat error = %v, want not exist", err)
@@ -99,9 +99,9 @@ func TestAgentConfigDetectAgent(t *testing.T) {
 				}
 				t.Setenv(tt.env, link)
 
-				got, err := config.detectAgent()
+				got, err := config.detectInstalled()
 				if err != nil || !got {
-					t.Fatalf("detectAgent() = %t, %v; want true, nil", got, err)
+					t.Fatalf("detectInstalled() = %t, %v; want true, nil", got, err)
 				}
 			})
 
@@ -112,21 +112,21 @@ func TestAgentConfigDetectAgent(t *testing.T) {
 				}
 				t.Setenv(tt.env, root)
 
-				got, err := config.detectAgent()
+				got, err := config.detectInstalled()
 				if got || !errors.Is(err, ErrAgentNotInstalled) {
-					t.Fatalf("detectAgent() = %t, %v; want false, ErrAgentNotInstalled", got, err)
+					t.Fatalf("detectInstalled() = %t, %v; want false, ErrAgentNotInstalled", got, err)
 				}
 			})
 		})
 	}
 }
 
-func TestTargetPath(t *testing.T) {
+func TestAgentProfileSkillTargetPath(t *testing.T) {
 	config := configForAgent(t, domain.AgentCodex)
 	root := filepath.Join(t.TempDir(), "agent-root")
 	t.Setenv("CODEX_HOME", root)
 
-	got, err := config.targetPath(domain.PowerRef{
+	got, err := config.skillTargetPath(domain.PowerRef{
 		Name: "demo",
 		Type: domain.PowerTypeSkill,
 	})
@@ -151,7 +151,7 @@ func TestTargetPath(t *testing.T) {
 		{Name: "nested/demo", Type: domain.PowerTypeSkill},
 		{Name: `nested\demo`, Type: domain.PowerTypeSkill},
 	} {
-		if _, err := config.targetPath(ref); !errors.Is(err, ErrInvalidSkill) {
+		if _, err := config.skillTargetPath(ref); !errors.Is(err, ErrInvalidSkill) {
 			t.Fatalf("targetPath(%+v) error = %v, want ErrInvalidSkill", ref, err)
 		}
 	}
@@ -172,13 +172,13 @@ func TestPluginTargetPath(t *testing.T) {
 	}
 }
 
-func configForAgent(t *testing.T, agent domain.AgentID) agentConfig {
+func configForAgent(t *testing.T, agent domain.AgentID) agentProfile {
 	t.Helper()
-	for _, config := range builtInAgentConfigs {
-		if config.id == agent {
-			return config
+	for _, registration := range builtInAgentRegistrations {
+		if registration.profile.id == agent {
+			return registration.profile
 		}
 	}
 	t.Fatalf("missing configuration for agent %q", agent)
-	return agentConfig{}
+	return agentProfile{}
 }

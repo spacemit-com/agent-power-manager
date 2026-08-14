@@ -14,41 +14,36 @@ import (
 	"apm/internal/utils/filesystem"
 )
 
-// skillAdapter 实现从公共 staging 到 Agent 全局目录的 Skill 安装流程。
-type skillAdapter struct {
-	config    agentConfig
+// filesystemSkillAdapter 实现从公共 staging 到 Agent 全局目录的 Skill 安装流程。
+type filesystemSkillAdapter struct {
+	profile   agentProfile
 	copyDir   func(string, string) error
 	rename    func(string, string) error
 	removeAll func(string) error
 }
 
-// newSkillAdapter 使用指定 Agent 配置创建 Skill Adapter。
-func newSkillAdapter(config agentConfig) *skillAdapter {
-	return &skillAdapter{
-		config:    config,
+// newFilesystemSkillAdapter 使用指定 Agent profile 创建 Skill Adapter。
+func newFilesystemSkillAdapter(profile agentProfile) *filesystemSkillAdapter {
+	return &filesystemSkillAdapter{
+		profile:   profile,
 		copyDir:   filesystem.CopyDir,
 		rename:    os.Rename,
 		removeAll: os.RemoveAll,
 	}
 }
 
-// DetectAgent 报告目标 Agent 是否已安装。
-func (a *skillAdapter) DetectAgent() (bool, error) {
-	return a.config.detectAgent()
-}
-
 // TargetPath 返回指定 Skill 的最终安装路径。
-func (a *skillAdapter) TargetPath(ref domain.PowerRef) (string, error) {
-	return a.config.targetPath(ref)
+func (a *filesystemSkillAdapter) TargetPath(ref domain.PowerRef) (string, error) {
+	return a.profile.skillTargetPath(ref)
 }
 
 // Install 从公共 staging 复制并原子发布指定 Skill，随后清理 staging。
-func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (result SkillInstallResult, resultErr error) {
+func (a *filesystemSkillAdapter) Install(ref domain.PowerRef, staging string) (result SkillInstallResult, resultErr error) {
 	stagingRoot, err := validateStagingIdentity(staging)
 	if err != nil {
 		return result, a.installError(ref, "staging", staging, err)
 	}
-	root, err := a.config.rootPath()
+	root, err := a.profile.rootPath()
 	if err != nil {
 		return result, a.installError(ref, "safety", stagingRoot, err)
 	}
@@ -89,7 +84,7 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (result Skil
 		return result, a.installError(ref, "frontmatter", frontmatterPath, err)
 	}
 	a.debugInstall(ref, "adaptation", sourceDir)
-	if err := a.config.adapt(ref, sourceDir); err != nil {
+	if err := a.profile.adaptSkill(ref, sourceDir); err != nil {
 		return result, a.installError(ref, "adaptation", sourceDir, err)
 	}
 
@@ -125,14 +120,14 @@ func (a *skillAdapter) Install(ref domain.PowerRef, staging string) (result Skil
 	return result, nil
 }
 
-func (a *skillAdapter) installError(ref domain.PowerRef, phase, path string, err error) error {
-	return fmt.Errorf("install agent %q power %q phase %q path %q: %w", a.config.id, ref.Name, phase, path, err)
+func (a *filesystemSkillAdapter) installError(ref domain.PowerRef, phase, path string, err error) error {
+	return fmt.Errorf("install agent %q power %q phase %q path %q: %w", a.profile.id, ref.Name, phase, path, err)
 }
 
-func (a *skillAdapter) debugInstall(ref domain.PowerRef, phase, path string) {
+func (a *filesystemSkillAdapter) debugInstall(ref domain.PowerRef, phase, path string) {
 	slog.Debug(
 		"install skill",
-		logging.Agent(a.config.id),
+		logging.Agent(a.profile.id),
 		logging.Power(ref.Name),
 		logging.Version(ref.Version),
 		logging.Phase(phase),
@@ -231,4 +226,4 @@ func ensureSkillsRoot(skillsRoot string) error {
 	return nil
 }
 
-var _ SkillAdapter = (*skillAdapter)(nil)
+var _ SkillAdapter = (*filesystemSkillAdapter)(nil)

@@ -17,8 +17,8 @@ import (
 )
 
 func TestSkillAdapterInstallPublishesSkillAndCleansStaging(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
-	adapter := newSkillAdapter(config)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
+	adapter := newFilesystemSkillAdapter(config)
 
 	result, err := adapter.Install(ref, staging)
 	if err != nil {
@@ -57,8 +57,8 @@ func TestSkillAdapterInstallPublishesSkillAndCleansStaging(t *testing.T) {
 }
 
 func TestSkillAdapterInstallReturnsNotInstalledWithoutCreatingAgentRoot(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, false)
-	adapter := newSkillAdapter(config)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, false)
+	adapter := newFilesystemSkillAdapter(config)
 
 	result, err := adapter.Install(ref, staging)
 	if !errors.Is(err, ErrAgentNotInstalled) {
@@ -72,8 +72,8 @@ func TestSkillAdapterInstallReturnsNotInstalledWithoutCreatingAgentRoot(t *testi
 }
 
 func TestSkillAdapterInstallCreatesMissingSkillsDirectory(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
-	adapter := newSkillAdapter(config)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
+	adapter := newFilesystemSkillAdapter(config)
 
 	result, err := adapter.Install(ref, staging)
 	if err != nil {
@@ -98,8 +98,8 @@ func TestSkillAdapterInstallCleansValidStagingForInvalidRef(t *testing.T) {
 		{Name: "demo", Type: domain.PowerTypeSkill},
 	} {
 		t.Run(string(ref.Type)+"-"+ref.Name+"-"+ref.Version, func(t *testing.T) {
-			config, _, staging, _ := skillAdapterFixture(t, true)
-			adapter := newSkillAdapter(config)
+			config, _, staging, _ := filesystemSkillAdapterFixture(t, true)
+			adapter := newFilesystemSkillAdapter(config)
 
 			_, err := adapter.Install(ref, staging)
 			if !errors.Is(err, ErrInvalidSkill) {
@@ -111,14 +111,14 @@ func TestSkillAdapterInstallCleansValidStagingForInvalidRef(t *testing.T) {
 }
 
 func TestSkillAdapterInstallRejectsUnsafeStagingWithoutCleaningIt(t *testing.T) {
-	config, _, staging, ref := skillAdapterFixture(t, true)
+	config, _, staging, ref := filesystemSkillAdapterFixture(t, true)
 	volumeRoot := filepath.VolumeName(staging) + string(filepath.Separator)
 	outside := filepath.Join(t.TempDir(), "other-staging")
 	writeSkillTree(t, skillSource(outside, ref), ref.Name)
 
 	for _, stagingPath := range []string{"", volumeRoot, outside} {
 		t.Run(stagingPath, func(t *testing.T) {
-			adapter := newSkillAdapter(config)
+			adapter := newFilesystemSkillAdapter(config)
 			cleaned := false
 			adapter.removeAll = func(string) error {
 				cleaned = true
@@ -139,7 +139,7 @@ func TestSkillAdapterInstallRejectsUnsafeStagingWithoutCleaningIt(t *testing.T) 
 }
 
 func TestSkillAdapterInstallRejectsEmptyStagingWhenWorkingDirectoryMatchesExpectedPath(t *testing.T) {
-	config, _, staging, ref := skillAdapterFixture(t, true)
+	config, _, staging, ref := filesystemSkillAdapterFixture(t, true)
 	source := skillSource(staging, ref)
 	originalWorkingDirectory, err := os.Getwd()
 	if err != nil {
@@ -153,7 +153,7 @@ func TestSkillAdapterInstallRejectsEmptyStagingWhenWorkingDirectoryMatchesExpect
 			t.Fatal(err)
 		}
 	})
-	adapter := newSkillAdapter(config)
+	adapter := newFilesystemSkillAdapter(config)
 	cleaned := false
 	adapter.removeAll = func(string) error {
 		cleaned = true
@@ -171,7 +171,7 @@ func TestSkillAdapterInstallRejectsEmptyStagingWhenWorkingDirectoryMatchesExpect
 }
 
 func TestSkillAdapterInstallRejectsPhysicalSkillRootWithinStagingWithoutMutation(t *testing.T) {
-	config, _, staging, ref := skillAdapterFixture(t, true)
+	config, _, staging, ref := filesystemSkillAdapterFixture(t, true)
 	root := filepath.Join(staging, "agent-root")
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestSkillAdapterInstallRejectsPhysicalSkillRootWithinStagingWithoutMutation
 }
 
 func TestSkillAdapterInstallRejectsPhysicalOverlapThroughAgentRootSymlinkWithoutMutation(t *testing.T) {
-	config, _, staging, ref := skillAdapterFixture(t, true)
+	config, _, staging, ref := filesystemSkillAdapterFixture(t, true)
 	physicalRoot := filepath.Join(staging, "agent-root")
 	if err := os.Mkdir(physicalRoot, 0o755); err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestSkillAdapterInstallRejectsPhysicalOverlapThroughAgentRootSymlinkWithout
 func TestSkillAdapterInstallRejectsPhysicalOverlapThroughSkillsRootSymlinkWithoutMutation(t *testing.T) {
 	for _, scenario := range []string{"equal-staging", "recursive-output", "existing-target"} {
 		t.Run(scenario, func(t *testing.T) {
-			config, root, staging, ref := skillAdapterFixture(t, true)
+			config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
 			physicalSkillsRoot := staging
 			switch scenario {
 			case "recursive-output":
@@ -274,13 +274,13 @@ func TestSkillAdapterInstallRejectsPhysicalOverlapThroughStagingSymlinkWithoutMu
 }
 
 func TestSkillAdapterInstallAllowsPhysicalSiblingOfStaging(t *testing.T) {
-	config, _, staging, ref := skillAdapterFixture(t, true)
+	config, _, staging, ref := filesystemSkillAdapterFixture(t, true)
 	root := staging + "-agent"
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(config.homeEnv, root)
-	adapter := newSkillAdapter(config)
+	adapter := newFilesystemSkillAdapter(config)
 
 	if _, err := adapter.Install(ref, staging); err != nil {
 		t.Fatalf("Install() error = %v", err)
@@ -290,9 +290,9 @@ func TestSkillAdapterInstallAllowsPhysicalSiblingOfStaging(t *testing.T) {
 }
 
 func TestSkillAdapterInstallCleansStagingForEscapingRef(t *testing.T) {
-	config, _, staging, _ := skillAdapterFixture(t, true)
+	config, _, staging, _ := filesystemSkillAdapterFixture(t, true)
 	ref := domain.PowerRef{Name: "../../outside", Type: domain.PowerTypeSkill, Version: "1.0.0"}
-	adapter := newSkillAdapter(config)
+	adapter := newFilesystemSkillAdapter(config)
 
 	_, err := adapter.Install(ref, staging)
 	if !errors.Is(err, ErrInvalidSkill) {
@@ -304,7 +304,7 @@ func TestSkillAdapterInstallCleansStagingForEscapingRef(t *testing.T) {
 func TestSkillAdapterConflictPreservesExistingTargetAndSkipsAdaptation(t *testing.T) {
 	for _, kind := range []string{"directory", "file", "symlink"} {
 		t.Run(kind, func(t *testing.T) {
-			config, root, staging, ref := skillAdapterFixture(t, true)
+			config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
 			target := filepath.Join(root, "skills", ref.Name)
 			if err := os.Mkdir(filepath.Join(root, "skills"), 0o755); err != nil {
 				t.Fatal(err)
@@ -333,11 +333,11 @@ func TestSkillAdapterConflictPreservesExistingTargetAndSkipsAdaptation(t *testin
 				}
 			}
 			adapted := false
-			config.adapt = func(domain.PowerRef, string) error {
+			config.adaptSkill = func(domain.PowerRef, string) error {
 				adapted = true
 				return nil
 			}
-			adapter := newSkillAdapter(config)
+			adapter := newFilesystemSkillAdapter(config)
 
 			_, err := adapter.Install(ref, staging)
 			if !errors.Is(err, ErrTargetConflict) {
@@ -364,8 +364,8 @@ func TestSkillAdapterConflictPreservesExistingTargetAndSkipsAdaptation(t *testin
 }
 
 func TestSkillAdapterInstallRejectsTargetCreatedAfterCopy(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
-	adapter := newSkillAdapter(config)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
+	adapter := newFilesystemSkillAdapter(config)
 	target := filepath.Join(root, "skills", ref.Name)
 	adapter.copyDir = func(from, to string) error {
 		if err := filesystem.CopyDir(from, to); err != nil {
@@ -390,13 +390,13 @@ func TestSkillAdapterInstallRejectsTargetCreatedAfterCopy(t *testing.T) {
 }
 
 func TestSkillAdapterInstallRejectsMalformedFrontmatterAndCleansStaging(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
 	source := skillSource(staging, ref)
 	frontmatterPath := filepath.Join(source, "SKILL.md")
 	if err := os.WriteFile(frontmatterPath, []byte("# missing frontmatter\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	adapter := newSkillAdapter(config)
+	adapter := newFilesystemSkillAdapter(config)
 
 	_, err := adapter.Install(ref, staging)
 	if !errors.Is(err, ErrInvalidSkill) {
@@ -408,11 +408,11 @@ func TestSkillAdapterInstallRejectsMalformedFrontmatterAndCleansStaging(t *testi
 }
 
 func TestSkillAdapterAdaptFailureIncludesInstallContext(t *testing.T) {
-	config, _, staging, ref := skillAdapterFixture(t, true)
+	config, _, staging, ref := filesystemSkillAdapterFixture(t, true)
 	source := skillSource(staging, ref)
 	adaptErr := errors.New("adapt failed")
-	config.adapt = func(domain.PowerRef, string) error { return adaptErr }
-	subject := newSkillAdapter(config)
+	config.adaptSkill = func(domain.PowerRef, string) error { return adaptErr }
+	subject := newFilesystemSkillAdapter(config)
 
 	_, err := subject.Install(ref, staging)
 	if !errors.Is(err, adaptErr) {
@@ -422,12 +422,12 @@ func TestSkillAdapterAdaptFailureIncludesInstallContext(t *testing.T) {
 }
 
 func TestSkillAdapterSkillsRootFailureIncludesInstallContext(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
 	skillsRoot := filepath.Join(root, "skills")
-	config.adapt = func(domain.PowerRef, string) error {
+	config.adaptSkill = func(domain.PowerRef, string) error {
 		return os.WriteFile(skillsRoot, []byte("not a directory"), 0o600)
 	}
-	subject := newSkillAdapter(config)
+	subject := newFilesystemSkillAdapter(config)
 
 	_, err := subject.Install(ref, staging)
 	if err == nil {
@@ -437,8 +437,8 @@ func TestSkillAdapterSkillsRootFailureIncludesInstallContext(t *testing.T) {
 }
 
 func TestSkillAdapterFailureJoinsRenameAndStagingCleanupErrors(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
-	subject := newSkillAdapter(config)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
+	subject := newFilesystemSkillAdapter(config)
 	primaryErr := errors.New("rename failed")
 	cleanupErr := errors.New("staging cleanup failed")
 	subject.rename = func(string, string) error { return primaryErr }
@@ -462,8 +462,8 @@ func TestSkillAdapterFailureJoinsRenameAndStagingCleanupErrors(t *testing.T) {
 }
 
 func TestSkillAdapterFailureCleansTemporaryAndStagingAfterCopyError(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
-	subject := newSkillAdapter(config)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
+	subject := newFilesystemSkillAdapter(config)
 	copyErr := errors.New("copy failed")
 	subject.copyDir = func(string, string) error { return copyErr }
 
@@ -478,15 +478,15 @@ func TestSkillAdapterFailureCleansTemporaryAndStagingAfterCopyError(t *testing.T
 }
 
 func TestSkillAdapterSecondConflictCreatedByAdaptationPreservesTarget(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
 	target := filepath.Join(root, "skills", ref.Name)
-	config.adapt = func(domain.PowerRef, string) error {
+	config.adaptSkill = func(domain.PowerRef, string) error {
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return err
 		}
 		return os.WriteFile(filepath.Join(target, "sentinel"), []byte("created during adaptation"), 0o600)
 	}
-	subject := newSkillAdapter(config)
+	subject := newFilesystemSkillAdapter(config)
 
 	_, err := subject.Install(ref, staging)
 	if !errors.Is(err, ErrTargetConflict) {
@@ -499,8 +499,8 @@ func TestSkillAdapterSecondConflictCreatedByAdaptationPreservesTarget(t *testing
 }
 
 func TestSkillAdapterCleanupReturnsStagingErrorAfterPublication(t *testing.T) {
-	config, root, staging, ref := skillAdapterFixture(t, true)
-	subject := newSkillAdapter(config)
+	config, root, staging, ref := filesystemSkillAdapterFixture(t, true)
+	subject := newFilesystemSkillAdapter(config)
 	cleanupErr := errors.New("staging cleanup failed")
 	subject.removeAll = func(path string) error {
 		if path == staging {
@@ -522,8 +522,8 @@ func TestSkillAdapterCleanupReturnsStagingErrorAfterPublication(t *testing.T) {
 }
 
 func TestSkillAdapterFailureJoinsTemporaryAndStagingCleanupErrors(t *testing.T) {
-	config, _, staging, ref := skillAdapterFixture(t, true)
-	subject := newSkillAdapter(config)
+	config, _, staging, ref := filesystemSkillAdapterFixture(t, true)
+	subject := newFilesystemSkillAdapter(config)
 	copyErr := errors.New("copy failed")
 	temporaryCleanupErr := errors.New("temporary cleanup failed")
 	stagingCleanupErr := errors.New("staging cleanup failed")
@@ -548,8 +548,8 @@ func TestSkillAdapterFailureJoinsTemporaryAndStagingCleanupErrors(t *testing.T) 
 }
 
 func TestSkillAdapterFailureDebugLogsInstallPhases(t *testing.T) {
-	config, _, staging, ref := skillAdapterFixture(t, true)
-	subject := newSkillAdapter(config)
+	config, _, staging, ref := filesystemSkillAdapterFixture(t, true)
+	subject := newFilesystemSkillAdapter(config)
 	var stderr bytes.Buffer
 	originalLogger := slog.Default()
 	slog.SetDefault(logging.NewLogger(io.Discard, &stderr, true))
@@ -577,7 +577,7 @@ func TestSkillAdapterFailureDebugLogsInstallPhases(t *testing.T) {
 	}
 }
 
-func skillAdapterFixture(t *testing.T, makeRoot bool) (agentConfig, string, string, domain.PowerRef) {
+func filesystemSkillAdapterFixture(t *testing.T, makeRoot bool) (agentProfile, string, string, domain.PowerRef) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
@@ -667,14 +667,14 @@ func assertSymlink(t *testing.T, path string) {
 	}
 }
 
-func assertOverlapRejectedWithoutMutation(t *testing.T, config agentConfig, staging string, ref domain.PowerRef, skillsRoot string) {
+func assertOverlapRejectedWithoutMutation(t *testing.T, config agentProfile, staging string, ref domain.PowerRef, skillsRoot string) {
 	t.Helper()
 	adapted := false
-	config.adapt = func(domain.PowerRef, string) error {
+	config.adaptSkill = func(domain.PowerRef, string) error {
 		adapted = true
 		return nil
 	}
-	subject := newSkillAdapter(config)
+	subject := newFilesystemSkillAdapter(config)
 	var operations []string
 	subject.copyDir = func(string, string) error {
 		operations = append(operations, "copy")

@@ -10,12 +10,12 @@ import (
 )
 
 type hermesPluginAdapter struct {
-	runner agentCLIRunner
-	config agentConfig
+	runner  agentCLIRunner
+	profile agentProfile
 }
 
-func newHermesPluginAdapter(runner agentCLIRunner, config agentConfig) *hermesPluginAdapter {
-	return &hermesPluginAdapter{runner: runner, config: config}
+func newHermesPluginAdapter(runner agentCLIRunner, profile agentProfile) *hermesPluginAdapter {
+	return &hermesPluginAdapter{runner: runner, profile: profile}
 }
 
 func (adapter *hermesPluginAdapter) DeploymentMode() domain.PluginDeploymentMode {
@@ -103,7 +103,7 @@ func (adapter *hermesPluginAdapter) Remove(ctx context.Context, target PluginTar
 }
 
 func (adapter *hermesPluginAdapter) TargetPath(actualName string) (string, error) {
-	return adapter.config.pluginTargetPath(actualName)
+	return adapter.profile.pluginTargetPath(actualName)
 }
 
 var _ PluginAdapter = (*hermesPluginAdapter)(nil)
