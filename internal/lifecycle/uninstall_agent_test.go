@@ -67,7 +67,7 @@ func TestUninstallMissingRecordWarnsSynchronouslyWithOptionalType(t *testing.T) 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			installTestLogger(t, &stdout, &stderr, false)
+			uninstallTestLogger(t, &stdout, &stderr, false)
 			fixture := uninstallFixture{snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}}}
 			fixture.beforeRelease = func() {
 				assertContainsAll(t, stderr.String(), []string{

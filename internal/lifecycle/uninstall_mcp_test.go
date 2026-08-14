@@ -37,7 +37,7 @@ func TestUninstallMCPPresentGetsExactDefinitionAndCompletes(t *testing.T) {
 
 func TestUninstallMCPAbsentSkipsCloudAndWarns(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	installTestLogger(t, &stdout, &stderr, false)
+	uninstallTestLogger(t, &stdout, &stderr, false)
 	var calls []string
 	fixture := uninstallMCPFixture(adapter.MCPAbsent)
 	fixture.transactionMCPResults = map[domain.AgentID]transaction.UninstallResult{domain.AgentCodex: {TargetMissing: true}}
@@ -107,7 +107,7 @@ func TestUninstallMCPFailuresKeepFullRefAndStopBeforeTransaction(t *testing.T) {
 
 func TestUninstallMCPMissingFactWithErrorWarnsBeforeRelease(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	installTestLogger(t, &stdout, &stderr, false)
+	uninstallTestLogger(t, &stdout, &stderr, false)
 	cause := errors.New("manifest failed")
 	fixture := uninstallMCPFixture(adapter.MCPAbsent)
 	fixture.transactionMCPResults = map[domain.AgentID]transaction.UninstallResult{domain.AgentCodex: {TargetMissing: true}}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"apm/internal/domain"
@@ -53,23 +54,19 @@ func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentI
 }
 
 func TestRegistryRefreshInstalledSortsSnapshotByAgentID(t *testing.T) {
-	root := t.TempDir()
 	registration := []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode}
 	profiles := make(map[domain.AgentID]agentProfile, len(registration))
 	for _, agent := range registration {
-		homeEnv := "TEST_" + string(agent) + "_HOME"
-		agentRoot := filepath.Join(root, string(agent))
-		t.Setenv(homeEnv, agentRoot)
-		if agent != domain.AgentCodex {
-			if err := os.Mkdir(agentRoot, 0o755); err != nil {
-				t.Fatal(err)
-			}
-		}
-		profiles[agent] = agentProfile{id: agent, homeEnv: homeEnv}
+		profiles[agent] = agentProfile{id: agent}
 	}
+	var detected []domain.AgentID
 	registry := &Registry{
 		ordered:  slices.Clone(registration),
 		profiles: profiles,
+		detectProfile: func(profile agentProfile) (bool, error) {
+			detected = append(detected, profile.id)
+			return profile.id != domain.AgentCodex, nil
+		},
 	}
 
 	snapshot, err := registry.RefreshInstalled()
@@ -83,21 +80,28 @@ func TestRegistryRefreshInstalledSortsSnapshotByAgentID(t *testing.T) {
 	if !slices.Equal(registry.ordered, registration) {
 		t.Fatalf("registration order = %v, want unchanged %v", registry.ordered, registration)
 	}
+	wantDetected := []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
+	if !slices.Equal(detected, wantDetected) {
+		t.Fatalf("detection order = %v, want %v", detected, wantDetected)
+	}
 }
 
 func TestRegistryRefreshInstalledStopsAfterFirstDetectionError(t *testing.T) {
-	root := t.TempDir()
-	claudeRoot := filepath.Join(root, "claude")
-	if err := os.WriteFile(claudeRoot, []byte("not a directory"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TEST_CLAUDE_HOME", claudeRoot)
+	cause := errors.New("detect failed")
+	var detected []domain.AgentID
 	registry := &Registry{
 		ordered: []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode},
 		profiles: map[domain.AgentID]agentProfile{
-			domain.AgentClaudeCode: {id: domain.AgentClaudeCode, homeEnv: "TEST_CLAUDE_HOME"},
-			domain.AgentCodex:      {id: domain.AgentCodex, homeEnv: "TEST_CODEX_HOME"},
-			domain.AgentHermes:     {id: domain.AgentHermes, homeEnv: "TEST_HERMES_HOME"},
+			domain.AgentClaudeCode: {id: domain.AgentClaudeCode},
+			domain.AgentCodex:      {id: domain.AgentCodex},
+			domain.AgentHermes:     {id: domain.AgentHermes},
+		},
+		detectProfile: func(profile agentProfile) (bool, error) {
+			detected = append(detected, profile.id)
+			if profile.id == domain.AgentClaudeCode {
+				return false, cause
+			}
+			return true, nil
 		},
 	}
 
@@ -105,8 +109,11 @@ func TestRegistryRefreshInstalledStopsAfterFirstDetectionError(t *testing.T) {
 	if snapshot.Agents != nil {
 		t.Fatalf("snapshot = %#v, want zero snapshot", snapshot)
 	}
-	if !errors.Is(err, ErrAgentNotInstalled) {
-		t.Fatalf("error = %v, want ErrAgentNotInstalled", err)
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), string(domain.AgentClaudeCode)) {
+		t.Fatalf("error = %v, want cause and failing Agent context", err)
+	}
+	if want := []domain.AgentID{domain.AgentClaudeCode}; !slices.Equal(detected, want) {
+		t.Fatalf("detection calls = %v, want stop after %v", detected, want)
 	}
 }
 

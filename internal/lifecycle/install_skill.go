@@ -32,6 +32,7 @@ func (s *InstallService) stageSkill(ref domain.PowerRef) (string, error) {
 	return staging, nil
 }
 
+// installSkill 先核对本地清单，再准备 staging 并交由 Skill 事务完成发布和结果分类。
 func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
 	resolvedAdapter, err := s.registry.ResolveSkill(agent)
 	if err != nil {

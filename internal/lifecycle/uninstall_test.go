@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
 
 	"apm/internal/cli"
 	"apm/internal/domain"
-	"apm/internal/logging"
 	"apm/internal/transaction"
 )
 
@@ -129,7 +127,7 @@ func TestUninstallRecoverFailureReleasesAndStopsBeforeRefresh(t *testing.T) {
 
 func TestUninstallRecoveryWarnsSynchronouslyBeforeRelease(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	installTestLogger(t, &stdout, &stderr, false)
+	uninstallTestLogger(t, &stdout, &stderr, false)
 	fixture := uninstallTargetFixture()
 	fixture.recovery = transaction.RecoveryResult{
 		Recovered:     true,
@@ -160,7 +158,7 @@ func TestUninstallRecoveryWarnsSynchronouslyBeforeRelease(t *testing.T) {
 
 func TestUninstallNoJournalHasNoNormalOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	installTestLogger(t, &stdout, &stderr, false)
+	uninstallTestLogger(t, &stdout, &stderr, false)
 	var calls []string
 	service := newUninstallService(t, &calls, uninstallTargetFixture())
 
@@ -174,7 +172,7 @@ func TestUninstallNoJournalHasNoNormalOutput(t *testing.T) {
 
 func TestUninstallNoJournalWritesOnlyDebugWhenVerbose(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	installTestLogger(t, &stdout, &stderr, true)
+	uninstallTestLogger(t, &stdout, &stderr, true)
 	var calls []string
 	service := newUninstallService(t, &calls, uninstallTargetFixture())
 
@@ -412,7 +410,7 @@ func TestUninstallFactWarningsRemainVisibleWhenReleaseSuppressesResult(t *testin
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			installTestLogger(t, &stdout, &stderr, false)
+			uninstallTestLogger(t, &stdout, &stderr, false)
 			var calls []string
 			service := newUninstallService(t, &calls, tt.fixture)
 
@@ -435,7 +433,7 @@ func TestUninstallFactWarningsRemainVisibleWhenReleaseSuppressesResult(t *testin
 
 func TestUninstallRecoveryAndBusinessWarningsAreBothEmittedBeforeRelease(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	installTestLogger(t, &stdout, &stderr, false)
+	uninstallTestLogger(t, &stdout, &stderr, false)
 	fixture := uninstallFixture{
 		recovery: transaction.RecoveryResult{
 			Recovered:     true,
@@ -467,113 +465,5 @@ func TestUninstallRecoveryAndBusinessWarningsAreBothEmittedBeforeRelease(t *test
 	assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Outcome: cli.UninstallOutcomeUnexecuted}})
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-}
-
-func newUninstallService(t *testing.T, calls *[]string, fixture uninstallFixture) *UninstallService {
-	t.Helper()
-	service, err := NewUninstall(
-		&uninstallFakeLocker{calls: calls, fixture: &fixture},
-		&uninstallFakeTransactions{calls: calls, fixture: &fixture},
-		&uninstallFakeCloud{calls: calls, fixture: &fixture},
-		&uninstallFakeRegistry{calls: calls, fixture: &fixture},
-		&uninstallFakeConfig{calls: calls, fixture: &fixture},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return service
-}
-
-func uninstallTarget() domain.PowerRef {
-	return domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.2.3"}
-}
-
-func uninstallTargetFixture() uninstallFixture {
-	target := uninstallTarget()
-	return uninstallFixture{
-		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentCodex: {domain.PowerTypeSkill: {target}},
-		},
-	}
-}
-
-func uninstallTargetFlags(agent string) cli.Flags {
-	return cli.Flags{Agent: agent, Type: "skill", Name: "demo"}
-}
-
-func powerPointer(ref domain.PowerRef) *domain.PowerRef {
-	copied := ref
-	return &copied
-}
-
-func assertUninstallItems(t *testing.T, result cli.UninstallResult, want []cli.UninstallItem) {
-	t.Helper()
-	if result.Items == nil {
-		t.Fatal("Uninstall() returned a nil Items slice")
-	}
-	if !reflect.DeepEqual(result.Items, want) {
-		t.Fatalf("Uninstall().Items = %#v, want %#v", result.Items, want)
-	}
-}
-
-func assertZeroUninstallResult(t *testing.T, result cli.UninstallResult) {
-	t.Helper()
-	if result.Items != nil {
-		t.Fatalf("Uninstall() result = %#v, want zero result", result)
-	}
-}
-
-func assertNoUninstallBatchError(t *testing.T, err error) {
-	t.Helper()
-	var batch *cli.UninstallBatchError
-	if errors.As(err, &batch) {
-		t.Fatalf("Uninstall() error = %v, want no UninstallBatchError", err)
-	}
-}
-
-func assertUninstallBatchError(t *testing.T, err error, agent domain.AgentID, cause error) {
-	t.Helper()
-	var batch *cli.UninstallBatchError
-	if !errors.As(err, &batch) {
-		t.Fatalf("Uninstall() error = %v, want UninstallBatchError", err)
-	}
-	if batch.Agent != agent {
-		t.Fatalf("UninstallBatchError agent = %q, want %q", batch.Agent, agent)
-	}
-	if !errors.Is(batch, cause) {
-		t.Fatalf("UninstallBatchError = %v, want cause %v", batch, cause)
-	}
-}
-
-func installTestLogger(t *testing.T, stdout, stderr *bytes.Buffer, verbose bool) {
-	t.Helper()
-	originalLogger := slog.Default()
-	slog.SetDefault(logging.NewLogger(stdout, stderr, verbose))
-	t.Cleanup(func() { slog.SetDefault(originalLogger) })
-}
-
-func assertContainsAll(t *testing.T, value string, wants []string) {
-	t.Helper()
-	for _, want := range wants {
-		if !strings.Contains(value, want) {
-			t.Fatalf("value = %q, want it to contain %q", value, want)
-		}
-	}
-}
-
-func rejectLaterUninstallEvents(t *testing.T, agents []domain.AgentID) func(string) {
-	t.Helper()
-	forbidden := make(map[string]bool, len(agents)*3)
-	for _, agent := range agents {
-		forbidden["config:"+string(agent)] = true
-		forbidden["resolve:"+string(agent)] = true
-		forbidden["transaction:uninstall:"+string(agent)] = true
-	}
-	return func(event string) {
-		if forbidden[event] {
-			t.Fatalf("Uninstall() accessed later Agent after first failure: %s", event)
-		}
 	}
 }

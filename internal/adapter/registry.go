@@ -47,6 +47,7 @@ var builtInAgentRegistrations = []agentRegistration{
 type Registry struct {
 	ordered       []domain.AgentID
 	profiles      map[domain.AgentID]agentProfile
+	detectProfile func(agentProfile) (bool, error)
 	skillByAgent  map[domain.AgentID]SkillAdapter
 	mcpByAgent    map[domain.AgentID]MCPAdapter
 	pluginByAgent map[domain.AgentID]PluginAdapter
@@ -60,6 +61,7 @@ func NewRegistry() *Registry {
 		skillByAgent:  make(map[domain.AgentID]SkillAdapter, len(builtInAgentRegistrations)),
 		mcpByAgent:    make(map[domain.AgentID]MCPAdapter, len(builtInAgentRegistrations)),
 		pluginByAgent: make(map[domain.AgentID]PluginAdapter, len(builtInAgentRegistrations)),
+		detectProfile: func(profile agentProfile) (bool, error) { return profile.detectInstalled() },
 	}
 	runner := newDefaultAgentCLIRunner()
 	for _, registration := range builtInAgentRegistrations {
@@ -77,15 +79,6 @@ func NewRegistry() *Registry {
 		}
 	}
 	return registry
-}
-
-// ResolvePlugin 解析指定智能体的 Plugin 类型专属 Adapter。
-func (r *Registry) ResolvePlugin(agent domain.AgentID) (PluginAdapter, error) {
-	adapter, ok := r.pluginByAgent[agent]
-	if !ok {
-		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, domain.PowerTypePlugin, ErrUnsupportedAdapter)
-	}
-	return adapter, nil
 }
 
 // ResolveSkill 解析指定智能体的文件型 Skill Adapter。
@@ -106,6 +99,15 @@ func (r *Registry) ResolveMCP(agent domain.AgentID) (MCPAdapter, error) {
 	return adapter, nil
 }
 
+// ResolvePlugin 解析指定智能体的 Plugin 类型专属 Adapter。
+func (r *Registry) ResolvePlugin(agent domain.AgentID) (PluginAdapter, error) {
+	adapter, ok := r.pluginByAgent[agent]
+	if !ok {
+		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, domain.PowerTypePlugin, ErrUnsupportedAdapter)
+	}
+	return adapter, nil
+}
+
 // RefreshInstalled 按 Agent ID 字典序探测并返回已安装智能体快照。
 func (r *Registry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	ordered := slices.Clone(r.ordered)
@@ -116,7 +118,11 @@ func (r *Registry) RefreshInstalled() (domain.AgentSnapshot, error) {
 		if !ok {
 			return domain.AgentSnapshot{}, fmt.Errorf("refresh installed agent %q: missing Agent profile", agent)
 		}
-		found, err := profile.detectInstalled()
+		detectProfile := r.detectProfile
+		if detectProfile == nil {
+			detectProfile = func(profile agentProfile) (bool, error) { return profile.detectInstalled() }
+		}
+		found, err := detectProfile(profile)
 		if err != nil {
 			return domain.AgentSnapshot{}, fmt.Errorf("refresh installed agent %q: %w", agent, err)
 		}

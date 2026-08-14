@@ -47,7 +47,7 @@ func TestUninstallPostResolutionFailuresReturnFullPowerFailedItems(t *testing.T)
 
 func TestUninstallMissingTargetWarnsSynchronouslyAndCompletes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	installTestLogger(t, &stdout, &stderr, false)
+	uninstallTestLogger(t, &stdout, &stderr, false)
 	fixture := uninstallTargetFixture()
 	fixture.transactionResults = map[domain.AgentID]transaction.UninstallResult{
 		domain.AgentCodex: {TargetMissing: true},
@@ -122,7 +122,7 @@ func TestUninstallTransactionFailureSuppressesLaterAgentAndKeepsResolvedPower(t 
 func TestUninstallMissingTargetFactWarnsBeforeReleaseWhenTransactionAlsoFails(t *testing.T) {
 	transactionCause := errors.New("manifest removal failed")
 	var stdout, stderr bytes.Buffer
-	installTestLogger(t, &stdout, &stderr, false)
+	uninstallTestLogger(t, &stdout, &stderr, false)
 	fixture := uninstallTargetFixture()
 	fixture.transactionResults = map[domain.AgentID]transaction.UninstallResult{
 		domain.AgentCodex: {TargetMissing: true},
