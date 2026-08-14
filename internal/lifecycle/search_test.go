@@ -85,7 +85,7 @@ func (c *stubCloudClient) List() ([]domain.PowerRef, error) {
 	return c.refs, c.err
 }
 
-func (*stubCloudClient) Get(domain.PowerRef) error { return nil }
+func (*stubCloudClient) DownloadSkill(domain.PowerRef) error { return nil }
 func (*stubCloudClient) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
@@ -93,6 +93,7 @@ func (*stubCloudClient) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 func (*stubCloudClient) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
 	return domain.PluginDefinition{}, nil
 }
+func (*stubCloudClient) DownloadPlugin(domain.PowerRef) error { return nil }
 
 func TestSearchRecoversWarnsUnlocksThenListsCloud(t *testing.T) {
 	var calls []string

@@ -71,7 +71,7 @@ func TestInstallMCPStateTableAvoidsUnneededCloudDefinitions(t *testing.T) {
 				t.Fatalf("Install() error = %v, want %v", err, test.wantErr)
 			}
 			for _, call := range calls {
-				if call == "cloud:get-mcp:v2.0.0" || call == "cloud:get-mcp:v1.0.0" || call == "cache:fetch:codex" {
+				if call == "cloud:get-mcp:v2.0.0" || call == "cloud:get-mcp:v1.0.0" || call == "cache:stage-skill:codex" {
 					t.Fatalf("calls = %v, want no MCP definition/cache call", calls)
 				}
 			}

@@ -108,18 +108,3 @@ func (c *LocalClient) listResources(directory, markerName string, powerType doma
 	}
 	return refs, nil
 }
-
-// Get 将文件型 Power 资源原子复制到本地缓存。
-func (c *LocalClient) Get(ref domain.PowerRef) error {
-	if ref.Version == "" {
-		return errors.New("power version is required")
-	}
-	switch ref.Type {
-	case domain.PowerTypeSkill:
-		return c.getSkill(ref)
-	case domain.PowerTypePlugin:
-		return c.getPlugin(ref)
-	default:
-		return ErrNotFound
-	}
-}

@@ -95,7 +95,7 @@ func (c *listFakeCloud) List() ([]domain.PowerRef, error) {
 	return c.fixture.cloudRefs, c.fixture.cloudErr
 }
 
-func (*listFakeCloud) Get(domain.PowerRef) error { return nil }
+func (*listFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
 func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
@@ -103,6 +103,7 @@ func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 func (*listFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
 	return domain.PluginDefinition{}, nil
 }
+func (*listFakeCloud) DownloadPlugin(domain.PowerRef) error { return nil }
 
 type listFakeRegistry struct {
 	calls   *[]string

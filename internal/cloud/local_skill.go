@@ -11,7 +11,14 @@ import (
 	"apm/internal/utils/filesystem"
 )
 
-func (c *LocalClient) getSkill(ref domain.PowerRef) (resultErr error) {
+// DownloadSkill 将指定版本的 Skill 原子复制到本地缓存。
+func (c *LocalClient) DownloadSkill(ref domain.PowerRef) (resultErr error) {
+	if ref.Version == "" {
+		return errors.New("power version is required")
+	}
+	if ref.Type != domain.PowerTypeSkill {
+		return ErrNotFound
+	}
 	if err := os.RemoveAll(c.cacheTempRoot); err != nil {
 		return fmt.Errorf("clean cache temporary path %q: %w", c.cacheTempRoot, err)
 	}

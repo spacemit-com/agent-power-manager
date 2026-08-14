@@ -39,8 +39,17 @@ func NewFilesystem() (*FilesystemCache, error) {
 	}, nil
 }
 
-// Fetch 将指定版本的缓存 Skill 或 Plugin 复制到公共 staging，并返回 staging 根目录。
-func (c *FilesystemCache) Fetch(ref domain.PowerRef) (stagingRoot string, resultErr error) {
+// StageSkill 将指定版本的缓存 Skill 复制到公共 staging。
+func (c *FilesystemCache) StageSkill(ref domain.PowerRef) (string, error) {
+	return c.stage(ref, "skills")
+}
+
+// StagePlugin 将指定版本的缓存 Plugin 复制到公共 staging。
+func (c *FilesystemCache) StagePlugin(ref domain.PowerRef) (string, error) {
+	return c.stage(ref, "plugins")
+}
+
+func (c *FilesystemCache) stage(ref domain.PowerRef, directory string) (stagingRoot string, resultErr error) {
 	if ref.Version == "" {
 		return "", errors.New("power version is required")
 	}
@@ -55,16 +64,6 @@ func (c *FilesystemCache) Fetch(ref domain.PowerRef) (stagingRoot string, result
 			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err))
 		}
 	}()
-
-	directory := ""
-	switch ref.Type {
-	case domain.PowerTypeSkill:
-		directory = "skills"
-	case domain.PowerTypePlugin:
-		directory = "plugins"
-	default:
-		return "", ErrMiss
-	}
 
 	source := filepath.Join(c.cacheRoot, directory, ref.Name, ref.Version)
 	if _, err := os.Stat(source); err != nil {

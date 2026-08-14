@@ -131,8 +131,8 @@ func (c *installFakeCloud) List() ([]domain.PowerRef, error) {
 	return c.fixture.cloudRefs, c.fixture.cloudListErr
 }
 
-func (c *installFakeCloud) Get(domain.PowerRef) error {
-	*c.calls = append(*c.calls, "cloud:get")
+func (c *installFakeCloud) DownloadSkill(domain.PowerRef) error {
+	*c.calls = append(*c.calls, "cloud:download-skill")
 	return c.fixture.cloudGetErr
 }
 
@@ -146,14 +146,27 @@ func (c *installFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, 
 	return c.fixture.pluginDefinition, nil
 }
 
+func (c *installFakeCloud) DownloadPlugin(domain.PowerRef) error {
+	*c.calls = append(*c.calls, "cloud:download-plugin")
+	return c.fixture.cloudGetErr
+}
+
 type installFakeCache struct {
 	calls   *[]string
 	fixture *installFixture
 }
 
-func (c *installFakeCache) Fetch(domain.PowerRef) (string, error) {
+func (c *installFakeCache) StageSkill(domain.PowerRef) (string, error) {
+	return c.stage("skill")
+}
+
+func (c *installFakeCache) StagePlugin(domain.PowerRef) (string, error) {
+	return c.stage("plugin")
+}
+
+func (c *installFakeCache) stage(power string) (string, error) {
 	agent := c.fixture.currentAgent
-	*c.calls = append(*c.calls, "cache:fetch:"+string(agent))
+	*c.calls = append(*c.calls, "cache:stage-"+power+":"+string(agent))
 	if c.fixture.cacheCalls == nil {
 		c.fixture.cacheCalls = make(map[domain.AgentID]int)
 	}
@@ -293,9 +306,9 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 	}
 	wantCalls := []string{
 		"acquire", "recover", "refresh", "cloud:list",
-		"resolve:claude-code", "config:find:claude-code", "cache:fetch:claude-code", "transaction:install:claude-code",
+		"resolve:claude-code", "config:find:claude-code", "cache:stage-skill:claude-code", "transaction:install:claude-code",
 		"resolve:codex", "config:find:codex",
-		"resolve:hermes-agent", "config:find:hermes-agent", "cache:fetch:hermes-agent", "transaction:install:hermes-agent",
+		"resolve:hermes-agent", "config:find:hermes-agent", "cache:stage-skill:hermes-agent", "transaction:install:hermes-agent",
 		"release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {

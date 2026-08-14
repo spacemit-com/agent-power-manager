@@ -11,7 +11,7 @@ import (
 	"apm/internal/domain"
 )
 
-func TestLocalCloudAndCacheFetchGetFetch(t *testing.T) {
+func TestLocalCloudAndCacheStageDownloadStageSkill(t *testing.T) {
 	realHome := t.TempDir()
 	stateHome := t.TempDir()
 	cacheHome := t.TempDir()
@@ -32,20 +32,20 @@ func TestLocalCloudAndCacheFetchGetFetch(t *testing.T) {
 	}
 	ref := domain.PowerRef{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"}
 
-	if _, err = store.Fetch(ref); !errors.Is(err, cache.ErrMiss) {
-		t.Fatalf("first Fetch() error = %v, want ErrMiss", err)
+	if _, err = store.StageSkill(ref); !errors.Is(err, cache.ErrMiss) {
+		t.Fatalf("first staging call error = %v, want ErrMiss", err)
 	}
-	if err = client.Get(ref); err != nil {
+	if err = client.DownloadSkill(ref); err != nil {
 		t.Fatal(err)
 	}
-	stagingRoot, err := store.Fetch(ref)
+	stagingRoot, err := store.StageSkill(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	cachePath := filepath.Join(cacheHome, "apm", "skills", ref.Name, ref.Version)
 	if stagingRoot != filepath.Join(stateHome, ".apm", "staging") {
-		t.Fatalf("Fetch() root = %q, want %q", stagingRoot, filepath.Join(stateHome, ".apm", "staging"))
+		t.Fatalf("staging root = %q, want %q", stagingRoot, filepath.Join(stateHome, ".apm", "staging"))
 	}
 	stagingPath := filepath.Join(stagingRoot, "skills", ref.Name)
 	versionedStagingPath := filepath.Join(stagingPath, ref.Version)
@@ -64,7 +64,7 @@ func TestLocalCloudAndCacheFetchGetFetch(t *testing.T) {
 	}
 }
 
-func TestLocalCloudAndCachePluginFetchGetFetch(t *testing.T) {
+func TestLocalCloudAndCacheStageDownloadStagePlugin(t *testing.T) {
 	realHome := t.TempDir()
 	stateHome := t.TempDir()
 	cacheHome := t.TempDir()
@@ -84,13 +84,13 @@ func TestLocalCloudAndCachePluginFetchGetFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
-	if _, err = store.Fetch(ref); !errors.Is(err, cache.ErrMiss) {
-		t.Fatalf("first Fetch() error = %v, want ErrMiss", err)
+	if _, err = store.StagePlugin(ref); !errors.Is(err, cache.ErrMiss) {
+		t.Fatalf("first staging call error = %v, want ErrMiss", err)
 	}
-	if err = client.Get(ref); err != nil {
+	if err = client.DownloadPlugin(ref); err != nil {
 		t.Fatal(err)
 	}
-	stagingRoot, err := store.Fetch(ref)
+	stagingRoot, err := store.StagePlugin(ref)
 	if err != nil {
 		t.Fatal(err)
 	}

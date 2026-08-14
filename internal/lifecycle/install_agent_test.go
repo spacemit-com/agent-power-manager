@@ -49,7 +49,7 @@ func TestInstallFirstInstallOrdersDependenciesAndReturnsInstalled(t *testing.T) 
 	}
 	wantEvents := []string{
 		"acquire", "recover", "refresh", "cloud:list",
-		"resolve:codex", "config:find:codex", "cache:fetch:codex",
+		"resolve:codex", "config:find:codex", "cache:stage-skill:codex",
 		"transaction:install:codex", "release",
 	}
 	assertEventSubsequence(t, calls, wantEvents)
@@ -77,7 +77,7 @@ func TestInstallCacheMissGetsCloudAndFetchesAgain(t *testing.T) {
 	}
 	wantCalls := []string{
 		"acquire", "recover", "refresh", "cloud:list", "resolve:codex", "config:find:codex",
-		"cache:fetch:codex", "cloud:get", "cache:fetch:codex", "transaction:install:codex", "release",
+		"cache:stage-skill:codex", "cloud:download-skill", "cache:stage-skill:codex", "transaction:install:codex", "release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want %v", calls, wantCalls)

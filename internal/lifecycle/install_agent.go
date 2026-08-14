@@ -14,18 +14,19 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-func (s *InstallService) fetchInstallStaging(ref domain.PowerRef) (string, error) {
-	staging, err := s.cache.Fetch(ref)
+// fetchSkillInstallStaging 按“缓存、Cloud、缓存”的既定顺序准备 Skill staging。
+func (s *InstallService) fetchSkillInstallStaging(ref domain.PowerRef) (string, error) {
+	staging, err := s.cache.StageSkill(ref)
 	if err == nil {
 		return staging, nil
 	}
 	if !errors.Is(err, cache.ErrMiss) {
 		return "", fmt.Errorf("fetch install power %+v from cache: %w", ref, err)
 	}
-	if err := s.cloud.Get(ref); err != nil {
+	if err := s.cloud.DownloadSkill(ref); err != nil {
 		return "", fmt.Errorf("get install power %+v from Cloud: %w", ref, err)
 	}
-	staging, err = s.cache.Fetch(ref)
+	staging, err = s.cache.StageSkill(ref)
 	if err != nil {
 		return "", fmt.Errorf("fetch downloaded install power %+v from cache: %w", ref, err)
 	}
@@ -59,7 +60,7 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 		return cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeUnchanged}, nil
 	}
 
-	staging, err := s.fetchInstallStaging(ref)
+	staging, err := s.fetchSkillInstallStaging(ref)
 	if err != nil {
 		return cli.InstallItem{}, err
 	}

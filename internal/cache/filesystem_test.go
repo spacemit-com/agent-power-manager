@@ -25,12 +25,12 @@ func TestFilesystemCacheRejectsEmptyVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.Fetch(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill})
+	_, err = store.StageSkill(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill})
 	if err == nil || errors.Is(err, cache.ErrMiss) {
-		t.Fatalf("Fetch() error = %v, want non-sentinel parameter error", err)
+		t.Fatalf("StageSkill() error = %v, want non-sentinel parameter error", err)
 	}
 	if got, err := os.ReadFile(stagingFile); err != nil || string(got) != "keep" {
-		t.Fatalf("existing staging after empty-version Fetch() = %q, %v; want preserved", got, err)
+		t.Fatalf("existing staging after empty-version StageSkill() = %q, %v; want preserved", got, err)
 	}
 }
 
@@ -41,9 +41,9 @@ func TestFilesystemCacheMissClearsOldStagingAndTemporaryStaging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.Fetch(domain.PowerRef{Name: "missing", Type: domain.PowerTypeSkill, Version: "1.0.0"})
+	_, err = store.StageSkill(domain.PowerRef{Name: "missing", Type: domain.PowerTypeSkill, Version: "1.0.0"})
 	if !errors.Is(err, cache.ErrMiss) {
-		t.Fatalf("Fetch() error = %v, want ErrMiss", err)
+		t.Fatalf("StageSkill() error = %v, want ErrMiss", err)
 	}
 	assertStagingRemoved(t, staleStagingPaths)
 }
@@ -65,13 +65,13 @@ func TestFilesystemCacheFetchesVersionAndReturnsStagingRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
-	root, err := store.Fetch(ref)
+	root, err := store.StageSkill(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantRoot := filepath.Join(stateHome, ".apm", "staging")
 	if root != wantRoot {
-		t.Fatalf("Fetch() root = %q, want %q", root, wantRoot)
+		t.Fatalf("StageSkill() root = %q, want %q", root, wantRoot)
 	}
 	wantPath := filepath.Join(root, "skills", "demo")
 	for _, name := range []string{"SKILL.md", "skill-card.md"} {
@@ -101,7 +101,7 @@ func TestFilesystemCacheFetchesPluginIntoTypeSpecificStaging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := store.Fetch(domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"})
+	root, err := store.StagePlugin(domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,24 +111,6 @@ func TestFilesystemCacheFetchesPluginIntoTypeSpecificStaging(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "old.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("old staging remains: %v", err)
-	}
-}
-
-func TestFilesystemCacheUnsupportedTypesMissAndClearStagingAndTemporaryStaging(t *testing.T) {
-	for _, powerType := range []domain.PowerType{domain.PowerTypeMCP, "unknown"} {
-		t.Run(string(powerType), func(t *testing.T) {
-			stateHome, _ := setCacheEnvironment(t)
-			staleStagingPaths := writeStaleStaging(t, stateHome)
-			store, err := cache.NewFilesystem()
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = store.Fetch(domain.PowerRef{Name: "demo", Type: powerType, Version: "1.0.0"})
-			if !errors.Is(err, cache.ErrMiss) {
-				t.Fatalf("Fetch() error = %v, want ErrMiss", err)
-			}
-			assertStagingRemoved(t, staleStagingPaths)
-		})
 	}
 }
 
@@ -146,18 +128,18 @@ func TestFilesystemCachePreservesSourceFilesystemError(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := filepath.Join(blockedParent, "1.0.0")
-	_, err = store.Fetch(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"})
+	_, err = store.StageSkill(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"})
 	if err == nil {
-		t.Fatal("Fetch() error = nil, want cache source filesystem error")
+		t.Fatal("StageSkill() error = nil, want cache source filesystem error")
 	}
 	if errors.Is(err, cache.ErrMiss) {
-		t.Fatalf("Fetch() error = %v, must not be ErrMiss", err)
+		t.Fatalf("StageSkill() error = %v, must not be ErrMiss", err)
 	}
 	if !errors.Is(err, syscall.ENOTDIR) {
-		t.Fatalf("Fetch() error = %v, want ENOTDIR", err)
+		t.Fatalf("StageSkill() error = %v, want ENOTDIR", err)
 	}
 	if !strings.Contains(err.Error(), source) {
-		t.Fatalf("Fetch() error = %q, want source path %q", err, source)
+		t.Fatalf("StageSkill() error = %q, want source path %q", err, source)
 	}
 }
 

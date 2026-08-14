@@ -6,12 +6,32 @@ import (
 	"fmt"
 
 	"apm/internal/adapter"
+	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/transaction"
 
 	"github.com/Masterminds/semver/v3"
 )
+
+// fetchPluginInstallStaging 按“缓存、Cloud、缓存”的既定顺序准备文件型 Plugin staging。
+func (s *InstallService) fetchPluginInstallStaging(ref domain.PowerRef) (string, error) {
+	staging, err := s.cache.StagePlugin(ref)
+	if err == nil {
+		return staging, nil
+	}
+	if !errors.Is(err, cache.ErrMiss) {
+		return "", fmt.Errorf("fetch install power %+v from cache: %w", ref, err)
+	}
+	if err := s.cloud.DownloadPlugin(ref); err != nil {
+		return "", fmt.Errorf("get install power %+v from Cloud: %w", ref, err)
+	}
+	staging, err = s.cache.StagePlugin(ref)
+	if err != nil {
+		return "", fmt.Errorf("fetch downloaded install power %+v from cache: %w", ref, err)
+	}
+	return staging, nil
+}
 
 // installPlugin 先准备 Cloud marketplace，再按 Agent 事实决定是否进入类型专属事务。
 func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
@@ -58,7 +78,7 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 		request.Previous = &copied
 	}
 	if pluginAdapter.DeploymentMode() == domain.PluginDeploymentFilesystem {
-		staging, err := s.fetchInstallStaging(ref)
+		staging, err := s.fetchPluginInstallStaging(ref)
 		if err != nil {
 			return cli.InstallItem{}, err
 		}

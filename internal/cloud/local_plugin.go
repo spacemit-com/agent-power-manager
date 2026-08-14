@@ -60,7 +60,14 @@ func (c *LocalClient) listPlugins() ([]domain.PowerRef, error) {
 	return refs, nil
 }
 
-func (c *LocalClient) getPlugin(ref domain.PowerRef) (resultErr error) {
+// DownloadPlugin 将指定版本的文件型 Plugin 原子复制到本地缓存。
+func (c *LocalClient) DownloadPlugin(ref domain.PowerRef) (resultErr error) {
+	if ref.Version == "" {
+		return errors.New("power version is required")
+	}
+	if ref.Type != domain.PowerTypePlugin {
+		return ErrNotFound
+	}
 	records, err := c.pluginRecords()
 	if err != nil {
 		return err
