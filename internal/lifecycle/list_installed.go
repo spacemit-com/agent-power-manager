@@ -25,7 +25,8 @@ func installedListAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]doma
 	return []domain.AgentID{target}, nil
 }
 
-// listInstalled 读取快照和配置生成已安装清单；读取失败按单个或全部 Agent 语义返回。
+// listInstalled 无锁读取 Agent 快照和配置，生成 best-effort 的已安装清单。
+// 结果不是跨 Agent、manifest 与目标状态的全局一致快照；读取失败按单个或全部 Agent 语义返回。
 func (s *ListService) listInstalled(ctx context.Context, flags cli.Flags) (cli.ListResult, error) {
 	snapshot, err := s.registry.RefreshInstalled()
 	if err != nil {

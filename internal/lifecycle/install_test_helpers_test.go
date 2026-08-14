@@ -85,8 +85,9 @@ type installFakeTransactions struct {
 	fixture *installFixture
 }
 
-func (*installFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
-	return transaction.InspectionResult{}, nil
+func (m *installFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
+	*m.calls = append(*m.calls, "inspect")
+	return transaction.InspectionResult{}, errors.New("Install lifecycle called Inspect before Recover")
 }
 
 func (m *installFakeTransactions) Recover(context.Context) (transaction.RecoveryResult, error) {

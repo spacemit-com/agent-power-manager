@@ -82,8 +82,9 @@ type uninstallFakeTransactions struct {
 	fixture *uninstallFixture
 }
 
-func (*uninstallFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
-	return transaction.InspectionResult{}, nil
+func (m *uninstallFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
+	recordUninstallEvent(m.calls, m.fixture, "inspect")
+	return transaction.InspectionResult{}, errors.New("Uninstall lifecycle called Inspect before Recover")
 }
 
 func (m *uninstallFakeTransactions) Recover(context.Context) (transaction.RecoveryResult, error) {

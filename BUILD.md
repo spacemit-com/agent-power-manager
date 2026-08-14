@@ -81,7 +81,7 @@ gofmt -w cmd internal
 Search 已实现：它按名称搜索 Cloud Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
 
 ```text
-skill/foo-before-summary@v0.0.1
+skill/foo-before-summary@v0.1.0
 ```
 
 Search 只接受可选的 `--type`，不接受 `--agent`。全局选项 `--verbose` 输出解析和 journal 检查诊断到标准错误；帮助信息可查看每个子命令支持的参数。

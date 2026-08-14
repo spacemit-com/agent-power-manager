@@ -21,6 +21,7 @@ type recordingJournalStore struct {
 	onCreate     func(Journal)
 	onUpdate     func(Journal)
 	inspectCalls int
+	createCalls  int
 	updateCalls  int
 	deleteCalls  int
 }
@@ -33,6 +34,7 @@ func (s *recordingJournalStore) Inspect() (Journal, bool, error) {
 	return s.journal, s.found, nil
 }
 func (s *recordingJournalStore) Create(journal Journal) error {
+	s.createCalls++
 	*s.events = append(*s.events, "create:"+string(journal.Phase))
 	if err := s.fail["create"]; err != nil {
 		return err

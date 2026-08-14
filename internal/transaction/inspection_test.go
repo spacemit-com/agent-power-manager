@@ -3,15 +3,89 @@ package transaction
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"testing"
+
+	"apm/internal/adapter"
+	"apm/internal/domain"
 )
+
+type failFastInspectionManifestWriter struct {
+	t *testing.T
+}
+
+func (w failFastInspectionManifestWriter) Set(domain.AgentID, domain.PowerRef) error {
+	w.t.Fatal("Inspect() accessed manifest Set")
+	return nil
+}
+
+func (w failFastInspectionManifestWriter) Remove(domain.AgentID, domain.PowerType, string) error {
+	w.t.Fatal("Inspect() accessed manifest Remove")
+	return nil
+}
+
+type failFastInspectionAdapterResolver struct {
+	t *testing.T
+}
+
+func (r failFastInspectionAdapterResolver) ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error) {
+	r.t.Fatal("Inspect() resolved an MCP Adapter")
+	return nil, nil
+}
+
+func (r failFastInspectionAdapterResolver) ResolvePlugin(domain.AgentID) (adapter.PluginAdapter, error) {
+	r.t.Fatal("Inspect() resolved a Plugin Adapter")
+	return nil, nil
+}
+
+func failFastInspectionFileOps(t *testing.T) fileOps {
+	t.Helper()
+	fail := func(operation string) {
+		t.Fatalf("Inspect() accessed fileOps.%s", operation)
+	}
+	return fileOps{
+		lstat: func(string) (os.FileInfo, error) {
+			fail("lstat")
+			return nil, nil
+		},
+		mkdir: func(string, os.FileMode) error {
+			fail("mkdir")
+			return nil
+		},
+		chmod: func(string, os.FileMode) error {
+			fail("chmod")
+			return nil
+		},
+		rename: func(string, string) error {
+			fail("rename")
+			return nil
+		},
+		remove: func(string) error {
+			fail("remove")
+			return nil
+		},
+		removeAll: func(string) error {
+			fail("removeAll")
+			return nil
+		},
+		readDir: func(string) ([]os.DirEntry, error) {
+			fail("readDir")
+			return nil, nil
+		},
+	}
+}
 
 func TestInspectReportsActiveJournalWithoutMutation(t *testing.T) {
 	fixture := newInstallFixture(t)
 	journal := validInstallJournal(t)
 	fixture.journals.journal = journal
 	fixture.journals.found = true
+	fixture.service.manifests = failFastInspectionManifestWriter{t: t}
+	resolver := failFastInspectionAdapterResolver{t: t}
+	fixture.service.mcpAdapters = resolver
+	fixture.service.pluginAdapters = resolver
+	fixture.service.files = failFastInspectionFileOps(t)
 
 	got, err := fixture.service.Inspect(context.Background())
 	if err != nil {
@@ -28,9 +102,7 @@ func TestInspectReportsActiveJournalWithoutMutation(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Inspect() = %#v, want %#v", got, want)
 	}
-	if fixture.journals.inspectCalls != 1 || fixture.journals.updateCalls != 0 || fixture.journals.deleteCalls != 0 {
-		t.Fatalf("journal calls = inspect %d update %d delete %d", fixture.journals.inspectCalls, fixture.journals.updateCalls, fixture.journals.deleteCalls)
-	}
+	assertInspectJournalCalls(t, fixture.journals)
 }
 
 func TestInspectReturnsZeroResultWithoutValidActiveJournal(t *testing.T) {
@@ -96,9 +168,20 @@ func TestInspectReturnsZeroResultWithoutValidActiveJournal(t *testing.T) {
 			if !reflect.DeepEqual(got, test.wantResult) {
 				t.Fatalf("Inspect() = %#v, want %#v", got, test.wantResult)
 			}
-			if fixture.journals.inspectCalls != 1 || fixture.journals.updateCalls != 0 || fixture.journals.deleteCalls != 0 {
-				t.Fatalf("journal calls = inspect %d update %d delete %d", fixture.journals.inspectCalls, fixture.journals.updateCalls, fixture.journals.deleteCalls)
-			}
+			assertInspectJournalCalls(t, fixture.journals)
 		})
+	}
+}
+
+func assertInspectJournalCalls(t *testing.T, store *recordingJournalStore) {
+	t.Helper()
+	if store.inspectCalls != 1 || store.createCalls != 0 || store.updateCalls != 0 || store.deleteCalls != 0 {
+		t.Fatalf(
+			"journal calls = inspect %d create %d update %d delete %d, want 1/0/0/0",
+			store.inspectCalls,
+			store.createCalls,
+			store.updateCalls,
+			store.deleteCalls,
+		)
 	}
 }
