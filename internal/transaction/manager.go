@@ -12,7 +12,8 @@ import (
 
 // Manager 定义 lifecycle 所需的高层事务操作。
 type Manager interface {
-	Recover(context.Context) (RecoveryResult, error)
+	Inspector
+	Recoverer
 	InstallSkill(context.Context, SkillInstallRequest) error
 	UninstallSkill(context.Context, SkillUninstallRequest) (UninstallResult, error)
 	InstallMCP(context.Context, MCPInstallRequest) error

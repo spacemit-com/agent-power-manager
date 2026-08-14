@@ -62,6 +62,10 @@ type listFakeTransactions struct {
 	fixture *listFixture
 }
 
+func (*listFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
+	return transaction.InspectionResult{}, nil
+}
+
 func (m *listFakeTransactions) Recover(context.Context) (transaction.RecoveryResult, error) {
 	*m.calls = append(*m.calls, "recover")
 	return m.fixture.recovery, m.fixture.recoverErr

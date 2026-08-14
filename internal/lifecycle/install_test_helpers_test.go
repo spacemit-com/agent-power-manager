@@ -85,6 +85,10 @@ type installFakeTransactions struct {
 	fixture *installFixture
 }
 
+func (*installFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
+	return transaction.InspectionResult{}, nil
+}
+
 func (m *installFakeTransactions) Recover(context.Context) (transaction.RecoveryResult, error) {
 	*m.calls = append(*m.calls, "recover")
 	return m.fixture.recovery, m.fixture.recoverErr

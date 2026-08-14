@@ -47,6 +47,10 @@ type stubTransactionManager struct {
 	err    error
 }
 
+func (*stubTransactionManager) Inspect(context.Context) (transaction.InspectionResult, error) {
+	return transaction.InspectionResult{}, nil
+}
+
 func (m *stubTransactionManager) Recover(context.Context) (transaction.RecoveryResult, error) {
 	*m.calls = append(*m.calls, "recover")
 	return m.result, m.err

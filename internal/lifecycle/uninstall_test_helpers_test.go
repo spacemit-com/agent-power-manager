@@ -82,6 +82,10 @@ type uninstallFakeTransactions struct {
 	fixture *uninstallFixture
 }
 
+func (*uninstallFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
+	return transaction.InspectionResult{}, nil
+}
+
 func (m *uninstallFakeTransactions) Recover(context.Context) (transaction.RecoveryResult, error) {
 	recordUninstallEvent(m.calls, m.fixture, "recover")
 	return m.fixture.recovery, m.fixture.recoverErr

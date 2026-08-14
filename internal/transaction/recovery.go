@@ -8,25 +8,22 @@ import (
 
 // Recover 检查并收敛任意上次未完成的集中事务。
 func (s *Service) Recover(ctx context.Context) (RecoveryResult, error) {
-	if isNilInterface(s.manifests) || isNilInterface(s.journals) {
+	if isNilInterface(s.manifests) {
 		return RecoveryResult{}, recoveryError(fmt.Errorf("recovery dependencies are nil: %w", ErrInvalidRequest))
 	}
-	journal, found, err := s.journals.Inspect()
+	journal, inspection, err := s.inspectActiveJournal(ctx)
 	if err != nil {
-		return RecoveryResult{}, recoveryError(fmt.Errorf("inspect active transaction: %w", err))
+		return RecoveryResult{}, recoveryError(err)
 	}
-	if !found {
+	if !inspection.Active {
 		return RecoveryResult{}, nil
 	}
 	result := RecoveryResult{
-		TransactionID: journal.TransactionID,
-		Operation:     journal.Operation,
-		Agent:         journal.Agent,
-		Power:         journal.Power,
-		OriginalPhase: journal.Phase,
-	}
-	if err := validateJournal(journal); err != nil {
-		return result, recoveryError(err)
+		TransactionID: inspection.TransactionID,
+		Operation:     inspection.Operation,
+		Agent:         inspection.Agent,
+		Power:         inspection.Power,
+		OriginalPhase: inspection.OriginalPhase,
 	}
 	if err := ctx.Err(); err != nil {
 		return result, recoveryError(err)
