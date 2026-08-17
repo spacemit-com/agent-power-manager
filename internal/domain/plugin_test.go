@@ -18,6 +18,26 @@ func TestPluginNameMappingRoundTrips(t *testing.T) {
 	}
 }
 
+func TestPluginMarketplaceNameUsesLogicalNameOnly(t *testing.T) {
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+	got, err := domain.PluginMarketplaceName(ref)
+	if err != nil || got != "apm-demo-plugin" {
+		t.Fatalf("PluginMarketplaceName() = %q, %v", got, err)
+	}
+}
+
+func TestPluginMarketplaceNameRejectsUnsafeIdentity(t *testing.T) {
+	for _, ref := range []domain.PowerRef{
+		{Name: "../demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"},
+		{Name: "demo", Type: domain.PowerTypeSkill, Version: "v0.1.0"},
+		{Name: "demo", Type: domain.PowerTypePlugin, Version: "0.1.0"},
+	} {
+		if _, err := domain.PluginMarketplaceName(ref); err == nil {
+			t.Fatalf("PluginMarketplaceName(%#v) error = nil", ref)
+		}
+	}
+}
+
 func TestPluginNameMappingRejectsUnsafeOrNonCanonicalValues(t *testing.T) {
 	tests := []struct {
 		name string

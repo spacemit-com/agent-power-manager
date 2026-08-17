@@ -46,6 +46,17 @@ func ActualPluginName(ref PowerRef) (string, error) {
 	return ref.Name + "-" + version, nil
 }
 
+// PluginMarketplaceName 返回逻辑 Plugin 对应的固定 marketplace 名称。
+func PluginMarketplaceName(ref PowerRef) (string, error) {
+	if ref.Type != PowerTypePlugin || !isSafePluginSegment(ref.Name) {
+		return "", fmt.Errorf("plugin reference %+v: %w", ref, ErrInvalidPluginDefinition)
+	}
+	if _, err := canonicalAPMPluginVersion(ref.Version); err != nil {
+		return "", err
+	}
+	return "apm-" + ref.Name, nil
+}
+
 // PluginRefFromMarketplace 将原生 marketplace 条目还原为 APM 逻辑引用。
 func PluginRefFromMarketplace(actualName, nativeVersion string) (PowerRef, error) {
 	version, err := canonicalNativePluginVersion(nativeVersion)
