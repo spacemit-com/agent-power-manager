@@ -143,6 +143,21 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 		{name: "upgrade", journal: upgrade, phases: []Phase{PhaseRegisteringMarketplace, PhaseRemovingPlugin}},
 		{name: "uninstall", journal: uninstall, phases: []Phase{PhaseRegisteringMarketplace, PhaseRemovingOldPlugin, PhaseUnregisteringOldMarketplace, PhaseRegisteringNewMarketplace, PhaseAddingNewPlugin}},
 	}
+	oldAndUnknownPhases := []Phase{PhasePreparing, PhasePublishing, PhaseRemovingOld, PhaseAddingNew, PhaseRemoving, Phase("unknown")}
+	for _, test := range []struct {
+		name    string
+		journal Journal
+	}{
+		{name: "first install", journal: firstInstall},
+		{name: "upgrade", journal: upgrade},
+		{name: "uninstall", journal: uninstall},
+	} {
+		invalid = append(invalid, struct {
+			name    string
+			journal Journal
+			phases  []Phase
+		}{name: test.name + " old-or-unknown", journal: test.journal, phases: oldAndUnknownPhases})
+	}
 	for _, test := range invalid {
 		for _, phase := range test.phases {
 			t.Run("reject "+test.name+"/"+string(phase), func(t *testing.T) {
@@ -153,6 +168,63 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPluginMarketplaceJournalRejectsMissingPayloadInEveryOperation(t *testing.T) {
+	cacheHome := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
+	previousSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
+	firstInstall := Journal{
+		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverPlugin,
+		Operation: OperationInstall, Phase: PhaseRegisteringMarketplace, Agent: domain.AgentCodex,
+		Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
+		Plugin: &PluginJournalPayload{
+			Deployment: domain.PluginDeploymentMarketplace,
+			Target:     adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+			Marketplace: &PluginMarketplaceJournalPayload{
+				Name: "apm-demo", TargetSource: targetSource,
+			},
+		},
+	}
+	upgrade := firstInstall
+	upgrade.Phase = PhaseRemovingOldPlugin
+	upgrade.Previous = &previousRef
+	upgradePlugin := *firstInstall.Plugin
+	upgrade.Plugin = &upgradePlugin
+	upgrade.Plugin.Previous = &previousTarget
+	upgrade.Plugin.PreviousPresent = true
+	upgrade.Plugin.Marketplace = &PluginMarketplaceJournalPayload{
+		Name: "apm-demo", PreviousSource: previousSource, PreviousPresent: true, TargetSource: targetSource,
+	}
+	uninstall := firstInstall
+	uninstall.Operation = OperationUninstall
+	uninstall.Phase = PhaseRemovingPlugin
+	uninstall.Plugin = &PluginJournalPayload{
+		Deployment:    domain.PluginDeploymentMarketplace,
+		Target:        adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+		TargetPresent: true,
+		Marketplace: &PluginMarketplaceJournalPayload{
+			Name: "apm-demo", TargetSource: targetSource,
+		},
+	}
+
+	for name, journal := range map[string]Journal{
+		"first install": firstInstall,
+		"upgrade":       upgrade,
+		"uninstall":     uninstall,
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := *journal.Plugin
+			journal.Plugin = &payload
+			journal.Plugin.Marketplace = nil
+			if err := validateJournal(journal); !errors.Is(err, ErrInvalidJournal) {
+				t.Fatalf("validateJournal(missing marketplace payload) error = %v, want ErrInvalidJournal", err)
+			}
+		})
 	}
 }
 
@@ -191,13 +263,10 @@ func TestPluginMarketplaceInvalidJournalPayloads(t *testing.T) {
 		"previous source without reference": func(j *Journal) {
 			j.Plugin.Marketplace.PreviousSource = filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
 		},
-		"filesystem payload too": func(j *Journal) { j.Plugin.Filesystem = &PluginFilesystemJournalPayload{} },
-		"legacy phase":           func(j *Journal) { j.Phase = PhaseAddingNew },
-		"extra old target fact":  func(j *Journal) { j.Plugin.TargetPresent = true },
-		"old journal without marketplace payload": func(j *Journal) {
-			j.Plugin.Marketplace = nil
-			j.Plugin.Target.Selector = j.Plugin.Target.ActualName
-		},
+		"filesystem payload too":      func(j *Journal) { j.Plugin.Filesystem = &PluginFilesystemJournalPayload{} },
+		"legacy phase":                func(j *Journal) { j.Phase = PhaseAddingNew },
+		"extra old target fact":       func(j *Journal) { j.Plugin.TargetPresent = true },
+		"missing marketplace payload": func(j *Journal) { j.Plugin.Marketplace = nil },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -219,15 +288,20 @@ func TestLegacyPluginJournalAcceptedOnlyDuringFeatureCutover(t *testing.T) {
 	upgrade.Phase = PhaseRemovingOld
 	upgrade.Plugin.Previous = &previousTarget
 	upgrade.Plugin.PreviousPresent = true
+	absentPreviousTarget := adapter.PluginTarget{ActualName: "demo-v0.9.0", Selector: "demo-v0.9.0@apm"}
+	absentPrevious := validPluginMarketplaceJournal()
+	absentPrevious.Previous = &previousRef
+	absentPrevious.Plugin.Previous = &absentPreviousTarget
 	uninstall := validPluginMarketplaceJournal()
 	uninstall.Operation = OperationUninstall
 	uninstall.Phase = PhaseRemoving
 	uninstall.Plugin.TargetPresent = true
 
 	for name, journal := range map[string]Journal{
-		"first install": firstInstall,
-		"upgrade":       upgrade,
-		"uninstall":     uninstall,
+		"first install":                       firstInstall,
+		"upgrade":                             upgrade,
+		"upgrade with absent previous Plugin": absentPrevious,
+		"uninstall":                           uninstall,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validateJournal(journal); err != nil {
@@ -241,6 +315,11 @@ func TestLegacyPluginJournalAcceptedOnlyDuringFeatureCutover(t *testing.T) {
 		"Hermes marketplace":  func(j *Journal) { j.Agent = domain.AgentHermes },
 		"install target present": func(j *Journal) {
 			j.Plugin.TargetPresent = true
+		},
+		"absent previous selector uses another marketplace": func(j *Journal) {
+			j.Previous = &previousRef
+			previous := adapter.PluginTarget{ActualName: "demo-v0.9.0", Selector: "demo-v0.9.0@other"}
+			j.Plugin.Previous = &previous
 		},
 	} {
 		t.Run("reject "+name, func(t *testing.T) {

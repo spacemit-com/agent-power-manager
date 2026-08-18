@@ -13,6 +13,7 @@ import (
 
 type marketplacePluginValidationAdapter struct {
 	nilPluginValidationAdapter
+	identity byte
 }
 
 func (*marketplacePluginValidationAdapter) InspectMarketplace(context.Context, string) (adapter.MarketplaceFact, error) {
@@ -44,6 +45,68 @@ func (*filesystemPluginValidationAdapter) Remove(context.Context, adapter.Plugin
 }
 func (*filesystemPluginValidationAdapter) TargetPath(string) (string, error) { return "", nil }
 
+type nonComparableMarketplacePluginValidationAdapter struct {
+	state []string
+}
+
+type comparableMarketplacePluginValidationAdapter int
+
+func (comparableMarketplacePluginValidationAdapter) DeploymentMode() domain.PluginDeploymentMode {
+	return domain.PluginDeploymentMarketplace
+}
+func (comparableMarketplacePluginValidationAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
+	return nil
+}
+func (comparableMarketplacePluginValidationAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
+	return adapter.PluginFact{}, nil
+}
+func (comparableMarketplacePluginValidationAdapter) Add(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+func (comparableMarketplacePluginValidationAdapter) Remove(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+func (comparableMarketplacePluginValidationAdapter) TargetPath(string) (string, error) {
+	return "", nil
+}
+func (comparableMarketplacePluginValidationAdapter) InspectMarketplace(context.Context, string) (adapter.MarketplaceFact, error) {
+	return adapter.MarketplaceFact{}, nil
+}
+func (comparableMarketplacePluginValidationAdapter) RegisterMarketplace(context.Context, adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+func (comparableMarketplacePluginValidationAdapter) UnregisterMarketplace(context.Context, adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+
+func (nonComparableMarketplacePluginValidationAdapter) DeploymentMode() domain.PluginDeploymentMode {
+	return domain.PluginDeploymentMarketplace
+}
+func (nonComparableMarketplacePluginValidationAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
+	return nil
+}
+func (nonComparableMarketplacePluginValidationAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
+	return adapter.PluginFact{}, nil
+}
+func (nonComparableMarketplacePluginValidationAdapter) Add(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+func (nonComparableMarketplacePluginValidationAdapter) Remove(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+func (nonComparableMarketplacePluginValidationAdapter) TargetPath(string) (string, error) {
+	return "", nil
+}
+func (nonComparableMarketplacePluginValidationAdapter) InspectMarketplace(context.Context, string) (adapter.MarketplaceFact, error) {
+	return adapter.MarketplaceFact{}, nil
+}
+func (nonComparableMarketplacePluginValidationAdapter) RegisterMarketplace(context.Context, adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+func (nonComparableMarketplacePluginValidationAdapter) UnregisterMarketplace(context.Context, adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{}, nil
+}
+
 func TestValidatePluginRequests(t *testing.T) {
 	var typedNil *nilPluginValidationAdapter
 	install := PluginInstallRequest{
@@ -60,7 +123,7 @@ func TestValidatePluginRequests(t *testing.T) {
 		t.Fatalf("typed nil install error = %v", err)
 	}
 	uninstall := PluginUninstallRequest{
-		Agent:      domain.AgentHermes,
+		Agent:      domain.AgentCodex,
 		Power:      domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
 		ActualName: "demo-v1.0.0",
 		Adapter:    &nilPluginValidationAdapter{},
@@ -84,6 +147,7 @@ func TestValidatePluginMarketplaceRequests(t *testing.T) {
 	previousMarketplace := adapter.MarketplaceTarget{Name: "apm-demo", Source: previousSource}
 	targetPlugin := adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"}
 	previousPlugin := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
+	var typedNilMarketplaceAdapter *marketplacePluginValidationAdapter
 	firstInstall := PluginInstallRequest{
 		Agent:   domain.AgentCodex,
 		Power:   domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
@@ -105,7 +169,21 @@ func TestValidatePluginMarketplaceRequests(t *testing.T) {
 		"wrong target marketplace source": func(r *PluginInstallRequest) {
 			r.Marketplace.Target.Source = previousSource
 		},
-		"missing marketplace Adapter": func(r *PluginInstallRequest) { r.Marketplace.Adapter = nil },
+		"missing marketplace Adapter":   func(r *PluginInstallRequest) { r.Marketplace.Adapter = nil },
+		"typed nil marketplace Adapter": func(r *PluginInstallRequest) { r.Marketplace.Adapter = typedNilMarketplaceAdapter },
+		"cross-wired marketplace Adapter": func(r *PluginInstallRequest) {
+			r.Marketplace.Adapter = &marketplacePluginValidationAdapter{}
+		},
+		"non-comparable Adapter value": func(r *PluginInstallRequest) {
+			value := nonComparableMarketplacePluginValidationAdapter{state: []string{"same-value"}}
+			r.Adapter = value
+			r.Marketplace.Adapter = value
+		},
+		"comparable Adapter value has no instance identity": func(r *PluginInstallRequest) {
+			value := comparableMarketplacePluginValidationAdapter(1)
+			r.Adapter = value
+			r.Marketplace.Adapter = value
+		},
 	} {
 		t.Run("first install/"+name, func(t *testing.T) {
 			request := firstInstall
@@ -169,6 +247,22 @@ func TestValidatePluginMarketplaceRequests(t *testing.T) {
 		"missing target Plugin":       func(r *PluginUninstallRequest) { r.Target = adapter.PluginTarget{} },
 		"missing target marketplace":  func(r *PluginUninstallRequest) { r.Marketplace = nil },
 		"missing marketplace Adapter": func(r *PluginUninstallRequest) { r.MarketplaceAdapter = nil },
+		"typed nil marketplace Adapter": func(r *PluginUninstallRequest) {
+			r.MarketplaceAdapter = typedNilMarketplaceAdapter
+		},
+		"cross-wired marketplace Adapter": func(r *PluginUninstallRequest) {
+			r.MarketplaceAdapter = &marketplacePluginValidationAdapter{}
+		},
+		"non-comparable Adapter value": func(r *PluginUninstallRequest) {
+			value := nonComparableMarketplacePluginValidationAdapter{state: []string{"same-value"}}
+			r.Adapter = value
+			r.MarketplaceAdapter = value
+		},
+		"comparable Adapter value has no instance identity": func(r *PluginUninstallRequest) {
+			value := comparableMarketplacePluginValidationAdapter(1)
+			r.Adapter = value
+			r.MarketplaceAdapter = value
+		},
 		"wrong marketplace source": func(r *PluginUninstallRequest) {
 			marketplace := *r.Marketplace
 			marketplace.Source = previousSource
@@ -199,4 +293,47 @@ func TestValidatePluginMarketplaceRequests(t *testing.T) {
 			t.Fatalf("validatePluginInstallRequest(Hermes marketplace) error = %v, want ErrInvalidRequest", err)
 		}
 	})
+}
+
+func TestValidateLegacyPluginRequestAgentModes(t *testing.T) {
+	pluginAdapter := &marketplacePluginValidationAdapter{}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	definition := domain.PluginDefinition{
+		ActualName: "demo-v1.0.0",
+		Marketplace: domain.MarketplaceDefinition{
+			Name: "apm", Source: "/marketplace",
+		},
+	}
+	marketplaceInstall := PluginInstallRequest{
+		Agent: domain.AgentHermes, Power: ref, Definition: definition, Adapter: pluginAdapter,
+	}
+	if err := validatePluginInstallRequest(marketplaceInstall); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Hermes legacy marketplace install error = %v, want ErrInvalidRequest", err)
+	}
+	marketplaceUninstall := PluginUninstallRequest{
+		Agent: domain.AgentHermes, Power: ref, ActualName: definition.ActualName, Adapter: pluginAdapter,
+	}
+	if err := validatePluginUninstallRequest(marketplaceUninstall); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Hermes legacy marketplace uninstall error = %v, want ErrInvalidRequest", err)
+	}
+
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	filesystemAdapter := &filesystemPluginValidationAdapter{}
+	filesystemInstall := PluginInstallRequest{
+		Agent: domain.AgentHermes, Power: ref, Definition: definition, StagingRoot: staging, Adapter: filesystemAdapter,
+	}
+	if err := validatePluginInstallRequest(filesystemInstall); err != nil {
+		t.Fatalf("Hermes legacy filesystem install error = %v", err)
+	}
+	filesystemUninstall := PluginUninstallRequest{
+		Agent: domain.AgentHermes, Power: ref, ActualName: definition.ActualName, Adapter: filesystemAdapter,
+	}
+	if err := validatePluginUninstallRequest(filesystemUninstall); err != nil {
+		t.Fatalf("Hermes legacy filesystem uninstall error = %v", err)
+	}
 }

@@ -3,6 +3,7 @@ package transaction
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"apm/internal/adapter"
@@ -19,6 +20,9 @@ func validatePluginInstallRequest(request PluginInstallRequest) error {
 		return fmt.Errorf("validate Plugin install request: nil adapter: %w", ErrInvalidRequest)
 	}
 	mode := request.Adapter.DeploymentMode()
+	if mode == domain.PluginDeploymentMarketplace && request.Agent != domain.AgentCodex && request.Agent != domain.AgentClaudeCode {
+		return fmt.Errorf("marketplace Plugin install agent %q: %w", request.Agent, ErrInvalidRequest)
+	}
 	if mode == domain.PluginDeploymentFilesystem {
 		if request.Marketplace != nil || request.PreviousTarget != nil || request.Target != (adapter.PluginTarget{}) {
 			return fmt.Errorf("filesystem Plugin install contains marketplace data: %w", ErrInvalidRequest)
@@ -59,6 +63,9 @@ func validatePluginUninstallRequest(request PluginUninstallRequest) error {
 		return fmt.Errorf("validate Plugin uninstall request: nil adapter: %w", ErrInvalidRequest)
 	}
 	mode := request.Adapter.DeploymentMode()
+	if mode == domain.PluginDeploymentMarketplace && request.Agent != domain.AgentCodex && request.Agent != domain.AgentClaudeCode {
+		return fmt.Errorf("marketplace Plugin uninstall agent %q: %w", request.Agent, ErrInvalidRequest)
+	}
 	if mode == domain.PluginDeploymentMarketplace && request.Marketplace != nil {
 		return validatePluginMarketplaceUninstallRequest(request)
 	}
@@ -79,6 +86,9 @@ func validatePluginMarketplaceInstallRequest(request PluginInstallRequest) error
 	marketplace := request.Marketplace
 	if marketplace == nil || isNilInterface(marketplace.Adapter) || marketplace.Adapter.DeploymentMode() != domain.PluginDeploymentMarketplace {
 		return fmt.Errorf("marketplace Plugin install has no marketplace Adapter: %w", ErrInvalidRequest)
+	}
+	if !samePluginAdapterInstance(request.Adapter, marketplace.Adapter) {
+		return fmt.Errorf("Plugin and marketplace install Adapters are not the same instance: %w", ErrInvalidRequest)
 	}
 	expectedName, err := domain.PluginMarketplaceName(request.Power)
 	if err != nil || marketplace.Target.Name != expectedName {
@@ -122,6 +132,9 @@ func validatePluginMarketplaceUninstallRequest(request PluginUninstallRequest) e
 	}
 	if isNilInterface(request.MarketplaceAdapter) || request.MarketplaceAdapter.DeploymentMode() != domain.PluginDeploymentMarketplace {
 		return fmt.Errorf("marketplace Plugin uninstall has no marketplace Adapter: %w", ErrInvalidRequest)
+	}
+	if !samePluginAdapterInstance(request.Adapter, request.MarketplaceAdapter) {
+		return fmt.Errorf("Plugin and marketplace uninstall Adapters are not the same instance: %w", ErrInvalidRequest)
 	}
 	expectedName, err := domain.PluginMarketplaceName(request.Power)
 	if err != nil || request.Marketplace.Name != expectedName {
@@ -307,6 +320,9 @@ func validLegacyPluginJournal(journal Journal, payload PluginJournalPayload) boo
 		if err := validatePluginPreviousReferenceLegacy(journal, payload); err != nil {
 			return false
 		}
+		if !payload.PreviousPresent && pluginMarketplaceSelector(payload.Target) != pluginMarketplaceSelector(*payload.Previous) {
+			return false
+		}
 		if payload.PreviousPresent {
 			return journal.Phase == PhaseRemovingOld || journal.Phase == PhaseAddingNew ||
 				journal.Phase == PhaseRollingBack || journal.Phase == PhaseCommitting
@@ -335,6 +351,23 @@ func validatePluginPreviousReferenceLegacy(journal Journal, payload PluginJourna
 
 func validMarketplacePluginTarget(target adapter.PluginTarget) bool {
 	return validPluginTarget(target) && strings.HasPrefix(target.Selector, target.ActualName+"@")
+}
+
+func pluginMarketplaceSelector(target adapter.PluginTarget) string {
+	return strings.TrimPrefix(target.Selector, target.ActualName+"@")
+}
+
+// samePluginAdapterInstance 保证 Plugin 与 marketplace 写操作共享同一个 Agent 客户端实例；不可比较的值按无效请求处理。
+func samePluginAdapterInstance(pluginAdapter adapter.PluginAdapter, marketplaceAdapter adapter.MarketplacePluginAdapter) bool {
+	if isNilInterface(pluginAdapter) || isNilInterface(marketplaceAdapter) {
+		return false
+	}
+	pluginValue := reflect.ValueOf(pluginAdapter)
+	marketplaceValue := reflect.ValueOf(marketplaceAdapter)
+	if pluginValue.Type() != marketplaceValue.Type() || pluginValue.Kind() != reflect.Pointer {
+		return false
+	}
+	return pluginValue.Pointer() == marketplaceValue.Pointer()
 }
 
 func validPluginTarget(target adapter.PluginTarget) bool {
