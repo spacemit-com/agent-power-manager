@@ -11,6 +11,7 @@ import (
 	"apm/internal/adapter"
 	"apm/internal/domain"
 	"apm/internal/paths"
+	"apm/internal/pluginartifact"
 )
 
 type marketplaceRecoverySelection uint8
@@ -140,7 +141,7 @@ func (s *Service) recoverLocalMarketplacePluginInstall(ctx context.Context, jour
 		if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
 			return err
 		}
-		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
 			return err
 		}
 		return s.commitRecoveredPlugin(journal, result)
@@ -149,7 +150,7 @@ func (s *Service) recoverLocalMarketplacePluginInstall(ctx context.Context, jour
 		return err
 	}
 	if journal.Plugin.PreviousPresent && (facts.marketplace != marketplaceRecoveryPrevious || !facts.previousPresent) {
-		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.PreviousSource); err != nil {
+		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, *journal.Previous, journal.Plugin.Marketplace.PreviousSource); err != nil {
 			return err
 		}
 	}
@@ -275,7 +276,7 @@ func (s *Service) recoverLocalMarketplacePluginUninstall(journal Journal, facts 
 			return fmt.Errorf("committing Plugin uninstall target is still present: %w", ErrIndeterminateState)
 		}
 		result.Direction = RecoveryCommit
-		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
 			return err
 		}
 		return s.commitRecoveredPlugin(journal, result)
@@ -284,7 +285,7 @@ func (s *Service) recoverLocalMarketplacePluginUninstall(journal Journal, facts 
 			return fmt.Errorf("rolled-back Plugin uninstall target is absent: %w", ErrIndeterminateState)
 		}
 		result.Direction = RecoveryRollback
-		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
 			return err
 		}
 		return s.deleteRecoveredJournal(journal)
@@ -294,7 +295,7 @@ func (s *Service) recoverLocalMarketplacePluginUninstall(journal Journal, facts 
 			if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 				return err
 			}
-			if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+			if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
 				return err
 			}
 			return s.deleteRecoveredJournal(journal)
@@ -303,7 +304,7 @@ func (s *Service) recoverLocalMarketplacePluginUninstall(journal Journal, facts 
 		if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
 			return err
 		}
-		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
 			return err
 		}
 		return s.commitRecoveredPlugin(journal, result)
@@ -312,13 +313,19 @@ func (s *Service) recoverLocalMarketplacePluginUninstall(journal Journal, facts 
 	}
 }
 
-// validateMarketplaceRecoverySource 只校验当前收敛动作实际依赖的持久缓存，避免无关历史版本阻断既定方向。
-func (s *Service) validateMarketplaceRecoverySource(source string) error {
+// validateMarketplaceRecoveryArtifact 只复验当前收敛动作实际依赖的完整持久 artifact，避免无关历史版本阻断既定方向。
+func (s *Service) validateMarketplaceRecoveryArtifact(agent domain.AgentID, ref domain.PowerRef, source string) error {
 	cacheRoot, err := paths.CachePath()
 	if err != nil {
 		return errors.Join(fmt.Errorf("resolve Plugin recovery cache root: %w", err), ErrIndeterminateState)
 	}
-	return validateMarketplaceRecoverySourceTree(cacheRoot, source, s.files)
+	if err := validateMarketplaceRecoverySourceTree(cacheRoot, source, s.files); err != nil {
+		return err
+	}
+	if err := pluginartifact.Validate(agent, ref, source); err != nil {
+		return errors.Join(fmt.Errorf("validate Plugin recovery artifact %+v for agent %q at %q: %w", ref, agent, source, err), ErrIndeterminateState)
+	}
+	return nil
 }
 
 func validateMarketplaceRecoverySourceTree(cacheRoot, source string, files fileOps) error {

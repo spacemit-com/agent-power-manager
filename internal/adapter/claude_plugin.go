@@ -115,6 +115,9 @@ func (adapter *claudePluginAdapter) Inspect(ctx context.Context, actualName stri
 	if err := decodePluginJSON(result.Stdout, &installed); err != nil {
 		return PluginFact{}, pluginStateUnknown(domain.AgentClaudeCode, "plugin list", result, err)
 	}
+	if installed == nil {
+		return PluginFact{}, pluginStateUnknown(domain.AgentClaudeCode, "plugin list", result, errors.New("plugin list is null"))
+	}
 	selectors := make([]string, 0, 1)
 	for _, plugin := range installed {
 		name, _, found := strings.Cut(plugin.ID, "@")

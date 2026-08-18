@@ -87,6 +87,12 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 	if err != nil {
 		return cli.InstallResult{}, releaseInstall(unlock, err)
 	}
+	if result, matched := s.explicitPluginManifestHit(flags, agents); matched {
+		if releaseErr := unlock.Release(); releaseErr != nil {
+			return cli.InstallResult{}, fmt.Errorf("release install lock: %w", releaseErr)
+		}
+		return result, nil
+	}
 
 	refs, err := s.cloud.List()
 	if err != nil {
@@ -127,6 +133,27 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 		return result, &cli.InstallBatchError{Agent: failedAgent, Err: businessErr}
 	}
 	return result, nil
+}
+
+// explicitPluginManifestHit 仅处理类型、名称和规范版本都显式给出的 Plugin 批次。
+// 任一 manifest 缺失、不匹配或不可读时回退既有 Cloud 解析路径，不在预检阶段改变错误优先级。
+func (s *InstallService) explicitPluginManifestHit(flags cli.Flags, agents []domain.AgentID) (cli.InstallResult, bool) {
+	if flags.Type != string(domain.PowerTypePlugin) || flags.Name == "" || flags.Version == "" {
+		return cli.InstallResult{}, false
+	}
+	ref := domain.PowerRef{Name: flags.Name, Type: domain.PowerTypePlugin, Version: flags.Version}
+	if _, err := domain.ActualPluginName(ref); err != nil {
+		return cli.InstallResult{}, false
+	}
+	items := make([]cli.InstallItem, 0, len(agents))
+	for _, agent := range agents {
+		previous, installed, err := s.config.Find(agent, domain.PowerTypePlugin, ref.Name)
+		if err != nil || !installed || previous != ref {
+			return cli.InstallResult{}, false
+		}
+		items = append(items, pluginInstallItem(agent, ref, cli.InstallOutcomeUnchanged))
+	}
+	return cli.InstallResult{Items: items}, true
 }
 
 func installAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.AgentID, error) {

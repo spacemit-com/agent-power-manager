@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 	"apm/internal/utils/filesystem"
 )
 
@@ -37,6 +38,9 @@ func (c *LocalClient) DownloadPlugin(ctx context.Context, agent domain.AgentID, 
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return fmt.Errorf("raw Plugin package %q is not a physical directory", source)
 	}
+	if err := validatePluginSourcePackage(c.resourcesRoot, source); err != nil {
+		return err
+	}
 	if destination == "" {
 		return errors.New("raw Plugin destination is empty")
 	}
@@ -53,6 +57,48 @@ func (c *LocalClient) DownloadPlugin(ctx context.Context, agent domain.AgentID, 
 	}
 	if err := filesystem.CopyDir(source, resolvedDestination); err != nil {
 		return fmt.Errorf("copy raw Plugin package %q to %q: %w", source, resolvedDestination, err)
+	}
+	return nil
+}
+
+// validatePluginSourcePackage 在 CopyDir 打开 payload 前校验可信资源根、祖先组件和完整后代树。
+func validatePluginSourcePackage(resourcesRoot, source string) error {
+	physicalRoot, err := filesystem.ResolvePhysicalPath(resourcesRoot)
+	if err != nil {
+		return fmt.Errorf("resolve physical resource root %q: %w", resourcesRoot, err)
+	}
+	physicalSource, err := filesystem.ResolvePhysicalPath(source)
+	if err != nil {
+		return fmt.Errorf("resolve physical raw Plugin package %q: %w", source, err)
+	}
+	insideRoot, err := filesystem.PathEqualOrWithin(physicalRoot, physicalSource)
+	if err != nil {
+		return fmt.Errorf("compare physical resource root %q and raw Plugin package %q: %w", physicalRoot, physicalSource, err)
+	}
+	if !insideRoot {
+		return fmt.Errorf("raw Plugin package %q escapes physical resource root %q", source, physicalRoot)
+	}
+
+	relative, err := filepath.Rel(resourcesRoot, source)
+	if err != nil || relative == "." || relative == ".." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return errors.Join(fmt.Errorf("raw Plugin package %q escapes resource root %q", source, resourcesRoot), err)
+	}
+	current := resourcesRoot
+	components := append([]string{""}, strings.Split(relative, string(filepath.Separator))...)
+	for _, component := range components {
+		if component != "" && component != "." {
+			current = filepath.Join(current, component)
+		}
+		info, err := os.Lstat(current)
+		if err != nil {
+			return fmt.Errorf("lstat raw Plugin package ancestor %q: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("raw Plugin package ancestor %q is not a physical directory", current)
+		}
+	}
+	if err := pluginartifact.ValidatePhysicalTree(source); err != nil {
+		return fmt.Errorf("validate raw Plugin package %q: %w", source, err)
 	}
 	return nil
 }

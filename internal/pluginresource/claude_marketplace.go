@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"reflect"
 
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 )
 
 const (
@@ -68,28 +68,8 @@ func (claudeMarketplaceBuilder) Validate(agent domain.AgentID, ref domain.PowerR
 	if agent != domain.AgentClaudeCode {
 		return fmt.Errorf("validate Claude marketplace for agent %q: %w", agent, ErrUnsupportedAgent)
 	}
-	actualName, err := domain.ActualPluginName(ref)
-	if err != nil {
-		return fmt.Errorf("resolve Claude plugin identity: %w", err)
-	}
-	pluginPath := filepath.Join(root, "plugins", actualName)
-	var manifest claudePluginManifest
-	if err := decodePluginManifest(pluginPath, claudeManifestPath, &manifest); err != nil {
-		return fmt.Errorf("decode Claude plugin manifest: %w", err)
-	}
-	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
-		return err
-	}
-	want, err := newClaudeMarketplaceDocument(ref, manifest)
-	if err != nil {
-		return fmt.Errorf("derive Claude marketplace: %w", err)
-	}
-	var got claudeMarketplaceDocument
-	if err := decodeJSONFile(filepath.Join(root, claudeMarketplacePath), &got); err != nil {
-		return fmt.Errorf("decode Claude marketplace: %w", errors.Join(ErrInvalidArtifact, err))
-	}
-	if !reflect.DeepEqual(got, want) {
-		return fmt.Errorf("Claude marketplace semantic value does not match manifest: %w", ErrInvalidArtifact)
+	if err := pluginartifact.Validate(agent, ref, root); err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
 	}
 	return nil
 }

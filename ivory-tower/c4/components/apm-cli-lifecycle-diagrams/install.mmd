@@ -2,13 +2,15 @@ flowchart TD
     Start([Install]) --> Lock[Acquire]
     Lock --> Recover[Recover shared journal]
     Recover --> Refresh[RefreshInstalled]
-    Refresh --> List[Cloud List + resolve exact PowerRef]
+    Refresh --> ExplicitPlugin{显式规范 Plugin ref 且所选 Agent manifest 全部精确命中?}
+    ExplicitPlugin -->|yes| ManifestHit[每个所选 Agent unchanged] --> Release
+    ExplicitPlugin -->|no| List[Cloud List + resolve exact PowerRef]
     List --> Agent{next Agent}
     Agent --> Type{Power type}
     Type -->|Skill| SkillResolve[ResolveSkill + Config Find]
     SkillResolve --> SkillSame{same manifest version?}
     SkillSame -->|yes| Unchanged[unchanged]
-    SkillSame -->|no| Cache[Cache Fetch / Cloud DownloadSkill / Fetch]
+    SkillSame -->|no| Cache[Cache StageSkill / miss 时 Cloud DownloadSkill / StageSkill]
     Cache --> FSTx[filesystem Install transaction]
     FSTx --> FSJournal[schema v1 driver=filesystem]
 

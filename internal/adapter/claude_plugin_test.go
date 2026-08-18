@@ -146,3 +146,14 @@ func TestClaudePluginInspectAbsentAndAmbiguous(t *testing.T) {
 		t.Fatalf("ambiguous Inspect() error = %v", err)
 	}
 }
+
+func TestClaudePluginInspectRejectsMalformedTopLevelCollection(t *testing.T) {
+	// 捕获错误变更：missing/null collection 被当成明确空列表，从而把未知状态误报为 absent。
+	for _, document := range []string{`{}`, `{"installed":null}`, `null`} {
+		runner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(document)}}
+		_, err := newClaudePluginAdapter(runner).Inspect(context.Background(), "demo-plugin-v0.0.1")
+		if !errors.Is(err, ErrPluginStateUnknown) {
+			t.Fatalf("Inspect(%s) error = %v, want ErrPluginStateUnknown", document, err)
+		}
+	}
+}

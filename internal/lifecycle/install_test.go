@@ -49,6 +49,120 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 	})
 }
 
+func TestInstallExplicitPluginManifestHitSkipsCloudAndMutablePluginDependencies(t *testing.T) {
+	// 捕获错误变更：公共 Install 在 manifest 精确命中前仍先访问 Cloud 或进入资源、Adapter、Transaction。
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
+	cloudCause := errors.New("Cloud must remain offline on manifest hit")
+	agents := []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
+	installed := make(map[domain.AgentID]domain.PowerRef, len(agents))
+	for _, agent := range agents {
+		installed[agent] = ref
+	}
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		snapshot:     domain.AgentSnapshot{Agents: agents},
+		installed:    installed,
+		cloudListErr: cloudCause,
+	})
+
+	result, err := service.Install(context.Background(), cli.Flags{
+		Agent: "all", Type: "plugin", Name: "demo", Version: "v2.0.0",
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	assertInstallItems(t, result, []cli.InstallItem{
+		{Agent: domain.AgentClaudeCode, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
+		{Agent: domain.AgentCodex, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
+		{Agent: domain.AgentHermes, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
+	})
+	wantCalls := []string{
+		"acquire", "recover", "refresh",
+		"config:find:claude-code", "config:find:codex", "config:find:hermes-agent",
+		"release",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %v, want manifest-only %v", calls, wantCalls)
+	}
+}
+
+func TestInstallExplicitPluginManifestFastPathFallsBackWhenAnyAgentDiffers(t *testing.T) {
+	// 捕获错误变更：批量 fast path 只检查部分 Agent，错误地把混合版本批次全部返回 unchanged。
+	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
+	cloudCause := errors.New("Cloud fallback reached")
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex, domain.AgentHermes}},
+		installed: map[domain.AgentID]domain.PowerRef{
+			domain.AgentCodex:  target,
+			domain.AgentHermes: {Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+		},
+		cloudListErr: cloudCause,
+	})
+
+	result, err := service.Install(context.Background(), cli.Flags{
+		Agent: "all", Type: "plugin", Name: "demo", Version: "v2.0.0",
+	})
+	if !errors.Is(err, cloudCause) {
+		t.Fatalf("Install() error = %v, want Cloud fallback cause %v", err, cloudCause)
+	}
+	assertZeroInstallResult(t, result)
+	wantCalls := []string{
+		"acquire", "recover", "refresh", "config:find:codex", "config:find:hermes-agent", "cloud:list", "release",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %v, want fallback %v", calls, wantCalls)
+	}
+}
+
+func TestInstallPluginFastPathRequiresExplicitCanonicalVersion(t *testing.T) {
+	// 捕获错误变更：省略版本时绕过 Cloud 版本选择并误用 manifest 中的任意版本。
+	cloudCause := errors.New("Cloud version selection required")
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		installed: map[domain.AgentID]domain.PowerRef{
+			domain.AgentCodex: {Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
+		},
+		cloudListErr: cloudCause,
+	})
+
+	result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})
+	if !errors.Is(err, cloudCause) {
+		t.Fatalf("Install() error = %v, want Cloud cause %v", err, cloudCause)
+	}
+	assertZeroInstallResult(t, result)
+	wantCalls := []string{"acquire", "recover", "refresh", "cloud:list", "release"}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %v, want normal resolution %v", calls, wantCalls)
+	}
+}
+
+func TestInstallPluginManifestFastPathReleaseFailureSuppressesResult(t *testing.T) {
+	// 捕获错误变更：新增 fast path 绕过统一解锁错误抑制，泄露 completed 结果。
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
+	releaseCause := errors.New("release fast-path lock")
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		installed:  map[domain.AgentID]domain.PowerRef{domain.AgentCodex: ref},
+		releaseErr: releaseCause,
+	})
+
+	result, err := service.Install(context.Background(), cli.Flags{
+		Agent: "codex", Type: "plugin", Name: "demo", Version: "v2.0.0",
+	})
+	if !errors.Is(err, releaseCause) {
+		t.Fatalf("Install() error = %v, want release cause %v", err, releaseCause)
+	}
+	assertZeroInstallResult(t, result)
+	assertNoInstallBatchError(t, err)
+	wantCalls := []string{"acquire", "recover", "refresh", "config:find:codex", "release"}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+	}
+}
+
 func TestInstallAllFailsFastAndCompletesResultAfterRelease(t *testing.T) {
 	cause := errors.New("find installed Codex power")
 	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}

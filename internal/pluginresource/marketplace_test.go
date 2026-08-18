@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"apm/internal/cloud"
 	"apm/internal/domain"
 )
 
@@ -26,7 +27,7 @@ func TestNewSelectsAgentBuildersAndReturnsCompleteArtifacts(t *testing.T) {
 		case domain.AgentClaudeCode:
 			return writeTestPluginManifest(destination, claudeManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 		case domain.AgentHermes:
-			return os.WriteFile(filepath.Join(destination, "plugin.txt"), []byte("hermes"), 0o600)
+			return writeTestPluginManifest(destination, claudeManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 		default:
 			return errors.New("unexpected agent")
 		}
@@ -75,6 +76,9 @@ func TestEnsureRejectsInvalidAgentPackagesWithoutPublishingCache(t *testing.T) {
 		return writeTestPluginManifest(destination, codexManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 	}
 	validClaude := func(destination string) error {
+		return writeTestPluginManifest(destination, claudeManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
+	}
+	validHermes := func(destination string) error {
 		return writeTestPluginManifest(destination, claudeManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 	}
 	tests := []struct {
@@ -172,6 +176,26 @@ func TestEnsureRejectsInvalidAgentPackagesWithoutPublishingCache(t *testing.T) {
 				return writeTestPluginManifest(destination, claudeMarketplacePath, `{}`)
 			},
 		},
+		{
+			name:  "Hermes package includes Codex marketplace",
+			agent: domain.AgentHermes,
+			write: func(_ *testing.T, destination string) error {
+				if err := validHermes(destination); err != nil {
+					return err
+				}
+				return writeTestPluginManifest(destination, codexMarketplacePath, `{}`)
+			},
+		},
+		{
+			name:  "Hermes package includes Claude marketplace",
+			agent: domain.AgentHermes,
+			write: func(_ *testing.T, destination string) error {
+				if err := validHermes(destination); err != nil {
+					return err
+				}
+				return writeTestPluginManifest(destination, claudeMarketplacePath, `{}`)
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -188,6 +212,98 @@ func TestEnsureRejectsInvalidAgentPackagesWithoutPublishingCache(t *testing.T) {
 			finalRoot := testArtifactRoot(roots.cache, test.agent, ref)
 			if _, err := os.Lstat(finalRoot); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("final cache stat error = %v, want not exist", err)
+			}
+		})
+	}
+}
+
+func TestEnsureWithLocalCloudRejectsSymlinkedSourceBeforePublishingArtifact(t *testing.T) {
+	// 捕获错误变更：Local Cloud 跟随外部 manifest 后，Plugin Resource 将其发布成最终不可变 artifact。
+	resourceRoot := filepath.Join(t.TempDir(), "resources")
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "xdg-cache"))
+	ref := testPluginRef()
+	source := filepath.Join(resourceRoot, "plugins", ref.Name, ref.Version, string(domain.AgentCodex))
+	manifestPath := filepath.Join(source, codexManifestPath)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	externalManifest := filepath.Join(t.TempDir(), "outside-plugin.json")
+	wantExternal := `{"name":"demo-v0.1.0","version":"0.1.0"}`
+	if err := os.WriteFile(externalManifest, []byte(wantExternal), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalManifest, manifestPath); err != nil {
+		t.Fatal(err)
+	}
+	client, err := cloud.NewLocalClient(resourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, client, builtInBuilders())
+
+	if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); err == nil {
+		t.Fatal("Ensure() error = nil, want non-physical Local Cloud source rejection")
+	}
+	finalRoot := testArtifactRoot(roots.cache, domain.AgentCodex, ref)
+	if _, err := os.Lstat(finalRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("final artifact stat error = %v, want absent", err)
+	}
+	contents, err := os.ReadFile(externalManifest)
+	if err != nil || string(contents) != wantExternal {
+		t.Fatalf("external manifest = %q, %v, want unchanged", contents, err)
+	}
+}
+
+func TestLookupRejectsMarketplaceFilesOutsideAgentClosedWorld(t *testing.T) {
+	// 捕获错误变更：cache hit 只复验本 Agent 的必需 marketplace，却容忍 Cloud/外部注入的其他 marketplace。
+	tests := []struct {
+		name     string
+		agent    domain.AgentID
+		relative string
+		nested   bool
+	}{
+		{name: "Codex foreign Claude marketplace", agent: domain.AgentCodex, relative: claudeMarketplacePath},
+		{name: "Claude foreign Codex marketplace", agent: domain.AgentClaudeCode, relative: codexMarketplacePath},
+		{name: "Hermes root Codex marketplace", agent: domain.AgentHermes, relative: codexMarketplacePath},
+		{name: "Hermes root Claude marketplace", agent: domain.AgentHermes, relative: claudeMarketplacePath},
+		{name: "Hermes nested Codex marketplace", agent: domain.AgentHermes, relative: codexMarketplacePath, nested: true},
+		{name: "Hermes nested Claude marketplace", agent: domain.AgentHermes, relative: claudeMarketplacePath, nested: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			roots := newTestRoots(t)
+			var calls atomic.Int32
+			download := pluginDownloadFunc(func(_ context.Context, agent domain.AgentID, _ domain.PowerRef, destination string) error {
+				calls.Add(1)
+				manifestPath := claudeManifestPath
+				if agent == domain.AgentCodex {
+					manifestPath = codexManifestPath
+				}
+				return writeTestPluginManifest(destination, manifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
+			})
+			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
+			ref := testPluginRef()
+			artifact, err := service.Ensure(context.Background(), test.agent, ref)
+			if err != nil {
+				t.Fatalf("initial Ensure() error = %v", err)
+			}
+			base := artifact.Root
+			if test.nested {
+				base = artifact.PluginPath
+			}
+			if err := writeTestPluginManifest(base, test.relative, `{}`); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := service.Lookup(test.agent, ref); !errors.Is(err, ErrInvalidArtifact) {
+				t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
+			}
+			if _, err := service.Ensure(context.Background(), test.agent, ref); !errors.Is(err, ErrInvalidArtifact) {
+				t.Fatalf("Ensure() error = %v, want immutable cache rejection", err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("DownloadPlugin calls = %d, want 1", calls.Load())
 			}
 		})
 	}
@@ -262,6 +378,13 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 		{
 			name:  "manifest changed after publish",
 			agent: domain.AgentClaudeCode,
+			mutate: func(t *testing.T, root string) {
+				writeFileForTest(t, filepath.Join(root, "plugins", "demo-v0.1.0", claudeManifestPath), `{"name":"other-v0.1.0","version":"0.1.0"}`)
+			},
+		},
+		{
+			name:  "Hermes manifest changed after publish",
+			agent: domain.AgentHermes,
 			mutate: func(t *testing.T, root string) {
 				writeFileForTest(t, filepath.Join(root, "plugins", "demo-v0.1.0", claudeManifestPath), `{"name":"other-v0.1.0","version":"0.1.0"}`)
 			},

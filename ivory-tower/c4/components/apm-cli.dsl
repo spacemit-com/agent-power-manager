@@ -43,7 +43,9 @@ cloudClient = component "Cloud Client" "List 扫描全部 Power；DownloadSkill 
         "classDiagram" "apm-cli-diagrams/cloud-client.mmd"
     }
 }
-pluginResource = component "Plugin Resource" "独占 Plugin 原始包下载、agent-aware immutable artifact、Codex/Claude 单条目本地 marketplace 生成与 Hermes staging；Hermes 没有 marketplace builder（ADR-013）。" "Go" {
+pluginResource = component "Plugin Resource" "独占 Plugin 原始包下载、agent-aware immutable artifact、Codex/Claude 单条目本地 marketplace 生成与 Hermes staging；通过中立只读 Validator 复验完整 artifact（ADR-013）。" "Go" {
+}
+pluginArtifactValidator = component "Plugin Artifact Validator" "中立只读校验：拒绝 symlink/特殊文件，精确核对 Agent manifest 与允许的 marketplace 闭集及语义；不下载、不生成、不修改 artifact。" "Go" {
 }
 pluginArtifactCache = component "Plugin Artifact Cache Roots" "cache/plugins/<agent>/<logical-name>/<version>；不可变 artifact 根，不属于通用 Cache Manager。" "filesystem" {
 }
@@ -53,7 +55,7 @@ codexMarketplaceBuilder = component "Codex Marketplace Builder" "从 Codex 原�
 }
 claudeMarketplaceBuilder = component "Claude Marketplace Builder" "从 Claude 原生 Plugin manifest 构建并复验单条目本地 marketplace。" "Go" {
 }
-transactionManager = component "Transaction Manager" "Plugin transaction 持久化 phase，联合切换 marketplace、Plugin 与 manifest；不依赖 Cloud 或 Plugin Resource。" "Go" {
+transactionManager = component "Transaction Manager" "Plugin transaction 持久化 phase，联合切换 marketplace、Plugin 与 manifest；恢复时只读复验方向所需 artifact，不依赖 Cloud 或 Plugin Resource。" "Go" {
 }
 journalStore = component "Journal Store" "唯一 transactions/active.json，schema v1 shared envelope。" "filesystem" {
 }
@@ -62,7 +64,7 @@ cliEntry -> lifecycle "通过五个独立 factory 调用 Search/List/Install/Uni
 lifecycle -> adapterRegistry "installed List/Install/Uninstall 刷新快照；Install/Uninstall 按 Agent 与 Power 类型解析 Adapter"
 lifecycle -> configModel "installed List、Install 与 Uninstall 读取/处理 manifest 事实"
 lifecycle -> lockManager "仅 Fix、Install、Uninstall 在各自边界获取/释放；Search 与两种 List 不获取"
-lifecycle -> cacheManager "Skill Install：为每个实际安装 Agent fetch 到公共 staging"
+lifecycle -> cacheManager "Skill Install：为每个实际安装 Agent StageSkill 到公共 staging"
 lifecycle -> cloudClient "Search/List/Install List；Skill DownloadSkill；MCP GetMCP"
 lifecycle -> pluginResource "Plugin Ensure / Lookup / StageHermes"
 lifecycle -> transactionManager "Install/Uninstall/Fix 的可恢复事务"
@@ -70,11 +72,13 @@ pluginResource -> cloudClient "DownloadPlugin 到 Plugin Resource 提供的原�
 pluginResource -> rawPluginDestination "创建并控制空的原始包 destination"
 cloudClient -> rawPluginDestination "只向调用方指定目录写入原始 Plugin 包，不生成 marketplace"
 pluginResource -> pluginArtifactCache "发布、复验 agent-aware immutable artifact"
+pluginResource -> pluginArtifactValidator "构建后与 cache hit 完整只读复验"
 pluginResource -> codexMarketplaceBuilder "构建与复验 Codex 单条目 marketplace"
 pluginResource -> claudeMarketplaceBuilder "构建与复验 Claude 单条目 marketplace"
 transactionManager -> adapterRegistry "Plugin marketplace/Plugin 与 filesystem 变更"
 transactionManager -> journalStore "create/update/delete schema v1 journal"
 transactionManager -> configModel "commit/rollback manifest Set/Remove"
+transactionManager -> pluginArtifactValidator "recovery 仅复验固定方向实际需要的 target/previous artifact"
 adapterRegistry -> targetAgent "Skill 访问文件根；MCP/Plugin 通过 Agent CLI；Hermes Plugin 发布本地目录" "本地文件系统 / CLI"
 configModel -> apm.installedPower "读写 JSON 清单"
 cacheManager -> apm.powerCache "读取版本化缓存"

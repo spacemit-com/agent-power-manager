@@ -103,6 +103,9 @@ func (adapter *codexPluginAdapter) Inspect(ctx context.Context, actualName strin
 	if err := decodePluginJSON(result.Stdout, &document); err != nil {
 		return PluginFact{}, pluginStateUnknown(domain.AgentCodex, "plugin list", result, err)
 	}
+	if document.Installed == nil {
+		return PluginFact{}, pluginStateUnknown(domain.AgentCodex, "plugin list", result, errors.New("plugin list has no installed array"))
+	}
 	selectors := make([]string, 0, 1)
 	for _, installed := range document.Installed {
 		if installed.Name == actualName {

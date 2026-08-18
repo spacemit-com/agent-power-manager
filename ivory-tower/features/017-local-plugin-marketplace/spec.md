@@ -170,6 +170,13 @@ Hermes Artifact 的 `MarketplaceName` 和 `MarketplaceSource` 为空；Codex/Cla
 `Ensure` 允许在 cache miss 时调用 Cloud；`Lookup` 严禁连接 Cloud。Lifecycle 使用这一
 差异保证目标版本可下载，而旧版本只能使用已存在的本地恢复材料。
 
+### `internal/pluginartifact`
+
+提供 Plugin Resource 与 Transaction recovery 共用的中立只读 Validator。它不依赖 Cloud
+或 `pluginresource.Manager`，不下载、生成或修改 artifact；只负责完整物理后代树、Agent
+原生 manifest 身份和 marketplace 闭集/语义校验。Codex 只允许根部生成的 Codex
+marketplace，Claude 只允许根部生成的 Claude marketplace，Hermes 不允许 marketplace。
+
 最终缓存布局为：
 
 ```text
@@ -515,7 +522,8 @@ marketplace。
 - marketplace absent、指向 previous source、指向 target source或指向其他 source；
 - old plugin present/absent；
 - target plugin present/absent；
-- journal 中缓存路径的安全性和存在性。
+- journal 中既定方向实际需要的完整缓存 artifact：安全物理树、原生 manifest 与生成
+  marketplace 语义。
 
 方向固定规则为：`committing` 必须继续 commit；`adding-new-plugin` 发现目标 marketplace
 和目标 Plugin 都已 present 时固定为 commit；其他尚未完成目标 Plugin 安装的安装 phase
@@ -630,6 +638,7 @@ Skill、MCP、Plugin 仍共用唯一 `transactions/active.json`，任意后续�
 | `internal/pluginresource/marketplace.go` | Builder 公共接口和 manifest 公共校验。 |
 | `internal/pluginresource/codex_marketplace.go` | Codex marketplace 生成与复验。 |
 | `internal/pluginresource/claude_marketplace.go` | Claude marketplace 生成与复验。 |
+| `internal/pluginartifact/validation.go` | Plugin Resource/Recovery 共用的中立只读完整 artifact 校验。 |
 | `internal/transaction/plugin_marketplace.go` | 首装和版本切换 marketplace transaction。 |
 | `internal/transaction/plugin_marketplace_recovery.go` | Marketplace/plugin 联合状态恢复。 |
 

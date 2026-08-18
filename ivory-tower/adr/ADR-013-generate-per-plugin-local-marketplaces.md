@@ -29,11 +29,14 @@ Install 和 Uninstall 以 APM manifest 为第一事实来源。Install 已记录
 
 Codex/Claude 的 marketplace 注册、Plugin 增删、manifest 写入与 rollback 属于同一个 `plugin` transaction。首装按“注册 marketplace、添加 Plugin、提交 manifest”执行；版本切换按“删除旧 Plugin、注销旧 marketplace、注册新 marketplace、添加新 Plugin、提交 manifest”执行。每次 Agent 写操作前持久化 journal phase；recovery 只使用 journal、Adapter、manifest 和不可变 artifact，绝不连接 Cloud 或 Plugin Resource。正常卸载只移除 manifest 指向的精确 Plugin，保留 marketplace 与 artifact。Transaction 依赖 Adapter、Journal 与 Manifest，不依赖 Cloud 或 Plugin Resource。
 
+Plugin Resource 与 Transaction recovery 共同依赖中立、只读的 Plugin Artifact Validator。Validator 对完整后代树拒绝 symlink 与特殊文件，精确校验 Agent 原生 manifest，并按闭集规则要求 Codex 仅有其生成 marketplace、Claude Code 仅有其生成 marketplace、Hermes 不含 marketplace；Codex/Claude 的 marketplace 文档还必须与 name、version 和本地 source 语义一致。Recovery 只复验既定 commit/rollback 方向实际需要的 target 或 previous artifact，既不通过 Plugin Resource 间接连接 Cloud，也不下载、生成或修改缓存。
+
 ## Consequences
 
 - 正面影响：Cloud 的责任收敛为原始资源交付，Codex/Claude 可从本地、可复验的 Agent 专属 artifact 安装，Hermes 保持 filesystem 部署。
 - 正面影响：每个逻辑 Plugin 的 marketplace 独立，切换一个 Plugin 不会重建或影响同一 Agent 的其他 Plugin；历史版本保留为离线降级与恢复材料。
 - 正面影响：marketplace 与 Plugin 的联合 journal 让首装、升级、降级和回滚具有明确、可恢复的事务边界。
+- 正面影响：同一个中立 Validator 让 cache hit 与离线 recovery 使用一致的完整 artifact 证据，同时保持 Transaction 与 Plugin Resource/Cloud 解耦。
 - 代价与风险：缓存不会自动刷新、回收或迁移；缓存损坏、source 冲突和 Agent 事实不完整都会 fail closed，需要保留现场并人工处理。
 - 后续动作：Feature 017、项目概览、BUILD 与 C4 图以本 ADR 为当前语义；ADR-012 保留为被取代的历史记录。
 

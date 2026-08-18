@@ -117,6 +117,31 @@ func TestUninstallPluginMarketplaceFailsClosedOnAnomalies(t *testing.T) {
 	}
 }
 
+func TestUninstallPluginUnknownCollectionFactRetainsManifestWithoutMutation(t *testing.T) {
+	// 捕获错误变更：malformed Plugin list 的 unknown 状态被当成 absent 并删除已安装 manifest。
+	ref := pluginRef("v1.0.0")
+	actualName, err := domain.ActualPluginName(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	service := newUninstallService(t, &calls, uninstallFixture{
+		pluginMode: domain.PluginDeploymentMarketplace,
+		marketplaceFacts: map[string]adapter.MarketplaceFact{
+			"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/codex/demo/v1.0.0"},
+		},
+		pluginInspectErrors: map[string]error{actualName: adapter.ErrPluginStateUnknown},
+	})
+
+	_, err = service.uninstallPlugin(context.Background(), domain.AgentCodex, ref)
+	if !errors.Is(err, adapter.ErrPluginStateUnknown) {
+		t.Fatalf("uninstallPlugin() error = %v, want ErrPluginStateUnknown", err)
+	}
+	if containsEvent(calls, "config:remove:codex:plugin:demo") || containsEvent(calls, "transaction:uninstall-plugin:codex") {
+		t.Fatalf("calls = %v, unknown fact must retain manifest and Agent state", calls)
+	}
+}
+
 func TestUninstallPluginHermesUsesPluginFactWithoutArtifactLookup(t *testing.T) {
 	ref := pluginRef("v1.0.0")
 	tests := []struct {

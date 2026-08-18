@@ -10,6 +10,7 @@ import (
 
 	"apm/internal/domain"
 	"apm/internal/paths"
+	"apm/internal/pluginartifact"
 )
 
 const localPluginSourcePrefix = "./plugins/"
@@ -63,11 +64,7 @@ func (hermesArtifactBuilder) Validate(agent domain.AgentID, ref domain.PowerRef,
 	if agent != domain.AgentHermes {
 		return fmt.Errorf("validate Hermes plugin artifact for agent %q: %w", agent, ErrUnsupportedAgent)
 	}
-	actualName, err := domain.ActualPluginName(ref)
-	if err != nil {
-		return errors.Join(ErrInvalidArtifact, err)
-	}
-	if err := validatePhysicalTree(filepath.Join(root, "plugins", actualName)); err != nil {
+	if err := pluginartifact.Validate(agent, ref, root); err != nil {
 		return errors.Join(ErrInvalidArtifact, err)
 	}
 	return nil
@@ -85,9 +82,6 @@ func decodeJSONFile(path string, target any) error {
 }
 
 func decodePluginManifest(pluginPath, relativePath string, target any) error {
-	if err := rejectCloudMarketplaces(pluginPath); err != nil {
-		return err
-	}
 	path := filepath.Join(pluginPath, relativePath)
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -98,19 +92,6 @@ func decodePluginManifest(pluginPath, relativePath string, target any) error {
 	}
 	if err := decodeJSONFile(path, target); err != nil {
 		return errors.Join(ErrInvalidArtifact, err)
-	}
-	return nil
-}
-
-// Cloud 只能提供原始 Plugin 包；任一 Agent marketplace 都必须由 APM 本地生成。
-func rejectCloudMarketplaces(pluginPath string) error {
-	for _, relativePath := range []string{codexMarketplacePath, claudeMarketplacePath} {
-		path := filepath.Join(pluginPath, relativePath)
-		if _, err := os.Lstat(path); err == nil {
-			return fmt.Errorf("Cloud plugin package contains marketplace %q: %w", relativePath, ErrInvalidArtifact)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return errors.Join(ErrInvalidArtifact, err)
-		}
 	}
 	return nil
 }

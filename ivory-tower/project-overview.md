@@ -39,7 +39,7 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 - 模块边界与职责：
     - 核心生命周期：提供独立的 Search、List、Install、Uninstall 与 Fix 用例。Search/List 返回结构化结果且不渲染业务输出；三种只读查询只无锁检查 journal，Fix/Install/Uninstall 才在 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md) 定义的边界内锁定并恢复。
     - 配置模型：通过无状态 Repository 维护每个 Agent 按 Skill、Plugin、MCP 分组的 Power 安装清单。
-    - Plugin Resource：独占原始 Plugin 下载、agent-aware immutable artifact、Codex/Claude 单条目本地 marketplace 生成与 Hermes staging。它依赖 Cloud、缓存根和并列的 Codex/Claude marketplace builder；Hermes 没有 marketplace builder。
+    - Plugin Resource：独占原始 Plugin 下载、agent-aware immutable artifact、Codex/Claude 单条目本地 marketplace 生成与 Hermes staging。它依赖 Cloud、缓存根、并列的 Codex/Claude marketplace builder，以及与 Transaction recovery 共用的中立只读 Plugin Artifact Validator；Hermes 没有 marketplace builder。
     - Adapter Registry：按 Agent 分别提供 `ResolveSkill`、`ResolveMCP`、`ResolvePlugin`。Codex/Claude Plugin Adapter 管理本地 marketplace 与 selector；Hermes Plugin Adapter 管理版本化目录并通过 CLI enable/disable。MCP/Plugin 都不追加安装后的 list 验证。
     - CLI：提供入口，校验并解析命令参数；Search、List、Install、Uninstall 与 Fix 通过五个独立 factory 创建专属端口。CLI 渲染前四者的结构化结果；Fix 没有 stdout 业务结果。
 - 数据与接口：每个 Agent 单独维护一份固定 `skills`、`plugins`、`mcps` 分组的 JSON 安装清单，条目统一为精确 `vMAJOR.MINOR.PATCH` 的 `PowerRef`。Config Repository 在 `List/Find/Set/Remove` 内封装完整 manifest 验证、读取和原子读改写；同一 Type/Name 重复合法，Find 取第一条而 Remove 清除全部，非法历史版本不会迁移或清理，详见 [ADR-007](adr/ADR-007-use-stateless-config-repository.md)。用户侧 CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)：Search 没有 Agent 维度；默认 List 禁止显式 `--agent`，installed List 必须提供 Agent。本地 Power 操作中，`--agent` 的具体值必须存在于按 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md) 排序的快照，`all` 对快照中的全部 Agent 执行。Search 与两种 List 都在业务前无锁 Inspect，合法活动 journal 提示 `apm fix`，损坏 journal Warn 后继续；Fix/Install/Uninstall 才锁内 Recover，见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。Cloud `list` 返回带版本的全部 `PowerRef`；Search 选择最新版本，List 保留所有版本。
@@ -58,9 +58,9 @@ cache/plugins/<agent>/<logical-name>/<version>/
 └── plugins/<logical-name>-v<version>/     # Agent 原始包
 ```
 
-Install 的精确顺序是：先 `Config.Find`；manifest 已含目标精确版本则立即 `unchanged`，不访问 Cloud、Plugin Resource、Adapter 或 Transaction；否则 `Ensure` 目标 artifact（仅 miss 时 Cloud 下载）、解析 Adapter、检查目标及旧版本的 Agent 事实。Codex/Claude 的旧版本还必须离线 `Lookup` 旧 artifact，随后在同一 Plugin transaction 中首装“注册 marketplace、添加 Plugin、写 manifest”，或切换“删除旧 Plugin、注销旧 marketplace、注册新 marketplace、添加新 Plugin、写 manifest”。Hermes 在所有事实校验后才 `StageHermes` 并走 filesystem transaction。
+Install 的精确顺序是：锁内 Recover 与 Agent 选择后，显式规范 Plugin ref 会先检查全部所选 Agent manifest；全部精确命中则立即 `unchanged`，不访问 Cloud、Plugin Resource、Adapter 或 Transaction，任一不匹配则回到既有 Cloud 解析路径。普通路径再 `Ensure` 目标 artifact（仅 miss 时 Cloud 下载）、解析 Adapter、检查目标及旧版本的 Agent 事实。Codex/Claude 的旧版本还必须离线 `Lookup` 旧 artifact，随后在同一 Plugin transaction 中首装“注册 marketplace、添加 Plugin、写 manifest”，或切换“删除旧 Plugin、注销旧 marketplace、注册新 marketplace、添加 Plugin、写 manifest”。Hermes 在所有事实校验后才 `StageHermes` 并走 filesystem transaction。
 
-Uninstall 先从 manifest 解析精确版本；没有记录时返回 Agent-only `unexecuted`，不查询 Agent。存在记录时检查该版本的 Adapter 事实；Codex/Claude 要离线 `Lookup` artifact 并验证 marketplace/source/selector 后，在 transaction 中只移除 Plugin 和 manifest，保留 marketplace 与 artifact；Hermes 只处理精确目录与 manifest。marketplace/Plugin 部分存在、身份或 source 不一致、旧 artifact 缺失或损坏、journal 非法或事实不可读时均保留现场和 manifest 并 fail closed；recovery 只使用 journal、Adapter、manifest 与不可变 artifact，绝不连接 Cloud。
+Uninstall 先从 manifest 解析精确版本；没有记录时返回 Agent-only `unexecuted`，不查询 Agent。存在记录时检查该版本的 Adapter 事实；Codex/Claude 要离线 `Lookup` artifact 并验证 marketplace/source/selector 后，在 transaction 中只移除 Plugin 和 manifest，保留 marketplace 与 artifact；Hermes 只处理精确目录与 manifest。marketplace/Plugin 部分存在、身份或 source 不一致、旧 artifact 缺失或损坏、journal 非法或事实不可读时均保留现场和 manifest 并 fail closed。Plugin Resource 与 recovery 共用中立只读 Validator，完整验证物理树、Agent manifest 与 marketplace 闭集/语义；recovery 仅检查既定方向所需 artifact，绝不连接 Cloud、Plugin Resource 或修改缓存。
 
 ## Test Filesystem Isolation
 

@@ -131,8 +131,8 @@ func TestEnsureRejectsUnsafeAgentBeforeConstructingCachePath(t *testing.T) {
 	}
 }
 
-func TestValidatePhysicalEntryRejectsSymlinkWhenDirectoryTypeIsUnknown(t *testing.T) {
-	// 捕获错误变更：仅凭 DirEntry.Type 判定 symlink，未知 d_type 时允许路径逃逸。
+func TestValidatePhysicalTreeRejectsSymlinkWithoutTrustingDirectoryType(t *testing.T) {
+	// 捕获错误变更：仅凭 DirEntry.Type 判定节点，文件系统未提供 d_type 时允许路径逃逸。
 	directory := t.TempDir()
 	target := filepath.Join(directory, "target")
 	if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
@@ -142,32 +142,11 @@ func TestValidatePhysicalEntryRejectsSymlinkWhenDirectoryTypeIsUnknown(t *testin
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var linkEntry os.DirEntry
-	for _, entry := range entries {
-		if entry.Name() == "link" {
-			linkEntry = entry
-			break
-		}
-	}
-	if linkEntry == nil {
-		t.Fatal("symlink DirEntry not found")
-	}
-
-	err = validatePhysicalEntry(link, unknownTypeDirEntry{DirEntry: linkEntry})
+	err := validatePhysicalTree(directory)
 	if !errors.Is(err, ErrInvalidArtifact) {
-		t.Fatalf("validatePhysicalEntry() error = %v, want ErrInvalidArtifact", err)
+		t.Fatalf("validatePhysicalTree() error = %v, want ErrInvalidArtifact", err)
 	}
 }
-
-type unknownTypeDirEntry struct {
-	os.DirEntry
-}
-
-func (unknownTypeDirEntry) Type() os.FileMode { return 0 }
 
 func testArtifactRoot(cacheRoot string, agent domain.AgentID, ref domain.PowerRef) string {
 	return filepath.Join(cacheRoot, "plugins", string(agent), ref.Name, ref.Version)

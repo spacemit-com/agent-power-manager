@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -98,6 +99,114 @@ func TestLocalClientDownloadPluginRejectsDestinationInsideSourceWithoutMutation(
 			after := snapshotTree(t, source)
 			if !reflect.DeepEqual(after, before) {
 				t.Fatalf("source tree changed: before entries=%d, after entries=%d", len(before), len(after))
+			}
+		})
+	}
+}
+
+func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *testing.T) {
+	// 捕获错误变更：CopyDir 在完整预检前跟随源树 symlink，或为特殊文件留下半成品目标。
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+	for _, scenario := range []string{
+		"source root symlink",
+		"source ancestor symlink",
+		"manifest symlink",
+		"payload symlink",
+		"nested directory symlink",
+		"socket special file",
+	} {
+		t.Run(scenario, func(t *testing.T) {
+			root := t.TempDir()
+			if scenario == "socket special file" {
+				var err error
+				root, err = os.MkdirTemp("", "apmc-")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.RemoveAll(root) })
+			}
+			source := writeRawCodexPackage(t, root, ref)
+			externalSentinel := filepath.Join(t.TempDir(), "outside-sentinel")
+			if err := os.WriteFile(externalSentinel, []byte("outside must remain unchanged"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			switch scenario {
+			case "source root symlink":
+				target := t.TempDir()
+				if err := os.WriteFile(filepath.Join(target, "outside-sentinel"), []byte("outside must remain unchanged"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				externalSentinel = filepath.Join(target, "outside-sentinel")
+				if err := os.RemoveAll(source); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, source); err != nil {
+					t.Fatal(err)
+				}
+			case "source ancestor symlink":
+				externalRoot := t.TempDir()
+				externalSource := writeRawCodexPackage(t, externalRoot, ref)
+				externalSentinel = filepath.Join(externalSource, "payload.txt")
+				logicalRoot := filepath.Join(root, "plugins", ref.Name)
+				if err := os.RemoveAll(logicalRoot); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(externalRoot, "plugins", ref.Name), logicalRoot); err != nil {
+					t.Fatal(err)
+				}
+			case "manifest symlink":
+				manifest := filepath.Join(source, ".codex-plugin", "plugin.json")
+				if err := os.Remove(manifest); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(externalSentinel, manifest); err != nil {
+					t.Fatal(err)
+				}
+			case "payload symlink":
+				payload := filepath.Join(source, "payload.txt")
+				if err := os.Remove(payload); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(externalSentinel, payload); err != nil {
+					t.Fatal(err)
+				}
+			case "nested directory symlink":
+				target := t.TempDir()
+				externalSentinel = filepath.Join(target, "outside-sentinel")
+				if err := os.WriteFile(externalSentinel, []byte("outside must remain unchanged"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, filepath.Join(source, "linked-payload")); err != nil {
+					t.Fatal(err)
+				}
+			case "socket special file":
+				listener, err := net.Listen("unix", filepath.Join(source, "payload.sock"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = listener.Close() })
+			}
+			before, err := os.ReadFile(externalSentinel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, err := cloud.NewLocalClient(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(t.TempDir(), "destination")
+
+			err = client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, destination)
+			if err == nil || errors.Is(err, cloud.ErrNotFound) {
+				t.Fatalf("DownloadPlugin() error = %v, want physical-source rejection", err)
+			}
+			if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("destination stat error = %v, want absent", err)
+			}
+			after, err := os.ReadFile(externalSentinel)
+			if err != nil || !reflect.DeepEqual(after, before) {
+				t.Fatalf("external sentinel = %q, %v, want unchanged %q", after, err, before)
 			}
 		})
 	}

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 	"apm/internal/utils/filesystem"
 )
 
@@ -131,6 +132,10 @@ func (service *Service) Ensure(ctx context.Context, agent domain.AgentID, ref do
 	// Agent builder 读取 manifest 或写 marketplace 前，必须先拒绝下载树中的 symlink。
 	if err := validatePhysicalTree(temporaryRoot); err != nil {
 		return Artifact{}, err
+	}
+	// Cloud raw package 在任何 Agent builder 读取 manifest 前统一拒绝 marketplace。
+	if err := pluginartifact.ValidateRawPackage(temporaryPluginPath); err != nil {
+		return Artifact{}, errors.Join(ErrInvalidArtifact, err)
 	}
 	if err := builder.Build(agent, ref, temporaryRoot, temporaryPluginPath); err != nil {
 		return Artifact{}, fmt.Errorf("build plugin artifact: %w", err)

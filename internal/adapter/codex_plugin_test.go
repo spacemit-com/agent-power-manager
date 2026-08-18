@@ -131,6 +131,9 @@ func TestCodexPluginMarketplaceMutationsClassifyRunnerFailures(t *testing.T) {
 func TestCodexPluginInspectRejectsAmbiguousOrInvalidOutput(t *testing.T) {
 	tests := []queuedMCPResponse{
 		successfulMCPResponse(`{"installed":[{"name":"demo-plugin-v0.0.1","pluginId":"demo-plugin-v0.0.1@one"},{"name":"demo-plugin-v0.0.1","pluginId":"demo-plugin-v0.0.1@two"}]}`),
+		successfulMCPResponse(`{}`),
+		successfulMCPResponse(`{"installed":null}`),
+		successfulMCPResponse(`null`),
 		successfulMCPResponse(`{"installed":[]} {}`),
 		truncatedMCPResponse(`{"installed":[]}`),
 		failedMCPResponse("failed"),

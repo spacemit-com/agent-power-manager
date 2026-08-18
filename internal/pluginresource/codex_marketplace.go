@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"reflect"
 
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 )
 
 const (
@@ -75,28 +75,8 @@ func (codexMarketplaceBuilder) Validate(agent domain.AgentID, ref domain.PowerRe
 	if agent != domain.AgentCodex {
 		return fmt.Errorf("validate Codex marketplace for agent %q: %w", agent, ErrUnsupportedAgent)
 	}
-	actualName, err := domain.ActualPluginName(ref)
-	if err != nil {
-		return fmt.Errorf("resolve Codex plugin identity: %w", err)
-	}
-	pluginPath := filepath.Join(root, "plugins", actualName)
-	var manifest codexPluginManifest
-	if err := decodePluginManifest(pluginPath, codexManifestPath, &manifest); err != nil {
-		return fmt.Errorf("decode Codex plugin manifest: %w", err)
-	}
-	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
-		return err
-	}
-	want, err := newCodexMarketplaceDocument(ref, manifest)
-	if err != nil {
-		return fmt.Errorf("derive Codex marketplace: %w", err)
-	}
-	var got codexMarketplaceDocument
-	if err := decodeJSONFile(filepath.Join(root, codexMarketplacePath), &got); err != nil {
-		return fmt.Errorf("decode Codex marketplace: %w", errors.Join(ErrInvalidArtifact, err))
-	}
-	if !reflect.DeepEqual(got, want) {
-		return fmt.Errorf("Codex marketplace semantic value does not match manifest: %w", ErrInvalidArtifact)
+	if err := pluginartifact.Validate(agent, ref, root); err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
 	}
 	return nil
 }

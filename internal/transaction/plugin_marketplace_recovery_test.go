@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"apm/internal/adapter"
@@ -160,11 +161,10 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
 	previousSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
-	for _, source := range []string{targetSource, previousSource} {
-		if err := os.MkdirAll(source, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	targetRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
+	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	writeValidMarketplaceRecoveryArtifact(t, targetSource, targetRef)
+	writeValidMarketplaceRecoveryArtifact(t, previousSource, previousRef)
 	target := adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"}
 	previous := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
 	journal := Journal{
@@ -174,7 +174,7 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 		Operation:     operation,
 		Phase:         phase,
 		Agent:         domain.AgentCodex,
-		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
+		Power:         targetRef,
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
 			Target:     target,
@@ -187,7 +187,6 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 		journal.Plugin.TargetPresent = true
 	}
 	if upgrade {
-		previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 		journal.Previous = &previousRef
 		journal.Plugin.Previous = &previous
 		journal.Plugin.PreviousPresent = true
@@ -212,6 +211,35 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 	fixture.resolver = &marketplaceRecoveryResolver{events: &fixture.events, adapter: fixture.adapter}
 	fixture.service = newService(fixture.manifests, fixture.store, fixture.resolver)
 	return fixture
+}
+
+func writeValidMarketplaceRecoveryArtifact(t *testing.T, root string, ref domain.PowerRef) {
+	t.Helper()
+	actualName, err := domain.ActualPluginName(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(root, "plugins", actualName, ".codex-plugin", "plugin.json")
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeVersion := strings.TrimPrefix(ref.Version, "v")
+	manifest := fmt.Sprintf(`{"name":%q,"version":%q}`, actualName, nativeVersion)
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marketplacePath := filepath.Join(root, ".agents", "plugins", "marketplace.json")
+	if err := os.MkdirAll(filepath.Dir(marketplacePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marketplace := fmt.Sprintf(`{
+  "name":"apm-%s",
+  "interface":{"displayName":%q},
+  "plugins":[{"name":%q,"source":{"source":"local","path":%q},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Coding"}]
+}`, ref.Name, ref.Name, actualName, "./plugins/"+actualName)
+	if err := os.WriteFile(marketplacePath, []byte(marketplace), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (f *marketplaceRecoveryFixture) recover() (RecoveryResult, error) {
@@ -1236,6 +1264,162 @@ func TestRecoverMarketplacePluginRejectsUnsafeOrMissingCacheSource(t *testing.T)
 				t.Fatalf("unsafe cache source caused writes: found=%t events=%v", fixture.store.found, fixture.events)
 			}
 		})
+	}
+}
+
+func TestRecoverMarketplacePluginRejectsIncompleteRequiredTargetArtifactBeforeWrites(t *testing.T) {
+	// 捕获错误变更：Recovery 只检查 source 目录链，随后用缺失/损坏的不可变 artifact 提交 manifest。
+	tests := []struct {
+		name   string
+		mutate func(*marketplaceRecoveryFixture) string
+	}{
+		{
+			name: "missing generated marketplace",
+			mutate: func(f *marketplaceRecoveryFixture) string {
+				if err := os.Remove(filepath.Join(f.targetSource, ".agents", "plugins", "marketplace.json")); err != nil {
+					f.t.Fatal(err)
+				}
+				return ""
+			},
+		},
+		{
+			name: "corrupt generated marketplace",
+			mutate: func(f *marketplaceRecoveryFixture) string {
+				path := filepath.Join(f.targetSource, ".agents", "plugins", "marketplace.json")
+				if err := os.WriteFile(path, []byte(`{"name":"apm-demo","plugins":[]}`), 0o600); err != nil {
+					f.t.Fatal(err)
+				}
+				return ""
+			},
+		},
+		{
+			name: "changed native manifest identity",
+			mutate: func(f *marketplaceRecoveryFixture) string {
+				path := filepath.Join(f.targetSource, "plugins", f.target.ActualName, ".codex-plugin", "plugin.json")
+				if err := os.WriteFile(path, []byte(`{"name":"other-v2.0.0","version":"2.0.0"}`), 0o600); err != nil {
+					f.t.Fatal(err)
+				}
+				return ""
+			},
+		},
+		{
+			name: "nested symlink",
+			mutate: func(f *marketplaceRecoveryFixture) string {
+				sentinel := filepath.Join(f.t.TempDir(), "outside-sentinel")
+				if err := os.WriteFile(sentinel, []byte("outside unchanged"), 0o600); err != nil {
+					f.t.Fatal(err)
+				}
+				link := filepath.Join(f.targetSource, "plugins", f.target.ActualName, "linked-payload")
+				if err := os.Symlink(sentinel, link); err != nil {
+					f.t.Fatal(err)
+				}
+				return sentinel
+			},
+		},
+		{
+			name: "nested special file",
+			mutate: func(f *marketplaceRecoveryFixture) string {
+				path := filepath.Join(f.targetSource, "plugins", f.target.ActualName, "payload.fifo")
+				if err := syscall.Mkfifo(path, 0o600); err != nil {
+					f.t.Fatal(err)
+				}
+				return ""
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseCommitting, false)
+			setMarketplaceRecoveryState(fixture, "target", true, false)
+			sentinel := test.mutate(fixture)
+
+			result, err := fixture.recover()
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != RecoveryCommit {
+				t.Fatalf("Recover() = %+v, %v, want indeterminate commit", result, err)
+			}
+			assertRequiredArtifactFailureRetainedState(t, fixture, PhaseCommitting)
+			if sentinel != "" {
+				contents, readErr := os.ReadFile(sentinel)
+				if readErr != nil || string(contents) != "outside unchanged" {
+					t.Fatalf("external sentinel = %q, %v, want unchanged", contents, readErr)
+				}
+			}
+		})
+	}
+}
+
+func TestRecoverMarketplacePluginRollbackValidatesCompletePreviousArtifactBeforeWrites(t *testing.T) {
+	// 捕获错误变更：需要恢复旧 Plugin 时仅校验 previous source 目录存在便开始注册和安装。
+	fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, true)
+	manifest := filepath.Join(fixture.previousSource, "plugins", fixture.previous.ActualName, ".codex-plugin", "plugin.json")
+	if err := os.WriteFile(manifest, []byte(`{"name":"other-v1.0.0","version":"1.0.0"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := fixture.recover()
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != RecoveryRollback {
+		t.Fatalf("Recover() = %+v, %v, want indeterminate rollback", result, err)
+	}
+	assertRequiredArtifactFailureRetainedState(t, fixture, PhaseRollingBack)
+}
+
+func TestRecoverMarketplacePluginUninstallValidatesRetainedArtifactBeforeCommit(t *testing.T) {
+	// 捕获错误变更：卸载恢复删除 manifest 前不验证仍被 marketplace 保留引用的完整 target artifact。
+	fixture := newMarketplaceRecoveryFixture(t, OperationUninstall, PhaseCommitting, false)
+	fixture.setMarketplace(fixture.targetSource)
+	if err := os.Remove(filepath.Join(fixture.targetSource, ".agents", "plugins", "marketplace.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := fixture.recover()
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != RecoveryCommit {
+		t.Fatalf("Recover() = %+v, %v, want indeterminate uninstall commit", result, err)
+	}
+	assertRequiredArtifactFailureRetainedState(t, fixture, PhaseCommitting)
+}
+
+func TestRecoverMarketplacePluginUnknownCollectionRetainsDirectionAndState(t *testing.T) {
+	// 捕获错误变更：malformed Plugin list 的 unknown 事实仍固定方向或触发 Agent/manifest 写入。
+	tests := []struct {
+		name      string
+		operation Operation
+		phase     Phase
+	}{
+		{name: "install before direction", operation: OperationInstall, phase: PhaseAddingNewPlugin},
+		{name: "install persisted rollback", operation: OperationInstall, phase: PhaseRollingBack},
+		{name: "install persisted commit", operation: OperationInstall, phase: PhaseCommitting},
+		{name: "uninstall before direction", operation: OperationUninstall, phase: PhaseRemovingPlugin},
+		{name: "uninstall persisted rollback", operation: OperationUninstall, phase: PhaseRollingBack},
+		{name: "uninstall persisted commit", operation: OperationUninstall, phase: PhaseCommitting},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMarketplaceRecoveryFixture(t, test.operation, test.phase, false)
+			fixture.setMarketplace(fixture.targetSource)
+			fixture.adapter.pluginErrors[fixture.target.ActualName] = adapter.ErrPluginStateUnknown
+
+			result, err := fixture.recover()
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || !errors.Is(err, adapter.ErrPluginStateUnknown) || result.Recovered {
+				t.Fatalf("Recover() = %+v, %v, want retained unknown state", result, err)
+			}
+			assertRequiredArtifactFailureRetainedState(t, fixture, test.phase)
+		})
+	}
+}
+
+func assertRequiredArtifactFailureRetainedState(t *testing.T, fixture *marketplaceRecoveryFixture, phase Phase) {
+	t.Helper()
+	if !fixture.store.found || fixture.store.journal.Phase != phase {
+		t.Fatalf("journal = found %t phase %q, want retained %q", fixture.store.found, fixture.store.journal.Phase, phase)
+	}
+	if fixture.manifests.setRef != (domain.PowerRef{}) || fixture.manifests.removed != (domain.PowerRef{}) {
+		t.Fatalf("manifest changed: set=%+v removed=%+v", fixture.manifests.setRef, fixture.manifests.removed)
+	}
+	for _, event := range fixture.events {
+		if strings.HasPrefix(event, "add-plugin:") || strings.HasPrefix(event, "remove-plugin:") ||
+			strings.HasPrefix(event, "register-marketplace:") || strings.HasPrefix(event, "unregister-marketplace:") {
+			t.Fatalf("required artifact failure caused Agent write: %v", fixture.events)
+		}
 	}
 }
 

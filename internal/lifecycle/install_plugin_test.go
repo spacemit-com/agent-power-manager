@@ -324,6 +324,39 @@ func TestInstallPluginPreviousLookupNeverDownloadsOldVersion(t *testing.T) {
 	}
 }
 
+func TestInstallPluginUnknownCollectionFactRetainsManifestWithoutMutation(t *testing.T) {
+	// 捕获错误变更：Adapter 将 malformed collection 报为 unknown 后，lifecycle 仍清理 manifest 或开始事务。
+	previous := pluginRef("v1.0.0")
+	target := pluginRef("v2.0.0")
+	previousName, err := domain.ActualPluginName(previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := adapter.ErrPluginStateUnknown
+	resources := &fakePluginResources{}
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		installed:  map[domain.AgentID]domain.PowerRef{domain.AgentCodex: previous},
+		pluginMode: domain.PluginDeploymentMarketplace,
+		marketplaceFacts: map[string]adapter.MarketplaceFact{
+			"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/codex/demo/v1.0.0"},
+		},
+		pluginInspectErrors: map[string]error{previousName: unknown},
+		pluginResources:     resources,
+	})
+
+	_, err = service.installForAgent(context.Background(), domain.AgentCodex, target)
+	if !errors.Is(err, unknown) {
+		t.Fatalf("installForAgent() error = %v, want %v", err, unknown)
+	}
+	if containsEvent(calls, "config:remove:codex:plugin:demo") || containsEvent(calls, "transaction:install-plugin:codex") {
+		t.Fatalf("calls = %v, unknown fact must retain manifest and Agent state", calls)
+	}
+	if resources.ensureCalls != 1 || resources.lookupCalls != 0 || resources.stageCalls != 0 {
+		t.Fatalf("resource calls ensure/lookup/stage = %d/%d/%d, want 1/0/0", resources.ensureCalls, resources.lookupCalls, resources.stageCalls)
+	}
+}
+
 func pluginRef(version string) domain.PowerRef {
 	return domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: version}
 }
