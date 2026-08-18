@@ -118,6 +118,31 @@ func TestBoundedWriterLimitsOutputWithoutDependingOnProcessScheduling(t *testing
 	}
 }
 
+func TestMCPRunnerBoundsSuccessfulCommandOutput(t *testing.T) {
+	fakeBin := t.TempDir()
+	writeRunnerFake(t, fakeBin, "hermes", `#!/bin/sh
+printf '1234567890'
+printf 'abcdefghij' >&2
+`)
+	t.Setenv("PATH", fakeBin)
+	runner := newDefaultAgentCLIRunner()
+	runner.outputLimit = 5
+
+	result, err := runner.Run(context.Background(), "hermes", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Started || result.TimedOut || result.ExitCode != 0 {
+		t.Fatalf("runner result = %+v, want successful started command", result)
+	}
+	if result.Stdout != "12345" || result.Stderr != "abcde" {
+		t.Fatalf("bounded runner output = %q/%q, want 12345/abcde", result.Stdout, result.Stderr)
+	}
+	if !result.StdoutTruncated || !result.StderrTruncated {
+		t.Fatalf("runner truncation flags = %v/%v, want true/true", result.StdoutTruncated, result.StderrTruncated)
+	}
+}
+
 func TestMCPRunnerHonorsCanceledParentContext(t *testing.T) {
 	fakeBin := t.TempDir()
 	writeRunnerFake(t, fakeBin, "claude", "#!/bin/sh\nexit 0\n")
