@@ -15,12 +15,13 @@ import (
 )
 
 type marketplaceRecoveryAdapter struct {
-	events         *[]string
-	marketplace    adapter.MarketplaceFact
-	marketplaceErr error
-	plugins        map[string]adapter.PluginFact
-	pluginErrors   map[string]error
-	interrupt      map[string]error
+	events          *[]string
+	marketplace     adapter.MarketplaceFact
+	marketplaceErr  error
+	plugins         map[string]adapter.PluginFact
+	pluginErrors    map[string]error
+	interrupt       map[string]error
+	mutationAnswers map[string][]pluginMutationAnswer
 }
 
 func (*marketplaceRecoveryAdapter) DeploymentMode() domain.PluginDeploymentMode {
@@ -46,15 +47,21 @@ func (a *marketplaceRecoveryAdapter) Inspect(_ context.Context, name string) (ad
 func (a *marketplaceRecoveryAdapter) Add(_ context.Context, target adapter.PluginTarget) (adapter.PluginMutationResult, error) {
 	event := "add-plugin:" + target.ActualName
 	*a.events = append(*a.events, event)
-	a.plugins[target.ActualName] = adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: target.ActualName, Selector: target.Selector}
-	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, a.interrupt[event]
+	answer := a.nextMutationAnswer(event)
+	if answer.result.State == adapter.PluginMutationApplied {
+		a.plugins[target.ActualName] = adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: target.ActualName, Selector: target.Selector}
+	}
+	return answer.result, answer.err
 }
 
 func (a *marketplaceRecoveryAdapter) Remove(_ context.Context, target adapter.PluginTarget) (adapter.PluginMutationResult, error) {
 	event := "remove-plugin:" + target.ActualName
 	*a.events = append(*a.events, event)
-	a.plugins[target.ActualName] = adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: target.ActualName}
-	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, a.interrupt[event]
+	answer := a.nextMutationAnswer(event)
+	if answer.result.State == adapter.PluginMutationApplied {
+		a.plugins[target.ActualName] = adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: target.ActualName}
+	}
+	return answer.result, answer.err
 }
 
 func (*marketplaceRecoveryAdapter) TargetPath(string) (string, error) {
@@ -69,15 +76,33 @@ func (a *marketplaceRecoveryAdapter) InspectMarketplace(_ context.Context, name 
 func (a *marketplaceRecoveryAdapter) RegisterMarketplace(_ context.Context, target adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
 	event := "register-marketplace:" + target.Source
 	*a.events = append(*a.events, event)
-	a.marketplace = adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: target.Name, Source: target.Source}
-	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, a.interrupt[event]
+	answer := a.nextMutationAnswer(event)
+	if answer.result.State == adapter.PluginMutationApplied {
+		a.marketplace = adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: target.Name, Source: target.Source}
+	}
+	return answer.result, answer.err
 }
 
 func (a *marketplaceRecoveryAdapter) UnregisterMarketplace(_ context.Context, target adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
 	event := "unregister-marketplace:" + target.Source
 	*a.events = append(*a.events, event)
-	a.marketplace = adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: target.Name}
-	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, a.interrupt[event]
+	answer := a.nextMutationAnswer(event)
+	if answer.result.State == adapter.PluginMutationApplied {
+		a.marketplace = adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: target.Name}
+	}
+	return answer.result, answer.err
+}
+
+func (a *marketplaceRecoveryAdapter) nextMutationAnswer(event string) pluginMutationAnswer {
+	if answers := a.mutationAnswers[event]; len(answers) != 0 {
+		answer := answers[0]
+		a.mutationAnswers[event] = answers[1:]
+		return answer
+	}
+	return pluginMutationAnswer{
+		result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied},
+		err:    a.interrupt[event],
+	}
 }
 
 type marketplaceRecoveryResolver struct {
@@ -108,6 +133,29 @@ type marketplaceRecoveryFixture struct {
 	previousSource string
 	target         adapter.PluginTarget
 	previous       adapter.PluginTarget
+}
+
+type statefulRecoveryManifestWriter struct {
+	events      *[]string
+	installed   bool
+	removeCalls int
+}
+
+func (w *statefulRecoveryManifestWriter) Set(domain.AgentID, domain.PowerRef) error {
+	w.installed = true
+	*w.events = append(*w.events, "manifest:set")
+	return nil
+}
+
+func (w *statefulRecoveryManifestWriter) Remove(domain.AgentID, domain.PowerType, string) error {
+	w.removeCalls++
+	if w.installed {
+		*w.events = append(*w.events, "manifest:remove-present")
+	} else {
+		*w.events = append(*w.events, "manifest:remove-absent")
+	}
+	w.installed = false
+	return nil
 }
 
 func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phase, upgrade bool) *marketplaceRecoveryFixture {
@@ -161,8 +209,9 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 			target.ActualName:   {Presence: adapter.PluginAbsent, ActualName: target.ActualName},
 			previous.ActualName: {Presence: adapter.PluginAbsent, ActualName: previous.ActualName},
 		},
-		pluginErrors: map[string]error{},
-		interrupt:    map[string]error{},
+		pluginErrors:    map[string]error{},
+		interrupt:       map[string]error{},
+		mutationAnswers: map[string][]pluginMutationAnswer{},
 	}
 	fixture.resolver = &marketplaceRecoveryResolver{events: &fixture.events, adapter: fixture.adapter}
 	fixture.service = newService(fixture.manifests, fixture.store, fixture.resolver)
@@ -495,6 +544,110 @@ func TestRecoverMarketplacePluginRollbackResumesAfterEveryAction(t *testing.T) {
 	}
 }
 
+func TestRecoverMarketplacePluginRollbackMutationMatrix(t *testing.T) {
+	operations := []struct {
+		name    string
+		prepare func(*marketplaceRecoveryFixture)
+		event   func(*marketplaceRecoveryFixture) string
+		write   string
+	}{
+		{
+			name: "remove target Plugin",
+			prepare: func(f *marketplaceRecoveryFixture) {
+				setMarketplaceRecoveryState(f, "target", true, false)
+			},
+			event: func(f *marketplaceRecoveryFixture) string { return "remove-plugin:" + f.target.ActualName },
+			write: "remove-plugin",
+		},
+		{
+			name: "unregister target marketplace",
+			prepare: func(f *marketplaceRecoveryFixture) {
+				setMarketplaceRecoveryState(f, "target", false, false)
+			},
+			event: func(f *marketplaceRecoveryFixture) string { return "unregister-marketplace:" + f.targetSource },
+			write: "unregister-marketplace",
+		},
+		{
+			name:    "register previous marketplace",
+			prepare: func(*marketplaceRecoveryFixture) {},
+			event:   func(f *marketplaceRecoveryFixture) string { return "register-marketplace:" + f.previousSource },
+			write:   "register-marketplace",
+		},
+		{
+			name: "restore previous Plugin",
+			prepare: func(f *marketplaceRecoveryFixture) {
+				setMarketplaceRecoveryState(f, "previous", false, false)
+			},
+			event: func(f *marketplaceRecoveryFixture) string { return "add-plugin:" + f.previous.ActualName },
+			write: "add-plugin",
+		},
+	}
+	states := []struct {
+		name              string
+		state             adapter.PluginMutationState
+		withError         bool
+		wantIndeterminate bool
+		wantSuccess       bool
+	}{
+		{name: "applied", state: adapter.PluginMutationApplied, wantSuccess: true},
+		{name: "not-applied", state: adapter.PluginMutationNotApplied, withError: true},
+		{name: "unknown", state: adapter.PluginMutationUnknown, withError: true, wantIndeterminate: true},
+		{name: "invalid", state: adapter.PluginMutationState("invalid"), wantIndeterminate: true},
+		{name: "applied-with-error", state: adapter.PluginMutationApplied, withError: true},
+	}
+	for _, operation := range operations {
+		for _, state := range states {
+			t.Run(operation.name+"/"+state.name, func(t *testing.T) {
+				fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, true)
+				operation.prepare(fixture)
+				event := operation.event(fixture)
+				mutationErr := errors.New("injected recovery mutation failure")
+				answer := pluginMutationAnswer{result: adapter.PluginMutationResult{State: state.state}}
+				if state.withError {
+					answer.err = mutationErr
+				}
+				fixture.adapter.mutationAnswers[event] = []pluginMutationAnswer{answer}
+
+				result, err := fixture.recover()
+				if state.wantSuccess {
+					if err != nil || !result.Recovered || result.Direction != RecoveryRollback {
+						t.Fatalf("Recover() = %+v, %v", result, err)
+					}
+					assertMarketplaceRollbackState(t, fixture, true)
+					return
+				}
+				if !errors.Is(err, ErrRecoveryFailed) || result.Recovered || result.Direction != RecoveryRollback {
+					t.Fatalf("Recover() = %+v, %v", result, err)
+				}
+				if errors.Is(err, mutationErr) != state.withError {
+					t.Fatalf("mutation error membership = %t, want %t: %v", errors.Is(err, mutationErr), state.withError, err)
+				}
+				if errors.Is(err, ErrIndeterminateState) != state.wantIndeterminate {
+					t.Fatalf("indeterminate membership = %t, want %t: %v", errors.Is(err, ErrIndeterminateState), state.wantIndeterminate, err)
+				}
+				if !fixture.store.found || fixture.store.journal.Phase != PhaseRollingBack {
+					t.Fatalf("journal = found %t phase %q", fixture.store.found, fixture.store.journal.Phase)
+				}
+				if got := marketplaceRecoveryWrites(fixture.events); !reflect.DeepEqual(got, []string{operation.write}) {
+					t.Fatalf("writes = %v, want only %q; events=%v", got, operation.write, fixture.events)
+				}
+				if fixture.events[len(fixture.events)-1] != event {
+					t.Fatalf("later operation followed failed mutation: %v", fixture.events)
+				}
+				if fixture.manifests.setRef != (domain.PowerRef{}) || fixture.manifests.removed != (domain.PowerRef{}) {
+					t.Fatalf("failed mutation changed manifest: set=%+v removed=%+v", fixture.manifests.setRef, fixture.manifests.removed)
+				}
+
+				continued, err := fixture.recover()
+				if err != nil || !continued.Recovered || continued.Direction != RecoveryRollback {
+					t.Fatalf("continued Recover() = %+v, %v", continued, err)
+				}
+				assertMarketplaceRollbackState(t, fixture, true)
+			})
+		}
+	}
+}
+
 func setMarketplaceRecoveryState(f *marketplaceRecoveryFixture, marketplace string, targetPresent, previousPresent bool) {
 	switch marketplace {
 	case "target":
@@ -627,6 +780,94 @@ func TestRecoverMarketplacePluginCommitRejectsInexactFacts(t *testing.T) {
 	}
 }
 
+func TestRecoverMarketplacePluginCommitDoesNotRequirePreviousCache(t *testing.T) {
+	fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseCommitting, true)
+	setMarketplaceRecoveryState(fixture, "target", true, false)
+	if err := os.RemoveAll(fixture.previousSource); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := fixture.recover()
+	if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
+		t.Fatalf("Recover() = %+v, %v", result, err)
+	}
+	if fixture.store.found || fixture.manifests.setRef != fixture.journal.Power {
+		t.Fatalf("commit did not finish: journal=%t manifest=%+v", fixture.store.found, fixture.manifests.setRef)
+	}
+	want := []string{
+		"resolve:codex",
+		"inspect-marketplace:apm-demo",
+		"inspect-plugin:demo-v2.0.0",
+		"inspect-plugin:demo-v1.0.0",
+		"manifest:set",
+		"delete:journal",
+	}
+	if !reflect.DeepEqual(fixture.events, want) {
+		t.Fatalf("events = %v, want %v", fixture.events, want)
+	}
+}
+
+func TestRecoverMarketplacePluginRollbackValidatesOnlyRequiredCache(t *testing.T) {
+	tests := []struct {
+		name        string
+		phase       Phase
+		marketplace string
+		target      bool
+		previous    bool
+		remove      func(*marketplaceRecoveryFixture) string
+		wantError   bool
+		wantWrites  []string
+	}{
+		{
+			name: "missing previous cache blocks restoration", phase: PhaseRegisteringNewMarketplace, marketplace: "absent",
+			remove: func(f *marketplaceRecoveryFixture) string { return f.previousSource }, wantError: true,
+		},
+		{
+			name: "complete previous state does not require previous cache", phase: PhaseRollingBack, marketplace: "previous", previous: true,
+			remove: func(f *marketplaceRecoveryFixture) string { return f.previousSource }, wantWrites: []string{"delete:journal"},
+		},
+		{
+			name: "first-install rollback does not require target cache", phase: PhaseRollingBack, marketplace: "target", target: true,
+			remove: func(f *marketplaceRecoveryFixture) string { return f.targetSource }, wantWrites: []string{"remove-plugin", "unregister-marketplace", "delete:journal"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			upgrade := test.name != "first-install rollback does not require target cache"
+			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, test.phase, upgrade)
+			setMarketplaceRecoveryState(fixture, test.marketplace, test.target, test.previous)
+			if err := os.RemoveAll(test.remove(fixture)); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := fixture.recover()
+			if test.wantError {
+				if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != RecoveryRollback {
+					t.Fatalf("Recover() = %+v, %v", result, err)
+				}
+				if !fixture.store.found || fixture.store.journal.Phase != PhaseRollingBack {
+					t.Fatalf("journal = found %t phase %q", fixture.store.found, fixture.store.journal.Phase)
+				}
+				if got := marketplaceRecoveryWrites(fixture.events); len(got) != 0 {
+					t.Fatalf("missing required cache caused later writes: %v", fixture.events)
+				}
+				if len(fixture.events) < 5 || !reflect.DeepEqual(fixture.events[:5], []string{
+					"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo-v2.0.0", "inspect-plugin:demo-v1.0.0", "update:rolling-back",
+				}) {
+					t.Fatalf("facts/direction order = %v", fixture.events)
+				}
+				return
+			}
+			if err != nil || !result.Recovered || result.Direction != RecoveryRollback {
+				t.Fatalf("Recover() = %+v, %v", result, err)
+			}
+			if got := marketplaceRecoveryWrites(fixture.events); !reflect.DeepEqual(got, test.wantWrites) {
+				t.Fatalf("writes = %v, want %v; events=%v", got, test.wantWrites, fixture.events)
+			}
+		})
+	}
+}
+
 func TestRecoverMarketplacePluginUninstallDirectionAndConvergence(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -731,7 +972,14 @@ func TestRecoverMarketplacePluginUninstallRejectsChangedState(t *testing.T) {
 			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered {
 				t.Fatalf("Recover() = %+v, %v", result, err)
 			}
-			if !fixture.store.found || hasMarketplaceRecoveryWrite(fixture.events) {
+			if !fixture.store.found {
+				t.Fatalf("invalid uninstall state removed journal: events=%v", fixture.events)
+			}
+			if test.name == "cache source missing" {
+				if fixture.store.journal.Phase != PhaseCommitting || len(marketplaceRecoveryWrites(fixture.events)) != 0 {
+					t.Fatalf("missing cache did not stop after direction persistence: phase=%q events=%v", fixture.store.journal.Phase, fixture.events)
+				}
+			} else if hasMarketplaceRecoveryWrite(fixture.events) {
 				t.Fatalf("invalid uninstall state caused writes: found=%t events=%v", fixture.store.found, fixture.events)
 			}
 		})
@@ -754,6 +1002,50 @@ func TestRecoverMarketplacePluginUninstallCommitResumes(t *testing.T) {
 	second, err := fixture.recover()
 	if err != nil || !second.Recovered || second.Direction != RecoveryCommit || fixture.store.found {
 		t.Fatalf("second Recover() = %+v, %v; journal=%t", second, err, fixture.store.found)
+	}
+}
+
+func TestRecoverMarketplacePluginUninstallResumesAfterManifestRemovedBeforeJournalDelete(t *testing.T) {
+	fixture := newMarketplaceRecoveryFixture(t, OperationUninstall, PhaseRemovingPlugin, false)
+	fixture.setMarketplace(fixture.targetSource)
+	manifests := &statefulRecoveryManifestWriter{events: &fixture.events, installed: true}
+	fixture.service.manifests = manifests
+	deleteErr := errors.New("journal delete interrupted")
+	fixture.store.fail["delete"] = deleteErr
+
+	first, err := fixture.recover()
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, deleteErr) || first.Recovered || first.Direction != RecoveryCommit {
+		t.Fatalf("first Recover() = %+v, %v", first, err)
+	}
+	if manifests.installed || manifests.removeCalls != 1 || !fixture.store.found || fixture.store.journal.Phase != PhaseCommitting {
+		t.Fatalf("first recovery state: installed=%t removes=%d journal=%t/%q", manifests.installed, manifests.removeCalls, fixture.store.found, fixture.store.journal.Phase)
+	}
+	delete(fixture.store.fail, "delete")
+	fixture.events = nil
+	fixture.adapter.events = &fixture.events
+	fixture.store.events = &fixture.events
+	fixture.resolver.events = &fixture.events
+	manifests.events = &fixture.events
+
+	second, err := fixture.recover()
+	if err != nil || !second.Recovered || second.Direction != RecoveryCommit {
+		t.Fatalf("second Recover() = %+v, %v", second, err)
+	}
+	want := []string{
+		"resolve:codex",
+		"inspect-marketplace:apm-demo",
+		"inspect-plugin:demo-v2.0.0",
+		"manifest:remove-absent",
+		"delete:journal",
+	}
+	if !reflect.DeepEqual(fixture.events, want) {
+		t.Fatalf("second recovery events = %v, want %v", fixture.events, want)
+	}
+	if fixture.store.found || manifests.installed || manifests.removeCalls != 2 {
+		t.Fatalf("final state: journal=%t installed=%t removes=%d", fixture.store.found, manifests.installed, manifests.removeCalls)
+	}
+	if got := marketplaceRecoveryWrites(fixture.events); len(got) != 1 || got[0] != "delete:journal" {
+		t.Fatalf("second recovery performed Agent writes: %v", fixture.events)
 	}
 }
 
@@ -878,28 +1170,33 @@ func TestRecoverMarketplacePluginRejectsResolverWithoutMarketplaceCapability(t *
 
 func TestRecoverMarketplacePluginRejectsUnsafeOrMissingCacheSource(t *testing.T) {
 	tests := []struct {
-		name   string
-		mutate func(*marketplaceRecoveryFixture)
+		name      string
+		phase     Phase
+		upgrade   bool
+		direction RecoveryDirection
+		prepare   func(*marketplaceRecoveryFixture)
 	}{
 		{
-			name: "target source missing",
-			mutate: func(f *marketplaceRecoveryFixture) {
+			name: "required target source missing", phase: PhaseCommitting, direction: RecoveryCommit,
+			prepare: func(f *marketplaceRecoveryFixture) {
+				setMarketplaceRecoveryState(f, "target", true, false)
 				if err := os.RemoveAll(f.targetSource); err != nil {
 					f.t.Fatal(err)
 				}
 			},
 		},
 		{
-			name: "previous source missing",
-			mutate: func(f *marketplaceRecoveryFixture) {
+			name: "required previous source missing", phase: PhaseRollingBack, upgrade: true, direction: RecoveryRollback,
+			prepare: func(f *marketplaceRecoveryFixture) {
 				if err := os.RemoveAll(f.previousSource); err != nil {
 					f.t.Fatal(err)
 				}
 			},
 		},
 		{
-			name: "target source symlink",
-			mutate: func(f *marketplaceRecoveryFixture) {
+			name: "required target source symlink", phase: PhaseCommitting, direction: RecoveryCommit,
+			prepare: func(f *marketplaceRecoveryFixture) {
+				setMarketplaceRecoveryState(f, "target", true, false)
 				outside := filepath.Join(f.t.TempDir(), "outside")
 				if err := os.MkdirAll(outside, 0o755); err != nil {
 					f.t.Fatal(err)
@@ -913,8 +1210,8 @@ func TestRecoverMarketplacePluginRejectsUnsafeOrMissingCacheSource(t *testing.T)
 			},
 		},
 		{
-			name: "cache ancestor symlink",
-			mutate: func(f *marketplaceRecoveryFixture) {
+			name: "required previous cache ancestor symlink", phase: PhaseRollingBack, upgrade: true, direction: RecoveryRollback,
+			prepare: func(f *marketplaceRecoveryFixture) {
 				codexRoot := filepath.Dir(filepath.Dir(f.targetSource))
 				outside := filepath.Join(f.t.TempDir(), "codex")
 				for _, version := range []string{"v1.0.0", "v2.0.0"} {
@@ -933,11 +1230,10 @@ func TestRecoverMarketplacePluginRejectsUnsafeOrMissingCacheSource(t *testing.T)
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, true)
-			setMarketplaceRecoveryState(fixture, "previous", false, true)
-			test.mutate(fixture)
+			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, test.phase, test.upgrade)
+			test.prepare(fixture)
 			result, err := fixture.recover()
-			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered {
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != test.direction {
 				t.Fatalf("Recover() = %+v, %v", result, err)
 			}
 			if !fixture.store.found || hasMarketplaceRecoveryWrite(fixture.events) {

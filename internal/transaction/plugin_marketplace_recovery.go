@@ -41,9 +41,6 @@ func (s *Service) recoverLocalMarketplacePlugin(ctx context.Context, journal Jou
 		pluginAdapter.DeploymentMode() != domain.PluginDeploymentMarketplace {
 		return fmt.Errorf("resolved Plugin adapter has no marketplace capability for %q: %w", journal.Agent, ErrInvalidRequest)
 	}
-	if err := s.validateMarketplaceRecoverySources(journal); err != nil {
-		return err
-	}
 	facts, err := inspectMarketplaceRecoveryFacts(ctx, journal, marketplaceAdapter)
 	if err != nil {
 		return err
@@ -143,10 +140,18 @@ func (s *Service) recoverLocalMarketplacePluginInstall(ctx context.Context, jour
 		if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
 			return err
 		}
+		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+			return err
+		}
 		return s.commitRecoveredPlugin(journal, result)
 	}
 	if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 		return err
+	}
+	if journal.Plugin.PreviousPresent && (facts.marketplace != marketplaceRecoveryPrevious || !facts.previousPresent) {
+		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.PreviousSource); err != nil {
+			return err
+		}
 	}
 	return s.rollbackRecoveredMarketplacePlugin(ctx, journal, facts, marketplaceAdapter, result)
 }
@@ -270,17 +275,26 @@ func (s *Service) recoverLocalMarketplacePluginUninstall(journal Journal, facts 
 			return fmt.Errorf("committing Plugin uninstall target is still present: %w", ErrIndeterminateState)
 		}
 		result.Direction = RecoveryCommit
+		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+			return err
+		}
 		return s.commitRecoveredPlugin(journal, result)
 	case PhaseRollingBack:
 		if !facts.targetPresent {
 			return fmt.Errorf("rolled-back Plugin uninstall target is absent: %w", ErrIndeterminateState)
 		}
 		result.Direction = RecoveryRollback
+		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+			return err
+		}
 		return s.deleteRecoveredJournal(journal)
 	case PhaseRemovingPlugin:
 		if facts.targetPresent {
 			result.Direction = RecoveryRollback
 			if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
+				return err
+			}
+			if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
 				return err
 			}
 			return s.deleteRecoveredJournal(journal)
@@ -289,27 +303,22 @@ func (s *Service) recoverLocalMarketplacePluginUninstall(journal Journal, facts 
 		if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
 			return err
 		}
+		if err := s.validateMarketplaceRecoverySource(journal.Plugin.Marketplace.TargetSource); err != nil {
+			return err
+		}
 		return s.commitRecoveredPlugin(journal, result)
 	default:
 		return fmt.Errorf("marketplace Plugin uninstall phase %q: %w", journal.Phase, ErrIndeterminateState)
 	}
 }
 
-func (s *Service) validateMarketplaceRecoverySources(journal Journal) error {
-	sources := []string{journal.Plugin.Marketplace.TargetSource}
-	if journal.Plugin.Marketplace.PreviousPresent {
-		sources = append(sources, journal.Plugin.Marketplace.PreviousSource)
-	}
+// validateMarketplaceRecoverySource 只校验当前收敛动作实际依赖的持久缓存，避免无关历史版本阻断既定方向。
+func (s *Service) validateMarketplaceRecoverySource(source string) error {
 	cacheRoot, err := paths.CachePath()
 	if err != nil {
 		return errors.Join(fmt.Errorf("resolve Plugin recovery cache root: %w", err), ErrIndeterminateState)
 	}
-	for _, source := range sources {
-		if err := validateMarketplaceRecoverySourceTree(cacheRoot, source, s.files); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateMarketplaceRecoverySourceTree(cacheRoot, source, s.files)
 }
 
 func validateMarketplaceRecoverySourceTree(cacheRoot, source string, files fileOps) error {
