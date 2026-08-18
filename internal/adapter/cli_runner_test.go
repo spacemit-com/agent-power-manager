@@ -78,17 +78,14 @@ func TestMCPRunnerReportsUnavailableBeforeStarting(t *testing.T) {
 	}
 }
 
-func TestMCPRunnerTimesOutAndBoundsOutput(t *testing.T) {
+func TestMCPRunnerTimesOutPromptly(t *testing.T) {
 	fakeBin := t.TempDir()
 	writeRunnerFake(t, fakeBin, "hermes", `#!/bin/sh
-printf '1234567890'
-printf 'abcdefghij' >&2
 /bin/sleep 5
 `)
 	t.Setenv("PATH", fakeBin)
 	runner := newDefaultAgentCLIRunner()
 	runner.timeout = 20 * time.Millisecond
-	runner.outputLimit = 5
 
 	startedAt := time.Now()
 	result, err := runner.Run(context.Background(), "hermes", nil, "")
@@ -99,11 +96,25 @@ printf 'abcdefghij' >&2
 	if elapsed >= time.Second {
 		t.Fatalf("Run() returned after %s, want prompt process-tree timeout", elapsed)
 	}
-	if result.Stdout != "12345" || result.Stderr != "abcde" {
-		t.Fatalf("bounded output = %q/%q, want 12345/abcde", result.Stdout, result.Stderr)
+	if result.Stdout != "" || result.Stderr != "" || result.StdoutTruncated || result.StderrTruncated {
+		t.Fatalf("silent timeout result = %+v", result)
 	}
-	if !result.StdoutTruncated || !result.StderrTruncated {
-		t.Fatalf("truncation flags = %v/%v, want true/true", result.StdoutTruncated, result.StderrTruncated)
+}
+
+func TestBoundedWriterLimitsOutputWithoutDependingOnProcessScheduling(t *testing.T) {
+	stdout := newBoundedWriter(5)
+	stderr := newBoundedWriter(5)
+	if count, err := stdout.Write([]byte("1234567890")); err != nil || count != 10 {
+		t.Fatalf("stdout Write() = %d, %v", count, err)
+	}
+	if count, err := stderr.Write([]byte("abcdefghij")); err != nil || count != 10 {
+		t.Fatalf("stderr Write() = %d, %v", count, err)
+	}
+	if stdout.String() != "12345" || stderr.String() != "abcde" {
+		t.Fatalf("bounded output = %q/%q, want 12345/abcde", stdout.String(), stderr.String())
+	}
+	if !stdout.Truncated() || !stderr.Truncated() {
+		t.Fatalf("truncation flags = %v/%v, want true/true", stdout.Truncated(), stderr.Truncated())
 	}
 }
 

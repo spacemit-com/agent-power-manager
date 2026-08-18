@@ -89,17 +89,14 @@ esac
 func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "fake-bin")
-	state := filepath.Join(root, "state")
+	hermesHome := filepath.Join(root, "agents", "hermes")
+	state := filepath.Join(hermesHome, ".apm-fake", "plugins")
 	for _, path := range []string{fakeBin, state} {
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := os.WriteFile(filepath.Join(fakeBin, "hermes"), []byte(fakeHermesPluginScript), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	hermesHome := filepath.Join(root, "agents", "hermes")
-	if err := os.MkdirAll(hermesHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
@@ -172,6 +169,12 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(hermesHome, "plugins", "demo-plugin-v0.0.1")); !os.IsNotExist(err) {
 		t.Fatalf("Hermes target remains: %v", err)
+	}
+	for _, release := range []string{"v0.0.1", "v0.1.0"} {
+		cachePath := filepath.Join(root, "cache", "apm", "plugins", string(domain.AgentHermes), "demo-plugin", release)
+		if info, err := os.Stat(cachePath); err != nil || !info.IsDir() {
+			t.Fatalf("Hermes agent-aware immutable cache %q missing: %v", cachePath, err)
+		}
 	}
 	contents, err := os.ReadFile(filepath.Join(root, "calls.log"))
 	if err != nil {
