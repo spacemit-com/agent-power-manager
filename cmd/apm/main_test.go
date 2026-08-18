@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,6 +16,103 @@ import (
 	"apm/internal/domain"
 	"apm/internal/logging"
 )
+
+type recordingPluginPackageDownloader struct {
+	ctx         context.Context
+	agent       domain.AgentID
+	ref         domain.PowerRef
+	destination string
+	err         error
+	calls       int
+}
+
+func (downloader *recordingPluginPackageDownloader) DownloadPluginTo(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
+	downloader.calls++
+	downloader.ctx = ctx
+	downloader.agent = agent
+	downloader.ref = ref
+	downloader.destination = destination
+	return downloader.err
+}
+
+func TestNewPluginResourcesRejectsNilDownloaderAtConstruction(t *testing.T) {
+	var typedNil *recordingPluginPackageDownloader
+	tests := []struct {
+		name   string
+		source interface {
+			DownloadPluginTo(context.Context, domain.AgentID, domain.PowerRef, string) error
+		}
+	}{
+		{name: "nil"},
+		{name: "typed nil", source: typedNil},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager, err := newPluginResources(test.source)
+			if manager != nil || err == nil {
+				t.Fatalf("newPluginResources() = (%v, %v), want nil/error", manager, err)
+			}
+		})
+	}
+}
+
+func TestPluginDownloadBridgeRejectsNilSourceWithoutPanic(t *testing.T) {
+	var typedNil *recordingPluginPackageDownloader
+	for _, test := range []struct {
+		name   string
+		source interface {
+			DownloadPluginTo(context.Context, domain.AgentID, domain.PowerRef, string) error
+		}
+	}{
+		{name: "nil"},
+		{name: "typed nil", source: typedNil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := (pluginDownloadBridge{source: test.source}).DownloadPlugin(context.Background(), domain.AgentCodex, pluginRefForMainTest(), "/destination")
+			if err == nil {
+				t.Fatal("DownloadPlugin() error = nil, want invalid source")
+			}
+		})
+	}
+}
+
+func TestPluginDownloadBridgeForwardsExactRequest(t *testing.T) {
+	cause := errors.New("download stopped")
+	downloader := &recordingPluginPackageDownloader{err: cause}
+	type contextKey string
+	ctx := context.WithValue(context.Background(), contextKey("request"), "exact")
+	ref := pluginRefForMainTest()
+	destination := filepath.Join(t.TempDir(), "plugin")
+
+	err := (pluginDownloadBridge{source: downloader}).DownloadPlugin(ctx, domain.AgentClaudeCode, ref, destination)
+	if !errors.Is(err, cause) {
+		t.Fatalf("DownloadPlugin() error = %v, want %v", err, cause)
+	}
+	if downloader.calls != 1 || downloader.ctx != ctx || downloader.agent != domain.AgentClaudeCode || downloader.ref != ref || downloader.destination != destination {
+		t.Fatalf("forwarded request = calls=%d ctx=%v agent=%q ref=%+v destination=%q", downloader.calls, downloader.ctx == ctx, downloader.agent, downloader.ref, downloader.destination)
+	}
+}
+
+func TestNewPluginResourcesCreatesDistinctManagerPerFactoryCall(t *testing.T) {
+	t.Setenv("APM_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	downloader := &recordingPluginPackageDownloader{}
+	installManager, err := newPluginResources(downloader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uninstallManager, err := newPluginResources(downloader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installManager == uninstallManager {
+		t.Fatal("newPluginResources() reused a mutable manager across factory calls")
+	}
+}
+
+func pluginRefForMainTest() domain.PowerRef {
+	return domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+}
 
 func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
 	t.Setenv("APM_HOME", t.TempDir())

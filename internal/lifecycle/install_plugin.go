@@ -85,6 +85,9 @@ func (s *InstallService) installMarketplacePlugin(
 	marketplaceAbsent := marketplaceFact.Presence == adapter.MarketplaceAbsent
 	pluginAbsent := pluginFact.Presence == adapter.PluginAbsent
 	if marketplaceAbsent && pluginAbsent {
+		if marketplaceFact.Name != marketplaceName || pluginFact.ActualName != previousName {
+			return cli.InstallItem{}, fmt.Errorf("absent previous marketplace/Plugin facts do not match manifest: %w", transaction.ErrIndeterminateState)
+		}
 		if err := s.config.Remove(agent, domain.PowerTypePlugin, ref.Name); err != nil {
 			return cli.InstallItem{}, fmt.Errorf("remove stale Plugin manifest for agent %q: %w", agent, err)
 		}

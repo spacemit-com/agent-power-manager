@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	"apm/internal/adapter"
 	"apm/internal/cache"
@@ -158,13 +159,32 @@ type pluginDownloadBridge struct {
 }
 
 func (bridge pluginDownloadBridge) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
+	if isNilPluginDownloader(bridge.source) {
+		return fmt.Errorf("download Plugin with nil Cloud source: %w", pluginresource.ErrInvalidArtifact)
+	}
 	return bridge.source.DownloadPluginTo(ctx, agent, ref, destination)
 }
 
 func newPluginResources(source cloud.PluginPackageDownloader) (pluginresource.Manager, error) {
+	if isNilPluginDownloader(source) {
+		return nil, fmt.Errorf("create Plugin Resource manager with nil Cloud source: %w", pluginresource.ErrInvalidArtifact)
+	}
 	manager, err := pluginresource.New(pluginDownloadBridge{source: source})
 	if err != nil {
 		return nil, fmt.Errorf("create Plugin Resource manager: %w", err)
 	}
 	return manager, nil
+}
+
+func isNilPluginDownloader(source cloud.PluginPackageDownloader) bool {
+	if source == nil {
+		return true
+	}
+	value := reflect.ValueOf(source)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

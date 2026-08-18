@@ -180,6 +180,59 @@ func TestInstallPluginMarketplaceStaleManifestClearsSingleEntryThenFirstInstalls
 	}
 }
 
+func TestInstallPluginMarketplaceDoubleAbsentWrongMarketplaceNamePreservesManifest(t *testing.T) {
+	var calls []string
+	previous := pluginRef("v1.0.0")
+	target := pluginRef("v2.0.0")
+	service := newInstallService(t, &calls, installFixture{
+		installed:  map[domain.AgentID]domain.PowerRef{domain.AgentCodex: previous},
+		pluginMode: domain.PluginDeploymentMarketplace,
+		marketplaceFacts: map[string]adapter.MarketplaceFact{
+			"apm-demo": {Presence: adapter.MarketplaceAbsent, Name: "apm-other"},
+		},
+	})
+
+	_, err := service.installForAgent(context.Background(), domain.AgentCodex, target)
+	if !errors.Is(err, transaction.ErrIndeterminateState) {
+		t.Fatalf("installForAgent() error = %v, want ErrIndeterminateState", err)
+	}
+	assertPluginManifestPreservedWithoutMutation(t, calls)
+}
+
+func TestInstallPluginMarketplaceDoubleAbsentWrongPluginNamePreservesManifest(t *testing.T) {
+	var calls []string
+	previous := pluginRef("v1.0.0")
+	target := pluginRef("v2.0.0")
+	service := newInstallService(t, &calls, installFixture{
+		installed:  map[domain.AgentID]domain.PowerRef{domain.AgentCodex: previous},
+		pluginMode: domain.PluginDeploymentMarketplace,
+		pluginFacts: map[string]adapter.PluginFact{
+			"demo-v1.0.0": {Presence: adapter.PluginAbsent, ActualName: "other-v1.0.0"},
+		},
+	})
+
+	_, err := service.installForAgent(context.Background(), domain.AgentCodex, target)
+	if !errors.Is(err, transaction.ErrIndeterminateState) {
+		t.Fatalf("installForAgent() error = %v, want ErrIndeterminateState", err)
+	}
+	assertPluginManifestPreservedWithoutMutation(t, calls)
+}
+
+func assertPluginManifestPreservedWithoutMutation(t *testing.T, calls []string) {
+	t.Helper()
+	for _, forbidden := range []string{
+		"config:remove:codex:plugin:demo",
+		"resource:stage-hermes:v2.0.0",
+		"transaction:install-plugin:codex",
+		"cloud:get-plugin",
+		"cloud:download-plugin",
+	} {
+		if containsEvent(calls, forbidden) {
+			t.Fatalf("calls = %v, want no %q", calls, forbidden)
+		}
+	}
+}
+
 func TestInstallPluginMarketplaceFailsClosedOnManagedAnomalies(t *testing.T) {
 	previous := pluginRef("v1.0.0")
 	target := pluginRef("v2.0.0")
