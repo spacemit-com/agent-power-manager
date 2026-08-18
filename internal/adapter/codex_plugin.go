@@ -77,6 +77,71 @@ func (adapter *codexPluginAdapter) PrepareInstall(ctx context.Context, definitio
 	return pluginPreparationCommandError(domain.AgentCodex, "upgrade", upgradeResult, err)
 }
 
+// InspectMarketplace 只接受 Codex 返回的唯一 local 绝对 clean source；其他形态均视为状态不明。
+func (adapter *codexPluginAdapter) InspectMarketplace(ctx context.Context, name string) (MarketplaceFact, error) {
+	if !isSafeMarketplaceName(name) {
+		return MarketplaceFact{}, fmt.Errorf("inspect marketplace name %q: %w", name, ErrInvalidPlugin)
+	}
+	result, runErr := adapter.runner.Run(ctx, "codex", []string{"plugin", "marketplace", "list", "--json"}, "")
+	if runErr != nil || result.StdoutTruncated || result.StderrTruncated {
+		return MarketplaceFact{}, pluginStateUnknown(domain.AgentCodex, "marketplace list", result, runErr)
+	}
+	var document struct {
+		Marketplaces []struct {
+			Name              string `json:"name"`
+			MarketplaceSource struct {
+				SourceType string `json:"sourceType"`
+				Source     string `json:"source"`
+			} `json:"marketplaceSource"`
+		} `json:"marketplaces"`
+	}
+	if err := decodePluginJSON(result.Stdout, &document); err != nil {
+		return MarketplaceFact{}, pluginStateUnknown(domain.AgentCodex, "marketplace list", result, err)
+	}
+	if document.Marketplaces == nil {
+		return MarketplaceFact{}, pluginStateUnknown(domain.AgentCodex, "marketplace list", result, errors.New("marketplace list has no marketplaces array"))
+	}
+	matches := make([]MarketplaceFact, 0, 1)
+	for _, marketplace := range document.Marketplaces {
+		if marketplace.Name != name {
+			continue
+		}
+		if marketplace.MarketplaceSource.SourceType != "local" {
+			return MarketplaceFact{}, pluginStateUnknown(domain.AgentCodex, "marketplace list", result, fmt.Errorf("marketplace %q has non-local source type %q", name, marketplace.MarketplaceSource.SourceType))
+		}
+		matches = append(matches, MarketplaceFact{Presence: MarketplacePresent, Name: name, Source: marketplace.MarketplaceSource.Source})
+	}
+	if len(matches) == 0 {
+		fact := MarketplaceFact{Presence: MarketplaceAbsent, Name: name}
+		return fact, validateMarketplaceFact(fact)
+	}
+	if len(matches) != 1 {
+		return MarketplaceFact{}, pluginStateUnknown(domain.AgentCodex, "marketplace list", result, fmt.Errorf("marketplace %q appears %d times", name, len(matches)))
+	}
+	if err := validateMarketplaceFact(matches[0]); err != nil {
+		return MarketplaceFact{}, pluginStateUnknown(domain.AgentCodex, "marketplace list", result, err)
+	}
+	return matches[0], nil
+}
+
+// RegisterMarketplace 注册调用方已校验的本地 marketplace，不追加 list 验证。
+func (adapter *codexPluginAdapter) RegisterMarketplace(ctx context.Context, target MarketplaceTarget) (PluginMutationResult, error) {
+	if err := validateMarketplaceTarget(target); err != nil {
+		return PluginMutationResult{State: PluginMutationNotApplied}, err
+	}
+	result, runErr := adapter.runner.Run(ctx, "codex", []string{"plugin", "marketplace", "add", target.Source, "--json"}, "")
+	return marketplaceMutationFromCommand(domain.AgentCodex, "add", target, result, runErr)
+}
+
+// UnregisterMarketplace 按固定名称删除注册；Source 仍需有效，以约束 transaction 目标完整性。
+func (adapter *codexPluginAdapter) UnregisterMarketplace(ctx context.Context, target MarketplaceTarget) (PluginMutationResult, error) {
+	if err := validateMarketplaceTarget(target); err != nil {
+		return PluginMutationResult{State: PluginMutationNotApplied}, err
+	}
+	result, runErr := adapter.runner.Run(ctx, "codex", []string{"plugin", "marketplace", "remove", target.Name, "--json"}, "")
+	return marketplaceMutationFromCommand(domain.AgentCodex, "remove", target, result, runErr)
+}
+
 func (adapter *codexPluginAdapter) Inspect(ctx context.Context, actualName string) (PluginFact, error) {
 	if !isSafePluginActualName(actualName) {
 		return PluginFact{}, fmt.Errorf("inspect plugin name %q: %w", actualName, ErrInvalidPlugin)
@@ -135,3 +200,4 @@ func (adapter *codexPluginAdapter) TargetPath(string) (string, error) {
 }
 
 var _ PluginAdapter = (*codexPluginAdapter)(nil)
+var _ MarketplacePluginAdapter = (*codexPluginAdapter)(nil)

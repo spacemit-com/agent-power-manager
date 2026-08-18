@@ -130,6 +130,27 @@ func TestRegistryResolversRejectUnsupportedAgent(t *testing.T) {
 	}
 }
 
+func TestRegistryPluginMarketplaceCapabilitiesMatchAgentSupport(t *testing.T) {
+	registry := NewRegistry()
+	for _, test := range []struct {
+		agent           domain.AgentID
+		wantMarketplace bool
+	}{
+		{agent: domain.AgentCodex, wantMarketplace: true},
+		{agent: domain.AgentClaudeCode, wantMarketplace: true},
+		{agent: domain.AgentHermes, wantMarketplace: false},
+	} {
+		plugin, err := registry.ResolvePlugin(test.agent)
+		if err != nil {
+			t.Fatalf("ResolvePlugin(%q): %v", test.agent, err)
+		}
+		_, gotMarketplace := plugin.(MarketplacePluginAdapter)
+		if gotMarketplace != test.wantMarketplace {
+			t.Fatalf("ResolvePlugin(%q) marketplace capability = %t, want %t", test.agent, gotMarketplace, test.wantMarketplace)
+		}
+	}
+}
+
 func TestRegistryRefreshInstalledReturnsZeroSnapshotOnDetectionError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)

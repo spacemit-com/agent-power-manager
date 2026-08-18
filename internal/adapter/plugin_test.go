@@ -2,10 +2,61 @@ package adapter
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"apm/internal/domain"
 )
+
+func TestMarketplaceTargetAcceptsSafeNameAndAbsoluteCleanSource(t *testing.T) {
+	target := MarketplaceTarget{Name: "apm-demo", Source: filepath.Join(t.TempDir(), "demo", "v0.1.0")}
+	if err := validateMarketplaceTarget(target); err != nil {
+		t.Fatalf("validateMarketplaceTarget(%#v): %v", target, err)
+	}
+}
+
+func TestMarketplaceTargetRejectsUnsafeNameOrNonLocalSource(t *testing.T) {
+	root := t.TempDir()
+	tests := []MarketplaceTarget{
+		{Name: "demo", Source: root},
+		{Name: "apm-", Source: root},
+		{Name: "apm-../demo", Source: root},
+		{Name: "apm-demo", Source: "relative/marketplace"},
+		{Name: "apm-demo", Source: "https://example.com/marketplace"},
+		{Name: "apm-demo", Source: root + "/demo/../marketplace"},
+	}
+	for _, target := range tests {
+		if err := validateMarketplaceTarget(target); !errors.Is(err, ErrInvalidPlugin) {
+			t.Fatalf("validateMarketplaceTarget(%#v) error = %v, want ErrInvalidPlugin", target, err)
+		}
+	}
+}
+
+func TestMarketplaceFactAcceptsConsistentPresence(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "demo", "v0.1.0")
+	for _, fact := range []MarketplaceFact{
+		{Presence: MarketplaceAbsent, Name: "apm-demo"},
+		{Presence: MarketplacePresent, Name: "apm-demo", Source: root},
+	} {
+		if err := validateMarketplaceFact(fact); err != nil {
+			t.Fatalf("validateMarketplaceFact(%#v): %v", fact, err)
+		}
+	}
+}
+
+func TestMarketplaceFactRejectsContradictoryOrUnknownPresence(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "demo", "v0.1.0")
+	for _, fact := range []MarketplaceFact{
+		{Presence: MarketplaceAbsent, Name: "apm-demo", Source: root},
+		{Presence: MarketplacePresent, Name: "apm-demo"},
+		{Presence: "unknown", Name: "apm-demo", Source: root},
+		{Presence: MarketplacePresent, Name: "unsafe", Source: root},
+	} {
+		if err := validateMarketplaceFact(fact); !errors.Is(err, ErrInvalidPlugin) {
+			t.Fatalf("validateMarketplaceFact(%#v) error = %v, want ErrInvalidPlugin", fact, err)
+		}
+	}
+}
 
 func TestValidatePluginFactRejectsContradictoryState(t *testing.T) {
 	for _, fact := range []PluginFact{

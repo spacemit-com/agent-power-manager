@@ -30,6 +30,29 @@ type PluginFact struct {
 	Selector   string         `json:"selector"`
 }
 
+// MarketplacePresence 表示目标 Agent 中指定 marketplace 的存在状态。
+type MarketplacePresence string
+
+const (
+	// MarketplacePresent 表示目标 Agent 明确返回唯一的本地 marketplace。
+	MarketplacePresent MarketplacePresence = "present"
+	// MarketplaceAbsent 表示目标 Agent 明确未找到指定 marketplace。
+	MarketplaceAbsent MarketplacePresence = "absent"
+)
+
+// MarketplaceTarget 描述 marketplace CLI 写操作使用的固定名称和本地绝对目录。
+type MarketplaceTarget struct {
+	Name   string
+	Source string
+}
+
+// MarketplaceFact 是 Adapter 从目标 Agent 读取的 marketplace 注册事实。
+type MarketplaceFact struct {
+	Presence MarketplacePresence
+	Name     string
+	Source   string
+}
+
 // PluginTarget 描述一次安装或卸载所使用的稳定实际名和 CLI selector。
 type PluginTarget struct {
 	ActualName string `json:"actual_name"`
@@ -53,7 +76,7 @@ type PluginMutationResult struct {
 	State PluginMutationState
 }
 
-// PluginAdapter 隔离不同 Agent 的 marketplace、CLI 和文件系统差异。
+// PluginAdapter 隔离不同 Agent 的 Plugin CLI 和文件系统差异。
 type PluginAdapter interface {
 	DeploymentMode() domain.PluginDeploymentMode
 	PrepareInstall(context.Context, domain.PluginDefinition) error
@@ -61,6 +84,50 @@ type PluginAdapter interface {
 	Add(context.Context, PluginTarget) (PluginMutationResult, error)
 	Remove(context.Context, PluginTarget) (PluginMutationResult, error)
 	TargetPath(string) (string, error)
+}
+
+// MarketplacePluginAdapter 为支持 marketplace 的 Agent 组合显式注册能力。
+// Source 必须保持为绝对 clean 本地路径，Adapter 不负责清洗调用方输入。
+type MarketplacePluginAdapter interface {
+	PluginAdapter
+	InspectMarketplace(context.Context, string) (MarketplaceFact, error)
+	RegisterMarketplace(context.Context, MarketplaceTarget) (PluginMutationResult, error)
+	UnregisterMarketplace(context.Context, MarketplaceTarget) (PluginMutationResult, error)
+}
+
+func validateMarketplaceTarget(target MarketplaceTarget) error {
+	if !isSafeMarketplaceName(target.Name) || !isAbsoluteCleanMarketplaceSource(target.Source) {
+		return fmt.Errorf("marketplace target %+v: %w", target, ErrInvalidPlugin)
+	}
+	return nil
+}
+
+func validateMarketplaceFact(fact MarketplaceFact) error {
+	if !isSafeMarketplaceName(fact.Name) {
+		return fmt.Errorf("marketplace fact %+v: %w", fact, ErrInvalidPlugin)
+	}
+	switch fact.Presence {
+	case MarketplaceAbsent:
+		if fact.Source != "" {
+			return fmt.Errorf("absent marketplace %q has source: %w", fact.Name, ErrInvalidPlugin)
+		}
+	case MarketplacePresent:
+		if !isAbsoluteCleanMarketplaceSource(fact.Source) {
+			return fmt.Errorf("present marketplace %q has invalid source %q: %w", fact.Name, fact.Source, ErrInvalidPlugin)
+		}
+	default:
+		return fmt.Errorf("marketplace %q has presence %q: %w", fact.Name, fact.Presence, ErrInvalidPlugin)
+	}
+	return nil
+}
+
+func isSafeMarketplaceName(name string) bool {
+	logical, found := strings.CutPrefix(name, "apm-")
+	return found && isSafePluginActualName(logical)
+}
+
+func isAbsoluteCleanMarketplaceSource(source string) bool {
+	return source != "" && strings.TrimSpace(source) == source && filepath.IsAbs(source) && filepath.Clean(source) == source
 }
 
 func validatePluginFact(fact PluginFact) error {
@@ -106,9 +173,17 @@ func isSafePluginActualName(name string) bool {
 }
 
 func pluginMutationFromCommand(agent domain.AgentID, operation string, target PluginTarget, result agentCLIResult, runErr error, success bool) (PluginMutationResult, error) {
+	return pluginResourceMutationFromCommand(agent, "Plugin", operation, target.ActualName, result, runErr, success)
+}
+
+func marketplaceMutationFromCommand(agent domain.AgentID, operation string, target MarketplaceTarget, result agentCLIResult, runErr error) (PluginMutationResult, error) {
+	return pluginResourceMutationFromCommand(agent, "marketplace", operation, target.Name, result, runErr, runErr == nil)
+}
+
+func pluginResourceMutationFromCommand(agent domain.AgentID, resource, operation, identity string, result agentCLIResult, runErr error, success bool) (PluginMutationResult, error) {
 	if !result.Started {
 		return PluginMutationResult{State: PluginMutationNotApplied}, fmt.Errorf(
-			"%s Plugin %s %q did not start: %w", agent, operation, target.ActualName, runErr,
+			"%s %s %s %q did not start: %w", agent, resource, operation, identity, runErr,
 		)
 	}
 	if result.StdoutTruncated || result.StderrTruncated {
@@ -127,8 +202,8 @@ func pluginMutationFromCommand(agent domain.AgentID, operation string, target Pl
 		diagnostic = strings.TrimSpace(result.Stdout)
 	}
 	return PluginMutationResult{State: PluginMutationUnknown}, fmt.Errorf(
-		"%s Plugin %s %q via %q has unknown result (exit=%d, diagnostic=%q): %w",
-		agent, operation, target.ActualName, result.Path, result.ExitCode, diagnostic,
+		"%s %s %s %q via %q has unknown result (exit=%d, diagnostic=%q): %w",
+		agent, resource, operation, identity, result.Path, result.ExitCode, diagnostic,
 		errors.Join(ErrPluginMutationUnknown, runErr),
 	)
 }
