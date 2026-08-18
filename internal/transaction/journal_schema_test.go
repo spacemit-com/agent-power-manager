@@ -74,6 +74,185 @@ func TestValidatePluginJournalEnvelope(t *testing.T) {
 	}
 }
 
+func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
+	cacheHome := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
+	previousSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
+
+	firstInstall := Journal{
+		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverPlugin,
+		Operation: OperationInstall, Agent: domain.AgentCodex,
+		Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
+		Plugin: &PluginJournalPayload{
+			Deployment: domain.PluginDeploymentMarketplace,
+			Target:     adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+			Marketplace: &PluginMarketplaceJournalPayload{
+				Name: "apm-demo", TargetSource: targetSource,
+			},
+		},
+	}
+	upgrade := firstInstall
+	upgrade.Previous = &previousRef
+	upgradePayload := *firstInstall.Plugin
+	upgrade.Plugin = &upgradePayload
+	upgrade.Plugin.Previous = &previousTarget
+	upgrade.Plugin.PreviousPresent = true
+	upgrade.Plugin.Marketplace = &PluginMarketplaceJournalPayload{
+		Name: "apm-demo", PreviousSource: previousSource, PreviousPresent: true, TargetSource: targetSource,
+	}
+	uninstall := firstInstall
+	uninstall.Operation = OperationUninstall
+	uninstall.Plugin = &PluginJournalPayload{
+		Deployment:    domain.PluginDeploymentMarketplace,
+		Target:        adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+		TargetPresent: true,
+		Marketplace: &PluginMarketplaceJournalPayload{
+			Name: "apm-demo", TargetSource: targetSource,
+		},
+	}
+
+	tests := []struct {
+		name    string
+		journal Journal
+		phases  []Phase
+	}{
+		{name: "first install", journal: firstInstall, phases: []Phase{PhaseRegisteringMarketplace, PhaseAddingNewPlugin, PhaseRollingBack, PhaseCommitting}},
+		{name: "upgrade", journal: upgrade, phases: []Phase{PhaseRemovingOldPlugin, PhaseUnregisteringOldMarketplace, PhaseRegisteringNewMarketplace, PhaseAddingNewPlugin, PhaseRollingBack, PhaseCommitting}},
+		{name: "uninstall", journal: uninstall, phases: []Phase{PhaseRemovingPlugin, PhaseRollingBack, PhaseCommitting}},
+	}
+	for _, test := range tests {
+		for _, phase := range test.phases {
+			t.Run(test.name+"/"+string(phase), func(t *testing.T) {
+				journal := test.journal
+				journal.Phase = phase
+				if err := validateJournal(journal); err != nil {
+					t.Fatalf("validateJournal(%s) error = %v", phase, err)
+				}
+			})
+		}
+	}
+	invalid := []struct {
+		name    string
+		journal Journal
+		phases  []Phase
+	}{
+		{name: "first install", journal: firstInstall, phases: []Phase{PhaseRemovingOldPlugin, PhaseUnregisteringOldMarketplace, PhaseRegisteringNewMarketplace, PhaseRemovingPlugin}},
+		{name: "upgrade", journal: upgrade, phases: []Phase{PhaseRegisteringMarketplace, PhaseRemovingPlugin}},
+		{name: "uninstall", journal: uninstall, phases: []Phase{PhaseRegisteringMarketplace, PhaseRemovingOldPlugin, PhaseUnregisteringOldMarketplace, PhaseRegisteringNewMarketplace, PhaseAddingNewPlugin}},
+	}
+	for _, test := range invalid {
+		for _, phase := range test.phases {
+			t.Run("reject "+test.name+"/"+string(phase), func(t *testing.T) {
+				journal := test.journal
+				journal.Phase = phase
+				if err := validateJournal(journal); !errors.Is(err, ErrInvalidJournal) {
+					t.Fatalf("validateJournal(%s) error = %v, want ErrInvalidJournal", phase, err)
+				}
+			})
+		}
+	}
+}
+
+func TestPluginMarketplaceInvalidJournalPayloads(t *testing.T) {
+	cacheHome := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
+	valid := func() Journal {
+		return Journal{
+			SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverPlugin,
+			Operation: OperationInstall, Phase: PhaseRegisteringMarketplace, Agent: domain.AgentCodex,
+			Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
+			Plugin: &PluginJournalPayload{
+				Deployment: domain.PluginDeploymentMarketplace,
+				Target:     adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+				Marketplace: &PluginMarketplaceJournalPayload{
+					Name: "apm-demo", TargetSource: targetSource,
+				},
+			},
+		}
+	}
+	tests := map[string]func(*Journal){
+		"relative source": func(j *Journal) { j.Plugin.Marketplace.TargetSource = "cache/plugins/codex/demo/v2.0.0" },
+		"remote source":   func(j *Journal) { j.Plugin.Marketplace.TargetSource = "https://example.test/demo" },
+		"missing source":  func(j *Journal) { j.Plugin.Marketplace.TargetSource = "" },
+		"dirty source": func(j *Journal) {
+			j.Plugin.Marketplace.TargetSource = targetSource + string(filepath.Separator) + "child" + string(filepath.Separator) + ".."
+		},
+		"wrong agent path": func(j *Journal) { j.Agent = domain.AgentClaudeCode },
+		"wrong logical name path": func(j *Journal) {
+			j.Plugin.Marketplace.TargetSource = filepath.Join(cacheHome, "apm", "plugins", "codex", "other", "v2.0.0")
+		},
+		"wrong version path": func(j *Journal) {
+			j.Plugin.Marketplace.TargetSource = filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+		},
+		"previous source without reference": func(j *Journal) {
+			j.Plugin.Marketplace.PreviousSource = filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+		},
+		"filesystem payload too": func(j *Journal) { j.Plugin.Filesystem = &PluginFilesystemJournalPayload{} },
+		"legacy phase":           func(j *Journal) { j.Phase = PhaseAddingNew },
+		"extra old target fact":  func(j *Journal) { j.Plugin.TargetPresent = true },
+		"old journal without marketplace payload": func(j *Journal) {
+			j.Plugin.Marketplace = nil
+			j.Plugin.Target.Selector = j.Plugin.Target.ActualName
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			journal := valid()
+			mutate(&journal)
+			if err := validateJournal(journal); !errors.Is(err, ErrInvalidJournal) {
+				t.Fatalf("validateJournal() error = %v, want ErrInvalidJournal", err)
+			}
+		})
+	}
+}
+
+func TestLegacyPluginJournalAcceptedOnlyDuringFeatureCutover(t *testing.T) {
+	firstInstall := validPluginMarketplaceJournal()
+	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.9.0"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo-v0.9.0", Selector: "demo-v0.9.0@custom"}
+	upgrade := validPluginMarketplaceJournal()
+	upgrade.Previous = &previousRef
+	upgrade.Phase = PhaseRemovingOld
+	upgrade.Plugin.Previous = &previousTarget
+	upgrade.Plugin.PreviousPresent = true
+	uninstall := validPluginMarketplaceJournal()
+	uninstall.Operation = OperationUninstall
+	uninstall.Phase = PhaseRemoving
+	uninstall.Plugin.TargetPresent = true
+
+	for name, journal := range map[string]Journal{
+		"first install": firstInstall,
+		"upgrade":       upgrade,
+		"uninstall":     uninstall,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateJournal(journal); err != nil {
+				t.Fatalf("validateJournal(legacy producer) error = %v", err)
+			}
+		})
+	}
+
+	for name, mutate := range map[string]func(*Journal){
+		"filesystem selector": func(j *Journal) { j.Plugin.Target.Selector = j.Plugin.Target.ActualName },
+		"Hermes marketplace":  func(j *Journal) { j.Agent = domain.AgentHermes },
+		"install target present": func(j *Journal) {
+			j.Plugin.TargetPresent = true
+		},
+	} {
+		t.Run("reject "+name, func(t *testing.T) {
+			journal := validPluginMarketplaceJournal()
+			mutate(&journal)
+			if err := validateJournal(journal); !errors.Is(err, ErrInvalidJournal) {
+				t.Fatalf("validateJournal(non-producer legacy shape) error = %v, want ErrInvalidJournal", err)
+			}
+		})
+	}
+}
+
 func TestValidatePluginFilesystemJournals(t *testing.T) {
 	staging, _ := validationPaths(t)
 	id := "00112233445566778899aabbccddeeff"

@@ -72,22 +72,35 @@ type MCPUninstallRequest struct {
 	Adapter adapter.MCPAdapter
 }
 
+// PluginMarketplaceInstallRequest 描述本地 marketplace 首装或版本切换目标。
+type PluginMarketplaceInstallRequest struct {
+	Target   adapter.MarketplaceTarget
+	Previous *adapter.MarketplaceTarget
+	Adapter  adapter.MarketplacePluginAdapter
+}
+
 // PluginInstallRequest 描述 Plugin 首装、修复或版本切换的事务输入。
 type PluginInstallRequest struct {
-	Agent       domain.AgentID
-	Power       domain.PowerRef
-	Previous    *domain.PowerRef
-	Definition  domain.PluginDefinition
-	StagingRoot string
-	Adapter     adapter.PluginAdapter
+	Agent          domain.AgentID
+	Power          domain.PowerRef
+	Previous       *domain.PowerRef
+	Definition     domain.PluginDefinition
+	StagingRoot    string
+	Adapter        adapter.PluginAdapter
+	Target         adapter.PluginTarget
+	PreviousTarget *adapter.PluginTarget
+	Marketplace    *PluginMarketplaceInstallRequest
 }
 
 // PluginUninstallRequest 描述无需 Cloud 即可执行的 Plugin 卸载输入。
 type PluginUninstallRequest struct {
-	Agent      domain.AgentID
-	Power      domain.PowerRef
-	ActualName string
-	Adapter    adapter.PluginAdapter
+	Agent              domain.AgentID
+	Power              domain.PowerRef
+	ActualName         string
+	Adapter            adapter.PluginAdapter
+	Target             adapter.PluginTarget
+	Marketplace        *adapter.MarketplaceTarget
+	MarketplaceAdapter adapter.MarketplacePluginAdapter
 }
 
 // UninstallResult 描述卸载事务已确认的目标状态；该事实可与后续错误同时返回。

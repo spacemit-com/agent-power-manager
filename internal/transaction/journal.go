@@ -41,6 +41,18 @@ const (
 	PhaseAddingNew Phase = "adding-new"
 	// PhaseRemoving 表示卸载移除意图已持久化。
 	PhaseRemoving Phase = "removing"
+	// PhaseRegisteringMarketplace 表示首装即将注册目标 marketplace。
+	PhaseRegisteringMarketplace Phase = "registering-marketplace"
+	// PhaseRemovingOldPlugin 表示版本切换即将移除旧 Plugin。
+	PhaseRemovingOldPlugin Phase = "removing-old-plugin"
+	// PhaseUnregisteringOldMarketplace 表示版本切换即将注销旧 marketplace。
+	PhaseUnregisteringOldMarketplace Phase = "unregistering-old-marketplace"
+	// PhaseRegisteringNewMarketplace 表示版本切换即将注册目标 marketplace。
+	PhaseRegisteringNewMarketplace Phase = "registering-new-marketplace"
+	// PhaseAddingNewPlugin 表示 marketplace 已切换且即将安装目标 Plugin。
+	PhaseAddingNewPlugin Phase = "adding-new-plugin"
+	// PhaseRemovingPlugin 表示卸载即将移除当前 Plugin，但保留 marketplace。
+	PhaseRemovingPlugin Phase = "removing-plugin"
 	// PhaseRollingBack 表示事务方向已固定为回滚。
 	PhaseRollingBack Phase = "rolling-back"
 	// PhaseCommitting 表示事务方向已固定为完成提交。
@@ -74,14 +86,23 @@ type PluginFilesystemJournalPayload struct {
 	TargetQuarantinePath   string `json:"target_quarantine_path,omitempty"`
 }
 
+// PluginMarketplaceJournalPayload 保存 marketplace 切换恢复所需的固定名称和新旧缓存来源。
+type PluginMarketplaceJournalPayload struct {
+	Name            string `json:"name"`
+	PreviousSource  string `json:"previous_source,omitempty"`
+	PreviousPresent bool   `json:"previous_present"`
+	TargetSource    string `json:"target_source"`
+}
+
 // PluginJournalPayload 保存 Plugin 恢复所需的部署模式、实际名和 CLI selector。
 type PluginJournalPayload struct {
-	Deployment      domain.PluginDeploymentMode     `json:"deployment"`
-	Target          adapter.PluginTarget            `json:"target"`
-	Previous        *adapter.PluginTarget           `json:"previous,omitempty"`
-	TargetPresent   bool                            `json:"target_present"`
-	PreviousPresent bool                            `json:"previous_present"`
-	Filesystem      *PluginFilesystemJournalPayload `json:"filesystem,omitempty"`
+	Deployment      domain.PluginDeploymentMode      `json:"deployment"`
+	Target          adapter.PluginTarget             `json:"target"`
+	Previous        *adapter.PluginTarget            `json:"previous,omitempty"`
+	TargetPresent   bool                             `json:"target_present"`
+	PreviousPresent bool                             `json:"previous_present"`
+	Filesystem      *PluginFilesystemJournalPayload  `json:"filesystem,omitempty"`
+	Marketplace     *PluginMarketplaceJournalPayload `json:"marketplace,omitempty"`
 }
 
 // Journal 表示恢复唯一活动事务所需的持久化状态。
