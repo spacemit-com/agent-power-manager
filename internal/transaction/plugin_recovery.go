@@ -9,8 +9,11 @@ import (
 	"apm/internal/adapter"
 )
 
-// recoverPlugin 仅使用 journal 与目标 Adapter 恢复 Plugin，不连接 Cloud 或 marketplace。
+// recoverPlugin 仅使用 journal 与目标 Adapter 恢复 Plugin，不连接 Cloud。
 func (s *Service) recoverPlugin(ctx context.Context, journal Journal, result *RecoveryResult) error {
+	if journal.Plugin.Marketplace != nil {
+		return s.recoverLocalMarketplacePlugin(ctx, journal, result)
+	}
 	if journal.Phase == PhaseCommitting {
 		result.Direction = RecoveryCommit
 		if journal.Plugin.Filesystem != nil {
