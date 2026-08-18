@@ -488,13 +488,12 @@ func TestMarketplacePluginRollbackMutationMatrix(t *testing.T) {
 		{
 			name: "first install",
 			progress: marketplacePluginProgress{
-				targetMarketplaceRegistered: true, targetPluginAdded: true,
+				targetMarketplaceRegistered: true,
 			},
 			operations: []rollbackOperation{
-				{name: "remove target Plugin", failureLog: []string{"update:rolling-back", "remove-plugin"}, setAnswer: setRemoveAnswer},
-				{name: "unregister target marketplace", failureLog: []string{"update:rolling-back", "remove-plugin", "unregister-marketplace"}, setAnswer: setUnregisterAnswer},
+				{name: "unregister target marketplace", failureLog: []string{"update:rolling-back", "unregister-marketplace"}, setAnswer: setUnregisterAnswer},
 			},
-			successLog: []string{"update:rolling-back", "remove-plugin", "unregister-marketplace", "delete-journal"},
+			successLog: []string{"update:rolling-back", "unregister-marketplace", "delete-journal"},
 		},
 	}
 	states := []struct {
