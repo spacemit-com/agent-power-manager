@@ -1,6 +1,8 @@
 # Lifecycle Plugin 设计规格
 
-> 状态：设计已于 2026-08-13 确认，尚未进入实现。
+> 状态：历史设计，已由 [Feature 017](../017-local-plugin-marketplace/spec.md) 与 [ADR-013](../../adr/ADR-013-generate-per-plugin-local-marketplaces.md) 取代其中的 Cloud、marketplace、Plugin cache 与 transaction 语义。
+
+> 本文其余内容保留为 2026-08-13 的设计记录。当前实现以 Feature 017/ADR-013 为准：Cloud 交付按 Agent 区分的原始 Plugin 文件；APM 在不可变的 agent-aware cache 中生成每 Agent、每逻辑 Plugin、单版本的本地 marketplace，并将 Codex/Claude marketplace 切换与 Plugin 切换置于同一可恢复 transaction。Hermes 保持 filesystem artifact/staging 模型。
 
 ## 目标
 

@@ -1,8 +1,10 @@
 # Manage Versioned Plugins Through Marketplace and Filesystem
 
-- Status：Accepted
+- Status：Superseded by ADR-013
 - Date：2026-08-13
 - Decision Makers：APM maintainers
+
+> 已由 [ADR-013](ADR-013-generate-per-plugin-local-marketplaces.md) 取代：Cloud 远程稳定全量 marketplace 与 Codex/Claude Plugin 不进入缓存已不符合当前实现；以下正文保留为历史决策上下文。
 
 ## Context
 

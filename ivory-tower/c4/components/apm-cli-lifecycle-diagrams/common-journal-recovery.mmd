@@ -9,7 +9,7 @@ flowchart TD
     FS --> Converge[按持久化 phase 提交或回滚]
     CLI --> InspectMCP[Agent CLI Inspect 同名 MCP]
     InspectMCP --> Converge
-    Plugin --> InspectPlugin[Adapter Inspect 实际名 / 受控文件路径]
+    Plugin --> InspectPlugin[Adapter Inspect 实际名/marketplace；只使用 manifest 与已有 immutable artifact，不连接 Cloud 或 Plugin Resource Ensure]
     InspectPlugin --> Converge
     Converge --> Delete[收敛后删除同一个 journal]
     Delete --> Warn[锁内同步恢复 Warn]

@@ -145,13 +145,25 @@ classDiagram
         <<interface>>
         +Fetch(PowerRef) (stagingRoot string, error)
     }
+    class PluginResourceManager {
+        <<interface>>
+        +Ensure(Context, AgentID, PowerRef) (Artifact, error)
+        +Lookup(AgentID, PowerRef) (Artifact, error)
+        +StageHermes(PowerRef) (stagingRoot string, error)
+    }
+    class PluginArtifact {
+        +Agent AgentID
+        +Power PowerRef
+        +ActualName string
+        +MarketplaceName string
+        +MarketplaceSource string
+    }
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
         +DownloadSkill(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
-        +GetPlugin(PowerRef) (PluginDefinition, error)
-        +DownloadPlugin(PowerRef) error
+        +DownloadPlugin(Context, AgentID, PowerRef, destination) error
     }
     class VersionSelector {
         <<interface>>
@@ -180,8 +192,9 @@ classDiagram
     installService --> InstallBatchError : successful Release only
     installService --> Locker : one lock interval
     installService --> TransactionManager : Recover / InstallSkill / InstallMCP / InstallPlugin
-    installService --> CloudClient : List / DownloadSkill / GetMCP / GetPlugin / DownloadPlugin
-    installService --> PowerCache : Skill / Hermes filesystem Plugin Fetch
+    installService --> CloudClient : List / DownloadSkill / GetMCP
+    installService --> PowerCache : Skill Fetch only
+    installService --> PluginResourceManager : Plugin Ensure / Lookup / StageHermes
     installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
     installService --> ConfigRepository : Find
     installService --> VersionSelector : resolve version
@@ -194,6 +207,7 @@ classDiagram
     uninstallService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
     uninstallService --> ConfigRepository : List
     uninstallService --> CloudClient : MCP GetMCP only when present
+    uninstallService --> PluginResourceManager : Plugin Lookup only; never Cloud
 
     AdapterRegistry --> Adapter : resolves
     AdapterRegistry --> AgentSnapshot : returns
@@ -204,3 +218,4 @@ classDiagram
     TransactionManager --|> Recoverer : embeds
     Inspector --> InspectionResult : returns
     TransactionManager --> ConfigRepository : Set / Remove
+    PluginResourceManager --> PluginArtifact : returns immutable Agent artifact

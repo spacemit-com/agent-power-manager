@@ -25,12 +25,17 @@ flowchart TD
     MCPTx --> MCPJournal[schema v1 driver=agent-cli]
     MCPJournal --> Phases[removing-old / adding-new / committing / rolling-back]
 
-    Type -->|Plugin| PluginResolve[ResolvePlugin + Config Find + Cloud GetPlugin]
-    PluginResolve --> Prepare[Codex/Claude marketplace add/update; Hermes no-op]
-    Prepare --> PluginInspect[Inspect versioned actual name]
-    PluginInspect -->|marketplace| PluginTx[plugin transaction with exact selector]
-    PluginInspect -->|Hermes filesystem| PluginCache[Cache Fetch / Cloud DownloadPlugin / Fetch] --> PluginTx
-    PluginTx --> PluginJournal[schema v1 driver=plugin]
+    Type -->|Plugin| PluginManifest[Config Find target exact version]
+    PluginManifest -->|same version| Unchanged
+    PluginManifest -->|missing or different| PluginEnsure[Plugin Resource Ensure target artifact；仅 miss 时 Cloud 下载原始 Agent 包]
+    PluginEnsure --> PluginResolve[ResolvePlugin]
+    PluginResolve --> PluginFacts[检查目标及旧版本的精确 Agent 事实]
+    PluginFacts -->|Codex / Claude| PreviousLookup[旧版本仅 Plugin Resource Lookup；验证本地 marketplace/source/selector]
+    PreviousLookup --> MarketplaceTx[plugin transaction：首装 register marketplace → add Plugin → manifest；切换 remove old Plugin → unregister old marketplace → register new marketplace → add Plugin → manifest]
+    PluginFacts -->|Hermes| HermesStage[事实完成后 Plugin Resource StageHermes] --> FilesystemPluginTx[filesystem Plugin transaction]
+    MarketplaceTx --> PluginJournal[schema v1 driver=plugin；每次 Agent 写操作前持久 phase]
+    FilesystemPluginTx --> PluginJournal
+    PluginFacts -->|部分、损坏或身份不符| PluginFail[fail closed；保留 manifest/artifact]
 
     FSJournal --> Outcome[installed/upgraded/downgraded]
     Phases --> Outcome
@@ -38,5 +43,6 @@ flowchart TD
     Unchanged --> Agent
     Outcome --> Agent
     Fail --> Batch[fail-fast + remaining unexecuted]
+    PluginFail --> Batch
     Agent -->|done| Release[Release then render]
     Batch --> Release

@@ -1,12 +1,11 @@
 classDiagram
-    note for CloudClient "List 返回全部精确 PowerRef；DownloadSkill/DownloadPlugin 写文件型缓存；GetMCP/GetPlugin 返回类型定义"
+    note for CloudClient "List 返回全部精确 PowerRef；DownloadSkill 保持既有缓存语义；DownloadPlugin 仅把指定 Agent 的原始包写入调用方提供的 destination，不生成或读取 marketplace"
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
         +DownloadSkill(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
-        +GetPlugin(PowerRef) (PluginDefinition, error)
-        +DownloadPlugin(PowerRef) error
+        +DownloadPlugin(Context, AgentID, PowerRef, destination) error
     }
     class MCPServer {
         +Transport MCPTransport
@@ -19,9 +18,11 @@ classDiagram
         +List() ([]PowerRef, error)
         +DownloadSkill(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
-        +GetPlugin(PowerRef) (PluginDefinition, error)
-        +DownloadPlugin(PowerRef) error
+        +DownloadPlugin(Context, AgentID, PowerRef, destination) error
     }
     LocalClient ..|> CloudClient
     CloudClient --> MCPServer : direct, no cache/staging
-    CloudClient --> PluginDefinition : actual name + marketplace source
+    class RawPluginDestination {
+        <<caller-owned directory>>
+    }
+    CloudClient --> RawPluginDestination : writes Agent-specific raw Plugin package

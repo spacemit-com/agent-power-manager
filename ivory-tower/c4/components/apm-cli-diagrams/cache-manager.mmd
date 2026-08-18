@@ -1,5 +1,5 @@
 classDiagram
-    note for PowerCache "Skill 与 Hermes Plugin 使用版本化 Cache/Staging；Codex/Claude Plugin 和 MCP 不使用"
+    note for PowerCache "只服务 Skill 的版本化 Cache/Staging；MCP 与所有 Plugin 均不使用此接口"
     class PowerCache {
         <<interface>>
         +Fetch(PowerRef) (stagingRoot string, error)
@@ -12,3 +12,8 @@ classDiagram
 
     FilesystemCache ..|> PowerCache
     PowerCache --> PowerRef : consumes
+
+    note for PluginArtifactCache "Plugin Resource 独占 agent-aware immutable artifact：cache/plugins/<agent>/<logical-name>/<version>；Codex/Claude 其中生成单条目本地 marketplace，Hermes 从其中 staging"
+    class PluginArtifactCache {
+        +artifactRoot(AgentID, PowerRef) string
+    }

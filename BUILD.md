@@ -113,7 +113,7 @@ Fix 是显式恢复命令。它不接受位置参数或 Agent/Type 等命令专�
 
 没有活动 journal 时普通模式静默成功，verbose 模式在 stderr 输出 Debug；恢复成功时输出 `transaction recovered` Warn。损坏、未知或不可读 journal 无法自动修复，Fix 会保留原文件和现场、记录 Error 并非零退出；不要手工删除 journal，除非已人工确认事务状态和数据所有权。
 
-Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名 Cloud 候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、Cloud 和串行 Transaction；Skill 使用 Cache/Staging，MCP 直接读取 Cloud 精确版本定义并调用目标 Agent CLI。Plugin 由 Cloud `GetPlugin` 返回版本化实际名和稳定 marketplace：Codex/Claude 注册或更新 marketplace 后安装，Hermes 才使用 Plugin Cache/Staging 发布目录并 enable。只有成功 Release 后 CLI 才渲染。
+Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名 Cloud 候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、Cloud 和串行 Transaction；Skill 使用 Cache/Staging，MCP 直接读取 Cloud 精确版本定义并调用目标 Agent CLI。Plugin 当前语义见 [Feature 017](ivory-tower/features/017-local-plugin-marketplace/spec.md) 与 [ADR-013](ivory-tower/adr/ADR-013-generate-per-plugin-local-marketplaces.md)：Cloud 只按 Agent 下载原始包到 Plugin Resource 指定目录，APM 再生成本地 marketplace 或 Hermes staging。只有成功 Release 后 CLI 才渲染。
 
 每个目标 Agent 的 stdout 精确为以下六种 outcome 之一：
 
@@ -143,7 +143,22 @@ stdout 只有两种精确行形式：
 
 MCP 支持 Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互斥结构：本地 stdio 使用 `transport=stdio`、`command`、`args`，远程端点使用 `transport=http`、`url`。Claude Code 固定写入 user scope；所有同名检查、安装、卸载和恢复都通过目标 Agent CLI 完成。CLI 从当前 `PATH` 动态解析，不经 shell，30 秒超时，输出有界；解析或状态不清晰时 fail closed 并保留共享 journal。Hermes 正常 Add/Remove 后按设计不额外执行 list。
 
-Skill、MCP 与 Plugin 共用唯一活动 journal。唯一正式 schema v1 shared envelope 通过 `filesystem`、`agent-cli` 与 `plugin` driver 路由，并且只允许与 driver 匹配的互斥载荷；旧平铺或其他格式返回 `ErrInvalidJournal`，文件原样保留。Search 与两种 List 只告警；Fix、Install 或 Uninstall 才在全局锁内串行恢复未完成事务。版本边界见 [ADR-011](ivory-tower/adr/ADR-011-reset-journal-schema-before-release.md)，Plugin 架构见 [ADR-012](ivory-tower/adr/ADR-012-manage-versioned-plugins-through-marketplace-and-filesystem.md)。
+### Plugin 本地 artifact 与操作顺序
+
+Plugin 当前架构以 [Feature 017](ivory-tower/features/017-local-plugin-marketplace/spec.md) 和 [ADR-013](ivory-tower/adr/ADR-013-generate-per-plugin-local-marketplaces.md) 为准。Cloud 不托管 marketplace；Plugin Resource 以以下不可变、agent-aware 布局保存原始包与生成物：
+
+```text
+cache/plugins/<agent>/<logical-name>/<version>/
+├── .agents/plugins/marketplace.json       # 仅 Codex
+├── .claude-plugin/marketplace.json        # 仅 Claude Code
+└── plugins/<logical-name>-v<version>/     # 原始 Plugin 内容
+```
+
+Install 先读 manifest。目标精确版本已经记录时直接返回 `unchanged`，不会调用 Cloud、Plugin Resource、Adapter 或 Transaction。否则依次为：`Ensure` 目标 artifact（miss 才由 Cloud 下载原始包）、解析 Plugin Adapter、检查目标和旧版本的精确 Agent 事实；Codex/Claude 的旧版本再离线 `Lookup` 旧 artifact。Codex/Claude 首装在一个 Plugin transaction 内依次注册本地 marketplace、添加 Plugin、写 manifest；升级/降级则依次删除旧 Plugin、注销旧 marketplace、注册新 marketplace、添加新 Plugin、写 manifest。Hermes 仅在事实检查后 `StageHermes`，再进入 filesystem transaction；Hermes 不生成 marketplace。
+
+Uninstall 先从 manifest 取得精确版本；没有记录时直接返回未执行，不检查 Agent。Codex/Claude 先检查该 marketplace 与 Plugin，再离线 `Lookup` 并验证 artifact/source/selector，最后在 transaction 中移除 Plugin 和 manifest，正常路径保留 marketplace 与 artifact；Hermes 只处理精确目录与 manifest。部分存在、source 或 selector 不匹配、artifact 缺失或损坏、Agent 事实不可读以及非法 journal 都会保留 manifest、artifact 和 journal 并 fail closed。`fix`/recovery 只依赖 journal、Adapter、manifest 与已有 artifact，绝不连接 Cloud 或重建缓存。
+
+Skill、MCP 与 Plugin 共用唯一活动 journal。唯一正式 schema v1 shared envelope 通过 `filesystem`、`agent-cli` 与 `plugin` driver 路由，并且只允许与 driver 匹配的互斥载荷；旧平铺或其他格式返回 `ErrInvalidJournal`，文件原样保留。Search 与两种 List 只告警；Fix、Install 或 Uninstall 才在全局锁内串行恢复未完成事务。版本边界见 [ADR-011](ivory-tower/adr/ADR-011-reset-journal-schema-before-release.md)，Plugin 架构见 [ADR-013](ivory-tower/adr/ADR-013-generate-per-plugin-local-marketplaces.md)。
 
 自动化测试绝不能调用真实 Agent CLI。MCP/Plugin 测试应把临时 fake-bin 前置到 `PATH`，将 `APM_HOME`、`XDG_CACHE_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME` 全部指向 `t.TempDir()` 下的隔离路径，并断言每次执行路径都位于 fake-bin。仓库集成测试已按此约束覆盖三个 Agent 的 Plugin 首装、幂等、升级、降级和卸载。
 

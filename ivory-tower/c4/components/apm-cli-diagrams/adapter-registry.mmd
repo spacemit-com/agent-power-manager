@@ -1,5 +1,5 @@
 classDiagram
-    note for AdapterRegistry "按 Agent 分别解析 Skill/MCP/Plugin；RefreshInstalled 只检查 Agent 根，不执行能力 CLI（ADR-004/010/012）"
+    note for AdapterRegistry "按 Agent 分别解析 Skill/MCP/Plugin；RefreshInstalled 只检查 Agent 根，不执行能力 CLI（ADR-004/010/013）"
     class AdapterRegistry {
         <<interface>>
         +ResolveSkill(AgentID) (Adapter, error)
@@ -23,15 +23,26 @@ classDiagram
     class Registry
     class PluginAdapter {
         <<interface>>
-        +PrepareInstall(Context, PluginDefinition) error
+        +DeploymentMode() PluginDeploymentMode
         +Inspect(Context, actualName) (PluginFact, error)
         +Add(Context, PluginTarget) (PluginMutationResult, error)
         +Remove(Context, PluginTarget) (PluginMutationResult, error)
+        +TargetPath(actualName) (string, error)
+    }
+    note for MarketplacePluginAdapter "Codex/Claude 的组合接口；本地 marketplace source 必须是绝对 clean artifact 路径"
+    class MarketplacePluginAdapter {
+        <<interface>>
+        +InspectMarketplace(Context, name) (MarketplaceFact, error)
+        +RegisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
+        +UnregisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
     }
     class skillAdapter
     class codexMCPAdapter
     class claudeMCPAdapter
     class hermesMCPAdapter
+    class codexPluginAdapter
+    class claudePluginAdapter
+    class hermesPluginAdapter
     class AgentSnapshot
 
     Registry ..|> AdapterRegistry
@@ -44,4 +55,8 @@ classDiagram
     codexMCPAdapter ..|> MCPAdapter
     claudeMCPAdapter ..|> MCPAdapter
     hermesMCPAdapter ..|> MCPAdapter
+    MarketplacePluginAdapter --|> PluginAdapter
+    codexPluginAdapter ..|> MarketplacePluginAdapter
+    claudePluginAdapter ..|> MarketplacePluginAdapter
+    hermesPluginAdapter ..|> PluginAdapter
     AdapterRegistry --> AgentSnapshot : lexical snapshot
