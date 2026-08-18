@@ -26,6 +26,9 @@ func (s *Service) UninstallPlugin(ctx context.Context, request PluginUninstallRe
 	} else if found {
 		return result, ErrActiveTransaction
 	}
+	if request.Marketplace != nil {
+		return s.uninstallLocalMarketplacePlugin(ctx, request)
+	}
 	fact, err := request.Adapter.Inspect(ctx, request.ActualName)
 	if err != nil {
 		return result, fmt.Errorf("inspect Plugin before uninstall: %w", err)

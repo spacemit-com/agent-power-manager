@@ -28,6 +28,9 @@ func (s *Service) InstallPlugin(ctx context.Context, request PluginInstallReques
 	} else if found {
 		return ErrActiveTransaction
 	}
+	if request.Marketplace != nil {
+		return s.installLocalMarketplacePlugin(ctx, request)
+	}
 	targetFact, err := request.Adapter.Inspect(ctx, request.Definition.ActualName)
 	if err != nil {
 		return fmt.Errorf("inspect target Plugin before install: %w", err)
