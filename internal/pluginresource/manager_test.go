@@ -25,18 +25,13 @@ func TestLocalCloudRawPluginPackagesBuildAgentArtifactsWithoutLegacyMarketplace(
 	if err := filesystem.CopyDir(resourcesSource, resourcesRoot); err != nil {
 		t.Fatalf("copy Local Cloud fixtures: %v", err)
 	}
-	legacyMarketplace := filepath.Join(resourcesRoot, "plugins", ".claude-plugin", "marketplace.json")
-	if err := os.WriteFile(legacyMarketplace, []byte("{"), 0o600); err != nil {
-		t.Fatalf("damage legacy marketplace: %v", err)
-	}
-
 	t.Setenv("APM_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	client, err := cloud.NewLocalClient(resourcesRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(localCloudPluginDownloader{source: client})
+	service, err := New(client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,19 +129,6 @@ func assertGeneratedClaudeMarketplace(t *testing.T, path string) {
 	if plugin.Name != "demo-plugin-v0.1.0" || plugin.Source != "./plugins/demo-plugin-v0.1.0" {
 		t.Fatalf("Claude marketplace plugin = %#v, want local demo-plugin-v0.1.0", plugin)
 	}
-}
-
-type localCloudPluginDownloader struct {
-	source cloud.PluginPackageDownloader
-}
-
-func (downloader localCloudPluginDownloader) DownloadPlugin(
-	ctx context.Context,
-	agent domain.AgentID,
-	ref domain.PowerRef,
-	destination string,
-) error {
-	return downloader.source.DownloadPluginTo(ctx, agent, ref, destination)
 }
 
 func TestEnsurePersistsValidatedArtifactAndReusesImmutableVersion(t *testing.T) {

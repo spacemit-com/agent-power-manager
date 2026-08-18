@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/config"
-	"apm/internal/domain"
 	"apm/internal/lifecycle"
 	"apm/internal/lock"
 	"apm/internal/logging"
@@ -153,30 +151,19 @@ func newLocalCloudClient() (*cloud.LocalClient, error) {
 	return cloudClient, nil
 }
 
-// pluginDownloadBridge 在 Cloud 旧接口完成重命名前，把原始包下载能力适配给 Plugin Resource。
-type pluginDownloadBridge struct {
-	source cloud.PluginPackageDownloader
-}
-
-func (bridge pluginDownloadBridge) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
-	if isNilPluginDownloader(bridge.source) {
-		return fmt.Errorf("download Plugin with nil Cloud source: %w", pluginresource.ErrInvalidArtifact)
-	}
-	return bridge.source.DownloadPluginTo(ctx, agent, ref, destination)
-}
-
-func newPluginResources(source cloud.PluginPackageDownloader) (pluginresource.Manager, error) {
+// newPluginResources 将 Cloud 原始包下载边界直接注入 Plugin Resource；后者独占缓存和 marketplace 管理。
+func newPluginResources(source pluginresource.Downloader) (pluginresource.Manager, error) {
 	if isNilPluginDownloader(source) {
 		return nil, fmt.Errorf("create Plugin Resource manager with nil Cloud source: %w", pluginresource.ErrInvalidArtifact)
 	}
-	manager, err := pluginresource.New(pluginDownloadBridge{source: source})
+	manager, err := pluginresource.New(source)
 	if err != nil {
 		return nil, fmt.Errorf("create Plugin Resource manager: %w", err)
 	}
 	return manager, nil
 }
 
-func isNilPluginDownloader(source cloud.PluginPackageDownloader) bool {
+func isNilPluginDownloader(source pluginresource.Downloader) bool {
 	if source == nil {
 		return true
 	}

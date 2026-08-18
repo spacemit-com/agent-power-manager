@@ -31,9 +31,6 @@ type filesystemPluginValidationAdapter struct{}
 func (*filesystemPluginValidationAdapter) DeploymentMode() domain.PluginDeploymentMode {
 	return domain.PluginDeploymentFilesystem
 }
-func (*filesystemPluginValidationAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	return nil
-}
 func (*filesystemPluginValidationAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
 	return adapter.PluginFact{}, nil
 }
@@ -53,9 +50,6 @@ type comparableMarketplacePluginValidationAdapter int
 
 func (comparableMarketplacePluginValidationAdapter) DeploymentMode() domain.PluginDeploymentMode {
 	return domain.PluginDeploymentMarketplace
-}
-func (comparableMarketplacePluginValidationAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	return nil
 }
 func (comparableMarketplacePluginValidationAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
 	return adapter.PluginFact{}, nil
@@ -82,9 +76,6 @@ func (comparableMarketplacePluginValidationAdapter) UnregisterMarketplace(contex
 func (nonComparableMarketplacePluginValidationAdapter) DeploymentMode() domain.PluginDeploymentMode {
 	return domain.PluginDeploymentMarketplace
 }
-func (nonComparableMarketplacePluginValidationAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	return nil
-}
 func (nonComparableMarketplacePluginValidationAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
 	return adapter.PluginFact{}, nil
 }
@@ -108,12 +99,16 @@ func (nonComparableMarketplacePluginValidationAdapter) UnregisterMarketplace(con
 }
 
 func TestValidatePluginRequests(t *testing.T) {
+	cacheHome := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	var typedNil *nilPluginValidationAdapter
+	pluginAdapter := &marketplacePluginValidationAdapter{}
+	target := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
+	marketplace := adapter.MarketplaceTarget{Name: "apm-demo", Source: filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")}
 	install := PluginInstallRequest{
-		Agent:      domain.AgentCodex,
-		Power:      domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
-		Definition: domain.PluginDefinition{ActualName: "demo-v1.0.0", Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: "/marketplace"}},
-		Adapter:    &nilPluginValidationAdapter{},
+		Agent: domain.AgentCodex, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+		Adapter: pluginAdapter, Target: target,
+		Marketplace: &PluginMarketplaceInstallRequest{Target: marketplace, Adapter: pluginAdapter},
 	}
 	if err := validatePluginInstallRequest(install); err != nil {
 		t.Fatalf("validatePluginInstallRequest(valid) = %v", err)
@@ -123,15 +118,13 @@ func TestValidatePluginRequests(t *testing.T) {
 		t.Fatalf("typed nil install error = %v", err)
 	}
 	uninstall := PluginUninstallRequest{
-		Agent:      domain.AgentCodex,
-		Power:      domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
-		ActualName: "demo-v1.0.0",
-		Adapter:    &nilPluginValidationAdapter{},
+		Agent: domain.AgentCodex, Power: install.Power,
+		Adapter: pluginAdapter, Target: target, Marketplace: &marketplace, MarketplaceAdapter: pluginAdapter,
 	}
 	if err := validatePluginUninstallRequest(uninstall); err != nil {
 		t.Fatalf("validatePluginUninstallRequest(valid) = %v", err)
 	}
-	uninstall.ActualName = "../demo"
+	uninstall.Target.ActualName = "../demo"
 	if err := validatePluginUninstallRequest(uninstall); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("unsafe uninstall error = %v", err)
 	}
@@ -237,7 +230,7 @@ func TestValidatePluginMarketplaceRequests(t *testing.T) {
 	}
 
 	uninstall := PluginUninstallRequest{
-		Agent: domain.AgentCodex, Power: firstInstall.Power, ActualName: targetPlugin.ActualName,
+		Agent: domain.AgentCodex, Power: firstInstall.Power,
 		Adapter: pluginAdapter, Target: targetPlugin, Marketplace: &targetMarketplace, MarketplaceAdapter: pluginAdapter,
 	}
 	if err := validatePluginUninstallRequest(uninstall); err != nil {
@@ -293,47 +286,4 @@ func TestValidatePluginMarketplaceRequests(t *testing.T) {
 			t.Fatalf("validatePluginInstallRequest(Hermes marketplace) error = %v, want ErrInvalidRequest", err)
 		}
 	})
-}
-
-func TestValidateLegacyPluginRequestAgentModes(t *testing.T) {
-	pluginAdapter := &marketplacePluginValidationAdapter{}
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
-	definition := domain.PluginDefinition{
-		ActualName: "demo-v1.0.0",
-		Marketplace: domain.MarketplaceDefinition{
-			Name: "apm", Source: "/marketplace",
-		},
-	}
-	marketplaceInstall := PluginInstallRequest{
-		Agent: domain.AgentHermes, Power: ref, Definition: definition, Adapter: pluginAdapter,
-	}
-	if err := validatePluginInstallRequest(marketplaceInstall); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("Hermes legacy marketplace install error = %v, want ErrInvalidRequest", err)
-	}
-	marketplaceUninstall := PluginUninstallRequest{
-		Agent: domain.AgentHermes, Power: ref, ActualName: definition.ActualName, Adapter: pluginAdapter,
-	}
-	if err := validatePluginUninstallRequest(marketplaceUninstall); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("Hermes legacy marketplace uninstall error = %v, want ErrInvalidRequest", err)
-	}
-
-	home := t.TempDir()
-	t.Setenv("APM_HOME", home)
-	staging, err := paths.StagingPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	filesystemAdapter := &filesystemPluginValidationAdapter{}
-	filesystemInstall := PluginInstallRequest{
-		Agent: domain.AgentHermes, Power: ref, Definition: definition, StagingRoot: staging, Adapter: filesystemAdapter,
-	}
-	if err := validatePluginInstallRequest(filesystemInstall); err != nil {
-		t.Fatalf("Hermes legacy filesystem install error = %v", err)
-	}
-	filesystemUninstall := PluginUninstallRequest{
-		Agent: domain.AgentHermes, Power: ref, ActualName: definition.ActualName, Adapter: filesystemAdapter,
-	}
-	if err := validatePluginUninstallRequest(filesystemUninstall); err != nil {
-		t.Fatalf("Hermes legacy filesystem uninstall error = %v", err)
-	}
 }

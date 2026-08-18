@@ -115,7 +115,6 @@ func (s *InstallService) installMarketplacePlugin(
 	previousMarketplace := marketplaceTarget(previousArtifact)
 	request := transaction.PluginInstallRequest{
 		Agent: agent, Power: ref, Previous: powerRefPointer(previous), Adapter: pluginAdapter,
-		Definition:     marketplacePluginDefinition(targetArtifact),
 		Target:         marketplacePluginTarget(targetArtifact),
 		PreviousTarget: &previousTarget,
 		Marketplace: &transaction.PluginMarketplaceInstallRequest{
@@ -158,7 +157,7 @@ func (s *InstallService) installUnmanagedMarketplacePlugin(
 	}
 
 	request := transaction.PluginInstallRequest{
-		Agent: agent, Power: ref, Definition: marketplacePluginDefinition(artifact), Adapter: pluginAdapter,
+		Agent: agent, Power: ref, Adapter: pluginAdapter,
 		Target: marketplacePluginTarget(artifact),
 		Marketplace: &transaction.PluginMarketplaceInstallRequest{
 			Target: marketplaceTarget(artifact), Adapter: marketplaceAdapter,
@@ -227,7 +226,8 @@ func (s *InstallService) installHermesPlugin(
 		return cli.InstallItem{}, fmt.Errorf("stage Hermes Plugin artifact %+v: %w", ref, err)
 	}
 	request := transaction.PluginInstallRequest{
-		Agent: agent, Power: ref, Definition: filesystemPluginDefinition(artifact), StagingRoot: staging, Adapter: pluginAdapter,
+		Agent: agent, Power: ref, StagingRoot: staging, Adapter: pluginAdapter,
+		Target: adapter.PluginTarget{ActualName: artifact.ActualName, Selector: artifact.ActualName},
 	}
 	if installed {
 		request.Previous = powerRefPointer(previous)
@@ -262,15 +262,6 @@ func marketplaceTarget(artifact pluginresource.Artifact) adapter.MarketplaceTarg
 
 func marketplacePluginTarget(artifact pluginresource.Artifact) adapter.PluginTarget {
 	return adapter.PluginTarget{ActualName: artifact.ActualName, Selector: artifact.ActualName + "@" + artifact.MarketplaceName}
-}
-
-func marketplacePluginDefinition(artifact pluginresource.Artifact) domain.PluginDefinition {
-	return domain.PluginDefinition{ActualName: artifact.ActualName, Marketplace: domain.MarketplaceDefinition{Name: artifact.MarketplaceName, Source: artifact.MarketplaceSource}}
-}
-
-func filesystemPluginDefinition(artifact pluginresource.Artifact) domain.PluginDefinition {
-	// Task 10 删除旧 Definition；过渡期 transaction 仍要求非空字段，但 Hermes 不消费 marketplace 值。
-	return domain.PluginDefinition{ActualName: artifact.ActualName, Marketplace: domain.MarketplaceDefinition{Name: "filesystem", Source: artifact.Root}}
 }
 
 func powerRefPointer(ref domain.PowerRef) *domain.PowerRef {

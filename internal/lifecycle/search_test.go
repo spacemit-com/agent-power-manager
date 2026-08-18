@@ -26,10 +26,9 @@ func (*stubCloudClient) DownloadSkill(domain.PowerRef) error { return nil }
 func (*stubCloudClient) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*stubCloudClient) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
-	return domain.PluginDefinition{}, nil
+func (*stubCloudClient) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+	return errors.New("unexpected Plugin download")
 }
-func (*stubCloudClient) DownloadPlugin(domain.PowerRef) error { return nil }
 
 func TestSearchInspectsBeforeListingCloud(t *testing.T) {
 	var calls []string

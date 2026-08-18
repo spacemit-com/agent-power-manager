@@ -22,9 +22,6 @@ type nilPluginValidationAdapter struct{}
 func (*nilPluginValidationAdapter) DeploymentMode() domain.PluginDeploymentMode {
 	return domain.PluginDeploymentMarketplace
 }
-func (*nilPluginValidationAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	return nil
-}
 func (*nilPluginValidationAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
 	return adapter.PluginFact{}, nil
 }

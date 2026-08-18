@@ -76,10 +76,9 @@ type PluginMutationResult struct {
 	State PluginMutationState
 }
 
-// PluginAdapter 隔离不同 Agent 的 Plugin CLI 和文件系统差异。
+// PluginAdapter 隔离各 Agent 的基础 Plugin 事实与安装卸载；不隐式管理 marketplace。
 type PluginAdapter interface {
 	DeploymentMode() domain.PluginDeploymentMode
-	PrepareInstall(context.Context, domain.PluginDefinition) error
 	Inspect(context.Context, string) (PluginFact, error)
 	Add(context.Context, PluginTarget) (PluginMutationResult, error)
 	Remove(context.Context, PluginTarget) (PluginMutationResult, error)
@@ -260,14 +259,4 @@ func pluginStateUnknown(agent domain.AgentID, operation string, result agentCLIR
 		agent, operation, result.Path, result.ExitCode, diagnostic,
 		errors.Join(ErrPluginStateUnknown, cause),
 	)
-}
-
-func pluginPreparationCommandError(agent domain.AgentID, operation string, result agentCLIResult, runErr error) error {
-	if result.StdoutTruncated || result.StderrTruncated {
-		return pluginStateUnknown(agent, operation, result, runErr)
-	}
-	if runErr == nil {
-		return nil
-	}
-	return fmt.Errorf("prepare %s Plugin marketplace %s via %q: %w", agent, operation, result.Path, runErr)
 }

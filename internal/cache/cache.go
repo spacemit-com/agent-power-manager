@@ -3,8 +3,7 @@ package cache
 
 import "apm/internal/domain"
 
-// PowerCache 定义文件型 Power 从版本化缓存物化到公共 staging 根的操作。
+// PowerCache 只负责 Skill 从版本化缓存物化到公共 staging；Plugin 缓存归 pluginresource 管理。
 type PowerCache interface {
 	StageSkill(domain.PowerRef) (stagingRoot string, err error)
-	StagePlugin(domain.PowerRef) (stagingRoot string, err error)
 }

@@ -22,10 +22,6 @@ func (adapter *hermesPluginAdapter) DeploymentMode() domain.PluginDeploymentMode
 	return domain.PluginDeploymentFilesystem
 }
 
-func (adapter *hermesPluginAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	return nil
-}
-
 func (adapter *hermesPluginAdapter) Inspect(ctx context.Context, actualName string) (PluginFact, error) {
 	if !isSafePluginActualName(actualName) {
 		return PluginFact{}, fmt.Errorf("inspect plugin name %q: %w", actualName, ErrInvalidPlugin)

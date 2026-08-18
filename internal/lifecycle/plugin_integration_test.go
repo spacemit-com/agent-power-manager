@@ -22,17 +22,9 @@ import (
 	"apm/internal/version"
 )
 
-type integrationPluginDownloadBridge struct {
-	source cloud.PluginPackageDownloader
-}
-
-func (bridge integrationPluginDownloadBridge) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
-	return bridge.source.DownloadPluginTo(ctx, agent, ref, destination)
-}
-
-func newIntegrationPluginResources(t *testing.T, source cloud.PluginPackageDownloader) pluginresource.Manager {
+func newIntegrationPluginResources(t *testing.T, source pluginresource.Downloader) pluginresource.Manager {
 	t.Helper()
-	manager, err := pluginresource.New(integrationPluginDownloadBridge{source: source})
+	manager, err := pluginresource.New(source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,6 +276,7 @@ type isolatedPluginHarness struct {
 	repository *config.JSONRepository
 	registry   *adapter.Registry
 	cloud      cloud.Client
+	plugins    pluginresource.Manager
 	install    *InstallService
 	uninstall  *UninstallService
 }
@@ -360,7 +353,7 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	}
 	return &isolatedPluginHarness{
 		t: t, root: root, fakeBin: fakeBin, state: state, calls: calls, cacheHome: cacheHome,
-		repository: repository, registry: registry, cloud: cloudClient, install: installer, uninstall: uninstaller,
+		repository: repository, registry: registry, cloud: cloudClient, plugins: pluginResources, install: installer, uninstall: uninstaller,
 	}
 }
 
@@ -424,20 +417,26 @@ func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
 func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJournal(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
-	definition, err := harness.cloud.GetPlugin(ref)
+	artifact, err := harness.plugins.Ensure(context.Background(), domain.AgentCodex, ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	selector := definition.ActualName + "@" + definition.Marketplace.Name
+	selector := artifact.ActualName + "@" + artifact.MarketplaceName
 	if err := os.WriteFile(filepath.Join(harness.state, "plugin-codex"), []byte(selector), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(harness.state, "marketplace-codex"), []byte(artifact.MarketplaceSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	journal := transaction.Journal{
 		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: transaction.DriverPlugin,
-		Operation: transaction.OperationInstall, Phase: transaction.PhaseAddingNew, Agent: domain.AgentCodex, Power: ref,
+		Operation: transaction.OperationInstall, Phase: transaction.PhaseAddingNewPlugin, Agent: domain.AgentCodex, Power: ref,
 		Plugin: &transaction.PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: definition.ActualName, Selector: selector},
+			Target:     adapter.PluginTarget{ActualName: artifact.ActualName, Selector: selector},
+			Marketplace: &transaction.PluginMarketplaceJournalPayload{
+				Name: artifact.MarketplaceName, TargetSource: artifact.MarketplaceSource,
+			},
 		},
 	}
 	contents, err := json.Marshal(journal)
@@ -508,8 +507,8 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJou
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(strings.Split(strings.TrimSpace(string(contents)), "\n")); got != 1 {
-		t.Fatalf("Fix CLI calls = %d, want exactly 1 recovery inspection: %s", got, contents)
+	if got := len(strings.Split(strings.TrimSpace(string(contents)), "\n")); got != 2 {
+		t.Fatalf("Fix CLI calls = %d, want marketplace and Plugin recovery inspections: %s", got, contents)
 	}
 	manifestPath, err := paths.ManifestPath(domain.AgentCodex)
 	if err != nil {
@@ -522,7 +521,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJou
 func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesystemJournal(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentHermes)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
-	definition, err := harness.cloud.GetPlugin(ref)
+	actualName, err := domain.ActualPluginName(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +529,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesyst
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := plugin.TargetPath(definition.ActualName)
+	target, err := plugin.TargetPath(actualName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +554,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesyst
 		Agent: domain.AgentHermes, Power: ref,
 		Plugin: &transaction.PluginJournalPayload{
 			Deployment: domain.PluginDeploymentFilesystem,
-			Target:     adapter.PluginTarget{ActualName: definition.ActualName, Selector: definition.ActualName},
+			Target:     adapter.PluginTarget{ActualName: actualName, Selector: actualName},
 			Filesystem: &transaction.PluginFilesystemJournalPayload{
 				StagingRoot: staging, SourcePath: filepath.Join(staging, "plugins", ref.Name),
 				TargetPath: target, TransactionDir: txDir, PublishPath: filepath.Join(txDir, "publish"),

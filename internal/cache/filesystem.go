@@ -41,15 +41,10 @@ func NewFilesystem() (*FilesystemCache, error) {
 
 // StageSkill 将指定版本的缓存 Skill 复制到公共 staging。
 func (c *FilesystemCache) StageSkill(ref domain.PowerRef) (string, error) {
-	return c.stage(ref, "skills")
+	return c.stageSkill(ref)
 }
 
-// StagePlugin 将指定版本的缓存 Plugin 复制到公共 staging。
-func (c *FilesystemCache) StagePlugin(ref domain.PowerRef) (string, error) {
-	return c.stage(ref, "plugins")
-}
-
-func (c *FilesystemCache) stage(ref domain.PowerRef, directory string) (stagingRoot string, resultErr error) {
+func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, resultErr error) {
 	if ref.Version == "" {
 		return "", errors.New("power version is required")
 	}
@@ -65,7 +60,7 @@ func (c *FilesystemCache) stage(ref domain.PowerRef, directory string) (stagingR
 		}
 	}()
 
-	source := filepath.Join(c.cacheRoot, directory, ref.Name, ref.Version)
+	source := filepath.Join(c.cacheRoot, "skills", ref.Name, ref.Version)
 	if _, err := os.Stat(source); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", ErrMiss
@@ -73,7 +68,7 @@ func (c *FilesystemCache) stage(ref domain.PowerRef, directory string) (stagingR
 		return "", fmt.Errorf("stat cache path %q: %w", source, err)
 	}
 
-	target := filepath.Join(c.stagingTempPath, directory, ref.Name)
+	target := filepath.Join(c.stagingTempPath, "skills", ref.Name)
 	if err := filesystem.CopyDir(source, target); err != nil {
 		return "", fmt.Errorf("copy cache path %q to staging path %q: %w", source, target, err)
 	}

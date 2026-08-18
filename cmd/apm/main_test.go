@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -26,7 +25,7 @@ type recordingPluginPackageDownloader struct {
 	calls       int
 }
 
-func (downloader *recordingPluginPackageDownloader) DownloadPluginTo(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
+func (downloader *recordingPluginPackageDownloader) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
 	downloader.calls++
 	downloader.ctx = ctx
 	downloader.agent = agent
@@ -40,7 +39,7 @@ func TestNewPluginResourcesRejectsNilDownloaderAtConstruction(t *testing.T) {
 	tests := []struct {
 		name   string
 		source interface {
-			DownloadPluginTo(context.Context, domain.AgentID, domain.PowerRef, string) error
+			DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error
 		}
 	}{
 		{name: "nil"},
@@ -53,43 +52,6 @@ func TestNewPluginResourcesRejectsNilDownloaderAtConstruction(t *testing.T) {
 				t.Fatalf("newPluginResources() = (%v, %v), want nil/error", manager, err)
 			}
 		})
-	}
-}
-
-func TestPluginDownloadBridgeRejectsNilSourceWithoutPanic(t *testing.T) {
-	var typedNil *recordingPluginPackageDownloader
-	for _, test := range []struct {
-		name   string
-		source interface {
-			DownloadPluginTo(context.Context, domain.AgentID, domain.PowerRef, string) error
-		}
-	}{
-		{name: "nil"},
-		{name: "typed nil", source: typedNil},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			err := (pluginDownloadBridge{source: test.source}).DownloadPlugin(context.Background(), domain.AgentCodex, pluginRefForMainTest(), "/destination")
-			if err == nil {
-				t.Fatal("DownloadPlugin() error = nil, want invalid source")
-			}
-		})
-	}
-}
-
-func TestPluginDownloadBridgeForwardsExactRequest(t *testing.T) {
-	cause := errors.New("download stopped")
-	downloader := &recordingPluginPackageDownloader{err: cause}
-	type contextKey string
-	ctx := context.WithValue(context.Background(), contextKey("request"), "exact")
-	ref := pluginRefForMainTest()
-	destination := filepath.Join(t.TempDir(), "plugin")
-
-	err := (pluginDownloadBridge{source: downloader}).DownloadPlugin(ctx, domain.AgentClaudeCode, ref, destination)
-	if !errors.Is(err, cause) {
-		t.Fatalf("DownloadPlugin() error = %v, want %v", err, cause)
-	}
-	if downloader.calls != 1 || downloader.ctx != ctx || downloader.agent != domain.AgentClaudeCode || downloader.ref != ref || downloader.destination != destination {
-		t.Fatalf("forwarded request = calls=%d ctx=%v agent=%q ref=%+v destination=%q", downloader.calls, downloader.ctx == ctx, downloader.agent, downloader.ref, downloader.destination)
 	}
 }
 

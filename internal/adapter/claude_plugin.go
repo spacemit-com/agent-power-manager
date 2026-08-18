@@ -21,64 +21,6 @@ func (adapter *claudePluginAdapter) DeploymentMode() domain.PluginDeploymentMode
 	return domain.PluginDeploymentMarketplace
 }
 
-func (adapter *claudePluginAdapter) PrepareInstall(ctx context.Context, definition domain.PluginDefinition) error {
-	if err := definition.Validate(); err != nil {
-		return errors.Join(ErrInvalidPlugin, err)
-	}
-	result, runErr := adapter.runner.Run(ctx, "claude", []string{"plugin", "marketplace", "list", "--json"}, "")
-	if runErr != nil || result.StdoutTruncated || result.StderrTruncated {
-		return pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, runErr)
-	}
-	var marketplaces []struct {
-		Name   string `json:"name"`
-		Source string `json:"source"`
-		URL    string `json:"url"`
-		Repo   string `json:"repo"`
-	}
-	if err := decodePluginJSON(result.Stdout, &marketplaces); err != nil {
-		return pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, err)
-	}
-	matches := 0
-	var currentSource string
-	for _, marketplace := range marketplaces {
-		if marketplace.Name != definition.Marketplace.Name {
-			continue
-		}
-		matches++
-		for _, candidate := range []string{marketplace.URL, marketplace.Repo, marketplace.Source} {
-			if strings.TrimSpace(candidate) != "" && !isClaudeMarketplaceSourceKind(candidate) {
-				currentSource = candidate
-				break
-			}
-		}
-	}
-	if matches > 1 {
-		return pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, fmt.Errorf("marketplace %q appears %d times", definition.Marketplace.Name, matches))
-	}
-	if matches == 0 {
-		addResult, err := adapter.runner.Run(ctx, "claude", []string{"plugin", "marketplace", "add", definition.Marketplace.Source, "--scope", "user"}, "")
-		return pluginPreparationCommandError(domain.AgentClaudeCode, "add", addResult, err)
-	}
-	if strings.TrimSpace(currentSource) == "" {
-		return pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, errors.New("matching marketplace has no source"))
-	}
-	currentLocal := isLocalPluginMarketplaceSource(currentSource)
-	expectedLocal := isLocalPluginMarketplaceSource(definition.Marketplace.Source)
-	current, err := normalizePluginMarketplaceSource(currentSource, currentLocal)
-	if err != nil {
-		return pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, err)
-	}
-	expected, err := normalizePluginMarketplaceSource(definition.Marketplace.Source, expectedLocal)
-	if err != nil {
-		return errors.Join(ErrInvalidPlugin, err)
-	}
-	if currentLocal != expectedLocal || current != expected {
-		return fmt.Errorf("claude marketplace %q source %q differs from %q: %w", definition.Marketplace.Name, current, expected, ErrMarketplaceConflict)
-	}
-	updateResult, err := adapter.runner.Run(ctx, "claude", []string{"plugin", "marketplace", "update", definition.Marketplace.Name}, "")
-	return pluginPreparationCommandError(domain.AgentClaudeCode, "update", updateResult, err)
-}
-
 // InspectMarketplace 只接受 Claude directory/local 类型中唯一的 url 或 repo 本地绝对路径。
 func (adapter *claudePluginAdapter) InspectMarketplace(ctx context.Context, name string) (MarketplaceFact, error) {
 	if !isSafeMarketplaceName(name) {

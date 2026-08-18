@@ -140,10 +140,7 @@ func (c *uninstallFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, erro
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
-func (*uninstallFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
-	panic("Plugin uninstall must not call Cloud GetPlugin")
-}
-func (*uninstallFakeCloud) DownloadPlugin(domain.PowerRef) error {
+func (*uninstallFakeCloud) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
 	panic("Plugin uninstall must not call Cloud DownloadPlugin")
 }
 
@@ -195,9 +192,6 @@ func (adapter uninstallFakePluginAdapter) DeploymentMode() domain.PluginDeployme
 		return adapter.fixture.pluginMode
 	}
 	return domain.PluginDeploymentMarketplace
-}
-func (uninstallFakePluginAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	return errors.New("unexpected PrepareInstall call")
 }
 func (a uninstallFakePluginAdapter) Inspect(_ context.Context, actualName string) (adapter.PluginFact, error) {
 	recordUninstallEvent(a.calls, a.fixture, "plugin:inspect:"+string(a.agent)+":"+actualName)

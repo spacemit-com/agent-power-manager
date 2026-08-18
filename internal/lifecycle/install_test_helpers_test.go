@@ -37,7 +37,6 @@ type installFixture struct {
 	mcpDefinitions           map[string]domain.MCPServer
 	mcpGetErrors             map[string]error
 	mcpRequests              []transaction.MCPInstallRequest
-	pluginDefinition         domain.PluginDefinition
 	pluginFact               adapter.PluginFact
 	pluginFacts              map[string]adapter.PluginFact
 	pluginInspectErrors      map[string]error
@@ -229,14 +228,9 @@ func (c *installFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error)
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
-func (c *installFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
-	*c.calls = append(*c.calls, "cloud:get-plugin")
-	return c.fixture.pluginDefinition, nil
-}
-
-func (c *installFakeCloud) DownloadPlugin(domain.PowerRef) error {
-	*c.calls = append(*c.calls, "cloud:download-plugin")
-	return c.fixture.cloudGetErr
+func (c *installFakeCloud) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+	*c.calls = append(*c.calls, "cloud:unexpected-download-plugin")
+	return errors.New("unexpected direct Plugin Cloud download")
 }
 
 type installFakeCache struct {
@@ -246,10 +240,6 @@ type installFakeCache struct {
 
 func (c *installFakeCache) StageSkill(domain.PowerRef) (string, error) {
 	return c.stage("skill")
-}
-
-func (c *installFakeCache) StagePlugin(domain.PowerRef) (string, error) {
-	return c.stage("plugin")
 }
 
 func (c *installFakeCache) stage(power string) (string, error) {
@@ -319,10 +309,6 @@ type installFakePluginAdapter struct {
 
 func (a installFakePluginAdapter) DeploymentMode() domain.PluginDeploymentMode {
 	return a.fixture.pluginMode
-}
-func (a installFakePluginAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	*a.calls = append(*a.calls, "plugin:prepare:"+string(a.agent))
-	return nil
 }
 func (a installFakePluginAdapter) Inspect(_ context.Context, actualName string) (adapter.PluginFact, error) {
 	*a.calls = append(*a.calls, "plugin:inspect:"+string(a.agent)+":"+actualName)

@@ -21,62 +21,6 @@ func (adapter *codexPluginAdapter) DeploymentMode() domain.PluginDeploymentMode 
 	return domain.PluginDeploymentMarketplace
 }
 
-func (adapter *codexPluginAdapter) PrepareInstall(ctx context.Context, definition domain.PluginDefinition) error {
-	if err := definition.Validate(); err != nil {
-		return errors.Join(ErrInvalidPlugin, err)
-	}
-	result, runErr := adapter.runner.Run(ctx, "codex", []string{"plugin", "marketplace", "list", "--json"}, "")
-	if runErr != nil || result.StdoutTruncated || result.StderrTruncated {
-		return pluginStateUnknown(domain.AgentCodex, "marketplace list", result, runErr)
-	}
-	var document struct {
-		Marketplaces []struct {
-			Name              string `json:"name"`
-			MarketplaceSource struct {
-				SourceType string `json:"sourceType"`
-				Source     string `json:"source"`
-			} `json:"marketplaceSource"`
-		} `json:"marketplaces"`
-	}
-	if err := decodePluginJSON(result.Stdout, &document); err != nil {
-		return pluginStateUnknown(domain.AgentCodex, "marketplace list", result, err)
-	}
-	matches := 0
-	var currentSource, sourceType string
-	for _, marketplace := range document.Marketplaces {
-		if marketplace.Name == definition.Marketplace.Name {
-			matches++
-			currentSource = marketplace.MarketplaceSource.Source
-			sourceType = marketplace.MarketplaceSource.SourceType
-		}
-	}
-	if matches > 1 {
-		return pluginStateUnknown(domain.AgentCodex, "marketplace list", result, fmt.Errorf("marketplace %q appears %d times", definition.Marketplace.Name, matches))
-	}
-	if matches == 0 {
-		addResult, err := adapter.runner.Run(ctx, "codex", []string{"plugin", "marketplace", "add", definition.Marketplace.Source, "--json"}, "")
-		return pluginPreparationCommandError(domain.AgentCodex, "add", addResult, err)
-	}
-	currentLocal := strings.EqualFold(strings.TrimSpace(sourceType), "local") || isLocalPluginMarketplaceSource(currentSource)
-	expectedLocal := isLocalPluginMarketplaceSource(definition.Marketplace.Source)
-	if strings.TrimSpace(currentSource) == "" {
-		return pluginStateUnknown(domain.AgentCodex, "marketplace list", result, errors.New("matching marketplace has no source"))
-	}
-	current, err := normalizePluginMarketplaceSource(currentSource, currentLocal)
-	if err != nil {
-		return pluginStateUnknown(domain.AgentCodex, "marketplace list", result, err)
-	}
-	expected, err := normalizePluginMarketplaceSource(definition.Marketplace.Source, expectedLocal)
-	if err != nil {
-		return errors.Join(ErrInvalidPlugin, err)
-	}
-	if currentLocal != expectedLocal || current != expected {
-		return fmt.Errorf("codex marketplace %q source %q differs from %q: %w", definition.Marketplace.Name, current, expected, ErrMarketplaceConflict)
-	}
-	upgradeResult, err := adapter.runner.Run(ctx, "codex", []string{"plugin", "marketplace", "upgrade", definition.Marketplace.Name, "--json"}, "")
-	return pluginPreparationCommandError(domain.AgentCodex, "upgrade", upgradeResult, err)
-}
-
 // InspectMarketplace 只接受 Codex 返回的唯一 local 绝对 clean source；其他形态均视为状态不明。
 func (adapter *codexPluginAdapter) InspectMarketplace(ctx context.Context, name string) (MarketplaceFact, error) {
 	if !isSafeMarketplaceName(name) {

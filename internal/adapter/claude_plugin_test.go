@@ -5,61 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-
-	"apm/internal/domain"
 )
-
-func TestClaudePluginPrepareInstallCommands(t *testing.T) {
-	definition := domain.PluginDefinition{
-		ActualName:  "demo-plugin-v0.0.1",
-		Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: "https://example.com/apm.git"},
-	}
-	tests := []struct {
-		name      string
-		list      string
-		wantArgs  [][]string
-		wantError error
-	}{
-		{
-			name: "add missing marketplace",
-			list: `[]`,
-			wantArgs: [][]string{
-				{"plugin", "marketplace", "list", "--json"},
-				{"plugin", "marketplace", "add", "https://example.com/apm.git", "--scope", "user"},
-			},
-		},
-		{
-			name: "update matching marketplace",
-			list: `[{"name":"apm","source":"git","url":"https://example.com/apm.git"}]`,
-			wantArgs: [][]string{
-				{"plugin", "marketplace", "list", "--json"},
-				{"plugin", "marketplace", "update", "apm"},
-			},
-		},
-		{
-			name:      "reject source conflict",
-			list:      `[{"name":"apm","source":"git","url":"https://example.com/other.git"}]`,
-			wantArgs:  [][]string{{"plugin", "marketplace", "list", "--json"}},
-			wantError: ErrMarketplaceConflict,
-		},
-		{
-			name:      "reject missing source fact",
-			list:      `[{"name":"apm","source":"git"}]`,
-			wantArgs:  [][]string{{"plugin", "marketplace", "list", "--json"}},
-			wantError: ErrPluginStateUnknown,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			runner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(test.list)}}
-			err := newClaudePluginAdapter(runner).PrepareInstall(context.Background(), definition)
-			if !errors.Is(err, test.wantError) {
-				t.Fatalf("PrepareInstall() error = %v, want %v", err, test.wantError)
-			}
-			assertPluginCommands(t, runner, "claude", test.wantArgs)
-		})
-	}
-}
 
 func TestClaudePluginInspectAndMutations(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{

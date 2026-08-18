@@ -19,25 +19,13 @@ const (
 	PluginDeploymentFilesystem PluginDeploymentMode = "filesystem"
 )
 
-// ErrInvalidPluginDefinition 表示 Plugin 名称、版本或 Cloud 定义不满足约束。
-var ErrInvalidPluginDefinition = errors.New("invalid plugin definition")
-
-// MarketplaceDefinition 描述目标 Agent 注册 Cloud marketplace 所需的身份和来源。
-type MarketplaceDefinition struct {
-	Name   string
-	Source string
-}
-
-// PluginDefinition 描述精确 Plugin 版本的 Agent 实际名称和 marketplace。
-type PluginDefinition struct {
-	ActualName  string
-	Marketplace MarketplaceDefinition
-}
+// ErrInvalidPluginIdentity 表示 Plugin 逻辑名称、类型或版本不满足规范。
+var ErrInvalidPluginIdentity = errors.New("invalid plugin identity")
 
 // ActualPluginName 将 APM 逻辑引用映射为 marketplace 中唯一的版本化实际名。
 func ActualPluginName(ref PowerRef) (string, error) {
 	if ref.Type != PowerTypePlugin || !isSafePluginSegment(ref.Name) {
-		return "", fmt.Errorf("plugin reference %+v: %w", ref, ErrInvalidPluginDefinition)
+		return "", fmt.Errorf("plugin reference %+v: %w", ref, ErrInvalidPluginIdentity)
 	}
 	version, err := canonicalAPMPluginVersion(ref.Version)
 	if err != nil {
@@ -49,7 +37,7 @@ func ActualPluginName(ref PowerRef) (string, error) {
 // PluginMarketplaceName 返回逻辑 Plugin 对应的固定 marketplace 名称。
 func PluginMarketplaceName(ref PowerRef) (string, error) {
 	if ref.Type != PowerTypePlugin || !isSafePluginSegment(ref.Name) {
-		return "", fmt.Errorf("plugin reference %+v: %w", ref, ErrInvalidPluginDefinition)
+		return "", fmt.Errorf("plugin reference %+v: %w", ref, ErrInvalidPluginIdentity)
 	}
 	if _, err := canonicalAPMPluginVersion(ref.Version); err != nil {
 		return "", err
@@ -57,40 +45,13 @@ func PluginMarketplaceName(ref PowerRef) (string, error) {
 	return "apm-" + ref.Name, nil
 }
 
-// PluginRefFromMarketplace 将原生 marketplace 条目还原为 APM 逻辑引用。
-func PluginRefFromMarketplace(actualName, nativeVersion string) (PowerRef, error) {
-	version, err := canonicalNativePluginVersion(nativeVersion)
-	if err != nil {
-		return PowerRef{}, err
-	}
-	suffix := "-v" + version
-	if !strings.HasSuffix(actualName, suffix) {
-		return PowerRef{}, fmt.Errorf("plugin actual name %q does not end with %q: %w", actualName, suffix, ErrInvalidPluginDefinition)
-	}
-	name := strings.TrimSuffix(actualName, suffix)
-	if !isSafePluginSegment(name) || !isSafePluginSegment(actualName) {
-		return PowerRef{}, fmt.Errorf("plugin actual name %q: %w", actualName, ErrInvalidPluginDefinition)
-	}
-	return PowerRef{Name: name, Type: PowerTypePlugin, Version: "v" + version}, nil
-}
-
-// Validate 校验 Cloud 返回的安装定义，不清洗或改写原始值。
-func (definition PluginDefinition) Validate() error {
-	if !isSafePluginSegment(definition.ActualName) ||
-		strings.TrimSpace(definition.Marketplace.Name) == "" ||
-		strings.TrimSpace(definition.Marketplace.Source) == "" {
-		return fmt.Errorf("plugin definition %+v: %w", definition, ErrInvalidPluginDefinition)
-	}
-	return nil
-}
-
 func canonicalAPMPluginVersion(version string) (string, error) {
 	if !strings.HasPrefix(version, "v") {
-		return "", fmt.Errorf("plugin version %q must use vMAJOR.MINOR.PATCH: %w", version, ErrInvalidPluginDefinition)
+		return "", fmt.Errorf("plugin version %q must use vMAJOR.MINOR.PATCH: %w", version, ErrInvalidPluginIdentity)
 	}
 	native, err := canonicalNativePluginVersion(strings.TrimPrefix(version, "v"))
 	if err != nil || "v"+native != version {
-		return "", fmt.Errorf("plugin version %q must use vMAJOR.MINOR.PATCH: %w", version, errors.Join(ErrInvalidPluginDefinition, err))
+		return "", fmt.Errorf("plugin version %q must use vMAJOR.MINOR.PATCH: %w", version, errors.Join(ErrInvalidPluginIdentity, err))
 	}
 	return version, nil
 }
@@ -98,7 +59,7 @@ func canonicalAPMPluginVersion(version string) (string, error) {
 func canonicalNativePluginVersion(version string) (string, error) {
 	parsed, err := semver.StrictNewVersion(version)
 	if err != nil || parsed.Prerelease() != "" || parsed.Metadata() != "" || parsed.String() != version {
-		return "", fmt.Errorf("native plugin version %q must use MAJOR.MINOR.PATCH: %w", version, errors.Join(ErrInvalidPluginDefinition, err))
+		return "", fmt.Errorf("native plugin version %q must use MAJOR.MINOR.PATCH: %w", version, errors.Join(ErrInvalidPluginIdentity, err))
 	}
 	return parsed.String(), nil
 }

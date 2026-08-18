@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"apm/internal/domain"
 	"apm/internal/paths"
@@ -138,8 +139,7 @@ func validateManifestIdentity(ref domain.PowerRef, actualName, nativeVersion str
 	if err != nil {
 		return err
 	}
-	gotRef, err := domain.PluginRefFromMarketplace(actualName, nativeVersion)
-	if err != nil || gotRef != ref || actualName != wantActualName {
+	if actualName != wantActualName || nativeVersion != strings.TrimPrefix(ref.Version, "v") {
 		return fmt.Errorf("plugin manifest identity %q@%q: %w", actualName, nativeVersion, ErrInvalidArtifact)
 	}
 	return nil

@@ -13,12 +13,11 @@ func TestInstallPluginDispatchesThroughPluginAdapterOnly(t *testing.T) {
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 	var calls []string
 	service := newInstallService(t, &calls, installFixture{
-		snapshot:         domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		cloudRefs:        []domain.PowerRef{ref},
-		selected:         ref.Version,
-		pluginDefinition: domain.PluginDefinition{ActualName: "demo-v1.0.0", Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: "/marketplace"}},
-		pluginFact:       adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo-v1.0.0"},
-		pluginMode:       domain.PluginDeploymentMarketplace,
+		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		cloudRefs:  []domain.PowerRef{ref},
+		selected:   ref.Version,
+		pluginFact: adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo-v1.0.0"},
+		pluginMode: domain.PluginDeploymentMarketplace,
 	})
 
 	result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})

@@ -79,12 +79,11 @@ type PluginMarketplaceInstallRequest struct {
 	Adapter  adapter.MarketplacePluginAdapter
 }
 
-// PluginInstallRequest 描述 Plugin 首装、修复或版本切换的事务输入。
+// PluginInstallRequest 描述已解析的 Plugin 首装或版本切换输入；不得携带 Cloud 或资源构建职责。
 type PluginInstallRequest struct {
 	Agent          domain.AgentID
 	Power          domain.PowerRef
 	Previous       *domain.PowerRef
-	Definition     domain.PluginDefinition
 	StagingRoot    string
 	Adapter        adapter.PluginAdapter
 	Target         adapter.PluginTarget
@@ -96,7 +95,6 @@ type PluginInstallRequest struct {
 type PluginUninstallRequest struct {
 	Agent              domain.AgentID
 	Power              domain.PowerRef
-	ActualName         string
 	Adapter            adapter.PluginAdapter
 	Target             adapter.PluginTarget
 	Marketplace        *adapter.MarketplaceTarget

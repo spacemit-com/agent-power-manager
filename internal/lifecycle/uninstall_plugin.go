@@ -123,6 +123,7 @@ func (s *UninstallService) uninstallHermesPlugin(
 		return transaction.UninstallResult{}, fmt.Errorf("unexpected Hermes Plugin presence %q: %w", fact.Presence, transaction.ErrIndeterminateState)
 	}
 	return s.transactions.UninstallPlugin(ctx, transaction.PluginUninstallRequest{
-		Agent: agent, Power: ref, ActualName: actualName, Adapter: pluginAdapter,
+		Agent: agent, Power: ref, Adapter: pluginAdapter,
+		Target: adapter.PluginTarget{ActualName: actualName, Selector: actualName},
 	})
 }

@@ -90,10 +90,6 @@ func (*recordingMarketplacePluginAdapter) DeploymentMode() domain.PluginDeployme
 	return domain.PluginDeploymentMarketplace
 }
 
-func (*recordingMarketplacePluginAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	return nil
-}
-
 func (a *recordingMarketplacePluginAdapter) Inspect(_ context.Context, name string) (adapter.PluginFact, error) {
 	*a.events = append(*a.events, "inspect-plugin")
 	return a.pluginFacts[name], nil

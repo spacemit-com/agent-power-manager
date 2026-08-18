@@ -21,10 +21,6 @@ func TestHermesPluginContract(t *testing.T) {
 	if adapter.DeploymentMode() != domain.PluginDeploymentFilesystem {
 		t.Fatalf("DeploymentMode() = %q", adapter.DeploymentMode())
 	}
-	definition := domain.PluginDefinition{ActualName: "demo-plugin-v0.0.1", Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: "/marketplace"}}
-	if err := adapter.PrepareInstall(context.Background(), definition); err != nil || len(runner.commands) != 0 {
-		t.Fatalf("PrepareInstall() = %v, commands %#v", err, runner.commands)
-	}
 	fact, err := adapter.Inspect(context.Background(), "demo-plugin-v0.0.1")
 	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin-v0.0.1", Selector: "demo-plugin-v0.0.1"}) {
 		t.Fatalf("Inspect() = %#v, %v", fact, err)

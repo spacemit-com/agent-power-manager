@@ -44,7 +44,7 @@ func TestDecodeJournalAcceptsOnlyCurrentSchemaV1Envelope(t *testing.T) {
 }
 
 func TestValidatePluginJournalEnvelope(t *testing.T) {
-	valid := validPluginMarketplaceJournal()
+	valid := validPluginMarketplaceJournal(t)
 	if err := validateJournal(valid); err != nil {
 		t.Fatalf("validate marketplace plugin journal: %v", err)
 	}
@@ -279,59 +279,6 @@ func TestPluginMarketplaceInvalidJournalPayloads(t *testing.T) {
 	}
 }
 
-func TestLegacyPluginJournalAcceptedOnlyDuringFeatureCutover(t *testing.T) {
-	firstInstall := validPluginMarketplaceJournal()
-	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.9.0"}
-	previousTarget := adapter.PluginTarget{ActualName: "demo-v0.9.0", Selector: "demo-v0.9.0@custom"}
-	upgrade := validPluginMarketplaceJournal()
-	upgrade.Previous = &previousRef
-	upgrade.Phase = PhaseRemovingOld
-	upgrade.Plugin.Previous = &previousTarget
-	upgrade.Plugin.PreviousPresent = true
-	absentPreviousTarget := adapter.PluginTarget{ActualName: "demo-v0.9.0", Selector: "demo-v0.9.0@apm"}
-	absentPrevious := validPluginMarketplaceJournal()
-	absentPrevious.Previous = &previousRef
-	absentPrevious.Plugin.Previous = &absentPreviousTarget
-	uninstall := validPluginMarketplaceJournal()
-	uninstall.Operation = OperationUninstall
-	uninstall.Phase = PhaseRemoving
-	uninstall.Plugin.TargetPresent = true
-
-	for name, journal := range map[string]Journal{
-		"first install":                       firstInstall,
-		"upgrade":                             upgrade,
-		"upgrade with absent previous Plugin": absentPrevious,
-		"uninstall":                           uninstall,
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := validateJournal(journal); err != nil {
-				t.Fatalf("validateJournal(legacy producer) error = %v", err)
-			}
-		})
-	}
-
-	for name, mutate := range map[string]func(*Journal){
-		"filesystem selector": func(j *Journal) { j.Plugin.Target.Selector = j.Plugin.Target.ActualName },
-		"Hermes marketplace":  func(j *Journal) { j.Agent = domain.AgentHermes },
-		"install target present": func(j *Journal) {
-			j.Plugin.TargetPresent = true
-		},
-		"absent previous selector uses another marketplace": func(j *Journal) {
-			j.Previous = &previousRef
-			previous := adapter.PluginTarget{ActualName: "demo-v0.9.0", Selector: "demo-v0.9.0@other"}
-			j.Plugin.Previous = &previous
-		},
-	} {
-		t.Run("reject "+name, func(t *testing.T) {
-			journal := validPluginMarketplaceJournal()
-			mutate(&journal)
-			if err := validateJournal(journal); !errors.Is(err, ErrInvalidJournal) {
-				t.Fatalf("validateJournal(non-producer legacy shape) error = %v, want ErrInvalidJournal", err)
-			}
-		})
-	}
-}
-
 func TestValidatePluginFilesystemJournals(t *testing.T) {
 	staging, _ := validationPaths(t)
 	id := "00112233445566778899aabbccddeeff"
@@ -373,18 +320,25 @@ func TestValidatePluginFilesystemJournals(t *testing.T) {
 	}
 }
 
-func validPluginMarketplaceJournal() Journal {
+func validPluginMarketplaceJournal(t *testing.T) Journal {
+	t.Helper()
+	cacheHome := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
 	return Journal{
 		SchemaVersion: 1,
 		TransactionID: "00112233445566778899aabbccddeeff",
 		Driver:        DriverPlugin,
 		Operation:     OperationInstall,
-		Phase:         PhaseAddingNew,
+		Phase:         PhaseAddingNewPlugin,
 		Agent:         domain.AgentCodex,
 		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm"},
+			Target:     adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"},
+			Marketplace: &PluginMarketplaceJournalPayload{
+				Name: "apm-demo", TargetSource: targetSource,
+			},
 		},
 	}
 }

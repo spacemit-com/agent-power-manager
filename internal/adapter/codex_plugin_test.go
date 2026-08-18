@@ -6,62 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	"apm/internal/domain"
 )
-
-func TestCodexPluginPrepareInstallCommands(t *testing.T) {
-	definition := domain.PluginDefinition{
-		ActualName:  "demo-plugin-v0.0.1",
-		Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: "/srv/apm-marketplace"},
-	}
-	tests := []struct {
-		name      string
-		list      string
-		wantArgs  [][]string
-		wantError error
-	}{
-		{
-			name: "add missing marketplace",
-			list: `{"marketplaces":[]}`,
-			wantArgs: [][]string{
-				{"plugin", "marketplace", "list", "--json"},
-				{"plugin", "marketplace", "add", "/srv/apm-marketplace", "--json"},
-			},
-		},
-		{
-			name: "upgrade matching marketplace",
-			list: `{"marketplaces":[{"name":"apm","marketplaceSource":{"sourceType":"local","source":"/srv/./apm-marketplace"}}]}`,
-			wantArgs: [][]string{
-				{"plugin", "marketplace", "list", "--json"},
-				{"plugin", "marketplace", "upgrade", "apm", "--json"},
-			},
-		},
-		{
-			name:      "reject source conflict",
-			list:      `{"marketplaces":[{"name":"apm","marketplaceSource":{"sourceType":"git","source":"owner/other"}}]}`,
-			wantArgs:  [][]string{{"plugin", "marketplace", "list", "--json"}},
-			wantError: ErrMarketplaceConflict,
-		},
-		{
-			name:      "reject missing source fact",
-			list:      `{"marketplaces":[{"name":"apm","marketplaceSource":{"sourceType":"git"}}]}`,
-			wantArgs:  [][]string{{"plugin", "marketplace", "list", "--json"}},
-			wantError: ErrPluginStateUnknown,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			runner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(test.list)}}
-			adapter := newCodexPluginAdapter(runner)
-			err := adapter.PrepareInstall(context.Background(), definition)
-			if !errors.Is(err, test.wantError) {
-				t.Fatalf("PrepareInstall() error = %v, want %v", err, test.wantError)
-			}
-			assertPluginCommands(t, runner, "codex", test.wantArgs)
-		})
-	}
-}
 
 func TestCodexPluginInspectAndMutations(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
@@ -196,16 +141,6 @@ func TestCodexPluginInspectRejectsAmbiguousOrInvalidOutput(t *testing.T) {
 		if !errors.Is(err, ErrPluginStateUnknown) {
 			t.Fatalf("case %d error = %v, want ErrPluginStateUnknown", index, err)
 		}
-	}
-}
-
-func TestCodexPluginMarketplaceComparesNonLocalSourceExactly(t *testing.T) {
-	definition := domain.PluginDefinition{ActualName: "demo-plugin-v0.0.1", Marketplace: domain.MarketplaceDefinition{Name: "apm", Source: " owner/repo "}}
-	runner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(
-		`{"marketplaces":[{"name":"apm","marketplaceSource":{"sourceType":"git","source":"owner/repo.git"}}]}`,
-	)}}
-	if err := newCodexPluginAdapter(runner).PrepareInstall(context.Background(), definition); !errors.Is(err, ErrMarketplaceConflict) {
-		t.Fatalf("PrepareInstall() error = %v", err)
 	}
 }
 

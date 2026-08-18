@@ -16,10 +16,7 @@ func (s *Service) recoverPlugin(ctx context.Context, journal Journal, result *Re
 	}
 	if journal.Phase == PhaseCommitting {
 		result.Direction = RecoveryCommit
-		if journal.Plugin.Filesystem != nil {
-			return s.commitRecoveredFilesystemPlugin(journal, result)
-		}
-		return s.commitRecoveredPlugin(journal, result)
+		return s.commitRecoveredFilesystemPlugin(journal, result)
 	}
 	if isNilInterface(s.pluginAdapters) {
 		return fmt.Errorf("Plugin recovery resolver is nil: %w", ErrInvalidRequest)
@@ -35,17 +32,7 @@ func (s *Service) recoverPlugin(ctx context.Context, journal Journal, result *Re
 	if err != nil {
 		return fmt.Errorf("inspect Plugin recovery target: %w", err)
 	}
-	if journal.Plugin.Filesystem != nil {
-		return s.recoverFilesystemPlugin(ctx, journal, fact, pluginAdapter, result)
-	}
-	switch journal.Operation {
-	case OperationInstall:
-		return s.recoverMarketplacePluginInstall(ctx, journal, fact, pluginAdapter, result)
-	case OperationUninstall:
-		return s.recoverMarketplacePluginUninstall(ctx, journal, fact, pluginAdapter, result)
-	default:
-		return fmt.Errorf("Plugin recovery operation %q: %w", journal.Operation, ErrIndeterminateState)
-	}
+	return s.recoverFilesystemPlugin(ctx, journal, fact, pluginAdapter, result)
 }
 
 func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, fact adapter.PluginFact, pluginAdapter adapter.PluginAdapter, result *RecoveryResult) error {
@@ -209,84 +196,6 @@ func (s *Service) commitRecoveredPluginManifest(journal Journal, result *Recover
 	}
 	result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveManifest})
 	return nil
-}
-
-func (s *Service) recoverMarketplacePluginInstall(ctx context.Context, journal Journal, fact adapter.PluginFact, pluginAdapter adapter.PluginAdapter, result *RecoveryResult) error {
-	if journal.Phase == PhaseAddingNew && fact.Presence == adapter.PluginPresent {
-		result.Direction = RecoveryCommit
-		if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
-			return err
-		}
-		return s.commitRecoveredPlugin(journal, result)
-	}
-	if journal.Phase != PhaseAddingNew && journal.Phase != PhaseRemovingOld && journal.Phase != PhaseRollingBack {
-		return fmt.Errorf("Plugin install recovery phase %q: %w", journal.Phase, ErrIndeterminateState)
-	}
-	result.Direction = RecoveryRollback
-	if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if fact.Presence == adapter.PluginPresent {
-		mutation, err := pluginAdapter.Remove(ctx, adapter.PluginTarget{ActualName: fact.ActualName, Selector: fact.Selector})
-		if err := requireAppliedPluginMutation("remove rolled-back Plugin", mutation, err); err != nil {
-			return err
-		}
-		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemovePlugin})
-	} else if fact.Presence != adapter.PluginAbsent {
-		return fmt.Errorf("unexpected Plugin recovery presence %q: %w", fact.Presence, ErrIndeterminateState)
-	}
-	if journal.Plugin.PreviousPresent && journal.Plugin.Previous != nil {
-		previousFact, err := pluginAdapter.Inspect(ctx, journal.Plugin.Previous.ActualName)
-		if err != nil {
-			return fmt.Errorf("inspect previous Plugin during rollback: %w", err)
-		}
-		if previousFact.Presence == adapter.PluginAbsent {
-			mutation, err := pluginAdapter.Add(ctx, *journal.Plugin.Previous)
-			if err := requireAppliedPluginMutation("restore previous Plugin", mutation, err); err != nil {
-				return err
-			}
-			result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRestorePlugin})
-		} else if previousFact.Presence != adapter.PluginPresent {
-			return fmt.Errorf("unexpected previous Plugin presence %q: %w", previousFact.Presence, ErrIndeterminateState)
-		}
-	}
-	return s.deleteRecoveredJournal(journal)
-}
-
-func (s *Service) recoverMarketplacePluginUninstall(ctx context.Context, journal Journal, fact adapter.PluginFact, pluginAdapter adapter.PluginAdapter, result *RecoveryResult) error {
-	switch journal.Phase {
-	case PhaseRemoving:
-		if fact.Presence == adapter.PluginAbsent {
-			result.Direction = RecoveryCommit
-			if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
-				return err
-			}
-			return s.commitRecoveredPlugin(journal, result)
-		}
-		if fact.Presence != adapter.PluginPresent {
-			return fmt.Errorf("unexpected Plugin uninstall presence %q: %w", fact.Presence, ErrIndeterminateState)
-		}
-		result.Direction = RecoveryRollback
-		if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
-			return err
-		}
-		return s.deleteRecoveredJournal(journal)
-	case PhaseRollingBack:
-		result.Direction = RecoveryRollback
-		if fact.Presence == adapter.PluginAbsent && journal.Plugin.TargetPresent {
-			mutation, err := pluginAdapter.Add(ctx, journal.Plugin.Target)
-			if err := requireAppliedPluginMutation("restore uninstalled Plugin", mutation, err); err != nil {
-				return err
-			}
-			result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRestorePlugin})
-		}
-		return s.deleteRecoveredJournal(journal)
-	default:
-		return fmt.Errorf("Plugin uninstall recovery phase %q: %w", journal.Phase, ErrIndeterminateState)
-	}
 }
 
 func (s *Service) commitRecoveredPlugin(journal Journal, result *RecoveryResult) error {

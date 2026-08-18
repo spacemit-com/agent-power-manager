@@ -39,14 +39,14 @@ func (s *Service) installFilesystemPlugin(ctx context.Context, request PluginIns
 	} else if found {
 		return ErrActiveTransaction
 	}
-	targetFact, err := request.Adapter.Inspect(ctx, request.Definition.ActualName)
+	targetFact, err := request.Adapter.Inspect(ctx, request.Target.ActualName)
 	if err != nil {
 		return fmt.Errorf("inspect filesystem Plugin target: %w", err)
 	}
 	if targetFact.Presence == adapter.PluginPresent {
 		return fmt.Errorf("filesystem Plugin target is already registered: %w", adapter.ErrPluginConflict)
 	}
-	targetPath, err := request.Adapter.TargetPath(request.Definition.ActualName)
+	targetPath, err := request.Adapter.TargetPath(request.Target.ActualName)
 	if err != nil {
 		return fmt.Errorf("resolve filesystem Plugin target: %w", err)
 	}
@@ -101,7 +101,7 @@ func (s *Service) installFilesystemPlugin(ctx context.Context, request PluginIns
 		Phase: phase, Agent: request.Agent, Power: request.Power, Previous: clonePowerRef(request.Previous),
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentFilesystem,
-			Target:     adapter.PluginTarget{ActualName: request.Definition.ActualName, Selector: request.Definition.ActualName},
+			Target:     request.Target,
 			Previous:   clonePluginTarget(previousTarget), PreviousPresent: previousPresent,
 			Filesystem: &PluginFilesystemJournalPayload{
 				StagingRoot: request.StagingRoot, SourcePath: source, TargetPath: targetPath,
@@ -267,7 +267,7 @@ func (s *Service) uninstallFilesystemPlugin(ctx context.Context, request PluginU
 	} else if found {
 		return result, ErrActiveTransaction
 	}
-	fact, err := request.Adapter.Inspect(ctx, request.ActualName)
+	fact, err := request.Adapter.Inspect(ctx, request.Target.ActualName)
 	if err != nil {
 		return result, fmt.Errorf("inspect filesystem Plugin before uninstall: %w", err)
 	}
@@ -281,7 +281,7 @@ func (s *Service) uninstallFilesystemPlugin(ctx context.Context, request PluginU
 	if fact.Presence != adapter.PluginPresent {
 		return result, fmt.Errorf("unexpected filesystem Plugin presence %q: %w", fact.Presence, ErrIndeterminateState)
 	}
-	targetPath, err := request.Adapter.TargetPath(request.ActualName)
+	targetPath, err := request.Adapter.TargetPath(request.Target.ActualName)
 	if err != nil {
 		return result, err
 	}

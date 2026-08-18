@@ -28,10 +28,6 @@ func (*marketplaceRecoveryAdapter) DeploymentMode() domain.PluginDeploymentMode 
 	return domain.PluginDeploymentMarketplace
 }
 
-func (*marketplaceRecoveryAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
-	return nil
-}
-
 func (a *marketplaceRecoveryAdapter) Inspect(_ context.Context, name string) (adapter.PluginFact, error) {
 	*a.events = append(*a.events, "inspect-plugin:"+name)
 	if err := a.pluginErrors[name]; err != nil {

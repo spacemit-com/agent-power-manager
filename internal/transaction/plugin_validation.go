@@ -11,7 +11,7 @@ import (
 	"apm/internal/paths"
 )
 
-// validatePluginInstallRequest 校验 Plugin 安装定义与部署模式约束。
+// validatePluginInstallRequest 校验 lifecycle 已解析的 Plugin target 与部署模式约束。
 func validatePluginInstallRequest(request PluginInstallRequest) error {
 	if err := validateAgentAndPower(request.Agent, request.Power); err != nil || request.Power.Type != domain.PowerTypePlugin {
 		return fmt.Errorf("validate Plugin install identity: %v: %w", err, ErrInvalidRequest)
@@ -24,13 +24,17 @@ func validatePluginInstallRequest(request PluginInstallRequest) error {
 		return fmt.Errorf("marketplace Plugin install agent %q: %w", request.Agent, ErrInvalidRequest)
 	}
 	if mode == domain.PluginDeploymentFilesystem {
-		if request.Marketplace != nil || request.PreviousTarget != nil || request.Target != (adapter.PluginTarget{}) {
+		if request.Agent != domain.AgentHermes || request.Marketplace != nil || request.PreviousTarget != nil {
 			return fmt.Errorf("filesystem Plugin install contains marketplace data: %w", ErrInvalidRequest)
+		}
+		expected, err := domain.ActualPluginName(request.Power)
+		if err != nil || request.Target != (adapter.PluginTarget{ActualName: expected, Selector: expected}) {
+			return fmt.Errorf("filesystem Plugin target %+v does not match %q: %v: %w", request.Target, expected, err, ErrInvalidRequest)
 		}
 		if err := validateCanonicalStaging(request.StagingRoot, ErrInvalidRequest); err != nil {
 			return err
 		}
-	} else if mode != domain.PluginDeploymentMarketplace || request.StagingRoot != "" {
+	} else if mode != domain.PluginDeploymentMarketplace || request.StagingRoot != "" || request.Marketplace == nil {
 		return fmt.Errorf("Plugin deployment %q with staging %q: %w", mode, request.StagingRoot, ErrInvalidRequest)
 	}
 	if request.Previous != nil {
@@ -39,18 +43,8 @@ func validatePluginInstallRequest(request PluginInstallRequest) error {
 			return fmt.Errorf("invalid previous Plugin reference: %w", ErrInvalidRequest)
 		}
 	}
-	if mode == domain.PluginDeploymentMarketplace && request.Marketplace != nil {
+	if mode == domain.PluginDeploymentMarketplace {
 		return validatePluginMarketplaceInstallRequest(request)
-	}
-	if request.PreviousTarget != nil || request.Target != (adapter.PluginTarget{}) {
-		return fmt.Errorf("legacy Plugin install contains explicit targets: %w", ErrInvalidRequest)
-	}
-	if err := request.Definition.Validate(); err != nil {
-		return fmt.Errorf("validate Plugin definition: %v: %w", err, ErrInvalidRequest)
-	}
-	expected, err := domain.ActualPluginName(request.Power)
-	if err != nil || expected != request.Definition.ActualName {
-		return fmt.Errorf("Plugin actual name %q does not match %q: %v: %w", request.Definition.ActualName, expected, err, ErrInvalidRequest)
 	}
 	return nil
 }
@@ -66,15 +60,18 @@ func validatePluginUninstallRequest(request PluginUninstallRequest) error {
 	if mode == domain.PluginDeploymentMarketplace && request.Agent != domain.AgentCodex && request.Agent != domain.AgentClaudeCode {
 		return fmt.Errorf("marketplace Plugin uninstall agent %q: %w", request.Agent, ErrInvalidRequest)
 	}
-	if mode == domain.PluginDeploymentMarketplace && request.Marketplace != nil {
+	if mode == domain.PluginDeploymentMarketplace {
+		if request.Marketplace == nil {
+			return fmt.Errorf("marketplace Plugin uninstall has no marketplace target: %w", ErrInvalidRequest)
+		}
 		return validatePluginMarketplaceUninstallRequest(request)
 	}
-	if request.Marketplace != nil || !isNilInterface(request.MarketplaceAdapter) || request.Target != (adapter.PluginTarget{}) {
+	if mode != domain.PluginDeploymentFilesystem || request.Agent != domain.AgentHermes || request.Marketplace != nil || !isNilInterface(request.MarketplaceAdapter) {
 		return fmt.Errorf("Plugin uninstall contains inapplicable marketplace data: %w", ErrInvalidRequest)
 	}
 	expected, err := domain.ActualPluginName(request.Power)
-	if err != nil || request.ActualName != expected {
-		return fmt.Errorf("Plugin actual name %q does not match %q: %v: %w", request.ActualName, expected, err, ErrInvalidRequest)
+	if err != nil || request.Target != (adapter.PluginTarget{ActualName: expected, Selector: expected}) {
+		return fmt.Errorf("filesystem Plugin target %+v does not match %q: %v: %w", request.Target, expected, err, ErrInvalidRequest)
 	}
 	return nil
 }
@@ -100,12 +97,6 @@ func validatePluginMarketplaceInstallRequest(request PluginInstallRequest) error
 	}
 	if err := validatePluginMarketplaceSource(request.Agent, request.Power, marketplace.Target.Source, ErrInvalidRequest); err != nil {
 		return err
-	}
-	if request.Definition != (domain.PluginDefinition{}) {
-		if err := request.Definition.Validate(); err != nil || request.Definition.ActualName != expectedTarget ||
-			request.Definition.Marketplace.Name != expectedName || request.Definition.Marketplace.Source != marketplace.Target.Source {
-			return fmt.Errorf("transitional Plugin definition does not match explicit targets: %v: %w", err, ErrInvalidRequest)
-		}
 	}
 	if request.Previous == nil {
 		if request.PreviousTarget != nil || marketplace.Previous != nil {
@@ -141,8 +132,7 @@ func validatePluginMarketplaceUninstallRequest(request PluginUninstallRequest) e
 		return fmt.Errorf("uninstall marketplace %q does not match %q: %v: %w", request.Marketplace.Name, expectedName, err, ErrInvalidRequest)
 	}
 	expectedTarget, err := domain.ActualPluginName(request.Power)
-	if err != nil || request.Target.ActualName != expectedTarget || request.Target.Selector != expectedTarget+"@"+expectedName ||
-		request.ActualName != "" && request.ActualName != expectedTarget {
+	if err != nil || request.Target.ActualName != expectedTarget || request.Target.Selector != expectedTarget+"@"+expectedName {
 		return fmt.Errorf("uninstall Plugin target %+v does not match %q: %v: %w", request.Target, expectedTarget, err, ErrInvalidRequest)
 	}
 	return validatePluginMarketplaceSource(request.Agent, request.Power, request.Marketplace.Source, ErrInvalidRequest)
@@ -162,10 +152,6 @@ func validatePluginJournal(journal Journal, payload PluginJournalPayload) error 
 			return fmt.Errorf("marketplace Plugin contains filesystem payload: %w", ErrInvalidJournal)
 		}
 		if payload.Marketplace == nil {
-			// Task 10 删除：仅允许当前旧 producer 能生成的精确形状跨越功能切换。
-			if validLegacyPluginJournal(journal, payload) {
-				return nil
-			}
 			return fmt.Errorf("marketplace Plugin has no marketplace payload: %w", ErrInvalidJournal)
 		}
 		return validatePluginMarketplaceJournal(journal, payload)
@@ -300,61 +286,6 @@ func validMarketplaceUpgradePhase(phase Phase) bool {
 
 func validMarketplaceUninstallPhase(phase Phase) bool {
 	return phase == PhaseRemovingPlugin || phase == PhaseRollingBack || phase == PhaseCommitting
-}
-
-func validLegacyPluginJournal(journal Journal, payload PluginJournalPayload) bool {
-	if (journal.Agent != domain.AgentCodex && journal.Agent != domain.AgentClaudeCode) || payload.Marketplace != nil || payload.Filesystem != nil ||
-		payload.TargetPresent && journal.Operation != OperationUninstall {
-		return false
-	}
-	expectedTarget, err := domain.ActualPluginName(journal.Power)
-	if err != nil || payload.Target.ActualName != expectedTarget || !validMarketplacePluginTarget(payload.Target) {
-		return false
-	}
-	switch journal.Operation {
-	case OperationInstall:
-		if journal.Previous == nil {
-			return payload.Previous == nil && !payload.PreviousPresent &&
-				(journal.Phase == PhaseAddingNew || journal.Phase == PhaseRollingBack || journal.Phase == PhaseCommitting)
-		}
-		if err := validatePluginPreviousReferenceLegacy(journal, payload); err != nil {
-			return false
-		}
-		if !payload.PreviousPresent && pluginMarketplaceSelector(payload.Target) != pluginMarketplaceSelector(*payload.Previous) {
-			return false
-		}
-		if payload.PreviousPresent {
-			return journal.Phase == PhaseRemovingOld || journal.Phase == PhaseAddingNew ||
-				journal.Phase == PhaseRollingBack || journal.Phase == PhaseCommitting
-		}
-		return journal.Phase == PhaseAddingNew || journal.Phase == PhaseRollingBack || journal.Phase == PhaseCommitting
-	case OperationUninstall:
-		return journal.Previous == nil && payload.Previous == nil && !payload.PreviousPresent && payload.TargetPresent &&
-			validUninstallPhase(journal.Phase)
-	default:
-		return false
-	}
-}
-
-func validatePluginPreviousReferenceLegacy(journal Journal, payload PluginJournalPayload) error {
-	if journal.Previous == nil || payload.Previous == nil {
-		return ErrInvalidJournal
-	}
-	previous := *journal.Previous
-	expected, err := domain.ActualPluginName(previous)
-	if err != nil || previous.Name != journal.Power.Name || previous.Version == journal.Power.Version ||
-		payload.Previous.ActualName != expected || !validMarketplacePluginTarget(*payload.Previous) {
-		return ErrInvalidJournal
-	}
-	return nil
-}
-
-func validMarketplacePluginTarget(target adapter.PluginTarget) bool {
-	return validPluginTarget(target) && strings.HasPrefix(target.Selector, target.ActualName+"@")
-}
-
-func pluginMarketplaceSelector(target adapter.PluginTarget) string {
-	return strings.TrimPrefix(target.Selector, target.ActualName+"@")
 }
 
 // samePluginAdapterInstance 保证 Plugin 与 marketplace 写操作共享同一个 Agent 客户端实例；不可比较的值按无效请求处理。

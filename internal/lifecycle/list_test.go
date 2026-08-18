@@ -53,10 +53,9 @@ func (*listFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
 func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*listFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
-	return domain.PluginDefinition{}, nil
+func (*listFakeCloud) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+	return errors.New("unexpected Plugin download")
 }
-func (*listFakeCloud) DownloadPlugin(domain.PowerRef) error { return nil }
 
 type listFakeRegistry struct {
 	calls   *[]string
