@@ -298,11 +298,24 @@ func (service *Service) artifactFor(agent domain.AgentID, ref domain.PowerRef) (
 		return Artifact{}, fmt.Errorf("plugin artifact reference %+v: %w", ref, err)
 	}
 	root := filepath.Join(service.cacheRoot, "plugins", string(agent), ref.Name, ref.Version)
-	return Artifact{
+	artifact := Artifact{
 		Agent:      agent,
 		Power:      ref,
 		ActualName: actualName,
 		Root:       root,
 		PluginPath: filepath.Join(root, "plugins", actualName),
-	}, nil
+	}
+	if agent == domain.AgentCodex || agent == domain.AgentClaudeCode {
+		marketplaceName, err := domain.PluginMarketplaceName(ref)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("plugin artifact marketplace: %w", err)
+		}
+		marketplaceSource, err := filepath.Abs(root)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("resolve plugin artifact marketplace source %q: %w", root, err)
+		}
+		artifact.MarketplaceName = marketplaceName
+		artifact.MarketplaceSource = filepath.Clean(marketplaceSource)
+	}
+	return artifact, nil
 }
