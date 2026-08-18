@@ -3,6 +3,7 @@ package transaction
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -81,6 +82,8 @@ type recordingMarketplacePluginAdapter struct {
 	removed           []adapter.PluginTarget
 	registered        []adapter.MarketplaceTarget
 	unregistered      []adapter.MarketplaceTarget
+	marketplaceNames  []string
+	wantMarketplace   string
 }
 
 func (*recordingMarketplacePluginAdapter) DeploymentMode() domain.PluginDeploymentMode {
@@ -116,8 +119,12 @@ func (*recordingMarketplacePluginAdapter) TargetPath(string) (string, error) {
 	return "", adapter.ErrUnsupportedAdapter
 }
 
-func (a *recordingMarketplacePluginAdapter) InspectMarketplace(_ context.Context, _ string) (adapter.MarketplaceFact, error) {
+func (a *recordingMarketplacePluginAdapter) InspectMarketplace(_ context.Context, name string) (adapter.MarketplaceFact, error) {
 	*a.events = append(*a.events, "inspect-marketplace")
+	a.marketplaceNames = append(a.marketplaceNames, name)
+	if name != a.wantMarketplace {
+		return adapter.MarketplaceFact{}, fmt.Errorf("inspect marketplace %q, want %q", name, a.wantMarketplace)
+	}
 	return a.marketplaceFact, nil
 }
 
@@ -157,7 +164,8 @@ func newMarketplacePluginFixture(t *testing.T) *marketplacePluginFixture {
 	fixture.journals = &recordingMarketplaceJournalStore{events: &fixture.events}
 	fixture.manifests = &recordingMarketplaceManifestWriter{events: &fixture.events}
 	fixture.adapter = &recordingMarketplacePluginAdapter{
-		events: &fixture.events,
+		events:          &fixture.events,
+		wantMarketplace: "apm-demo",
 		pluginFacts: map[string]adapter.PluginFact{
 			target.ActualName: {Presence: adapter.PluginAbsent, ActualName: target.ActualName},
 		},
@@ -203,6 +211,9 @@ func TestMarketplacePluginFirstInstallOrder(t *testing.T) {
 	if got := fixture.adapter.added; len(got) != 1 || got[0] != fixture.request.Target {
 		t.Fatalf("added = %+v", got)
 	}
+	if got := fixture.adapter.marketplaceNames; !reflect.DeepEqual(got, []string{"apm-demo"}) {
+		t.Fatalf("inspected marketplace names = %v, want [apm-demo]", got)
+	}
 }
 
 func TestMarketplacePluginVersionSwitchOrder(t *testing.T) {
@@ -233,6 +244,9 @@ func TestMarketplacePluginVersionSwitchOrder(t *testing.T) {
 	}
 	if previousMarketplace.Name != fixture.request.Marketplace.Target.Name || previousMarketplace.Source == fixture.request.Marketplace.Target.Source {
 		t.Fatalf("marketplace identity/source = %+v -> %+v", previousMarketplace, fixture.request.Marketplace.Target)
+	}
+	if got := fixture.adapter.marketplaceNames; !reflect.DeepEqual(got, []string{"apm-demo"}) {
+		t.Fatalf("inspected marketplace names = %v, want [apm-demo]", got)
 	}
 }
 
@@ -437,6 +451,116 @@ func TestMarketplacePluginRollbackRestoresJointPreStateInOrder(t *testing.T) {
 	}
 }
 
+func TestMarketplacePluginRollbackMutationMatrix(t *testing.T) {
+	type rollbackOperation struct {
+		name       string
+		failureLog []string
+		setAnswer  func(*recordingMarketplacePluginAdapter, pluginMutationAnswer)
+	}
+	type rollbackShape struct {
+		name       string
+		previous   bool
+		progress   marketplacePluginProgress
+		operations []rollbackOperation
+		successLog []string
+	}
+	setRemoveAnswer := func(a *recordingMarketplacePluginAdapter, answer pluginMutationAnswer) { a.removeAnswers[0] = answer }
+	setUnregisterAnswer := func(a *recordingMarketplacePluginAdapter, answer pluginMutationAnswer) {
+		a.unregisterAnswers[0] = answer
+	}
+	setRegisterAnswer := func(a *recordingMarketplacePluginAdapter, answer pluginMutationAnswer) { a.registerAnswers[0] = answer }
+	setAddAnswer := func(a *recordingMarketplacePluginAdapter, answer pluginMutationAnswer) { a.addAnswers[0] = answer }
+	shapes := []rollbackShape{
+		{
+			name: "version switch", previous: true,
+			progress: marketplacePluginProgress{
+				previousPluginRemoved: true, previousMarketplaceRemoved: true,
+				targetMarketplaceRegistered: true, targetPluginAdded: true,
+			},
+			operations: []rollbackOperation{
+				{name: "remove target Plugin", failureLog: []string{"update:rolling-back", "remove-plugin"}, setAnswer: setRemoveAnswer},
+				{name: "unregister target marketplace", failureLog: []string{"update:rolling-back", "remove-plugin", "unregister-marketplace"}, setAnswer: setUnregisterAnswer},
+				{name: "register previous marketplace", failureLog: []string{"update:rolling-back", "remove-plugin", "unregister-marketplace", "register-marketplace"}, setAnswer: setRegisterAnswer},
+				{name: "restore previous Plugin", failureLog: []string{"update:rolling-back", "remove-plugin", "unregister-marketplace", "register-marketplace", "add-plugin"}, setAnswer: setAddAnswer},
+			},
+			successLog: []string{"update:rolling-back", "remove-plugin", "unregister-marketplace", "register-marketplace", "add-plugin", "delete-journal"},
+		},
+		{
+			name: "first install",
+			progress: marketplacePluginProgress{
+				targetMarketplaceRegistered: true, targetPluginAdded: true,
+			},
+			operations: []rollbackOperation{
+				{name: "remove target Plugin", failureLog: []string{"update:rolling-back", "remove-plugin"}, setAnswer: setRemoveAnswer},
+				{name: "unregister target marketplace", failureLog: []string{"update:rolling-back", "remove-plugin", "unregister-marketplace"}, setAnswer: setUnregisterAnswer},
+			},
+			successLog: []string{"update:rolling-back", "remove-plugin", "unregister-marketplace", "delete-journal"},
+		},
+	}
+	states := []struct {
+		name              string
+		answer            pluginMutationAnswer
+		wantMutationError bool
+		wantIndeterminate bool
+	}{
+		{name: "applied", answer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}},
+		{name: "not-applied", answer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: errRollbackMutation}, wantMutationError: true},
+		{name: "unknown", answer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationUnknown}, err: errRollbackMutation}, wantMutationError: true, wantIndeterminate: true},
+		{name: "invalid", answer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationState("invalid")}, err: errRollbackMutation}, wantMutationError: true, wantIndeterminate: true},
+		{name: "applied-with-error", answer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, err: errRollbackMutation}, wantMutationError: true},
+	}
+	for _, shape := range shapes {
+		for _, operation := range shape.operations {
+			for _, state := range states {
+				t.Run(shape.name+"/"+operation.name+"/"+state.name, func(t *testing.T) {
+					fixture := newMarketplacePluginFixture(t)
+					if shape.previous {
+						configureMarketplaceVersionSwitch(fixture)
+					}
+					journal, err := fixture.service.newLocalMarketplacePluginInstallJournal(fixture.request, PhaseRollingBack)
+					if err != nil {
+						t.Fatal(err)
+					}
+					applied := pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}
+					fixture.adapter.removeAnswers = []pluginMutationAnswer{applied}
+					fixture.adapter.unregisterAnswers = []pluginMutationAnswer{applied}
+					fixture.adapter.registerAnswers = []pluginMutationAnswer{applied}
+					fixture.adapter.addAnswers = []pluginMutationAnswer{applied}
+					operation.setAnswer(fixture.adapter, state.answer)
+					originalErr := errors.New("forward mutation was not applied")
+					err = fixture.service.rollbackLocalMarketplacePlugin(context.Background(), journal, fixture.adapter, shape.progress, originalErr)
+					if !errors.Is(err, originalErr) {
+						t.Fatalf("rollback error = %v, want original error", err)
+					}
+					if errors.Is(err, errRollbackMutation) != state.wantMutationError || errors.Is(err, ErrIndeterminateState) != state.wantIndeterminate {
+						t.Fatalf("rollback error = %v, want mutation=%v indeterminate=%v", err, state.wantMutationError, state.wantIndeterminate)
+					}
+					if state.name == "applied" {
+						if fixture.journals.found {
+							t.Fatalf("successful rollback retained journal: %+v", fixture.journals.journal)
+						}
+						if !reflect.DeepEqual(fixture.events, shape.successLog) {
+							t.Fatalf("events = %v, want %v", fixture.events, shape.successLog)
+						}
+					} else {
+						if !fixture.journals.found || fixture.journals.journal.Phase != PhaseRollingBack {
+							t.Fatalf("failed rollback journal = found %v phase %q", fixture.journals.found, fixture.journals.journal.Phase)
+						}
+						if !reflect.DeepEqual(fixture.events, operation.failureLog) {
+							t.Fatalf("events = %v, want stop at %v", fixture.events, operation.failureLog)
+						}
+					}
+					if fixture.manifests.setRef != (domain.PowerRef{}) || fixture.manifests.removed != (domain.PowerRef{}) {
+						t.Fatalf("rollback changed manifest: set=%+v removed=%+v", fixture.manifests.setRef, fixture.manifests.removed)
+					}
+				})
+			}
+		}
+	}
+}
+
+var errRollbackMutation = errors.New("rollback mutation failed")
+
 func marketplacePluginUninstallRequest(fixture *marketplacePluginFixture) PluginUninstallRequest {
 	return PluginUninstallRequest{
 		Agent:              fixture.request.Agent,
@@ -476,6 +600,9 @@ func TestMarketplacePluginUninstallRemovesOnlyPlugin(t *testing.T) {
 	}
 	if got := fixture.adapter.removed; len(got) != 1 || got[0] != fixture.request.Target {
 		t.Fatalf("removed = %+v", got)
+	}
+	if got := fixture.adapter.marketplaceNames; !reflect.DeepEqual(got, []string{"apm-demo"}) {
+		t.Fatalf("inspected marketplace names = %v, want [apm-demo]", got)
 	}
 }
 
