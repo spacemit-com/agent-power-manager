@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -299,10 +300,64 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 	}
 }
 
+func TestEnsureValidatesDownloadedPhysicalTreeBeforeAgentBuilder(t *testing.T) {
+	// 捕获错误变更：Agent builder 在物理树校验前跟随 Cloud 包中的 symlink 读取或写入外部目录。
+	scenarios := []string{"manifest parent", "marketplace parent", "plugin root"}
+	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
+		for _, scenario := range scenarios {
+			t.Run(string(agent)+"/"+scenario, func(t *testing.T) {
+				roots := newTestRoots(t)
+				external := t.TempDir()
+				var externalBefore string
+				download := pluginDownloadFunc(func(_ context.Context, _ domain.AgentID, _ domain.PowerRef, destination string) error {
+					if err := writeSymlinkScenario(t, agent, scenario, destination, external); err != nil {
+						return err
+					}
+					externalBefore = snapshotTestTree(t, external)
+					return nil
+				})
+				builders := builtInBuilders()
+				observer := &observingArtifactBuilder{delegate: builders[agent]}
+				builders[agent] = observer
+				service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builders)
+				ref := testPluginRef()
+
+				if _, err := service.Ensure(context.Background(), agent, ref); !errors.Is(err, ErrInvalidArtifact) {
+					t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
+				}
+				if observer.buildCalls.Load() != 0 {
+					t.Fatalf("builder Build calls = %d, want 0 before physical validation", observer.buildCalls.Load())
+				}
+				if externalAfter := snapshotTestTree(t, external); externalAfter != externalBefore {
+					t.Fatalf("external target changed\nbefore:\n%s\nafter:\n%s", externalBefore, externalAfter)
+				}
+				finalRoot := testArtifactRoot(roots.cache, agent, ref)
+				if _, err := os.Lstat(finalRoot); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("final cache stat error = %v, want not exist", err)
+				}
+			})
+		}
+	}
+}
+
 type pluginDownloadFunc func(context.Context, domain.AgentID, domain.PowerRef, string) error
 
 func (download pluginDownloadFunc) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
 	return download(ctx, agent, ref, destination)
+}
+
+type observingArtifactBuilder struct {
+	delegate   artifactBuilder
+	buildCalls atomic.Int32
+}
+
+func (builder *observingArtifactBuilder) Build(agent domain.AgentID, ref domain.PowerRef, root, pluginPath string) error {
+	builder.buildCalls.Add(1)
+	return builder.delegate.Build(agent, ref, root, pluginPath)
+}
+
+func (builder *observingArtifactBuilder) Validate(agent domain.AgentID, ref domain.PowerRef, root string) error {
+	return builder.delegate.Validate(agent, ref, root)
 }
 
 func writeTestPluginManifest(pluginPath, relativePath, content string) error {
@@ -327,4 +382,82 @@ func writeJSONForTest(t *testing.T, path string, value any) {
 		t.Fatal(err)
 	}
 	writeFileForTest(t, path, string(data))
+}
+
+func writeSymlinkScenario(t *testing.T, agent domain.AgentID, scenario, destination, external string) error {
+	t.Helper()
+	manifestPath := codexManifestPath
+	if agent == domain.AgentClaudeCode {
+		manifestPath = claudeManifestPath
+	}
+	manifest := `{"name":"demo-v0.1.0","version":"0.1.0"}`
+	if err := os.WriteFile(filepath.Join(external, "sentinel.txt"), []byte("outside must remain unchanged"), 0o600); err != nil {
+		return err
+	}
+	switch scenario {
+	case "manifest parent":
+		if err := os.WriteFile(filepath.Join(external, "plugin.json"), []byte(manifest), 0o600); err != nil {
+			return err
+		}
+		return os.Symlink(external, filepath.Join(destination, filepath.Dir(manifestPath)))
+	case "plugin root":
+		if err := writeTestPluginManifest(external, manifestPath, manifest); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(destination); err != nil {
+			return err
+		}
+		return os.Symlink(external, destination)
+	case "marketplace parent":
+		if err := writeTestPluginManifest(destination, manifestPath, manifest); err != nil {
+			return err
+		}
+		artifactRoot := filepath.Dir(filepath.Dir(destination))
+		if agent == domain.AgentCodex {
+			if err := os.MkdirAll(filepath.Join(external, "plugins"), 0o700); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(external, "plugins", "marketplace.json"), []byte("outside marketplace"), 0o600); err != nil {
+				return err
+			}
+			return os.Symlink(external, filepath.Join(artifactRoot, ".agents"))
+		}
+		if err := os.WriteFile(filepath.Join(external, "marketplace.json"), []byte("outside marketplace"), 0o600); err != nil {
+			return err
+		}
+		return os.Symlink(external, filepath.Join(artifactRoot, ".claude-plugin"))
+	default:
+		return fmt.Errorf("unknown symlink scenario %q", scenario)
+	}
+}
+
+func snapshotTestTree(t *testing.T, root string) string {
+	t.Helper()
+	var snapshot strings.Builder
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&snapshot, "%s %s", relative, info.Mode())
+		if info.Mode().IsRegular() {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(&snapshot, " %q", content)
+		}
+		snapshot.WriteByte('\n')
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot.String()
 }

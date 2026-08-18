@@ -132,6 +132,7 @@ func writeJSONFile(path string, value any) error {
 	return closeErr
 }
 
+// validateManifestIdentity 精确映射 APM 的 vMAJOR.MINOR.PATCH 与原生 MAJOR.MINOR.PATCH；不做 trim 或规范化。
 func validateManifestIdentity(ref domain.PowerRef, actualName, nativeVersion string) error {
 	wantActualName, err := domain.ActualPluginName(ref)
 	if err != nil {
