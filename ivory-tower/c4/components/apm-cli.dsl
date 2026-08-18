@@ -49,7 +49,9 @@ pluginArtifactCache = component "Plugin Artifact Cache Roots" "cache/plugins/<ag
 }
 rawPluginDestination = component "Raw Plugin Destination" "Plugin Resource 创建的空临时目录；Cloud 只在此写入按 Agent 区分的原始 Plugin 包。" "filesystem" {
 }
-marketplaceBuilders = component "Marketplace Builders" "Codex 与 Claude 并列生成各自原生的单条目 marketplace；Hermes 不参与。" "Go" {
+codexMarketplaceBuilder = component "Codex Marketplace Builder" "从 Codex 原生 Plugin manifest 构建并复验单条目本地 marketplace。" "Go" {
+}
+claudeMarketplaceBuilder = component "Claude Marketplace Builder" "从 Claude 原生 Plugin manifest 构建并复验单条目本地 marketplace。" "Go" {
 }
 transactionManager = component "Transaction Manager" "Plugin transaction 持久化 phase，联合切换 marketplace、Plugin 与 manifest；不依赖 Cloud 或 Plugin Resource。" "Go" {
 }
@@ -68,7 +70,8 @@ pluginResource -> cloudClient "DownloadPlugin 到 Plugin Resource 提供的原�
 pluginResource -> rawPluginDestination "创建并控制空的原始包 destination"
 cloudClient -> rawPluginDestination "只向调用方指定目录写入原始 Plugin 包，不生成 marketplace"
 pluginResource -> pluginArtifactCache "发布、复验 agent-aware immutable artifact"
-pluginResource -> marketplaceBuilders "Codex/Claude 构建与复验单条目 marketplace"
+pluginResource -> codexMarketplaceBuilder "构建与复验 Codex 单条目 marketplace"
+pluginResource -> claudeMarketplaceBuilder "构建与复验 Claude 单条目 marketplace"
 transactionManager -> adapterRegistry "Plugin marketplace/Plugin 与 filesystem 变更"
 transactionManager -> journalStore "create/update/delete schema v1 journal"
 transactionManager -> configModel "commit/rollback manifest Set/Remove"
