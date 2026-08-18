@@ -2,6 +2,7 @@ package pluginresource
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,9 +10,144 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"apm/internal/cloud"
 	"apm/internal/domain"
 	"apm/internal/utils/filesystem"
 )
+
+func TestLocalCloudRawPluginPackagesBuildAgentArtifactsWithoutLegacyMarketplace(t *testing.T) {
+	// 捕获错误变更：Plugin Resource 桥接回退调用旧 marketplace 索引 API。
+	resourcesSource, err := filepath.Abs(filepath.Join("..", "cloud", "resources"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resourcesRoot := t.TempDir()
+	if err := filesystem.CopyDir(resourcesSource, resourcesRoot); err != nil {
+		t.Fatalf("copy Local Cloud fixtures: %v", err)
+	}
+	legacyMarketplace := filepath.Join(resourcesRoot, "plugins", ".claude-plugin", "marketplace.json")
+	if err := os.WriteFile(legacyMarketplace, []byte("{"), 0o600); err != nil {
+		t.Fatalf("damage legacy marketplace: %v", err)
+	}
+
+	t.Setenv("APM_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	client, err := cloud.NewLocalClient(resourcesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(localCloudPluginDownloader{source: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+
+	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes} {
+		t.Run(string(agent), func(t *testing.T) {
+			artifact, err := service.Ensure(context.Background(), agent, ref)
+			if err != nil {
+				t.Fatalf("Ensure() error = %v", err)
+			}
+			if artifact.Agent != agent || artifact.ActualName != "demo-plugin-v0.1.0" {
+				t.Fatalf("Artifact identity = %#v, want %s/demo-plugin-v0.1.0", artifact, agent)
+			}
+			if err := artifact.Validate(); err != nil {
+				t.Fatalf("Artifact.Validate() error = %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(artifact.PluginPath, "skills", "demo-plugin", "SKILL.md")); err != nil {
+				t.Fatalf("stat Plugin skill: %v", err)
+			}
+
+			switch agent {
+			case domain.AgentCodex:
+				assertGeneratedCodexMarketplace(t, filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"))
+				if _, err := os.Lstat(filepath.Join(artifact.PluginPath, ".claude-plugin", "plugin.json")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("Codex raw package contains Claude manifest: %v", err)
+				}
+			case domain.AgentClaudeCode:
+				assertGeneratedClaudeMarketplace(t, filepath.Join(artifact.Root, ".claude-plugin", "marketplace.json"))
+				if _, err := os.Lstat(filepath.Join(artifact.PluginPath, ".codex-plugin", "plugin.json")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("Claude raw package contains Codex manifest: %v", err)
+				}
+			case domain.AgentHermes:
+				for _, marketplace := range []string{
+					filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"),
+					filepath.Join(artifact.Root, ".claude-plugin", "marketplace.json"),
+				} {
+					if _, err := os.Lstat(marketplace); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("Hermes artifact marketplace %q stat error = %v, want not exist", marketplace, err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func assertGeneratedCodexMarketplace(t *testing.T, path string) {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated marketplace %q: %v", path, err)
+	}
+	var document struct {
+		Name    string `json:"name"`
+		Plugins []struct {
+			Name   string `json:"name"`
+			Source struct {
+				Kind string `json:"source"`
+				Path string `json:"path"`
+			} `json:"source"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(contents, &document); err != nil {
+		t.Fatalf("decode generated Codex marketplace %q: %v", path, err)
+	}
+	if document.Name != "apm-demo-plugin" || len(document.Plugins) != 1 {
+		t.Fatalf("Codex marketplace identity/count = %q/%d, want apm-demo-plugin/1", document.Name, len(document.Plugins))
+	}
+	plugin := document.Plugins[0]
+	if plugin.Name != "demo-plugin-v0.1.0" || plugin.Source.Kind != "local" || plugin.Source.Path != "./plugins/demo-plugin-v0.1.0" {
+		t.Fatalf("Codex marketplace plugin = %#v, want local demo-plugin-v0.1.0", plugin)
+	}
+}
+
+func assertGeneratedClaudeMarketplace(t *testing.T, path string) {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated marketplace %q: %v", path, err)
+	}
+	var document struct {
+		Name    string `json:"name"`
+		Plugins []struct {
+			Name   string `json:"name"`
+			Source string `json:"source"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(contents, &document); err != nil {
+		t.Fatalf("decode generated Claude marketplace %q: %v", path, err)
+	}
+	if document.Name != "apm-demo-plugin" || len(document.Plugins) != 1 {
+		t.Fatalf("Claude marketplace identity/count = %q/%d, want apm-demo-plugin/1", document.Name, len(document.Plugins))
+	}
+	plugin := document.Plugins[0]
+	if plugin.Name != "demo-plugin-v0.1.0" || plugin.Source != "./plugins/demo-plugin-v0.1.0" {
+		t.Fatalf("Claude marketplace plugin = %#v, want local demo-plugin-v0.1.0", plugin)
+	}
+}
+
+type localCloudPluginDownloader struct {
+	source cloud.PluginPackageDownloader
+}
+
+func (downloader localCloudPluginDownloader) DownloadPlugin(
+	ctx context.Context,
+	agent domain.AgentID,
+	ref domain.PowerRef,
+	destination string,
+) error {
+	return downloader.source.DownloadPluginTo(ctx, agent, ref, destination)
+}
 
 func TestEnsurePersistsValidatedArtifactAndReusesImmutableVersion(t *testing.T) {
 	// 捕获错误变更：把已经存在的有效版本重新下载或替换。

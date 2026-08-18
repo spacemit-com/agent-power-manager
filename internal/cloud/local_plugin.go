@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"apm/internal/domain"
 	"apm/internal/utils/filesystem"
@@ -29,6 +31,108 @@ type localPluginRecord struct {
 	ref        domain.PowerRef
 	definition domain.PluginDefinition
 	sourcePath string
+}
+
+// PluginPackageDownloader 按 Agent 下载原始 Plugin 包到调用方控制的空目录。
+// 该过渡接口不生成 marketplace，也不持有 APM cache 或 staging。
+type PluginPackageDownloader interface {
+	DownloadPluginTo(context.Context, domain.AgentID, domain.PowerRef, string) error
+}
+
+// DownloadPluginTo 复制精确 Agent/ref 的原始 Plugin 包；目标必须不存在或为空物理目录。
+func (c *LocalClient) DownloadPluginTo(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
+	if !supportedPluginPackageAgent(agent) {
+		return ErrNotFound
+	}
+	if _, err := domain.ActualPluginName(ref); err != nil {
+		return ErrNotFound
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	source := filepath.Join(c.resourcesRoot, "plugins", ref.Name, ref.Version, string(agent))
+	info, err := os.Lstat(source)
+	if errors.Is(err, fs.ErrNotExist) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("stat raw Plugin package %q: %w", source, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("raw Plugin package %q is not a physical directory", source)
+	}
+	if destination == "" {
+		return errors.New("raw Plugin destination is empty")
+	}
+	resolvedDestination, err := filepath.Abs(destination)
+	if err != nil {
+		return fmt.Errorf("resolve raw Plugin destination %q: %w", destination, err)
+	}
+	resolvedDestination = filepath.Clean(resolvedDestination)
+	if err := validatePluginDownloadDestination(resolvedDestination); err != nil {
+		return err
+	}
+	if err := filesystem.CopyDir(source, resolvedDestination); err != nil {
+		return fmt.Errorf("copy raw Plugin package %q to %q: %w", source, resolvedDestination, err)
+	}
+	return nil
+}
+
+func supportedPluginPackageAgent(agent domain.AgentID) bool {
+	switch agent {
+	case domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes:
+		return true
+	default:
+		return false
+	}
+}
+
+func validatePluginDownloadDestination(destination string) error {
+	info, err := os.Lstat(destination)
+	if errors.Is(err, fs.ErrNotExist) {
+		return validatePluginDestinationAncestors(destination)
+	}
+	if err != nil {
+		return fmt.Errorf("stat raw Plugin destination %q: %w", destination, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("raw Plugin destination %q is not a physical directory", destination)
+	}
+	if err := validatePluginDestinationAncestors(destination); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(destination)
+	if err != nil {
+		return fmt.Errorf("read raw Plugin destination %q: %w", destination, err)
+	}
+	if len(entries) != 0 {
+		return fmt.Errorf("raw Plugin destination %q is not empty", destination)
+	}
+	return nil
+}
+
+func validatePluginDestinationAncestors(destination string) error {
+	volume := filepath.VolumeName(destination)
+	current := volume + string(filepath.Separator)
+	relative := strings.TrimPrefix(destination, current)
+	for _, segment := range strings.Split(relative, string(filepath.Separator)) {
+		if segment == "" {
+			continue
+		}
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("stat raw Plugin destination ancestor %q: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("raw Plugin destination ancestor %q is not a physical directory", current)
+		}
+	}
+	return nil
 }
 
 // GetPlugin 从 Claude marketplace 权威索引读取精确版本的 Plugin 安装定义。
