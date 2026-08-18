@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -59,9 +60,10 @@ barrier() {
     /bin/cat "$FAKE_PLUGIN_BARRIER_GATE" >/dev/null
   fi
 }
-self_remove() {
-  if [ -f "$FAKE_PLUGIN_SELF_REMOVE" ] && [ "$(/bin/cat "$FAKE_PLUGIN_SELF_REMOVE")" = "$1" ]; then
-    /bin/rm -f "$FAKE_PLUGIN_SELF_REMOVE" "$0"
+fail_before() {
+  if [ -f "$FAKE_PLUGIN_FAIL_BEFORE" ] && [ "$(/bin/cat "$FAKE_PLUGIN_FAIL_BEFORE")" = "$1" ]; then
+    /bin/rm -f "$FAKE_PLUGIN_FAIL_BEFORE"
+    exit 42
   fi
 }
 interrupt() {
@@ -106,29 +108,29 @@ case "$agent:$1:$2:$3" in
     require_count 5 "$#"; [ "$5" = --json ] || exit 98
     source=$4; name=$(market_name "$source")
     barrier codex:marketplace-add
+    fail_before codex:marketplace-add
     printf '%s' "$source" > "$markets/$name"
-    self_remove codex:marketplace-add
     interrupt codex:marketplace-add ;;
   claude:plugin:marketplace:add)
     require_count 6 "$#"; [ "$5" = --scope ] && [ "$6" = user ] || exit 98
     source=$4; name=$(market_name "$source")
     barrier claude:marketplace-add
+    fail_before claude:marketplace-add
     printf '%s' "$source" > "$markets/$name"
-    self_remove claude:marketplace-add
     interrupt claude:marketplace-add ;;
   codex:plugin:marketplace:remove)
     require_count 5 "$#"; [ "$5" = --json ] || exit 98
     name=$4
     barrier codex:marketplace-remove
+    fail_before codex:marketplace-remove
     /bin/rm -f "$markets/$name"
-    self_remove codex:marketplace-remove
     interrupt codex:marketplace-remove ;;
   claude:plugin:marketplace:remove)
     require_count 6 "$#"; [ "$5" = --scope ] && [ "$6" = user ] || exit 98
     name=$4
     barrier claude:marketplace-remove
+    fail_before claude:marketplace-remove
     /bin/rm -f "$markets/$name"
-    self_remove claude:marketplace-remove
     interrupt claude:marketplace-remove ;;
   codex:plugin:list:--json)
     require_count 3 "$#"
@@ -158,29 +160,29 @@ case "$agent:$1:$2:$3" in
     require_count 4 "$#"; [ "$4" = --json ] || exit 98
     selector=$3; name=${selector%@*}
     barrier codex:plugin-add
+    fail_before codex:plugin-add
     printf '%s' "$selector" > "$plugins/$name"
-    self_remove codex:plugin-add
     interrupt codex:plugin-add ;;
   claude:plugin:install:*)
     require_count 5 "$#"; [ "$4" = --scope ] && [ "$5" = user ] || exit 98
     selector=$3; name=${selector%@*}
     barrier claude:plugin-add
+    fail_before claude:plugin-add
     printf '%s' "$selector" > "$plugins/$name"
-    self_remove claude:plugin-add
     interrupt claude:plugin-add ;;
   codex:plugin:remove:*)
     require_count 4 "$#"; [ "$4" = --json ] || exit 98
     selector=$3; name=${selector%@*}
     barrier codex:plugin-remove
+    fail_before codex:plugin-remove
     /bin/rm -f "$plugins/$name"
-    self_remove codex:plugin-remove
     interrupt codex:plugin-remove ;;
   claude:plugin:uninstall:*)
     require_count 5 "$#"; [ "$4" = --scope ] && [ "$5" = user ] || exit 98
     selector=$3; name=${selector%@*}
     barrier claude:plugin-remove
+    fail_before claude:plugin-remove
     /bin/rm -f "$plugins/$name"
-    self_remove claude:plugin-remove
     interrupt claude:plugin-remove ;;
   *) printf 'unsupported fake invocation: %s %s\n' "$agent" "$*" >&2; exit 98 ;;
 esac
@@ -196,7 +198,7 @@ type pluginAcceptanceHarness struct {
 	barrierKey   string
 	barrierEvent string
 	barrierGate  string
-	selfRemove   string
+	failBefore   string
 	cacheHome    string
 	agent        domain.AgentID
 	agentHome    string
@@ -284,7 +286,7 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	barrierKey := filepath.Join(root, "barrier-key")
 	barrierEvent := filepath.Join(root, "barrier-event")
 	barrierGate := filepath.Join(root, "barrier-gate")
-	selfRemove := filepath.Join(root, "self-remove")
+	failBefore := filepath.Join(root, "fail-before")
 	cacheHome := filepath.Join(root, "cache")
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
 	t.Setenv("FAKE_PLUGIN_BIN", fakeBin)
@@ -294,7 +296,7 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	t.Setenv("FAKE_PLUGIN_BARRIER_KEY", barrierKey)
 	t.Setenv("FAKE_PLUGIN_BARRIER_EVENT", barrierEvent)
 	t.Setenv("FAKE_PLUGIN_BARRIER_GATE", barrierGate)
-	t.Setenv("FAKE_PLUGIN_SELF_REMOVE", selfRemove)
+	t.Setenv("FAKE_PLUGIN_FAIL_BEFORE", failBefore)
 	t.Setenv("APM_HOME", filepath.Join(root, "apm-home"))
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	t.Setenv("CODEX_HOME", agentHomes[domain.AgentCodex])
@@ -338,7 +340,7 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	}
 	return &pluginAcceptanceHarness{
 		t: t, root: root, fakeBin: fakeBin, calls: calls, interrupt: interrupt, unreadable: unreadable,
-		barrierKey: barrierKey, barrierEvent: barrierEvent, barrierGate: barrierGate, selfRemove: selfRemove,
+		barrierKey: barrierKey, barrierEvent: barrierEvent, barrierGate: barrierGate, failBefore: failBefore,
 		cacheHome: cacheHome, agent: agent, agentHome: agentHome, repository: repository, manifests: manifests, registry: registry,
 		plugins: plugins, install: installer, uninstall: uninstaller, fix: fixer,
 	}
@@ -500,20 +502,9 @@ func (h *pluginAcceptanceHarness) waitUninstallBarrier(key string, completed <-c
 	}
 }
 
-func (h *pluginAcceptanceHarness) setSelfRemove(key string) {
+func (h *pluginAcceptanceHarness) setFailBefore(key string) {
 	h.t.Helper()
-	if err := os.WriteFile(h.selfRemove, []byte(key), 0o600); err != nil {
-		h.t.Fatal(err)
-	}
-}
-
-func (h *pluginAcceptanceHarness) restoreExecutable() {
-	h.t.Helper()
-	executable := "codex"
-	if h.agent == domain.AgentClaudeCode {
-		executable = "claude"
-	}
-	if err := os.WriteFile(filepath.Join(h.fakeBin, executable), []byte(acceptanceMarketplaceCLIScript), 0o700); err != nil {
+	if err := os.WriteFile(h.failBefore, []byte(key), 0o600); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -653,6 +644,7 @@ func (h *pluginAcceptanceHarness) assertJournal(present bool) {
 
 func (h *pluginAcceptanceHarness) assertOnlyFakeExecutables() {
 	h.t.Helper()
+	h.assertFakeExecutablePresent()
 	wantPrefix := h.fakeBin + string(filepath.Separator)
 	for _, line := range h.callLines() {
 		executable, _, found := strings.Cut(line, "|")
@@ -666,6 +658,29 @@ func (h *pluginAcceptanceHarness) assertOnlyFakeExecutables() {
 	}
 	for _, path := range []string{os.Getenv("CODEX_HOME"), os.Getenv("CLAUDE_CONFIG_DIR"), os.Getenv("HERMES_HOME"), os.Getenv("APM_HOME"), os.Getenv("XDG_CACHE_HOME")} {
 		assertPathsWithinRoot(h.t, h.root, path)
+	}
+}
+
+func (h *pluginAcceptanceHarness) assertFakeExecutablePresent() {
+	h.t.Helper()
+	executable := "codex"
+	if h.agent == domain.AgentClaudeCode {
+		executable = "claude"
+	}
+	want := filepath.Join(h.fakeBin, executable)
+	info, err := os.Stat(want)
+	if err != nil {
+		h.t.Fatalf("fake Agent executable %q is unavailable: %v", want, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		h.t.Fatalf("fake Agent executable %q has mode %s", want, info.Mode())
+	}
+	got, err := exec.LookPath(executable)
+	if err != nil {
+		h.t.Fatalf("LookPath(%q): %v", executable, err)
+	}
+	if got != want {
+		h.t.Fatalf("LookPath(%q) = %q, want fake-bin executable %q", executable, got, want)
 	}
 }
 
@@ -1363,20 +1378,39 @@ func TestPluginAcceptanceActualCommittingPhaseWritesFailBeforeManifest(t *testin
 	})
 }
 
-func TestPluginAcceptanceActualRollingBackPhaseWritesFailBeforeRollbackAction(t *testing.T) {
+func TestPluginAcceptanceActualRollingBackPhaseKeepsFakeExecutablePinned(t *testing.T) {
 	t.Run("first install", func(t *testing.T) {
 		h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-		h.setSelfRemove("codex:marketplace-add")
+		h.setInterrupt("codex:marketplace-add")
+		installStart := len(h.callLines())
 		result, err := h.installRef("demo-plugin", "v0.0.1")
 		if err == nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeFailed {
 			t.Fatalf("Install() = %+v, %v", result, err)
 		}
 		artifact := h.artifact("demo-plugin", "v0.0.1")
+		h.assertPhase(transaction.PhaseRegisteringMarketplace)
+		h.assertManifest("demo-plugin", "", false)
+		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+		h.assertPlugins()
+		h.assertMutationCallsSince(installStart,
+			h.expectedCall("plugin", "marketplace", "add", artifact.MarketplaceSource, "--json"),
+		)
+		h.assertFakeExecutablePresent()
+
+		fixStart := len(h.callLines())
+		h.setFailBefore("codex:marketplace-remove")
+		if err := h.fix.Fix(context.Background()); !errors.Is(err, transaction.ErrRecoveryFailed) || !errors.Is(err, transaction.ErrIndeterminateState) {
+			t.Fatalf("Fix() with rollback failure = %v, want recovery/indeterminate", err)
+		}
 		h.assertPhase(transaction.PhaseRollingBack)
 		h.assertManifest("demo-plugin", "", false)
 		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
 		h.assertPlugins()
-		h.restoreExecutable()
+		h.assertMutationCallsSince(fixStart,
+			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
+		)
+		h.assertFakeExecutablePresent()
+
 		if err := h.fix.Fix(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -1384,6 +1418,10 @@ func TestPluginAcceptanceActualRollingBackPhaseWritesFailBeforeRollbackAction(t 
 		h.assertManifest("demo-plugin", "", false)
 		h.assertMarketplace("demo-plugin", "", false)
 		h.assertPlugins()
+		h.assertMutationCallsSince(fixStart,
+			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
+			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
+		)
 		h.assertOnlyFakeExecutables()
 	})
 
@@ -1392,17 +1430,38 @@ func TestPluginAcceptanceActualRollingBackPhaseWritesFailBeforeRollbackAction(t 
 		if result, err := h.installRef("demo-plugin", "v0.0.1"); err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
 			t.Fatalf("baseline Install() = %+v, %v", result, err)
 		}
-		h.setSelfRemove("codex:marketplace-add")
+		h.setInterrupt("codex:marketplace-add")
+		installStart := len(h.callLines())
 		result, err := h.installRef("demo-plugin", "v0.1.0")
 		if err == nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeFailed {
 			t.Fatalf("switch Install() = %+v, %v", result, err)
 		}
 		target := h.artifact("demo-plugin", "v0.1.0")
+		h.assertPhase(transaction.PhaseRegisteringNewMarketplace)
+		h.assertManifest("demo-plugin", "v0.0.1", true)
+		h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
+		h.assertPlugins()
+		h.assertMutationCallsSince(installStart,
+			h.expectedCall("plugin", "remove", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"),
+			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
+			h.expectedCall("plugin", "marketplace", "add", target.MarketplaceSource, "--json"),
+		)
+		h.assertFakeExecutablePresent()
+
+		fixStart := len(h.callLines())
+		h.setFailBefore("codex:marketplace-remove")
+		if err := h.fix.Fix(context.Background()); !errors.Is(err, transaction.ErrRecoveryFailed) || !errors.Is(err, transaction.ErrIndeterminateState) {
+			t.Fatalf("Fix() with rollback failure = %v, want recovery/indeterminate", err)
+		}
 		h.assertPhase(transaction.PhaseRollingBack)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
 		h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
 		h.assertPlugins()
-		h.restoreExecutable()
+		h.assertMutationCallsSince(fixStart,
+			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
+		)
+		h.assertFakeExecutablePresent()
+
 		old := h.artifact("demo-plugin", "v0.0.1")
 		if err := h.fix.Fix(context.Background()); err != nil {
 			t.Fatal(err)
@@ -1411,6 +1470,12 @@ func TestPluginAcceptanceActualRollingBackPhaseWritesFailBeforeRollbackAction(t 
 		h.assertManifest("demo-plugin", "v0.0.1", true)
 		h.assertMarketplace("demo-plugin", old.MarketplaceSource, true)
 		h.assertPlugins("demo-plugin-v0.0.1")
+		h.assertMutationCallsSince(fixStart,
+			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
+			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
+			h.expectedCall("plugin", "marketplace", "add", old.MarketplaceSource, "--json"),
+			h.expectedCall("plugin", "add", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"),
+		)
 		h.assertOnlyFakeExecutables()
 	})
 }
