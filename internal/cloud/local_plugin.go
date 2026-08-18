@@ -35,11 +35,13 @@ type localPluginRecord struct {
 
 // PluginPackageDownloader 按 Agent 下载原始 Plugin 包到调用方控制的空目录。
 // 该过渡接口不生成 marketplace，也不持有 APM cache 或 staging。
+// 复制中途失败可能留下部分目标，由创建该目标的调用方负责清理。
 type PluginPackageDownloader interface {
 	DownloadPluginTo(context.Context, domain.AgentID, domain.PowerRef, string) error
 }
 
 // DownloadPluginTo 复制精确 Agent/ref 的原始 Plugin 包；目标必须不存在或为空物理目录。
+// 复制失败时目标可能是半成品，其生命周期和清理由调用方负责。
 func (c *LocalClient) DownloadPluginTo(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
 	if !supportedPluginPackageAgent(agent) {
 		return ErrNotFound
@@ -73,8 +75,30 @@ func (c *LocalClient) DownloadPluginTo(ctx context.Context, agent domain.AgentID
 	if err := validatePluginDownloadDestination(resolvedDestination); err != nil {
 		return err
 	}
+	if err := validatePluginCopyBoundary(source, resolvedDestination); err != nil {
+		return err
+	}
 	if err := filesystem.CopyDir(source, resolvedDestination); err != nil {
 		return fmt.Errorf("copy raw Plugin package %q to %q: %w", source, resolvedDestination, err)
+	}
+	return nil
+}
+
+func validatePluginCopyBoundary(source, destination string) error {
+	physicalSource, err := filesystem.ResolvePhysicalPath(source)
+	if err != nil {
+		return fmt.Errorf("resolve raw Plugin package %q: %w", source, err)
+	}
+	physicalDestination, err := filesystem.ResolvePhysicalPath(destination)
+	if err != nil {
+		return fmt.Errorf("resolve raw Plugin destination %q: %w", destination, err)
+	}
+	insideSource, err := filesystem.PathEqualOrWithin(physicalSource, physicalDestination)
+	if err != nil {
+		return fmt.Errorf("compare raw Plugin package %q and destination %q: %w", physicalSource, physicalDestination, err)
+	}
+	if insideSource {
+		return fmt.Errorf("raw Plugin destination %q must not equal or be contained by source %q", destination, source)
 	}
 	return nil
 }

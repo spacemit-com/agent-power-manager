@@ -27,10 +27,11 @@ func TestLocalClientDownloadPluginToCopiesExactAgentPackage(t *testing.T) {
 	tests := []struct {
 		agent        domain.AgentID
 		manifestPath string
+		sentinel     string
 	}{
-		{agent: domain.AgentCodex, manifestPath: filepath.Join(".codex-plugin", "plugin.json")},
-		{agent: domain.AgentClaudeCode, manifestPath: filepath.Join(".claude-plugin", "plugin.json")},
-		{agent: domain.AgentHermes, manifestPath: filepath.Join(".claude-plugin", "plugin.json")},
+		{agent: domain.AgentCodex, manifestPath: filepath.Join(".codex-plugin", "plugin.json"), sentinel: "codex\n"},
+		{agent: domain.AgentClaudeCode, manifestPath: filepath.Join(".claude-plugin", "plugin.json"), sentinel: "claude-code\n"},
+		{agent: domain.AgentHermes, manifestPath: filepath.Join(".claude-plugin", "plugin.json"), sentinel: "hermes-agent\n"},
 	}
 	for _, test := range tests {
 		t.Run(string(test.agent), func(t *testing.T) {
@@ -55,8 +56,68 @@ func TestLocalClientDownloadPluginToCopiesExactAgentPackage(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(destination, "skills", "demo-plugin", "SKILL.md")); err != nil {
 				t.Fatalf("stat downloaded skill: %v", err)
 			}
+			sentinel, err := os.ReadFile(filepath.Join(destination, "agent.txt"))
+			if err != nil {
+				t.Fatalf("read Agent sentinel: %v", err)
+			}
+			if string(sentinel) != test.sentinel {
+				t.Fatalf("Agent sentinel = %q, want %q", sentinel, test.sentinel)
+			}
 			assertTreeHasNoPluginMarketplace(t, destination)
 		})
+	}
+}
+
+func TestLocalClientDownloadPluginToRejectsDestinationInsideSourceWithoutMutation(t *testing.T) {
+	// 捕获错误变更：将目标建在源包内部，导致 CopyDir 递归把源树复制进自身。
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+	for _, existing := range []bool{false, true} {
+		name := "missing nested destination"
+		if existing {
+			name = "existing empty nested destination"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			source := writeRawCodexPackage(t, root, ref)
+			destination := filepath.Join(source, "nested", "plugin")
+			if existing {
+				destination = filepath.Join(source, "nested")
+				if err := os.Mkdir(destination, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := snapshotTree(t, source)
+			client, err := cloud.NewLocalClient(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := client.DownloadPluginTo(context.Background(), domain.AgentCodex, ref, destination); err == nil || errors.Is(err, cloud.ErrNotFound) {
+				t.Fatalf("DownloadPluginTo() error = %v, want source-containment error", err)
+			}
+			after := snapshotTree(t, source)
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("source tree changed: before entries=%d, after entries=%d", len(before), len(after))
+			}
+		})
+	}
+}
+
+func TestLocalClientDownloadPluginToAllowsDestinationWithSourceNamePrefix(t *testing.T) {
+	// 捕获错误变更：使用字符串前缀判定包含关系，误拒绝同级 codex-copy 目标。
+	root := t.TempDir()
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+	source := writeRawCodexPackage(t, root, ref)
+	destination := source + "-copy"
+	client, err := cloud.NewLocalClient(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DownloadPluginTo(context.Background(), domain.AgentCodex, ref, destination); err != nil {
+		t.Fatalf("DownloadPluginTo() error = %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(destination, "payload.txt")); err != nil || string(got) != "payload" {
+		t.Fatalf("copied payload = %q, %v, want payload", got, err)
 	}
 }
 
@@ -217,6 +278,58 @@ func assertTreeHasNoPluginMarketplace(t *testing.T, root string) {
 	}); err != nil {
 		t.Fatalf("walk downloaded tree: %v", err)
 	}
+}
+
+type treeSnapshotEntry struct {
+	Mode    os.FileMode
+	Content string
+}
+
+func writeRawCodexPackage(t *testing.T, root string, ref domain.PowerRef) string {
+	t.Helper()
+	source := filepath.Join(root, "plugins", ref.Name, ref.Version, string(domain.AgentCodex))
+	if err := os.MkdirAll(filepath.Join(source, ".codex-plugin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"demo-plugin-v0.1.0","version":"0.1.0"}`
+	if err := os.WriteFile(filepath.Join(source, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "payload.txt"), []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
+func snapshotTree(t *testing.T, root string) map[string]treeSnapshotEntry {
+	t.Helper()
+	snapshot := make(map[string]treeSnapshotEntry)
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		item := treeSnapshotEntry{Mode: info.Mode()}
+		if info.Mode().IsRegular() {
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			item.Content = string(contents)
+		}
+		snapshot[relative] = item
+		return nil
+	}); err != nil {
+		t.Fatalf("snapshot tree %q: %v", root, err)
+	}
+	return snapshot
 }
 
 func TestLocalClientListsPluginsFromClaudeMarketplaceOnly(t *testing.T) {
