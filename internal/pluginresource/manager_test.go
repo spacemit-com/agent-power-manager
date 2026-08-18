@@ -5,10 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"apm/internal/domain"
+	"apm/internal/utils/filesystem"
 )
 
 func TestEnsurePersistsValidatedArtifactAndReusesImmutableVersion(t *testing.T) {
@@ -168,6 +170,8 @@ func TestStageHermesDoesNotChangeCodexOrClaudeArtifactRoots(t *testing.T) {
 
 func TestEnsureConcurrentPublishersReturnTheValidatedImmutableArtifact(t *testing.T) {
 	// 捕获错误变更：同一 Service 并发发布同版本，在第一个版本发布前启动第二次下载。
+	previous := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
 	roots := newTestRoots(t)
 	downloader := newBlockingDownloader()
 	service := newService(
@@ -189,10 +193,9 @@ func TestEnsureConcurrentPublishersReturnTheValidatedImmutableArtifact(t *testin
 		_, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
 		results <- err
 	}()
-	select {
-	case <-downloader.secondStarted:
+	runtime.Gosched()
+	if downloader.started.Load() != 1 {
 		t.Fatal("second download started before the first artifact was published")
-	case <-time.After(100 * time.Millisecond):
 	}
 	close(downloader.release)
 	for range 2 {
@@ -200,11 +203,163 @@ func TestEnsureConcurrentPublishersReturnTheValidatedImmutableArtifact(t *testin
 			t.Fatalf("concurrent Ensure() error = %v", err)
 		}
 	}
-	if downloader.calls != 1 {
-		t.Fatalf("concurrent DownloadPlugin calls = %d, want 1", downloader.calls)
+	if got := downloader.started.Load(); got != 1 {
+		t.Fatalf("concurrent DownloadPlugin calls = %d, want 1", got)
 	}
 	if _, err := service.Lookup(domain.AgentCodex, ref); err != nil {
 		t.Fatalf("Lookup() after concurrent Ensure = %v", err)
+	}
+}
+
+func TestStageHermesSerializesSameStagingPath(t *testing.T) {
+	// 捕获错误变更：同一路径的并发 staging 复制互相删除临时树或交叉发布。
+	previous := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, domain.AgentHermes, ref))
+	copier := newBlockingCopier()
+	service.files.copyDir = copier.copy
+	results := make(chan error, 2)
+	go func() {
+		_, err := service.StageHermes(ref)
+		results <- err
+	}()
+	<-copier.firstStarted
+	go func() {
+		_, err := service.StageHermes(ref)
+		results <- err
+	}()
+	runtime.Gosched()
+	if got := copier.started.Load(); got != 1 {
+		t.Fatalf("concurrent staging copy calls = %d, want 1 before release", got)
+	}
+	close(copier.release)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent StageHermes() error = %v", err)
+		}
+	}
+	if got := copier.started.Load(); got != 2 {
+		t.Fatalf("staging copy calls = %d, want 2", got)
+	}
+}
+
+func TestStageHermesCopyFailureKeepsCompleteStagingAndCleansUniqueTemporary(t *testing.T) {
+	// 捕获错误变更：复制失败时将半成品发布为 staging，或遗留/清理非本次临时目录。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, domain.AgentHermes, ref))
+	if err := os.MkdirAll(roots.staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(roots.staging, "complete-old-staging.txt")
+	if err := os.WriteFile(old, []byte("complete old staging"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	copyErr := errors.New("injected staging copy failure")
+	var temporary string
+	service.files.copyDir = func(_ string, destination string) error {
+		temporary = filepath.Dir(filepath.Dir(destination))
+		if err := os.MkdirAll(destination, 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(destination, "partial.txt"), []byte("partial"), 0o600); err != nil {
+			return err
+		}
+		return copyErr
+	}
+
+	if _, err := service.StageHermes(ref); !errors.Is(err, copyErr) {
+		t.Fatalf("StageHermes() error = %v, want injected copy error", err)
+	}
+	content, err := os.ReadFile(old)
+	if err != nil {
+		t.Fatalf("ReadFile(old staging) error = %v", err)
+	}
+	if got, want := string(content), "complete old staging"; got != want {
+		t.Fatalf("old staging = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(roots.staging, "plugins", "demo", "partial.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial final staging stat error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(temporary); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unique temporary stat error = %v, want not exist", err)
+	}
+}
+
+func TestEnsureRejectsTypedNilDependencies(t *testing.T) {
+	// 捕获错误变更：接口携带 typed-nil downloader 或 builder 时解引用 panic。
+	roots := newTestRoots(t)
+	ref := testPluginRef()
+	var downloader *typedNilDownloader
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, downloader, testBuilders())
+	if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("Ensure() typed-nil downloader error = %v, want ErrInvalidArtifact", err)
+	}
+	var builder *typedNilBuilder
+	service = newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, map[domain.AgentID]artifactBuilder{domain.AgentCodex: builder})
+	if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); !errors.Is(err, ErrUnsupportedAgent) {
+		t.Fatalf("Ensure() typed-nil builder error = %v, want ErrUnsupportedAgent", err)
+	}
+}
+
+func TestEnsureJoinsRenameAndInspectErrors(t *testing.T) {
+	// 捕获错误变更：rename 失败后的 final 检查错误被悄然丢弃。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	renameErr := errors.New("rename failed")
+	inspectErr := errors.New("inspect failed")
+	service.files.rename = func(string, string) error { return renameErr }
+	var rootChecks atomic.Int32
+	service.files.lstat = func(path string) (os.FileInfo, error) {
+		if path == testArtifactRoot(roots.cache, domain.AgentCodex, ref) && rootChecks.Add(1) >= 4 {
+			return nil, inspectErr
+		}
+		return os.Lstat(path)
+	}
+
+	_, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
+	if !errors.Is(err, renameErr) || !errors.Is(err, inspectErr) {
+		t.Fatalf("Ensure() error = %v, want rename and inspect errors", err)
+	}
+}
+
+func TestEnsureJoinsDownloadAndUniqueTemporaryCleanupErrors(t *testing.T) {
+	// 捕获错误变更：下载失败时丢失同一唯一临时目录的清理错误。
+	roots := newTestRoots(t)
+	downloadErr := errors.New("download failed")
+	cleanupErr := errors.New("temporary cleanup failed")
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, failingDownloader{err: downloadErr}, testBuilders())
+	service.files.removeAll = func(string) error { return cleanupErr }
+
+	_, err := service.Ensure(context.Background(), domain.AgentCodex, testPluginRef())
+	if !errors.Is(err, downloadErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("Ensure() error = %v, want download and cleanup errors", err)
+	}
+}
+
+func TestStageHermesJoinsCopyAndUniqueTemporaryCleanupErrors(t *testing.T) {
+	// 捕获错误变更：staging 复制失败时丢失唯一临时目录的清理错误。
+	roots := newTestRoots(t)
+	copyErr := errors.New("staging copy failed")
+	cleanupErr := errors.New("staging temporary cleanup failed")
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, domain.AgentHermes, testPluginRef()))
+	service.files.copyDir = func(string, string) error { return copyErr }
+	service.files.removeAll = func(path string) error {
+		if filepath.Base(path) != filepath.Base(roots.stagingTemp) {
+			return cleanupErr
+		}
+		return os.RemoveAll(path)
+	}
+
+	_, err := service.StageHermes(testPluginRef())
+	if !errors.Is(err, copyErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("StageHermes() error = %v, want copy and cleanup errors", err)
 	}
 }
 
@@ -264,28 +419,65 @@ func testBuilders() map[domain.AgentID]artifactBuilder {
 }
 
 type blockingDownloader struct {
-	firstStarted  chan struct{}
-	secondStarted chan struct{}
-	release       chan struct{}
-	calls         int
+	firstStarted chan struct{}
+	release      chan struct{}
+	started      atomic.Int32
 }
 
 func newBlockingDownloader() *blockingDownloader {
 	return &blockingDownloader{
-		firstStarted:  make(chan struct{}),
-		secondStarted: make(chan struct{}),
-		release:       make(chan struct{}),
+		firstStarted: make(chan struct{}),
+		release:      make(chan struct{}),
 	}
 }
 
 func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, _ domain.AgentID, _ domain.PowerRef, destination string) error {
-	downloader.calls++
-	switch downloader.calls {
+	switch downloader.started.Add(1) {
 	case 1:
 		close(downloader.firstStarted)
-	case 2:
-		close(downloader.secondStarted)
 	}
 	<-downloader.release
 	return os.WriteFile(filepath.Join(destination, "payload.txt"), []byte("payload"), 0o600)
+}
+
+type blockingCopier struct {
+	firstStarted chan struct{}
+	release      chan struct{}
+	started      atomic.Int32
+}
+
+func newBlockingCopier() *blockingCopier {
+	return &blockingCopier{firstStarted: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (copier *blockingCopier) copy(source, destination string) error {
+	if copier.started.Add(1) == 1 {
+		close(copier.firstStarted)
+		<-copier.release
+	}
+	return filesystem.CopyDir(source, destination)
+}
+
+type typedNilDownloader struct{}
+
+func (*typedNilDownloader) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+	panic("typed nil downloader must not be called")
+}
+
+type typedNilBuilder struct{}
+
+func (*typedNilBuilder) Build(domain.AgentID, domain.PowerRef, string, string) error {
+	panic("typed nil builder must not be called")
+}
+
+func (*typedNilBuilder) Validate(domain.AgentID, domain.PowerRef, string) error {
+	panic("typed nil builder must not be called")
+}
+
+type failingDownloader struct {
+	err error
+}
+
+func (downloader failingDownloader) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+	return downloader.err
 }

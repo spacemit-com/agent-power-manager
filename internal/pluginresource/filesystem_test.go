@@ -17,7 +17,7 @@ func TestLookupRejectsSymlinkedArtifactRootWithoutChangingOutsideSentinel(t *tes
 	ref := testPluginRef()
 	outside := filepath.Join(t.TempDir(), "outside-artifact")
 	writeValidTestArtifact(t, outside)
-	sentinel := writeOutsideSentinel(t, filepath.Dir(outside))
+	sentinel := writeOutsideSentinel(t, outside)
 	root := testArtifactRoot(roots.cache, domain.AgentCodex, ref)
 	if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
 		t.Fatal(err)
@@ -51,8 +51,30 @@ func TestLookupRejectsSymlinkedPluginLeafWithoutChangingOutsideSentinel(t *testi
 	if err := os.WriteFile(filepath.Join(outside, "payload.txt"), []byte("payload"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sentinel := writeOutsideSentinel(t, filepath.Dir(outside))
+	sentinel := writeOutsideSentinel(t, outside)
 	if err := os.Symlink(outside, filepath.Join(root, "plugins", "demo-v0.1.0")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.Lookup(domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
+	}
+	assertOutsideSentinel(t, sentinel)
+}
+
+func TestLookupRejectsSymlinkedArtifactAncestorWithoutChangingTargetSentinel(t *testing.T) {
+	// 捕获错误变更：只校验最终 root，允许 cache 根以下的祖先 symlink 重定向 artifact。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	ancestor := filepath.Join(roots.cache, "plugins", "codex", "demo")
+	if err := os.MkdirAll(filepath.Dir(ancestor), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "artifact-ancestor-target")
+	writeValidTestArtifact(t, filepath.Join(target, "v0.1.0"))
+	sentinel := writeOutsideSentinel(t, target)
+	if err := os.Symlink(target, ancestor); err != nil {
 		t.Fatal(err)
 	}
 
