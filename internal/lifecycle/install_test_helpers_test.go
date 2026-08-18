@@ -10,6 +10,7 @@ import (
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/lock"
+	"apm/internal/pluginresource"
 	"apm/internal/transaction"
 )
 
@@ -38,8 +39,15 @@ type installFixture struct {
 	mcpRequests              []transaction.MCPInstallRequest
 	pluginDefinition         domain.PluginDefinition
 	pluginFact               adapter.PluginFact
+	pluginFacts              map[string]adapter.PluginFact
+	pluginInspectErrors      map[string]error
+	marketplaceFacts         map[string]adapter.MarketplaceFact
+	marketplaceInspectErrors map[string]error
 	pluginMode               domain.PluginDeploymentMode
 	pluginRequests           []transaction.PluginInstallRequest
+	pluginRequestSink        *[]transaction.PluginInstallRequest
+	pluginResources          *fakePluginResources
+	configRemoveErr          error
 	versionErr               error
 
 	currentAgent domain.AgentID
@@ -47,6 +55,82 @@ type installFixture struct {
 
 	beforeRefresh func()
 	beforeRelease func()
+}
+
+type fakePluginResources struct {
+	calls       *[]string
+	artifacts   map[string]pluginresource.Artifact
+	ensureErr   map[string]error
+	lookupErr   map[string]error
+	stageRoot   string
+	stageErr    error
+	stageCalls  int
+	ensureCalls int
+	lookupCalls int
+}
+
+type installFakePluginResources = fakePluginResources
+
+func pluginArtifactKey(agent domain.AgentID, ref domain.PowerRef) string {
+	return string(agent) + ":" + ref.Name + ":" + ref.Version
+}
+
+func fakePluginArtifact(agent domain.AgentID, ref domain.PowerRef) pluginresource.Artifact {
+	actualName, _ := domain.ActualPluginName(ref)
+	artifact := pluginresource.Artifact{
+		Agent: agent, Power: ref, ActualName: actualName,
+		Root: "/cache/plugins/" + string(agent) + "/" + ref.Name + "/" + ref.Version,
+	}
+	artifact.PluginPath = artifact.Root + "/plugins/" + actualName
+	if agent != domain.AgentHermes {
+		artifact.MarketplaceName, _ = domain.PluginMarketplaceName(ref)
+		artifact.MarketplaceSource = artifact.Root
+	}
+	return artifact
+}
+
+func (resources *fakePluginResources) Ensure(_ context.Context, agent domain.AgentID, ref domain.PowerRef) (pluginresource.Artifact, error) {
+	resources.ensureCalls++
+	if resources.calls != nil {
+		*resources.calls = append(*resources.calls, "resource:ensure:"+string(agent)+":"+ref.Version)
+	}
+	key := pluginArtifactKey(agent, ref)
+	if err := resources.ensureErr[key]; err != nil {
+		return pluginresource.Artifact{}, err
+	}
+	if artifact, ok := resources.artifacts[key]; ok {
+		return artifact, nil
+	}
+	return fakePluginArtifact(agent, ref), nil
+}
+
+func (resources *fakePluginResources) Lookup(agent domain.AgentID, ref domain.PowerRef) (pluginresource.Artifact, error) {
+	resources.lookupCalls++
+	if resources.calls != nil {
+		*resources.calls = append(*resources.calls, "resource:lookup:"+string(agent)+":"+ref.Version)
+	}
+	key := pluginArtifactKey(agent, ref)
+	if err := resources.lookupErr[key]; err != nil {
+		return pluginresource.Artifact{}, err
+	}
+	if artifact, ok := resources.artifacts[key]; ok {
+		return artifact, nil
+	}
+	return fakePluginArtifact(agent, ref), nil
+}
+
+func (resources *fakePluginResources) StageHermes(ref domain.PowerRef) (string, error) {
+	resources.stageCalls++
+	if resources.calls != nil {
+		*resources.calls = append(*resources.calls, "resource:stage-hermes:"+ref.Version)
+	}
+	if resources.stageErr != nil {
+		return "", resources.stageErr
+	}
+	if resources.stageRoot != "" {
+		return resources.stageRoot, nil
+	}
+	return "/staging", nil
 }
 
 type installCacheResponse struct {
@@ -116,7 +200,10 @@ func (*installFakeTransactions) UninstallMCP(context.Context, transaction.MCPUni
 func (m *installFakeTransactions) InstallPlugin(_ context.Context, request transaction.PluginInstallRequest) error {
 	*m.calls = append(*m.calls, "transaction:install-plugin:"+string(request.Agent))
 	m.fixture.pluginRequests = append(m.fixture.pluginRequests, request)
-	return nil
+	if m.fixture.pluginRequestSink != nil {
+		*m.fixture.pluginRequestSink = append(*m.fixture.pluginRequestSink, request)
+	}
+	return m.fixture.transactionInstallErr[request.Agent]
 }
 func (*installFakeTransactions) UninstallPlugin(context.Context, transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, errors.New("unexpected UninstallPlugin call")
@@ -237,9 +324,37 @@ func (a installFakePluginAdapter) PrepareInstall(context.Context, domain.PluginD
 	*a.calls = append(*a.calls, "plugin:prepare:"+string(a.agent))
 	return nil
 }
-func (a installFakePluginAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
-	*a.calls = append(*a.calls, "plugin:inspect:"+string(a.agent))
+func (a installFakePluginAdapter) Inspect(_ context.Context, actualName string) (adapter.PluginFact, error) {
+	*a.calls = append(*a.calls, "plugin:inspect:"+string(a.agent)+":"+actualName)
+	if err := a.fixture.pluginInspectErrors[actualName]; err != nil {
+		return adapter.PluginFact{}, err
+	}
+	if fact, ok := a.fixture.pluginFacts[actualName]; ok {
+		return fact, nil
+	}
+	if a.fixture.pluginFact.ActualName == "" {
+		return adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: actualName}, nil
+	}
 	return a.fixture.pluginFact, nil
+}
+
+func (a installFakePluginAdapter) InspectMarketplace(_ context.Context, name string) (adapter.MarketplaceFact, error) {
+	*a.calls = append(*a.calls, "marketplace:inspect:"+string(a.agent)+":"+name)
+	if err := a.fixture.marketplaceInspectErrors[name]; err != nil {
+		return adapter.MarketplaceFact{}, err
+	}
+	if fact, ok := a.fixture.marketplaceFacts[name]; ok {
+		return fact, nil
+	}
+	return adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: name}, nil
+}
+
+func (installFakePluginAdapter) RegisterMarketplace(context.Context, adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, nil
+}
+
+func (installFakePluginAdapter) UnregisterMarketplace(context.Context, adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, nil
 }
 func (installFakePluginAdapter) Add(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
 	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, nil
@@ -277,7 +392,10 @@ func (*installFakeConfig) List(domain.AgentID) (domain.PowerGroups, error) { ret
 
 func (*installFakeConfig) Set(domain.AgentID, domain.PowerRef) error { return nil }
 
-func (*installFakeConfig) Remove(domain.AgentID, domain.PowerType, string) error { return nil }
+func (c *installFakeConfig) Remove(agent domain.AgentID, powerType domain.PowerType, name string) error {
+	*c.calls = append(*c.calls, "config:remove:"+string(agent)+":"+string(powerType)+":"+name)
+	return c.fixture.configRemoveErr
+}
 
 type installFakeVersions struct {
 	selected string
@@ -288,11 +406,17 @@ func (s *installFakeVersions) Select([]string, string) (string, error) { return 
 
 func newInstallService(t *testing.T, calls *[]string, fixture installFixture) *InstallService {
 	t.Helper()
+	pluginResources := fixture.pluginResources
+	if pluginResources == nil {
+		pluginResources = &fakePluginResources{}
+	}
+	pluginResources.calls = calls
 	service, err := NewInstall(
 		&installFakeLocker{calls: calls, fixture: &fixture},
 		&installFakeTransactions{calls: calls, fixture: &fixture},
 		&installFakeCloud{calls: calls, fixture: &fixture},
 		&installFakeCache{calls: calls, fixture: &fixture},
+		pluginResources,
 		&installFakeRegistry{calls: calls, fixture: &fixture},
 		&installFakeConfig{calls: calls, fixture: &fixture},
 		&installFakeVersions{selected: fixture.selected, err: fixture.versionErr},

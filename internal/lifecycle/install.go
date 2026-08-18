@@ -13,6 +13,7 @@ import (
 	"apm/internal/domain"
 	"apm/internal/lock"
 	"apm/internal/logging"
+	"apm/internal/pluginresource"
 	"apm/internal/transaction"
 )
 
@@ -22,13 +23,15 @@ type InstallService struct {
 	transactions transaction.Manager
 	cloud        cloud.Client
 	cache        cache.PowerCache
+	plugins      pluginresource.Manager
 	registry     AdapterRegistry
 	config       config.Repository
 	versions     VersionSelector
 }
 
 // NewInstall 创建持有完整共享状态区间的 Install 生命周期。
-func NewInstall(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, cache cache.PowerCache, registry AdapterRegistry, config config.Repository, versions VersionSelector) (*InstallService, error) {
+// plugins 仅允许对目标版本 Ensure；已安装旧版本必须在 manifest 判定后由 Lookup 离线读取。
+func NewInstall(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, cache cache.PowerCache, plugins pluginresource.Manager, registry AdapterRegistry, config config.Repository, versions VersionSelector) (*InstallService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Install lifecycle with nil locker")
@@ -38,6 +41,8 @@ func NewInstall(locker lock.Locker, transactions transaction.Manager, cloud clou
 		return nil, errors.New("create Install lifecycle with nil Cloud client")
 	case isNilInterface(cache):
 		return nil, errors.New("create Install lifecycle with nil power cache")
+	case isNilInterface(plugins):
+		return nil, errors.New("create Install lifecycle with nil Plugin Resource manager")
 	case isNilInterface(registry):
 		return nil, errors.New("create Install lifecycle with nil adapter registry")
 	case isNilInterface(config):
@@ -50,6 +55,7 @@ func NewInstall(locker lock.Locker, transactions transaction.Manager, cloud clou
 		transactions: transactions,
 		cloud:        cloud,
 		cache:        cache,
+		plugins:      plugins,
 		registry:     registry,
 		config:       config,
 		versions:     versions,

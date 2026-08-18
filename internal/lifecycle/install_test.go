@@ -301,6 +301,7 @@ func TestNewInstallRejectsNilAndTypedNilDependencies(t *testing.T) {
 	transactions := &installFakeTransactions{calls: &calls, fixture: fixture}
 	cloud := &installFakeCloud{calls: &calls, fixture: fixture}
 	cache := &installFakeCache{calls: &calls, fixture: fixture}
+	pluginResources := &installFakePluginResources{}
 	registry := &installFakeRegistry{calls: &calls, fixture: fixture}
 	config := &installFakeConfig{calls: &calls, fixture: fixture}
 	versions := &installFakeVersions{}
@@ -311,46 +312,52 @@ func TestNewInstallRejectsNilAndTypedNilDependencies(t *testing.T) {
 		want string
 	}{
 		{name: "locker", new: func() (*InstallService, error) {
-			return NewInstall(nil, transactions, cloud, cache, registry, config, versions)
+			return NewInstall(nil, transactions, cloud, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil locker"},
 		{name: "typed nil locker", new: func() (*InstallService, error) {
-			return NewInstall((*installFakeLocker)(nil), transactions, cloud, cache, registry, config, versions)
+			return NewInstall((*installFakeLocker)(nil), transactions, cloud, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil locker"},
 		{name: "transaction manager", new: func() (*InstallService, error) {
-			return NewInstall(locker, nil, cloud, cache, registry, config, versions)
+			return NewInstall(locker, nil, cloud, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil transaction manager"},
 		{name: "typed nil transaction manager", new: func() (*InstallService, error) {
-			return NewInstall(locker, (*installFakeTransactions)(nil), cloud, cache, registry, config, versions)
+			return NewInstall(locker, (*installFakeTransactions)(nil), cloud, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil transaction manager"},
 		{name: "Cloud client", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, nil, cache, registry, config, versions)
+			return NewInstall(locker, transactions, nil, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil Cloud client"},
 		{name: "typed nil Cloud client", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, (*installFakeCloud)(nil), cache, registry, config, versions)
+			return NewInstall(locker, transactions, (*installFakeCloud)(nil), cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil Cloud client"},
 		{name: "power cache", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, nil, registry, config, versions)
+			return NewInstall(locker, transactions, cloud, nil, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil power cache"},
 		{name: "typed nil power cache", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, (*installFakeCache)(nil), registry, config, versions)
+			return NewInstall(locker, transactions, cloud, (*installFakeCache)(nil), pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil power cache"},
+		{name: "Plugin Resource manager", new: func() (*InstallService, error) {
+			return NewInstall(locker, transactions, cloud, cache, nil, registry, config, versions)
+		}, want: "create Install lifecycle with nil Plugin Resource manager"},
+		{name: "typed nil Plugin Resource manager", new: func() (*InstallService, error) {
+			return NewInstall(locker, transactions, cloud, cache, (*installFakePluginResources)(nil), registry, config, versions)
+		}, want: "create Install lifecycle with nil Plugin Resource manager"},
 		{name: "adapter registry", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, nil, config, versions)
+			return NewInstall(locker, transactions, cloud, cache, pluginResources, nil, config, versions)
 		}, want: "create Install lifecycle with nil adapter registry"},
 		{name: "typed nil adapter registry", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, (*installFakeRegistry)(nil), config, versions)
+			return NewInstall(locker, transactions, cloud, cache, pluginResources, (*installFakeRegistry)(nil), config, versions)
 		}, want: "create Install lifecycle with nil adapter registry"},
 		{name: "config repository", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, registry, nil, versions)
+			return NewInstall(locker, transactions, cloud, cache, pluginResources, registry, nil, versions)
 		}, want: "create Install lifecycle with nil config repository"},
 		{name: "typed nil config repository", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, registry, (*installFakeConfig)(nil), versions)
+			return NewInstall(locker, transactions, cloud, cache, pluginResources, registry, (*installFakeConfig)(nil), versions)
 		}, want: "create Install lifecycle with nil config repository"},
 		{name: "version selector", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, registry, config, nil)
+			return NewInstall(locker, transactions, cloud, cache, pluginResources, registry, config, nil)
 		}, want: "create Install lifecycle with nil version selector"},
 		{name: "typed nil version selector", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, registry, config, (*installFakeVersions)(nil))
+			return NewInstall(locker, transactions, cloud, cache, pluginResources, registry, config, (*installFakeVersions)(nil))
 		}, want: "create Install lifecycle with nil version selector"},
 	}
 

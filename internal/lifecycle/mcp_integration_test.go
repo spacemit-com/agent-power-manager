@@ -136,11 +136,12 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	if err != nil {
 		t.Fatal(err)
 	}
-	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, registry, repository, version.NewSelector())
+	pluginResources := &installFakePluginResources{}
+	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}
-	uninstaller, err := NewUninstall(locker, transactions, cloudClient, registry, repository)
+	uninstaller, err := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
 	if err != nil {
 		t.Fatal(err)
 	}

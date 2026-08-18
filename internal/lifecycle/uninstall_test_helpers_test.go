@@ -29,7 +29,15 @@ type uninstallFixture struct {
 	mcpGetErrors          map[string]error
 	mcpRequests           []transaction.MCPUninstallRequest
 	pluginFact            adapter.PluginFact
+	pluginFacts           map[string]adapter.PluginFact
+	pluginInspectErrors   map[string]error
+	marketplaceFacts      map[string]adapter.MarketplaceFact
+	marketplaceErrors     map[string]error
+	pluginMode            domain.PluginDeploymentMode
 	pluginRequests        []transaction.PluginUninstallRequest
+	pluginRequestSink     *[]transaction.PluginUninstallRequest
+	pluginResources       *fakePluginResources
+	configRemoveErr       error
 
 	acquireErr           error
 	recoverErr           error
@@ -114,7 +122,10 @@ func (*uninstallFakeTransactions) InstallPlugin(context.Context, transaction.Plu
 func (m *uninstallFakeTransactions) UninstallPlugin(_ context.Context, request transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
 	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall-plugin:"+string(request.Agent))
 	m.fixture.pluginRequests = append(m.fixture.pluginRequests, request)
-	return transaction.UninstallResult{}, nil
+	if m.fixture.pluginRequestSink != nil {
+		*m.fixture.pluginRequestSink = append(*m.fixture.pluginRequestSink, request)
+	}
+	return m.fixture.transactionResults[request.Agent], m.fixture.transactionErrors[request.Agent]
 }
 
 type uninstallFakeCloud struct {
@@ -130,9 +141,11 @@ func (c *uninstallFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, erro
 }
 
 func (*uninstallFakeCloud) GetPlugin(domain.PowerRef) (domain.PluginDefinition, error) {
-	return domain.PluginDefinition{}, nil
+	panic("Plugin uninstall must not call Cloud GetPlugin")
 }
-func (*uninstallFakeCloud) DownloadPlugin(domain.PowerRef) error { return nil }
+func (*uninstallFakeCloud) DownloadPlugin(domain.PowerRef) error {
+	panic("Plugin uninstall must not call Cloud DownloadPlugin")
+}
 
 type uninstallFakeRegistry struct {
 	calls   *[]string
@@ -177,15 +190,43 @@ type uninstallFakePluginAdapter struct {
 	fixture *uninstallFixture
 }
 
-func (uninstallFakePluginAdapter) DeploymentMode() domain.PluginDeploymentMode {
+func (adapter uninstallFakePluginAdapter) DeploymentMode() domain.PluginDeploymentMode {
+	if adapter.fixture.pluginMode != "" {
+		return adapter.fixture.pluginMode
+	}
 	return domain.PluginDeploymentMarketplace
 }
 func (uninstallFakePluginAdapter) PrepareInstall(context.Context, domain.PluginDefinition) error {
 	return errors.New("unexpected PrepareInstall call")
 }
-func (a uninstallFakePluginAdapter) Inspect(context.Context, string) (adapter.PluginFact, error) {
-	recordUninstallEvent(a.calls, a.fixture, "plugin:inspect:"+string(a.agent))
+func (a uninstallFakePluginAdapter) Inspect(_ context.Context, actualName string) (adapter.PluginFact, error) {
+	recordUninstallEvent(a.calls, a.fixture, "plugin:inspect:"+string(a.agent)+":"+actualName)
+	if err := a.fixture.pluginInspectErrors[actualName]; err != nil {
+		return adapter.PluginFact{}, err
+	}
+	if fact, ok := a.fixture.pluginFacts[actualName]; ok {
+		return fact, nil
+	}
+	if a.fixture.pluginFact.ActualName == "" {
+		return adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: actualName}, nil
+	}
 	return a.fixture.pluginFact, nil
+}
+func (a uninstallFakePluginAdapter) InspectMarketplace(_ context.Context, name string) (adapter.MarketplaceFact, error) {
+	recordUninstallEvent(a.calls, a.fixture, "marketplace:inspect:"+string(a.agent)+":"+name)
+	if err := a.fixture.marketplaceErrors[name]; err != nil {
+		return adapter.MarketplaceFact{}, err
+	}
+	if fact, ok := a.fixture.marketplaceFacts[name]; ok {
+		return fact, nil
+	}
+	return adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: name}, nil
+}
+func (uninstallFakePluginAdapter) RegisterMarketplace(context.Context, adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, nil
+}
+func (uninstallFakePluginAdapter) UnregisterMarketplace(context.Context, adapter.MarketplaceTarget) (adapter.PluginMutationResult, error) {
+	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, nil
 }
 func (uninstallFakePluginAdapter) Add(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
 	return adapter.PluginMutationResult{}, nil
@@ -222,14 +263,23 @@ func (*uninstallFakeConfig) Find(domain.AgentID, domain.PowerType, string) (doma
 
 func (*uninstallFakeConfig) Set(domain.AgentID, domain.PowerRef) error { return nil }
 
-func (*uninstallFakeConfig) Remove(domain.AgentID, domain.PowerType, string) error { return nil }
+func (c *uninstallFakeConfig) Remove(agent domain.AgentID, powerType domain.PowerType, name string) error {
+	recordUninstallEvent(c.calls, c.fixture, "config:remove:"+string(agent)+":"+string(powerType)+":"+name)
+	return c.fixture.configRemoveErr
+}
 
 func newUninstallService(t *testing.T, calls *[]string, fixture uninstallFixture) *UninstallService {
 	t.Helper()
+	pluginResources := fixture.pluginResources
+	if pluginResources == nil {
+		pluginResources = &fakePluginResources{}
+	}
+	pluginResources.calls = calls
 	service, err := NewUninstall(
 		&uninstallFakeLocker{calls: calls, fixture: &fixture},
 		&uninstallFakeTransactions{calls: calls, fixture: &fixture},
 		&uninstallFakeCloud{calls: calls, fixture: &fixture},
+		pluginResources,
 		&uninstallFakeRegistry{calls: calls, fixture: &fixture},
 		&uninstallFakeConfig{calls: calls, fixture: &fixture},
 	)

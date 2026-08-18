@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,9 +11,11 @@ import (
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/config"
+	"apm/internal/domain"
 	"apm/internal/lifecycle"
 	"apm/internal/lock"
 	"apm/internal/logging"
+	"apm/internal/pluginresource"
 	"apm/internal/transaction"
 	"apm/internal/version"
 )
@@ -83,11 +86,16 @@ func newInstallLifecycle() (cli.InstallLifecycle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create power cache: %w", err)
 	}
+	pluginResources, err := newPluginResources(cloudClient)
+	if err != nil {
+		return nil, err
+	}
 	return lifecycle.NewInstall(
 		locker,
 		transactions,
 		cloudClient,
 		powerCache,
+		pluginResources,
 		registry,
 		repository,
 		version.NewSelector(),
@@ -110,7 +118,11 @@ func newUninstallLifecycle() (cli.UninstallLifecycle, error) {
 	if err != nil {
 		return nil, err
 	}
-	return lifecycle.NewUninstall(locker, transactions, cloudClient, registry, repository)
+	pluginResources, err := newPluginResources(cloudClient)
+	if err != nil {
+		return nil, err
+	}
+	return lifecycle.NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
 }
 
 // newFixLifecycle 创建修复中断事务所需的锁、清单和事务恢复依赖。
@@ -128,7 +140,7 @@ func newFixLifecycle() (cli.FixLifecycle, error) {
 	return lifecycle.NewFix(locker, transactions)
 }
 
-func newLocalCloudClient() (cloud.Client, error) {
+func newLocalCloudClient() (*cloud.LocalClient, error) {
 	resourcesRoot, err := filepath.Abs(filepath.Join("internal", "cloud", "resources"))
 	if err != nil {
 		return nil, fmt.Errorf("resolve local Cloud resources: %w", err)
@@ -138,4 +150,21 @@ func newLocalCloudClient() (cloud.Client, error) {
 		return nil, fmt.Errorf("create local Cloud client: %w", err)
 	}
 	return cloudClient, nil
+}
+
+// pluginDownloadBridge 在 Cloud 旧接口完成重命名前，把原始包下载能力适配给 Plugin Resource。
+type pluginDownloadBridge struct {
+	source cloud.PluginPackageDownloader
+}
+
+func (bridge pluginDownloadBridge) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
+	return bridge.source.DownloadPluginTo(ctx, agent, ref, destination)
+}
+
+func newPluginResources(source cloud.PluginPackageDownloader) (pluginresource.Manager, error) {
+	manager, err := pluginresource.New(pluginDownloadBridge{source: source})
+	if err != nil {
+		return nil, fmt.Errorf("create Plugin Resource manager: %w", err)
+	}
+	return manager, nil
 }

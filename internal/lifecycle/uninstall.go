@@ -12,6 +12,7 @@ import (
 	"apm/internal/domain"
 	"apm/internal/lock"
 	"apm/internal/logging"
+	"apm/internal/pluginresource"
 	"apm/internal/transaction"
 )
 
@@ -20,12 +21,14 @@ type UninstallService struct {
 	locker       lock.Locker
 	transactions transaction.Manager
 	cloud        cloud.Client
+	plugins      pluginresource.Manager
 	registry     AdapterRegistry
 	config       config.Repository
 }
 
 // NewUninstall 创建持有完整共享状态区间的 Uninstall 生命周期。
-func NewUninstall(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, registry AdapterRegistry, config config.Repository) (*UninstallService, error) {
+// plugins 在卸载中只允许 Lookup manifest 指向的精确版本，禁止 Ensure 或回源 Cloud。
+func NewUninstall(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, plugins pluginresource.Manager, registry AdapterRegistry, config config.Repository) (*UninstallService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Uninstall lifecycle with nil locker")
@@ -33,12 +36,14 @@ func NewUninstall(locker lock.Locker, transactions transaction.Manager, cloud cl
 		return nil, errors.New("create Uninstall lifecycle with nil transaction manager")
 	case isNilInterface(cloud):
 		return nil, errors.New("create Uninstall lifecycle with nil Cloud client")
+	case isNilInterface(plugins):
+		return nil, errors.New("create Uninstall lifecycle with nil Plugin Resource manager")
 	case isNilInterface(registry):
 		return nil, errors.New("create Uninstall lifecycle with nil adapter registry")
 	case isNilInterface(config):
 		return nil, errors.New("create Uninstall lifecycle with nil config repository")
 	}
-	return &UninstallService{locker: locker, transactions: transactions, cloud: cloud, registry: registry, config: config}, nil
+	return &UninstallService{locker: locker, transactions: transactions, cloud: cloud, plugins: plugins, registry: registry, config: config}, nil
 }
 
 var _ cli.UninstallLifecycle = (*UninstallService)(nil)

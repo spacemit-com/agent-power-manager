@@ -17,9 +17,27 @@ import (
 	"apm/internal/domain"
 	"apm/internal/lock"
 	"apm/internal/paths"
+	"apm/internal/pluginresource"
 	"apm/internal/transaction"
 	"apm/internal/version"
 )
+
+type integrationPluginDownloadBridge struct {
+	source cloud.PluginPackageDownloader
+}
+
+func (bridge integrationPluginDownloadBridge) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
+	return bridge.source.DownloadPluginTo(ctx, agent, ref, destination)
+}
+
+func newIntegrationPluginResources(t *testing.T, source cloud.PluginPackageDownloader) pluginresource.Manager {
+	t.Helper()
+	manager, err := pluginresource.New(integrationPluginDownloadBridge{source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manager
+}
 
 const fakeHermesPluginScript = `#!/bin/sh
 case "$0" in "$FAKE_PLUGIN_BIN"/*) ;; *) exit 97 ;; esac
@@ -47,12 +65,14 @@ case "$0" in "$FAKE_PLUGIN_BIN"/*) ;; *) exit 97 ;; esac
 printf '%s|%s\n' "$0" "$*" >> "$FAKE_PLUGIN_CALLS"
 market="$FAKE_PLUGIN_STATE/marketplace-$agent"
 plugin="$FAKE_PLUGIN_STATE/plugin-$agent"
+marketplace_name=${FAKE_PLUGIN_MARKETPLACE_NAME:-apm-demo-plugin}
 case "$agent:$1:$2:$3" in
   codex:plugin:marketplace:list)
     if [ -f "$market" ]; then
-      printf '{"marketplaces":[{"name":"apm","marketplaceSource":{"sourceType":"local","source":"%s"}}]}\n' "$FAKE_PLUGIN_MARKETPLACE"
+      printf '{"marketplaces":[{"name":"%s","marketplaceSource":{"sourceType":"local","source":"%s"}}]}\n' "$marketplace_name" "$(/bin/cat "$market")"
     else printf '{"marketplaces":[]}\n'; fi ;;
-  codex:plugin:marketplace:add) : > "$market" ;;
+  codex:plugin:marketplace:add) printf '%s' "$4" > "$market" ;;
+  codex:plugin:marketplace:remove) /bin/rm -f "$market" ;;
   codex:plugin:marketplace:upgrade) : ;;
   codex:plugin:list:--json)
     if [ -f "$plugin" ]; then id=$(/bin/cat "$plugin"); name=${id%@*}; printf '{"installed":[{"name":"%s","pluginId":"%s","enabled":false}]}\n' "$name" "$id"
@@ -60,9 +80,10 @@ case "$agent:$1:$2:$3" in
   codex:plugin:add:*) printf '%s' "$3" > "$plugin" ;;
   codex:plugin:remove:*) /bin/rm -f "$plugin" ;;
   claude:plugin:marketplace:list)
-    if [ -f "$market" ]; then printf '[{"name":"apm","source":"directory","url":"%s"}]\n' "$FAKE_PLUGIN_MARKETPLACE"
+    if [ -f "$market" ]; then printf '[{"name":"%s","source":"directory","url":"%s"}]\n' "$marketplace_name" "$(/bin/cat "$market")"
     else printf '[]\n'; fi ;;
-  claude:plugin:marketplace:add) : > "$market" ;;
+  claude:plugin:marketplace:add) printf '%s' "$4" > "$market" ;;
+  claude:plugin:marketplace:remove) /bin/rm -f "$market" ;;
   claude:plugin:marketplace:update) : ;;
   claude:plugin:list:--json)
     if [ -f "$plugin" ]; then id=$(/bin/cat "$plugin"); printf '[{"id":"%s","scope":"user","enabled":false}]\n' "$id"
@@ -111,11 +132,12 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	}
 	locker, _ := lock.NewDefault()
 	powerCache, _ := cache.NewFilesystem()
-	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, registry, repository, version.NewSelector())
+	pluginResources := newIntegrationPluginResources(t, cloudClient)
+	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}
-	uninstaller, err := NewUninstall(locker, transactions, cloudClient, registry, repository)
+	uninstaller, err := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,8 +239,9 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 			}
 			locker, _ := lock.NewDefault()
 			powerCache, _ := cache.NewFilesystem()
-			installer, _ := NewInstall(locker, transactions, cloudClient, powerCache, registry, repository, version.NewSelector())
-			uninstaller, _ := NewUninstall(locker, transactions, cloudClient, registry, repository)
+			pluginResources := newIntegrationPluginResources(t, cloudClient)
+			installer, _ := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
+			uninstaller, _ := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
 			for _, target := range []struct {
 				version string
 				outcome cli.InstallOutcome
@@ -244,8 +267,8 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 					t.Fatalf("unsafe CLI call %q", line)
 				}
 			}
-			if _, err := os.Stat(filepath.Join(cacheHome, "apm", "plugins")); !os.IsNotExist(err) {
-				t.Fatalf("marketplace install touched Plugin cache: %v", err)
+			if info, err := os.Stat(filepath.Join(cacheHome, "apm", "plugins", string(agent), "demo-plugin")); err != nil || !info.IsDir() {
+				t.Fatalf("marketplace install did not persist Plugin cache: %v", err)
 			}
 		})
 	}
@@ -326,11 +349,12 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, registry, repository, version.NewSelector())
+	pluginResources := newIntegrationPluginResources(t, cloudClient)
+	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}
-	uninstaller, err := NewUninstall(locker, transactions, cloudClient, registry, repository)
+	uninstaller, err := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +382,7 @@ func TestPluginIntegrationRejectsUnmanagedTargetAndMarketplaceConflict(t *testin
 
 	t.Run("marketplace source conflict", func(t *testing.T) {
 		harness := newIsolatedPluginHarness(t, domain.AgentCodex)
-		if err := os.WriteFile(filepath.Join(harness.state, "marketplace-codex"), nil, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(harness.state, "marketplace-codex"), []byte(filepath.Join(harness.root, "foreign-marketplace")), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv("FAKE_PLUGIN_MARKETPLACE", filepath.Join(harness.root, "foreign-marketplace"))
@@ -369,7 +393,7 @@ func TestPluginIntegrationRejectsUnmanagedTargetAndMarketplaceConflict(t *testin
 		if _, statErr := os.Lstat(filepath.Join(harness.state, "plugin-codex")); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("conflicting marketplace mutated Plugin state: %v", statErr)
 		}
-		harness.assertMarketplaceCacheAndStagingAbsent()
+		harness.assertMarketplaceCachePresentAndStagingAbsent(domain.AgentCodex, "v0.0.1")
 		harness.assertOnlyFakeExecutables()
 	})
 }
@@ -601,7 +625,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesyst
 
 func TestPluginIntegrationMultiAgentInstallFailsFast(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes)
-	if err := os.WriteFile(filepath.Join(harness.state, "marketplace-claude"), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(harness.state, "marketplace-claude"), []byte(filepath.Join(harness.root, "foreign-marketplace")), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("FAKE_PLUGIN_MARKETPLACE", filepath.Join(harness.root, "foreign-marketplace"))
@@ -620,14 +644,17 @@ func TestPluginIntegrationMultiAgentInstallFailsFast(t *testing.T) {
 	if strings.Contains(string(contents), filepath.Join(harness.fakeBin, "codex")+"|") || strings.Contains(string(contents), filepath.Join(harness.fakeBin, "hermes")+"|") {
 		t.Fatalf("fail-fast invoked later Agent CLI:\n%s", contents)
 	}
-	harness.assertMarketplaceCacheAndStagingAbsent()
+	harness.assertMarketplaceCachePresentAndStagingAbsent(domain.AgentClaudeCode, "v0.0.1")
 	harness.assertOnlyFakeExecutables()
 }
 
-func (h *isolatedPluginHarness) assertMarketplaceCacheAndStagingAbsent() {
+func (h *isolatedPluginHarness) assertMarketplaceCachePresentAndStagingAbsent(agent domain.AgentID, version string) {
 	h.t.Helper()
+	cachePath := filepath.Join(h.cacheHome, "apm", "plugins", string(agent), "demo-plugin", version)
+	if info, err := os.Stat(cachePath); err != nil || !info.IsDir() {
+		h.t.Fatalf("Plugin cache %q is not persisted: %v", cachePath, err)
+	}
 	for _, path := range []string{
-		filepath.Join(h.cacheHome, "apm", "plugins"),
 		filepath.Join(h.root, "apm-home", ".apm", "staging"),
 		filepath.Join(h.root, "apm-home", ".apm", ".tmp", "staging"),
 	} {
