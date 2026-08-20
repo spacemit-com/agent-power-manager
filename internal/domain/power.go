@@ -10,6 +10,8 @@ const (
 	PowerTypeMCP PowerType = "mcp"
 	// PowerTypePlugin 表示插件能力。
 	PowerTypePlugin PowerType = "plugin"
+	// PowerTypeAgent 表示 Agent 能力（Bibit 子代理，由 agent.yaml 配置）。
+	PowerTypeAgent PowerType = "agent"
 )
 
 // PowerRef 表示能力的类别、名称和可选版本。
