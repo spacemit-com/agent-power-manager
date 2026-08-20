@@ -1,8 +1,10 @@
 # Generate Per-Plugin Local Marketplaces
 
-- Status：Accepted
+- Status：Superseded by ADR-014
 - Date：2026-08-17
 - Decision Makers：APM maintainers
+
+> 已由 [ADR-014](ADR-014-share-multi-agent-plugin-artifacts.md) 取代：Cloud 与持久缓存改为每个 Plugin 版本一份共享多 Agent 制品，Plugin 运行时名称和 selector 改为逻辑名称；以下正文保留为历史决策上下文。
 
 ## Context
 
