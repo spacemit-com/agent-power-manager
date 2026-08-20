@@ -544,39 +544,208 @@ func TestRecoverMarketplacePluginRollbackResumesAfterEveryAction(t *testing.T) {
 	}
 }
 
-func TestRecoverRetainedMarketplaceReinstallRollbackPreservesSourceAcrossRetry(t *testing.T) {
+func TestRecoverRetainedMarketplaceReinstallRollbackLeavesPresentSourceUntouched(t *testing.T) {
+	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
+		for _, phase := range []Phase{PhaseAddingNewPlugin, PhaseRollingBack} {
+			t.Run(string(agent)+"/"+string(phase), func(t *testing.T) {
+				fixture := newMarketplaceRecoveryFixture(t, OperationInstall, phase, false)
+				fixture.journal.Agent = agent
+				fixture.journal.Plugin.Marketplace.PreviousSource = fixture.targetSource
+				fixture.journal.Plugin.Marketplace.PreviousPresent = true
+				fixture.store.journal = fixture.journal
+				fixture.setMarketplace(fixture.targetSource)
+
+				// 若实现错误地注销 retained marketplace，本注入会使恢复失败并暴露多余写操作。
+				fixture.adapter.interrupt["unregister-marketplace:"+fixture.targetSource] = errors.New("retained marketplace must not be unregistered")
+				result, err := fixture.recover()
+				if err != nil || !result.Recovered || result.Direction != RecoveryRollback {
+					t.Fatalf("Recover() = %+v, %v", result, err)
+				}
+				if fixture.store.found || fixture.adapter.marketplace.Presence != adapter.MarketplacePresent || fixture.adapter.marketplace.Source != fixture.targetSource {
+					t.Fatalf("recovery state = journal %v marketplace %+v", fixture.store.found, fixture.adapter.marketplace)
+				}
+				for _, event := range fixture.events {
+					if strings.HasPrefix(event, "unregister-marketplace:") || strings.HasPrefix(event, "register-marketplace:") {
+						t.Fatalf("retained marketplace rollback mutated marketplace: events=%v", fixture.events)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestRecoverRetainedMarketplaceReinstallCommitLeavesPresentSourceUntouched(t *testing.T) {
 	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
 		t.Run(string(agent), func(t *testing.T) {
-			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseAddingNewPlugin, false)
+			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseCommitting, false)
 			fixture.journal.Agent = agent
 			fixture.journal.Plugin.Marketplace.PreviousSource = fixture.targetSource
 			fixture.journal.Plugin.Marketplace.PreviousPresent = true
 			fixture.store.journal = fixture.journal
 			fixture.setMarketplace(fixture.targetSource)
+			fixture.setPlugin(fixture.target, adapter.PluginPresent)
 
-			interrupted := errors.New("injected retained marketplace rollback interruption")
-			unregister := "unregister-marketplace:" + fixture.targetSource
-			fixture.adapter.interrupt[unregister] = interrupted
-			first, err := fixture.recover()
-			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, interrupted) || first.Recovered || first.Direction != RecoveryRollback {
-				t.Fatalf("first Recover() = %+v, %v", first, err)
+			result, err := fixture.recover()
+			if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
+				t.Fatalf("Recover() = %+v, %v", result, err)
 			}
-			if !fixture.store.found || fixture.store.journal.Phase != PhaseRollingBack || fixture.adapter.marketplace.Presence != adapter.MarketplaceAbsent {
-				t.Fatalf("first recovery state = journal %v/%q marketplace %+v", fixture.store.found, fixture.store.journal.Phase, fixture.adapter.marketplace)
-			}
-
-			fixture.adapter.interrupt = map[string]error{}
-			second, err := fixture.recover()
-			if err != nil || !second.Recovered || second.Direction != RecoveryRollback {
-				t.Fatalf("second Recover() = %+v, %v", second, err)
-			}
-			if fixture.store.found || fixture.adapter.marketplace.Presence != adapter.MarketplacePresent || fixture.adapter.marketplace.Source != fixture.targetSource {
-				t.Fatalf("second recovery state = journal %v marketplace %+v", fixture.store.found, fixture.adapter.marketplace)
-			}
-			if fact := fixture.adapter.plugins[fixture.target.ActualName]; fact.Presence != adapter.PluginAbsent {
-				t.Fatalf("rollback adopted Plugin target: %+v", fact)
+			for _, event := range fixture.events {
+				if strings.HasPrefix(event, "unregister-marketplace:") || strings.HasPrefix(event, "register-marketplace:") {
+					t.Fatalf("retained marketplace commit mutated marketplace: events=%v", fixture.events)
+				}
 			}
 		})
+	}
+}
+
+func TestRecoverRetainedMarketplaceReinstallFixedRollbackRemovesOnlyPlugin(t *testing.T) {
+	fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, false)
+	fixture.journal.Plugin.Marketplace.PreviousSource = fixture.targetSource
+	fixture.journal.Plugin.Marketplace.PreviousPresent = true
+	fixture.store.journal = fixture.journal
+	fixture.setMarketplace(fixture.targetSource)
+	fixture.setPlugin(fixture.target, adapter.PluginPresent)
+
+	result, err := fixture.recover()
+	if err != nil || !result.Recovered || result.Direction != RecoveryRollback {
+		t.Fatalf("Recover() = %+v, %v", result, err)
+	}
+	if fixture.adapter.marketplace.Presence != adapter.MarketplacePresent || fixture.adapter.marketplace.Source != fixture.targetSource {
+		t.Fatalf("retained marketplace changed: %+v", fixture.adapter.marketplace)
+	}
+	if fact := fixture.adapter.plugins[fixture.target.ActualName]; fact.Presence != adapter.PluginAbsent {
+		t.Fatalf("rolled-back Plugin remains: %+v", fact)
+	}
+	writes := marketplaceRecoveryWrites(fixture.events)
+	want := []string{"remove-plugin", "delete:journal"}
+	if !reflect.DeepEqual(writes, want) {
+		t.Fatalf("rollback writes = %v, want %v; events=%v", writes, want, fixture.events)
+	}
+}
+
+func TestRecoverRetainedMarketplaceReinstallAbsentSourceRequiresFixedRollback(t *testing.T) {
+	fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseAddingNewPlugin, false)
+	fixture.journal.Plugin.Marketplace.PreviousSource = fixture.targetSource
+	fixture.journal.Plugin.Marketplace.PreviousPresent = true
+	fixture.store.journal = fixture.journal
+
+	result, err := fixture.recover()
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered {
+		t.Fatalf("Recover() = %+v, %v; want fail closed", result, err)
+	}
+	if !fixture.store.found || fixture.store.journal.Phase != PhaseAddingNewPlugin {
+		t.Fatalf("journal = found %v phase %q, want unchanged adding-new-plugin", fixture.store.found, fixture.store.journal.Phase)
+	}
+	for _, event := range fixture.events {
+		if strings.HasPrefix(event, "unregister-marketplace:") || strings.HasPrefix(event, "register-marketplace:") {
+			t.Fatalf("unfixed retained recovery mutated marketplace: events=%v", fixture.events)
+		}
+	}
+}
+
+func TestRecoverRetainedMarketplaceReinstallAbsentSourceValidatesOfflineBeforeRegister(t *testing.T) {
+	fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, false)
+	fixture.journal.Plugin.Marketplace.PreviousSource = fixture.targetSource
+	fixture.journal.Plugin.Marketplace.PreviousPresent = true
+	fixture.store.journal = fixture.journal
+	if err := os.Remove(filepath.Join(fixture.targetSource, ".agents", "plugins", "marketplace.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := fixture.recover()
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != RecoveryRollback {
+		t.Fatalf("Recover() = %+v, %v; want offline artifact rejection", result, err)
+	}
+	if !fixture.store.found || fixture.store.journal.Phase != PhaseRollingBack {
+		t.Fatalf("journal = found %v phase %q", fixture.store.found, fixture.store.journal.Phase)
+	}
+	for _, event := range fixture.events {
+		if strings.HasPrefix(event, "register-marketplace:") {
+			t.Fatalf("invalid offline artifact reached register: events=%v", fixture.events)
+		}
+	}
+}
+
+func TestRecoverRetainedMarketplaceReinstallAbsentSourceRegisterRetries(t *testing.T) {
+	states := []struct {
+		name         string
+		answer       pluginMutationAnswer
+		firstPresent bool
+	}{
+		{
+			name: "applied with error",
+			answer: pluginMutationAnswer{
+				result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied},
+			},
+			firstPresent: true,
+		},
+		{
+			name: "not applied",
+			answer: pluginMutationAnswer{
+				result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied},
+			},
+		},
+		{
+			name: "unknown",
+			answer: pluginMutationAnswer{
+				result: adapter.PluginMutationResult{State: adapter.PluginMutationUnknown},
+			},
+		},
+	}
+	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
+		for _, test := range states {
+			t.Run(string(agent)+"/"+test.name, func(t *testing.T) {
+				fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, false)
+				fixture.journal.Agent = agent
+				fixture.journal.Plugin.Marketplace.PreviousSource = fixture.targetSource
+				fixture.journal.Plugin.Marketplace.PreviousPresent = true
+				fixture.store.journal = fixture.journal
+
+				injected := errors.New("injected retained marketplace register failure")
+				test.answer.err = injected
+				register := "register-marketplace:" + fixture.targetSource
+				fixture.adapter.mutationAnswers[register] = []pluginMutationAnswer{test.answer}
+				first, err := fixture.recover()
+				if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, injected) || first.Recovered || first.Direction != RecoveryRollback {
+					t.Fatalf("first Recover() = %+v, %v", first, err)
+				}
+				if !fixture.store.found || fixture.store.journal.Phase != PhaseRollingBack {
+					t.Fatalf("first journal = found %v phase %q", fixture.store.found, fixture.store.journal.Phase)
+				}
+				if got := fixture.adapter.marketplace.Presence == adapter.MarketplacePresent; got != test.firstPresent {
+					t.Fatalf("marketplace present after first recovery = %v, want %v", got, test.firstPresent)
+				}
+
+				fixture.events = nil
+				fixture.adapter.events = &fixture.events
+				fixture.store.events = &fixture.events
+				fixture.manifests.events = &fixture.events
+				fixture.resolver.events = &fixture.events
+				second, err := fixture.recover()
+				if err != nil || !second.Recovered || second.Direction != RecoveryRollback {
+					t.Fatalf("second Recover() = %+v, %v", second, err)
+				}
+				if fixture.store.found || fixture.adapter.marketplace.Presence != adapter.MarketplacePresent || fixture.adapter.marketplace.Source != fixture.targetSource {
+					t.Fatalf("second recovery state = journal %v marketplace %+v", fixture.store.found, fixture.adapter.marketplace)
+				}
+				registers := 0
+				for _, event := range fixture.events {
+					if strings.HasPrefix(event, "unregister-marketplace:") {
+						t.Fatalf("retained retry unregistered marketplace: events=%v", fixture.events)
+					}
+					if strings.HasPrefix(event, "register-marketplace:") {
+						registers++
+					}
+				}
+				wantRegisters := 1
+				if test.firstPresent {
+					wantRegisters = 0
+				}
+				if registers != wantRegisters {
+					t.Fatalf("second recovery register calls = %d, want %d; events=%v", registers, wantRegisters, fixture.events)
+				}
+			})
+		}
 	}
 }
 

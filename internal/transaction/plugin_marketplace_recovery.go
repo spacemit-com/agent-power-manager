@@ -20,6 +20,7 @@ const (
 	marketplaceRecoveryAbsent marketplaceRecoverySelection = iota
 	marketplaceRecoveryPrevious
 	marketplaceRecoveryTarget
+	marketplaceRecoveryRetained
 )
 
 type marketplaceRecoveryFacts struct {
@@ -74,7 +75,7 @@ func inspectMarketplaceRecoveryFacts(ctx context.Context, journal Journal, marke
 	facts := marketplaceRecoveryFacts{marketplace: selection}
 	if pluginPresent {
 		switch selection {
-		case marketplaceRecoveryTarget:
+		case marketplaceRecoveryTarget, marketplaceRecoveryRetained:
 			facts.targetPresent = true
 		case marketplaceRecoveryPrevious:
 			facts.previousPresent = true
@@ -96,6 +97,10 @@ func classifyRecoveryMarketplaceFact(fact adapter.MarketplaceFact, journal Plugi
 		}
 		return marketplaceRecoveryAbsent, nil
 	case adapter.MarketplacePresent:
+		// 重装 journal 的 previous/target source 相同；必须保留其卸载后遗留的 marketplace 身份。
+		if retainedMarketplaceRecoveryPreState(journal) && fact.Source == journal.TargetSource {
+			return marketplaceRecoveryRetained, nil
+		}
 		switch fact.Source {
 		case journal.TargetSource:
 			return marketplaceRecoveryTarget, nil
@@ -108,6 +113,10 @@ func classifyRecoveryMarketplaceFact(fact adapter.MarketplaceFact, journal Plugi
 	default:
 		return 0, fmt.Errorf("marketplace %q has presence %q: %w", fact.Name, fact.Presence, ErrIndeterminateState)
 	}
+}
+
+func retainedMarketplaceRecoveryPreState(marketplace PluginMarketplaceJournalPayload) bool {
+	return marketplace.PreviousPresent && marketplace.PreviousSource != "" && marketplace.PreviousSource == marketplace.TargetSource
 }
 
 func inspectExactRecoveryPlugin(ctx context.Context, pluginAdapter adapter.PluginAdapter, target adapter.PluginTarget) (bool, error) {
@@ -153,7 +162,7 @@ func (s *Service) recoverLocalMarketplacePluginInstall(ctx context.Context, jour
 	if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 		return err
 	}
-	if journal.Plugin.Marketplace.PreviousPresent && facts.marketplace != marketplaceRecoveryPrevious {
+	if journal.Plugin.Marketplace.PreviousPresent && facts.marketplace != marketplaceRecoveryPrevious && facts.marketplace != marketplaceRecoveryRetained {
 		previousRef := journal.Power
 		if journal.Previous != nil {
 			previousRef = *journal.Previous
@@ -168,7 +177,7 @@ func (s *Service) recoverLocalMarketplacePluginInstall(ctx context.Context, jour
 func selectMarketplaceInstallRecoveryDirection(journal Journal, facts marketplaceRecoveryFacts) (RecoveryDirection, error) {
 	previousExpected := journal.Plugin.PreviousPresent
 	if journal.Phase == PhaseCommitting {
-		if facts.marketplace != marketplaceRecoveryTarget || !facts.targetPresent || previousExpected && facts.previousPresent {
+		if !marketplaceRecoveryHasTargetSource(facts.marketplace) || !facts.targetPresent || previousExpected && facts.previousPresent {
 			return "", fmt.Errorf("committing marketplace Plugin facts are not exact target state: %w", ErrIndeterminateState)
 		}
 		return RecoveryCommit, nil
@@ -180,7 +189,7 @@ func selectMarketplaceInstallRecoveryDirection(journal Journal, facts marketplac
 		return RecoveryRollback, nil
 	}
 	if journal.Phase == PhaseAddingNewPlugin {
-		if facts.marketplace != marketplaceRecoveryTarget || previousExpected && facts.previousPresent {
+		if !marketplaceRecoveryHasTargetSource(facts.marketplace) || previousExpected && facts.previousPresent {
 			return "", fmt.Errorf("adding marketplace Plugin facts are not a reachable target state: %w", ErrIndeterminateState)
 		}
 		if facts.targetPresent {
@@ -214,6 +223,10 @@ func selectMarketplaceInstallRecoveryDirection(journal Journal, facts marketplac
 	return RecoveryRollback, nil
 }
 
+func marketplaceRecoveryHasTargetSource(selection marketplaceRecoverySelection) bool {
+	return selection == marketplaceRecoveryTarget || selection == marketplaceRecoveryRetained
+}
+
 func validateMarketplaceRollbackFacts(journal Journal, facts marketplaceRecoveryFacts) error {
 	if !journal.Plugin.PreviousPresent {
 		if facts.marketplace == marketplaceRecoveryPrevious ||
@@ -235,6 +248,8 @@ func validateMarketplaceRollbackFacts(journal Journal, facts marketplaceRecovery
 		if facts.targetPresent {
 			return fmt.Errorf("previous marketplace coexists with target Plugin during rollback: %w", ErrIndeterminateState)
 		}
+	case marketplaceRecoveryRetained:
+		// 重装 rollback 可移除已落地 Plugin，但必须保留卸载后已有的同源 marketplace。
 	default:
 		return fmt.Errorf("unknown marketplace rollback fact %d: %w", facts.marketplace, ErrIndeterminateState)
 	}
