@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 )
 
 // UninstallAgent 执行单个 Agent 的可恢复文件型 Agent 卸载事务。
@@ -100,8 +102,21 @@ func (s *Service) UninstallAgent(ctx context.Context, request AgentUninstallRequ
 	if err := cleanupTransactionDirWithOps(journal, s.files); err != nil {
 		return result, err
 	}
+	if err := pruneEmptyAgentDirs(s.files, target); err != nil {
+		return result, err
+	}
 	if err := s.journals.Delete(transactionID); err != nil {
 		return result, fmt.Errorf("delete completed uninstall journal: %w", err)
 	}
 	return result, nil
+}
+
+// pruneEmptyAgentDirs 尽力移除已空的 agents/<id>/ 与 agents/ 父目录；目录非空或不存在时忽略。
+func pruneEmptyAgentDirs(files fileOps, target string) error {
+	for _, dir := range []string{filepath.Dir(target), filepath.Dir(filepath.Dir(target))} {
+		if err := files.remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+			break
+		}
+	}
+	return nil
 }
