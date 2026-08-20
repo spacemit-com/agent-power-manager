@@ -298,6 +298,17 @@ func (s *Service) requirePhysicalPluginTarget(target string) error {
 	return nil
 }
 
+func (s *Service) requireFilesystemPluginTargetAbsent(target string) error {
+	state, err := inspectFilesystemPluginTarget(target, s.files.lstat)
+	if err != nil {
+		return err
+	}
+	if state != filesystemPluginTargetMissing {
+		return fmt.Errorf("managed filesystem Plugin target %q reappeared during uninstall commit: %w", target, ErrIndeterminateState)
+	}
+	return nil
+}
+
 // validateOptionalPhysicalPluginTarget 允许恢复产物已缺失，但存在时必须仍是可安全递归清理的物理目录。
 func (s *Service) validateOptionalPhysicalPluginTarget(target string) error {
 	_, err := inspectFilesystemPluginTarget(target, s.files.lstat)

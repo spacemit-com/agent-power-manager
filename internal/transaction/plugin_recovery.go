@@ -139,6 +139,9 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 		if err != nil {
 			return err
 		}
+		if journal.Phase == PhaseRemoving && targetExists && quarantineExists {
+			return fmt.Errorf("filesystem Plugin target and quarantine both exist: %w", ErrIndeterminateState)
+		}
 		if journal.Phase == PhaseRemoving && (quarantineExists || !targetExists) {
 			result.Direction = RecoveryCommit
 			if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
@@ -190,6 +193,8 @@ func (s *Service) commitRecoveredFilesystemPlugin(journal Journal, result *Recov
 		if err := s.requirePhysicalPluginTarget(filesystem.TargetPath); err != nil {
 			return fmt.Errorf("validate committing filesystem Plugin target: %w", err)
 		}
+	} else if err := s.requireFilesystemPluginTargetAbsent(filesystem.TargetPath); err != nil {
+		return fmt.Errorf("validate committing filesystem Plugin uninstall target: %w", err)
 	}
 	for _, path := range []string{filesystem.PreviousQuarantinePath, filesystem.TargetQuarantinePath} {
 		if path != "" {

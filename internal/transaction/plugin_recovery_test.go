@@ -302,6 +302,163 @@ func TestPluginRecoveryFilesystemCommittingRejectsUnsafePhysicalQuarantineBefore
 	}
 }
 
+func TestPluginRecoveryFilesystemCommittingRejectsReappearedUninstallTarget(t *testing.T) {
+	tests := []struct {
+		name    string
+		create  func(*testing.T, string)
+		wantErr error
+	}{
+		{name: "directory", wantErr: ErrIndeterminateState, create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(target, "evidence.txt"), []byte("reappeared-directory"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "symlink", wantErr: ErrUnsafePath, create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.Symlink(t.TempDir(), target); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "regular file", wantErr: ErrUnsafePath, create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.WriteFile(target, []byte("reappeared-file"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			events := []string{}
+			id := "00112233445566778899aabbccddeeff"
+			pluginsRoot := filepath.Join(t.TempDir(), "plugins")
+			if err := os.MkdirAll(pluginsRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(pluginsRoot, "demo")
+			test.create(t, target)
+			tx := filepath.Join(pluginsRoot, ".apm-transactions", id)
+			quarantine := filepath.Join(tx, "target")
+			if err := os.MkdirAll(quarantine, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(quarantine, "evidence.txt"), []byte("quarantined-target"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			journal := Journal{
+				SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationUninstall, Phase: PhaseCommitting,
+				Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+				Plugin: &PluginJournalPayload{Deployment: domain.PluginDeploymentFilesystem, TargetPresent: true,
+					Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+					Filesystem: &PluginFilesystemJournalPayload{TargetPath: target, TransactionDir: tx, TargetQuarantinePath: quarantine}},
+			}
+			originalJournal := journal
+			store := &recordingJournalStore{journal: journal, found: true, events: &events, fail: map[string]error{}}
+			manifests := &recordingManifestWriter{events: &events}
+			plugin := &recordingPluginAdapter{events: &events, mode: domain.PluginDeploymentFilesystem}
+			resolver := &recordingPluginResolver{events: &events, plugin: plugin}
+			service := newService(manifests, store, resolver)
+			beforeMode, beforeEvidence := snapshotPluginRecoveryNode(t, target)
+
+			result, err := service.Recover(context.Background())
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, test.wantErr) || result.Recovered {
+				t.Fatalf("Recover() = %+v, %v; want %v with retained journal; journal found=%t events=%v", result, err, test.wantErr, store.found, events)
+			}
+			if !store.found || !reflect.DeepEqual(store.journal, originalJournal) {
+				t.Fatalf("journal changed: found=%t journal=%+v, want %+v", store.found, store.journal, originalJournal)
+			}
+			afterMode, afterEvidence := snapshotPluginRecoveryNode(t, target)
+			if afterMode != beforeMode || afterEvidence != beforeEvidence {
+				t.Fatalf("target changed: before=(%v, %q) after=(%v, %q)", beforeMode, beforeEvidence, afterMode, afterEvidence)
+			}
+			if contents, readErr := os.ReadFile(filepath.Join(quarantine, "evidence.txt")); readErr != nil || string(contents) != "quarantined-target" {
+				t.Fatalf("quarantine evidence = %q, %v; want preserved", contents, readErr)
+			}
+			if manifests.removed != (domain.PowerRef{}) || manifests.removedAgent != "" || len(events) != 0 {
+				t.Fatalf("committing rejection mutated state: manifest=%+v agent=%q events=%v", manifests.removed, manifests.removedAgent, events)
+			}
+			if len(plugin.added) != 0 || len(plugin.removed) != 0 {
+				t.Fatalf("committing rejection mutated Adapter: added=%+v removed=%+v", plugin.added, plugin.removed)
+			}
+		})
+	}
+}
+
+func TestPluginRecoveryFilesystemRemovingRejectsTargetAndQuarantineCoexistenceBeforeDirection(t *testing.T) {
+	events := []string{}
+	id := "00112233445566778899aabbccddeeff"
+	pluginsRoot := filepath.Join(t.TempDir(), "plugins")
+	target := filepath.Join(pluginsRoot, "demo")
+	tx := filepath.Join(pluginsRoot, ".apm-transactions", id)
+	quarantine := filepath.Join(tx, "target")
+	for path, evidence := range map[string]string{target: "target", quarantine: "quarantine"} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "evidence.txt"), []byte(evidence), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journal := Journal{
+		SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationUninstall, Phase: PhaseRemoving,
+		Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+		Plugin: &PluginJournalPayload{Deployment: domain.PluginDeploymentFilesystem, TargetPresent: true,
+			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+			Filesystem: &PluginFilesystemJournalPayload{TargetPath: target, TransactionDir: tx, TargetQuarantinePath: quarantine}},
+	}
+	originalJournal := journal
+	store := &recordingJournalStore{journal: journal, found: true, events: &events, fail: map[string]error{}}
+	manifests := &recordingManifestWriter{events: &events}
+	plugin := &recordingPluginAdapter{events: &events, mode: domain.PluginDeploymentFilesystem, facts: map[string]adapter.PluginFact{
+		"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+	}}
+	resolver := &recordingPluginResolver{events: &events, plugin: plugin}
+	service := newService(manifests, store, resolver)
+
+	result, err := service.Recover(context.Background())
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered {
+		t.Fatalf("Recover() = %+v, %v; want retained ambiguous recovery; journal found=%t events=%v", result, err, store.found, events)
+	}
+	if !store.found || !reflect.DeepEqual(store.journal, originalJournal) || store.updateCalls != 0 {
+		t.Fatalf("journal changed before rejection: found=%t updates=%d journal=%+v", store.found, store.updateCalls, store.journal)
+	}
+	for path, want := range map[string]string{target: "target", quarantine: "quarantine"} {
+		if contents, readErr := os.ReadFile(filepath.Join(path, "evidence.txt")); readErr != nil || string(contents) != want {
+			t.Fatalf("evidence %q = %q, %v; want %q", path, contents, readErr, want)
+		}
+	}
+	if manifests.removed != (domain.PowerRef{}) || len(plugin.added) != 0 || len(plugin.removed) != 0 {
+		t.Fatalf("ambiguous recovery mutated state: manifest=%+v added=%+v removed=%+v", manifests.removed, plugin.added, plugin.removed)
+	}
+}
+
+func snapshotPluginRecoveryNode(t *testing.T, path string) (os.FileMode, string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Mode(), target
+	}
+	contentsPath := path
+	if info.IsDir() {
+		contentsPath = filepath.Join(path, "evidence.txt")
+	}
+	contents, err := os.ReadFile(contentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Mode(), string(contents)
+}
+
 func TestPluginRecoveryFilesystemRemovingOldReenablesUnmovedPreviousTarget(t *testing.T) {
 	events := []string{}
 	home := t.TempDir()
