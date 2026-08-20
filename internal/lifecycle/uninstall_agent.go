@@ -38,6 +38,8 @@ func (s *UninstallService) uninstallForAgent(ctx context.Context, agent domain.A
 		transactionResult, err = s.uninstallMCP(ctx, agent, ref)
 	case domain.PowerTypePlugin:
 		transactionResult, err = s.uninstallPlugin(ctx, agent, ref)
+	case domain.PowerTypeAgent:
+		transactionResult, err = s.uninstallAgentPower(ctx, agent, ref)
 	default:
 		err = fmt.Errorf("uninstall power type %q: %w", ref.Type, adapter.ErrUnsupportedAdapter)
 	}
