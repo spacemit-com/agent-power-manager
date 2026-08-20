@@ -173,6 +173,10 @@ func (r *uninstallFakeRegistry) ResolvePlugin(agent domain.AgentID) (adapter.Plu
 	recordUninstallEvent(r.calls, r.fixture, "resolve-plugin:"+string(agent))
 	return uninstallFakePluginAdapter{agent: agent, calls: r.calls, fixture: r.fixture}, r.fixture.resolveErrors[agent]
 }
+func (r *uninstallFakeRegistry) ResolveAgent(agent domain.AgentID) (adapter.AgentAdapter, error) {
+	recordUninstallEvent(r.calls, r.fixture, "resolve-agent:"+string(agent))
+	return uninstallFakeAgentAdapter{}, r.fixture.resolveErrors[agent]
+}
 
 func (r *uninstallFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	recordUninstallEvent(r.calls, r.fixture, "refresh")
@@ -185,6 +189,14 @@ func (uninstallFakeAdapter) TargetPath(domain.PowerRef) (string, error) { return
 
 func (uninstallFakeAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
 	return adapter.SkillInstallResult{Published: true}, nil
+}
+
+type uninstallFakeAgentAdapter struct{}
+
+func (uninstallFakeAgentAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
+
+func (uninstallFakeAgentAdapter) Install(domain.PowerRef, string) (adapter.AgentInstallResult, error) {
+	return adapter.AgentInstallResult{Published: true}, nil
 }
 
 type uninstallFakeMCPAdapter struct {

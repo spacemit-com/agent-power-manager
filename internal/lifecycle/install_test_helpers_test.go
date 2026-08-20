@@ -293,6 +293,11 @@ func (r *installFakeRegistry) ResolvePlugin(agent domain.AgentID) (adapter.Plugi
 	*r.calls = append(*r.calls, "resolve-plugin:"+string(agent))
 	return installFakePluginAdapter{agent: agent, calls: r.calls, fixture: r.fixture}, r.fixture.resolveErrors[agent]
 }
+func (r *installFakeRegistry) ResolveAgent(agent domain.AgentID) (adapter.AgentAdapter, error) {
+	r.fixture.currentAgent = agent
+	*r.calls = append(*r.calls, "resolve-agent:"+string(agent))
+	return installFakeAgentAdapter{}, r.fixture.resolveErrors[agent]
+}
 
 func (r *installFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	if r.fixture.beforeRefresh != nil {
@@ -308,6 +313,14 @@ func (installFakeAdapter) TargetPath(domain.PowerRef) (string, error) { return "
 
 func (installFakeAdapter) Install(domain.PowerRef, string) (adapter.SkillInstallResult, error) {
 	return adapter.SkillInstallResult{Published: true}, nil
+}
+
+type installFakeAgentAdapter struct{}
+
+func (installFakeAgentAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
+
+func (installFakeAgentAdapter) Install(domain.PowerRef, string) (adapter.AgentInstallResult, error) {
+	return adapter.AgentInstallResult{Published: true}, nil
 }
 
 type installFakeMCPAdapter struct {
