@@ -218,6 +218,14 @@ func (service *Service) StageFilesystem(ref domain.PowerRef) (staging string, re
 	stageLock := service.pathLock(service.stagingRoot)
 	stageLock.Lock()
 	defer stageLock.Unlock()
+	if err := validateStagingDisjoint(
+		service.cacheRoot,
+		artifact,
+		service.stagingRoot,
+		service.stagingTempRoot,
+	); err != nil {
+		return "", err
+	}
 
 	// 配置根由 lifecycle 全局锁协作保护；这里仅清理明确注入的 staging 临时根。
 	if err := service.files.removeAll(service.stagingTempRoot); err != nil {
@@ -245,14 +253,45 @@ func (service *Service) StageFilesystem(ref domain.PowerRef) (staging string, re
 	if err := service.files.mkdirAll(filepath.Dir(service.stagingRoot), 0o700); err != nil {
 		return "", fmt.Errorf("create filesystem staging parent %q: %w", filepath.Dir(service.stagingRoot), err)
 	}
-	// 成功构建前保留旧 staging，避免复制失败时暴露半成品或删除完整版本。
-	if err := service.files.removeAll(service.stagingRoot); err != nil {
-		return "", fmt.Errorf("remove filesystem staging root %q: %w", service.stagingRoot, err)
+
+	// 旧 staging 先移动到唯一 sibling backup；新根发布失败时必须恢复，绝不直接递归删除旧完整树。
+	backupRoot := ""
+	if _, err := service.files.lstat(service.stagingRoot); err == nil {
+		backupRoot, err = service.files.mkdirTemp(
+			filepath.Dir(service.stagingRoot),
+			filepath.Base(service.stagingRoot)+"-backup-",
+		)
+		if err != nil {
+			return "", fmt.Errorf("reserve filesystem staging backup: %w", err)
+		}
+		if err := service.files.removeAll(backupRoot); err != nil {
+			return "", fmt.Errorf("remove filesystem staging backup reservation %q: %w", backupRoot, err)
+		}
+		if err := service.files.rename(service.stagingRoot, backupRoot); err != nil {
+			return "", fmt.Errorf("quarantine filesystem staging %q to %q: %w", service.stagingRoot, backupRoot, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect filesystem staging root %q: %w", service.stagingRoot, err)
 	}
 	if err := service.files.rename(temporaryRoot, service.stagingRoot); err != nil {
-		return "", fmt.Errorf("publish filesystem staging %q: %w", service.stagingRoot, err)
+		publishErr := fmt.Errorf("publish filesystem staging %q: %w", service.stagingRoot, err)
+		if backupRoot == "" {
+			return "", publishErr
+		}
+		if restoreErr := service.files.rename(backupRoot, service.stagingRoot); restoreErr != nil {
+			return "", errors.Join(
+				publishErr,
+				fmt.Errorf("restore filesystem staging backup %q: %w", backupRoot, restoreErr),
+			)
+		}
+		return "", publishErr
 	}
 	temporaryRoot = ""
+	if backupRoot != "" {
+		if err := service.files.removeAll(backupRoot); err != nil {
+			return "", fmt.Errorf("remove published filesystem staging backup %q: %w", backupRoot, err)
+		}
+	}
 	return service.stagingRoot, nil
 }
 

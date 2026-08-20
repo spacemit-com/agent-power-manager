@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"apm/internal/pluginartifact"
+	filesystemutil "apm/internal/utils/filesystem"
 )
 
 // validatePhysicalTree 拒绝 symlink 和非目录根，确保后续读取不会逃逸 artifact 边界。
@@ -53,4 +54,70 @@ func splitPath(path string) []string {
 		}
 	}
 	return components
+}
+
+// validateStagingDisjoint 在任何递归清理前解析物理路径，拒绝 staging 与共享 cache/source 双向包含。
+func validateStagingDisjoint(cacheRoot string, artifact Artifact, stagingRoot, stagingTempRoot string) error {
+	type namedPath struct {
+		name     string
+		logical  string
+		physical string
+	}
+	resolve := func(name, path string) (namedPath, error) {
+		physical, err := filesystemutil.ResolvePhysicalPath(path)
+		if err != nil {
+			return namedPath{}, fmt.Errorf("resolve physical %s path %q: %w", name, path, errors.Join(ErrInvalidArtifact, err))
+		}
+		return namedPath{name: name, logical: path, physical: physical}, nil
+	}
+
+	sources := make([]namedPath, 0, 3)
+	for _, path := range []struct {
+		name string
+		path string
+	}{
+		{name: "cache root", path: cacheRoot},
+		{name: "artifact root", path: artifact.Root},
+		{name: "Plugin source", path: artifact.PluginPath},
+	} {
+		resolved, err := resolve(path.name, path.path)
+		if err != nil {
+			return err
+		}
+		sources = append(sources, resolved)
+	}
+	targets := make([]namedPath, 0, 2)
+	for _, path := range []struct {
+		name string
+		path string
+	}{
+		{name: "staging root", path: stagingRoot},
+		{name: "staging temporary root", path: stagingTempRoot},
+	} {
+		resolved, err := resolve(path.name, path.path)
+		if err != nil {
+			return err
+		}
+		targets = append(targets, resolved)
+	}
+
+	for _, source := range sources {
+		for _, target := range targets {
+			targetWithinSource, err := filesystemutil.PathEqualOrWithin(source.physical, target.physical)
+			if err != nil {
+				return fmt.Errorf("compare physical %s and %s paths: %w", source.name, target.name, errors.Join(ErrInvalidArtifact, err))
+			}
+			sourceWithinTarget, err := filesystemutil.PathEqualOrWithin(target.physical, source.physical)
+			if err != nil {
+				return fmt.Errorf("compare physical %s and %s paths: %w", target.name, source.name, errors.Join(ErrInvalidArtifact, err))
+			}
+			if targetWithinSource || sourceWithinTarget {
+				return fmt.Errorf(
+					"physical %s path %q overlaps %s path %q: %w",
+					target.name, target.logical, source.name, source.logical, ErrInvalidArtifact,
+				)
+			}
+		}
+	}
+	return nil
 }

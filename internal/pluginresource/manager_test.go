@@ -249,6 +249,205 @@ func TestStageFilesystemAtomicallyRebuildsLogicalPluginLeaf(t *testing.T) {
 	}
 }
 
+func TestStageFilesystemPublishFailureRestoresOldCompleteStaging(t *testing.T) {
+	// 捕获错误变更：发布新 staging 的 rename 失败后丢失已经完整存在的旧 staging。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
+	if err := os.MkdirAll(roots.staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(roots.staging, "complete-old-staging.txt")
+	if err := os.WriteFile(old, []byte("complete old staging"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	publishErr := errors.New("injected staging publish failure")
+	var backupRoot string
+	var failedPublish bool
+	service.files.rename = func(source, destination string) error {
+		if source == roots.staging {
+			backupRoot = destination
+		}
+		if destination == roots.staging && !failedPublish {
+			failedPublish = true
+			return publishErr
+		}
+		return os.Rename(source, destination)
+	}
+
+	if _, err := service.StageFilesystem(ref); !errors.Is(err, publishErr) {
+		t.Fatalf("StageFilesystem() error = %v, want publish error", err)
+	}
+	content, err := os.ReadFile(old)
+	if err != nil || string(content) != "complete old staging" {
+		t.Fatalf("restored old staging = %q, %v, want complete old staging", content, err)
+	}
+	if _, err := os.Lstat(filepath.Join(roots.staging, "plugins", "demo", "payload.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("new staging payload stat error = %v, want absent", err)
+	}
+	if backupRoot == "" {
+		t.Fatal("old staging was not quarantined before publication")
+	}
+	if _, err := os.Lstat(backupRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("restored backup stat error = %v, want absent", err)
+	}
+}
+
+func TestStageFilesystemJoinsPublishAndRestoreErrorsAndPreservesBackup(t *testing.T) {
+	// 捕获错误变更：发布和恢复同时失败时丢失恢复错误，或清理仍持有旧完整 staging 的 backup。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
+	if err := os.MkdirAll(roots.staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(roots.staging, "complete-old-staging.txt"), []byte("complete old staging"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	publishErr := errors.New("injected staging publish failure")
+	restoreErr := errors.New("injected staging restore failure")
+	var backupRoot string
+	service.files.rename = func(source, destination string) error {
+		switch {
+		case source == roots.staging:
+			backupRoot = destination
+			return os.Rename(source, destination)
+		case destination == roots.staging && source == backupRoot:
+			return restoreErr
+		case destination == roots.staging:
+			return publishErr
+		default:
+			return os.Rename(source, destination)
+		}
+	}
+
+	_, err := service.StageFilesystem(ref)
+	if !errors.Is(err, publishErr) || !errors.Is(err, restoreErr) {
+		t.Fatalf("StageFilesystem() error = %v, want publish and restore errors", err)
+	}
+	content, readErr := os.ReadFile(filepath.Join(backupRoot, "complete-old-staging.txt"))
+	if readErr != nil || string(content) != "complete old staging" {
+		t.Fatalf("preserved backup = %q, %v, want complete old staging", content, readErr)
+	}
+}
+
+func TestStageFilesystemBackupCleanupFailureReturnsErrorAndPreservesBackup(t *testing.T) {
+	// 捕获错误变更：新 staging 发布后 backup 清理失败仍返回成功，或删除唯一旧副本。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
+	if err := os.MkdirAll(roots.staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(roots.staging, "complete-old-staging.txt"), []byte("complete old staging"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cleanupErr := errors.New("injected staging backup cleanup failure")
+	var backupRoot string
+	originalMkdirTemp := service.files.mkdirTemp
+	service.files.mkdirTemp = func(directory, pattern string) (string, error) {
+		path, err := originalMkdirTemp(directory, pattern)
+		if pattern == filepath.Base(roots.staging)+"-backup-" {
+			backupRoot = path
+		}
+		return path, err
+	}
+	var backupCleanupCalls int
+	service.files.removeAll = func(path string) error {
+		if path == backupRoot {
+			backupCleanupCalls++
+			if backupCleanupCalls == 2 {
+				return cleanupErr
+			}
+		}
+		return os.RemoveAll(path)
+	}
+
+	staging, err := service.StageFilesystem(ref)
+	if staging != "" || !errors.Is(err, cleanupErr) {
+		t.Fatalf("StageFilesystem() = %q, %v, want empty result and cleanup error", staging, err)
+	}
+	if _, err := os.Stat(filepath.Join(roots.staging, "plugins", "demo", "payload.txt")); err != nil {
+		t.Fatalf("published new staging payload: %v", err)
+	}
+	content, readErr := os.ReadFile(filepath.Join(backupRoot, "complete-old-staging.txt"))
+	if readErr != nil || string(content) != "complete old staging" {
+		t.Fatalf("preserved cleanup-failed backup = %q, %v, want complete old staging", content, readErr)
+	}
+}
+
+func TestStageFilesystemRejectsDirectCacheOverlapBeforeRecursiveCleanup(t *testing.T) {
+	// 捕获错误变更：staging root 直接包含 cache 时先递归清理，再发现源已被破坏。
+	roots := newTestRoots(t)
+	ref := testPluginRef()
+	cacheArtifact := testArtifactRoot(roots.cache, ref)
+	writeValidTestArtifact(t, cacheArtifact)
+	cacheBefore := snapshotTestTree(t, roots.cache)
+	service := newService(
+		roots.cache,
+		roots.cacheTemp,
+		roots.cache,
+		filepath.Join(filepath.Dir(roots.cache), "safe-staging-temp"),
+		&testDownloader{},
+		testBuilders(),
+	)
+	var cleanupCalls int
+	service.files.removeAll = func(path string) error {
+		cleanupCalls++
+		return os.RemoveAll(path)
+	}
+
+	if _, err := service.StageFilesystem(ref); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("StageFilesystem() error = %v, want ErrInvalidArtifact", err)
+	}
+	if cleanupCalls != 0 {
+		t.Fatalf("recursive cleanup calls = %d, want 0 before overlap rejection", cleanupCalls)
+	}
+	if cacheAfter := snapshotTestTree(t, roots.cache); cacheAfter != cacheBefore {
+		t.Fatalf("cache changed after direct overlap rejection\nbefore:\n%s\nafter:\n%s", cacheBefore, cacheAfter)
+	}
+}
+
+func TestStageFilesystemRejectsSymlinkAliasCacheOverlapBeforeRecursiveCleanup(t *testing.T) {
+	// 捕获错误变更：staging temp 经 symlink 祖先指向 artifact 时递归删除共享 cache。
+	roots := newTestRoots(t)
+	ref := testPluginRef()
+	cacheArtifact := testArtifactRoot(roots.cache, ref)
+	writeValidTestArtifact(t, cacheArtifact)
+	cacheBefore := snapshotTestTree(t, roots.cache)
+	cacheAlias := filepath.Join(filepath.Dir(roots.cache), "cache-alias")
+	if err := os.Symlink(roots.cache, cacheAlias); err != nil {
+		t.Fatal(err)
+	}
+	aliasedArtifact := filepath.Join(cacheAlias, "plugins", ref.Name, ref.Version)
+	service := newService(
+		roots.cache,
+		roots.cacheTemp,
+		filepath.Join(filepath.Dir(roots.cache), "safe-staging"),
+		aliasedArtifact,
+		&testDownloader{},
+		testBuilders(),
+	)
+	var cleanupCalls int
+	service.files.removeAll = func(path string) error {
+		cleanupCalls++
+		return os.RemoveAll(path)
+	}
+
+	if _, err := service.StageFilesystem(ref); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("StageFilesystem() error = %v, want ErrInvalidArtifact", err)
+	}
+	if cleanupCalls != 0 {
+		t.Fatalf("recursive cleanup calls = %d, want 0 before alias rejection", cleanupCalls)
+	}
+	if cacheAfter := snapshotTestTree(t, roots.cache); cacheAfter != cacheBefore {
+		t.Fatalf("cache changed after alias overlap rejection\nbefore:\n%s\nafter:\n%s", cacheBefore, cacheAfter)
+	}
+}
+
 func TestEnsurePublishesOneSharedArtifactForConcurrentCallers(t *testing.T) {
 	// 捕获错误变更：同一 Service 并发发布同版本，在第一个版本发布前启动第二次下载。
 	previous := runtime.GOMAXPROCS(1)
