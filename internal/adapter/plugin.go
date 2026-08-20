@@ -53,21 +53,21 @@ type MarketplaceFact struct {
 	Source   string
 }
 
-// PluginTarget 描述一次安装或卸载所使用的稳定实际名和 CLI selector。
+// PluginTarget 描述一次安装或卸载所使用的稳定运行时名称和 Agent selector。
 type PluginTarget struct {
 	ActualName string `json:"actual_name"`
 	Selector   string `json:"selector"`
 }
 
-// PluginMutationState 表示 Agent CLI 写操作产生副作用的确定程度。
+// PluginMutationState 表示 Agent CLI 或 activation hook 产生副作用的确定程度。
 type PluginMutationState string
 
 const (
-	// PluginMutationApplied 表示 CLI 已明确完成变更。
+	// PluginMutationApplied 表示 CLI 或 activation hook 已明确完成变更。
 	PluginMutationApplied PluginMutationState = "applied"
-	// PluginMutationNotApplied 表示 CLI 明确没有产生变更。
+	// PluginMutationNotApplied 表示 CLI 或 activation hook 明确没有产生变更。
 	PluginMutationNotApplied PluginMutationState = "not-applied"
-	// PluginMutationUnknown 表示无法判断 CLI 是否已产生变更，调用方必须保留 journal。
+	// PluginMutationUnknown 表示无法判断 CLI 或 activation hook 是否已产生变更，调用方必须保留 journal。
 	PluginMutationUnknown PluginMutationState = "unknown"
 )
 
@@ -77,6 +77,7 @@ type PluginMutationResult struct {
 }
 
 // PluginAdapter 隔离各 Agent 的基础 Plugin 事实与安装卸载；不隐式管理 marketplace。
+// 文件系统部署模式的 Add/Remove 仅作为 Agent activation hook，目录发布和删除由 Transaction 负责。
 type PluginAdapter interface {
 	DeploymentMode() domain.PluginDeploymentMode
 	Inspect(context.Context, string) (PluginFact, error)

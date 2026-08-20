@@ -13,7 +13,7 @@ func TestHermesPluginContract(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "hermes")
 	t.Setenv("HERMES_HOME", root)
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
-		successfulMCPResponse(`{"plugins":[{"name":"demo-plugin-v0.0.1","status":"disabled"}]}`),
+		successfulMCPResponse(`{"plugins":[{"name":"demo-plugin","status":"disabled"}]}`),
 		successfulMCPResponse(""),
 		successfulMCPResponse(""),
 	}}
@@ -21,8 +21,8 @@ func TestHermesPluginContract(t *testing.T) {
 	if adapter.DeploymentMode() != domain.PluginDeploymentFilesystem {
 		t.Fatalf("DeploymentMode() = %q", adapter.DeploymentMode())
 	}
-	fact, err := adapter.Inspect(context.Background(), "demo-plugin-v0.0.1")
-	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin-v0.0.1", Selector: "demo-plugin-v0.0.1"}) {
+	fact, err := adapter.Inspect(context.Background(), "demo-plugin")
+	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin", Selector: "demo-plugin"}) {
 		t.Fatalf("Inspect() = %#v, %v", fact, err)
 	}
 	target := PluginTarget{ActualName: fact.ActualName, Selector: fact.Selector}
@@ -32,23 +32,23 @@ func TestHermesPluginContract(t *testing.T) {
 	if result, err := adapter.Remove(context.Background(), target); err != nil || result.State != PluginMutationApplied {
 		t.Fatalf("Remove() = %#v, %v", result, err)
 	}
-	path, err := adapter.TargetPath("demo-plugin-v0.0.1")
-	if err != nil || path != filepath.Join(root, "plugins", "demo-plugin-v0.0.1") {
+	path, err := adapter.TargetPath("demo-plugin")
+	if err != nil || path != filepath.Join(root, "plugins", "demo-plugin") {
 		t.Fatalf("TargetPath() = %q, %v", path, err)
 	}
 	assertPluginCommands(t, runner, "hermes", [][]string{
 		{"plugins", "list", "--json"},
-		{"plugins", "enable", "demo-plugin-v0.0.1"},
-		{"plugins", "disable", "demo-plugin-v0.0.1"},
+		{"plugins", "enable", "demo-plugin"},
+		{"plugins", "disable", "demo-plugin"},
 	})
 }
 
 func TestHermesPluginInspectIgnoresStatus(t *testing.T) {
 	for _, status := range []string{"enabled", "disabled"} {
 		runner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(
-			`[{"name":"demo-plugin-v0.0.1","status":"` + status + `"}]`,
+			`[{"name":"demo-plugin","status":"` + status + `"}]`,
 		)}}
-		fact, err := newHermesPluginAdapter(runner, configForAgent(t, domain.AgentHermes)).Inspect(context.Background(), "demo-plugin-v0.0.1")
+		fact, err := newHermesPluginAdapter(runner, configForAgent(t, domain.AgentHermes)).Inspect(context.Background(), "demo-plugin")
 		if err != nil || fact.Presence != PluginPresent {
 			t.Fatalf("status %q Inspect() = %#v, %v", status, fact, err)
 		}
@@ -58,7 +58,7 @@ func TestHermesPluginInspectIgnoresStatus(t *testing.T) {
 func TestHermesPluginAbsentAndUnsafeTarget(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(`{"plugins":[]}`)}}
 	adapter := newHermesPluginAdapter(runner, configForAgent(t, domain.AgentHermes))
-	fact, err := adapter.Inspect(context.Background(), "demo-plugin-v0.0.1")
+	fact, err := adapter.Inspect(context.Background(), "demo-plugin")
 	if err != nil || fact.Presence != PluginAbsent {
 		t.Fatalf("Inspect() = %#v, %v", fact, err)
 	}

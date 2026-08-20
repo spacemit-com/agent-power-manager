@@ -158,17 +158,30 @@ func TestAgentProfileSkillTargetPath(t *testing.T) {
 }
 
 func TestPluginTargetPath(t *testing.T) {
-	config := configForAgent(t, domain.AgentHermes)
+	config := agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: "bianbu-agent"}
 	root := filepath.Join(t.TempDir(), "agent-root")
-	t.Setenv("HERMES_HOME", root)
-	got, err := config.pluginTargetPath("demo-plugin-v0.0.1")
-	if err != nil || got != filepath.Join(root, "plugins", "demo-plugin-v0.0.1") {
+	t.Setenv("BIANBU_AGENT_HOME", root)
+	got, err := config.pluginTargetPath("demo-plugin")
+	if err != nil || got != filepath.Join(root, "plugins", "demo-plugin") {
 		t.Fatalf("pluginTargetPath() = %q, %v", got, err)
 	}
 	for _, name := range []string{"", ".", "..", "nested/demo", `nested\demo`} {
 		if _, err := config.pluginTargetPath(name); !errors.Is(err, ErrInvalidPlugin) {
 			t.Fatalf("pluginTargetPath(%q) error = %v", name, err)
 		}
+	}
+}
+
+func TestBibitPluginTargetPathUsesBianbuAgentDefaultRoot(t *testing.T) {
+	config := agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: "bianbu-agent"}
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("BIANBU_AGENT_HOME", "")
+
+	got, err := config.pluginTargetPath("demo-plugin")
+	want := filepath.Join(home, "bianbu-agent", "plugins", "demo-plugin")
+	if err != nil || got != want {
+		t.Fatalf("pluginTargetPath() = %q, %v; want %q, nil", got, err, want)
 	}
 }
 
