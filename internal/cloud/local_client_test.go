@@ -37,6 +37,7 @@ func TestLocalClientListsCommittedSkillFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []domain.PowerRef{
+		{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"},
 		{Name: "company-tools", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
 		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
 		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.1.0"},

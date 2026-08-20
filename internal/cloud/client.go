@@ -14,4 +14,6 @@ type Client interface {
 	DownloadSkill(domain.PowerRef) error
 	GetMCP(domain.PowerRef) (domain.MCPServer, error)
 	DownloadPlugin(context.Context, domain.PowerRef, string) error
+	// DownloadAgent 将指定版本的 Agent yaml 原子复制到本地缓存。
+	DownloadAgent(domain.PowerRef) error
 }
