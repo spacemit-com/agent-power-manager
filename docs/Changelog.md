@@ -6,6 +6,38 @@
 
 分类：新增功能
 
+用户需求：新增第四种 Power 类型 `agent`（仅 Bibit 适用，由 `agent.yaml` 配置的 Bibit 子代理），并把 Bibit 默认资源根修正为 `~/.bianbu-agent`。
+
+相关提交：
+
+- `39f9dd1 docs(agent): add bibit-only agent power spec and versioned cloud resource`
+- `46e7680 docs(adr): record bibit-only agent power and bibit root correction`
+- `22d96ee docs(agent): add implementation plan for bibit-only agent power`
+- `b93a4ab feat(domain): add agent power type and agent config`
+- `e9bfdd4 fix(adapter): correct bibit default root to ~/.bianbu-agent`
+- `4953365 feat(cloud): list and download versioned agent yaml`
+- `e4ec3f4 test(lifecycle): satisfy cloud.Client interface after DownloadAgent addition`
+- `0addd38 feat(cache): stage single-file agent yaml`
+- `5dc3961 test(lifecycle): satisfy cache.PowerCache interface after StageAgent addition`
+- `05542b0 feat(adapter): add bibit filesystem agent adapter`
+- `9669c27 feat(transaction): add recoverable filesystem agent install/uninstall`
+- `2213942 test(lifecycle): satisfy transaction.Manager after InstallAgent/UninstallAgent addition`
+- `d298939 feat(config): add agents manifest group`
+- `78d9a41 feat(lifecycle): add agent install/uninstall and bibit default`
+- `9d24c37 test(lifecycle): satisfy AdapterRegistry after ResolveAgent addition`
+- `abea656 feat(cli): accept --type agent with bibit-only agent rule`
+- `2fc7f93 docs(agent): document agent power across build and overview`
+- `a49349e fix(lifecycle): default list --installed agent to bibit`
+- `ae4edb2 fix(transaction): prune empty agent dirs and add file-target recovery tests`
+
+解决方案或完成结果：Cloud 资源布局对齐 skill（`agents/<name>/<version>/agent.yaml`），版本目录为版本真相；下载单元是单个 `agent.yaml`，走版本化缓存 `cache/agents/<name>/<version>/agent.yaml` + staging，由 Bibit 专属 `AgentAdapter` 原样字节原子发布到 `<bibit根>/agents/<agent.id>/agent.yaml`（本地不版本化，版本仅记 manifest）。安装/卸载复用 `DriverFilesystem` 可恢复事务（target 为文件路径）与 `fix`，卸载后裁剪空的 `agents/<id>/` 与 `agents/` 父目录；config manifest 增加 `agents` 分组。CLI `--type agent` 支持省略 `--agent` 默认 `bibit`、显式 `bibit` 允许、其它值（含 `all`）报错。Bibit 默认根由 `bianbu-agent` 修正为 `.bianbu-agent`（`BIANBU_AGENT_HOME` 与 CLI 可执行名不变）。详见 Feature 019 与 ADR-015。
+
+验证结果或限制：六条门禁全部通过（gofmt、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、临时目录构建、`git diff --check`）；覆盖文件级 target 的 install/uninstall/rollback/fix 中断恢复。测试将 PATH、APM home、cache 与所有 Agent home 隔离在 `t.TempDir()`，未调用真实 `bianbu-agent`。Cloud 资源对齐由其管理方保证，APM 不交叉校验 id/version 与目录名；不迁移旧 cache/journal。
+
+## 2026-08-20
+
+分类：新增功能
+
 用户需求：新增 Bibit 的 Skill/MCP/Plugin 适配，并把 Plugin Cloud/缓存迁移为共享多 Agent 制品。
 
 相关提交：
