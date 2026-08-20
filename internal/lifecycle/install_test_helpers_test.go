@@ -228,7 +228,7 @@ func (c *installFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error)
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
-func (c *installFakeCloud) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+func (c *installFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, string) error {
 	*c.calls = append(*c.calls, "cloud:unexpected-download-plugin")
 	return errors.New("unexpected direct Plugin Cloud download")
 }

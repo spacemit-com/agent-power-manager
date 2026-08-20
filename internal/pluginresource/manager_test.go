@@ -15,7 +15,7 @@ import (
 	"apm/internal/utils/filesystem"
 )
 
-func TestLocalCloudRawPluginPackagesBuildAgentArtifactsWithoutLegacyMarketplace(t *testing.T) {
+func TestLocalCloudSharedPluginPackagesBuildAgentArtifactsWithoutLegacyMarketplace(t *testing.T) {
 	// 捕获错误变更：Plugin Resource 桥接回退调用旧 marketplace 索引 API。
 	resourcesSource, err := filepath.Abs(filepath.Join("..", "cloud", "resources"))
 	if err != nil {
@@ -52,18 +52,22 @@ func TestLocalCloudRawPluginPackagesBuildAgentArtifactsWithoutLegacyMarketplace(
 			if _, err := os.Stat(filepath.Join(artifact.PluginPath, "skills", "demo-plugin", "SKILL.md")); err != nil {
 				t.Fatalf("stat Plugin skill: %v", err)
 			}
+			for _, required := range []string{
+				filepath.Join(".codex-plugin", "plugin.json"),
+				filepath.Join(".claude-plugin", "plugin.json"),
+				filepath.Join(".hermes-plugin", "__init__.py"),
+				filepath.Join(".hermes-plugin", "plugin.yaml"),
+			} {
+				if _, err := os.Stat(filepath.Join(artifact.PluginPath, required)); err != nil {
+					t.Fatalf("stat shared Plugin entry %q: %v", required, err)
+				}
+			}
 
 			switch agent {
 			case domain.AgentCodex:
 				assertGeneratedCodexMarketplace(t, filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"))
-				if _, err := os.Lstat(filepath.Join(artifact.PluginPath, ".claude-plugin", "plugin.json")); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("Codex raw package contains Claude manifest: %v", err)
-				}
 			case domain.AgentClaudeCode:
 				assertGeneratedClaudeMarketplace(t, filepath.Join(artifact.Root, ".claude-plugin", "marketplace.json"))
-				if _, err := os.Lstat(filepath.Join(artifact.PluginPath, ".codex-plugin", "plugin.json")); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("Claude raw package contains Codex manifest: %v", err)
-				}
 			case domain.AgentHermes:
 				for _, marketplace := range []string{
 					filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"),
@@ -507,7 +511,7 @@ type testDownloader struct {
 	calls int
 }
 
-func (downloader *testDownloader) DownloadPlugin(_ context.Context, _ domain.AgentID, _ domain.PowerRef, destination string) error {
+func (downloader *testDownloader) DownloadPlugin(_ context.Context, _ domain.PowerRef, destination string) error {
 	downloader.calls++
 	return os.WriteFile(filepath.Join(destination, "payload.txt"), []byte("payload"), 0o600)
 }
@@ -549,7 +553,7 @@ func newBlockingDownloader() *blockingDownloader {
 	}
 }
 
-func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, _ domain.AgentID, _ domain.PowerRef, destination string) error {
+func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, _ domain.PowerRef, destination string) error {
 	switch downloader.started.Add(1) {
 	case 1:
 		close(downloader.firstStarted)
@@ -578,7 +582,7 @@ func (copier *blockingCopier) copy(source, destination string) error {
 
 type typedNilDownloader struct{}
 
-func (*typedNilDownloader) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+func (*typedNilDownloader) DownloadPlugin(context.Context, domain.PowerRef, string) error {
 	panic("typed nil downloader must not be called")
 }
 
@@ -596,6 +600,6 @@ type failingDownloader struct {
 	err error
 }
 
-func (downloader failingDownloader) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+func (downloader failingDownloader) DownloadPlugin(context.Context, domain.PowerRef, string) error {
 	return downloader.err
 }

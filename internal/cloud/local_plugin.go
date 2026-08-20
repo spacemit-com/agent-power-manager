@@ -14,12 +14,9 @@ import (
 	"apm/internal/utils/filesystem"
 )
 
-// DownloadPlugin 复制精确 Agent/ref 的原始 Plugin 包；Cloud 不生成 marketplace，也不写入 APM 缓存。
+// DownloadPlugin 复制指定版本的完整共享 Plugin 包；Cloud 不生成 marketplace，也不按 Agent 裁剪入口。
 // 目标必须不存在或为空物理目录，复制失败后的半成品由调用方清理。
-func (c *LocalClient) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
-	if !supportedPluginPackageAgent(agent) {
-		return ErrNotFound
-	}
+func (c *LocalClient) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
 	if _, err := domain.ActualPluginName(ref); err != nil {
 		return ErrNotFound
 	}
@@ -27,7 +24,7 @@ func (c *LocalClient) DownloadPlugin(ctx context.Context, agent domain.AgentID, 
 		return err
 	}
 
-	source := filepath.Join(c.resourcesRoot, "plugins", ref.Name, ref.Version, string(agent))
+	source := filepath.Join(c.resourcesRoot, "plugins", ref.Name, ref.Version)
 	info, err := os.Lstat(source)
 	if errors.Is(err, fs.ErrNotExist) {
 		return ErrNotFound
@@ -103,7 +100,7 @@ func validatePluginSourcePackage(resourcesRoot, source string) error {
 	return nil
 }
 
-// listPlugins 只根据 `<logical>/<version>/<agent>` 原始包目录发现逻辑 Plugin；多个 Agent 包合并为同一引用。
+// listPlugins 根据 `<logical>/<version>` 共享原始包目录发现逻辑 Plugin，不审计各 Agent 入口完整性。
 func (c *LocalClient) listPlugins() ([]domain.PowerRef, error) {
 	root := filepath.Join(c.resourcesRoot, "plugins")
 	logicalEntries, err := os.ReadDir(root)
@@ -132,33 +129,10 @@ func (c *LocalClient) listPlugins() ([]domain.PowerRef, error) {
 			if _, err := domain.ActualPluginName(ref); err != nil {
 				continue
 			}
-			hasPackage, err := hasSupportedPluginPackage(filepath.Join(logicalRoot, version.Name()))
-			if err != nil {
-				return nil, err
-			}
-			if hasPackage {
-				refs = append(refs, ref)
-			}
+			refs = append(refs, ref)
 		}
 	}
 	return refs, nil
-}
-
-func hasSupportedPluginPackage(versionRoot string) (bool, error) {
-	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes} {
-		path := filepath.Join(versionRoot, string(agent))
-		info, err := os.Lstat(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return false, fmt.Errorf("stat raw Plugin package %q: %w", path, err)
-		}
-		if info.Mode()&os.ModeSymlink == 0 && info.IsDir() {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func validatePluginCopyBoundary(source, destination string) error {
@@ -178,15 +152,6 @@ func validatePluginCopyBoundary(source, destination string) error {
 		return fmt.Errorf("raw Plugin destination %q must not equal or be contained by source %q", destination, source)
 	}
 	return nil
-}
-
-func supportedPluginPackageAgent(agent domain.AgentID) bool {
-	switch agent {
-	case domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes:
-		return true
-	default:
-		return false
-	}
 }
 
 func validatePluginDownloadDestination(destination string) error {

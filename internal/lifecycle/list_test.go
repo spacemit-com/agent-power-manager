@@ -53,7 +53,7 @@ func (*listFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
 func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*listFakeCloud) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+func (*listFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, string) error {
 	return errors.New("unexpected Plugin download")
 }
 

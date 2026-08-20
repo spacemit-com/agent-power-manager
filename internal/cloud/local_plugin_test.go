@@ -2,7 +2,6 @@ package cloud_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -14,8 +13,8 @@ import (
 	"apm/internal/domain"
 )
 
-func TestLocalClientDownloadPluginCopiesExactAgentPackage(t *testing.T) {
-	// 捕获错误变更：忽略 Agent 维度或把 Cloud marketplace 一起复制到原始包。
+func TestLocalClientDownloadsOneSharedPluginPackage(t *testing.T) {
+	// 捕获错误变更：按 Agent 选择或裁剪原始包，导致下载结果缺少其他 Agent 的原生入口。
 	root, err := filepath.Abs("resources")
 	if err != nil {
 		t.Fatal(err)
@@ -25,48 +24,27 @@ func TestLocalClientDownloadPluginCopiesExactAgentPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	tests := []struct {
-		agent        domain.AgentID
-		manifestPath string
-		sentinel     string
-	}{
-		{agent: domain.AgentCodex, manifestPath: filepath.Join(".codex-plugin", "plugin.json"), sentinel: "codex\n"},
-		{agent: domain.AgentClaudeCode, manifestPath: filepath.Join(".claude-plugin", "plugin.json"), sentinel: "claude-code\n"},
-		{agent: domain.AgentHermes, manifestPath: filepath.Join(".claude-plugin", "plugin.json"), sentinel: "hermes-agent\n"},
+	destination := filepath.Join(t.TempDir(), "plugin")
+	if err := client.DownloadPlugin(context.Background(), ref, destination); err != nil {
+		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
-	for _, test := range tests {
-		t.Run(string(test.agent), func(t *testing.T) {
-			destination := t.TempDir()
-			if err := client.DownloadPlugin(context.Background(), test.agent, ref, destination); err != nil {
-				t.Fatalf("DownloadPlugin() error = %v", err)
-			}
-			manifestData, err := os.ReadFile(filepath.Join(destination, test.manifestPath))
-			if err != nil {
-				t.Fatalf("read Agent manifest: %v", err)
-			}
-			var manifest struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			}
-			if err := json.Unmarshal(manifestData, &manifest); err != nil {
-				t.Fatalf("decode Agent manifest: %v", err)
-			}
-			if manifest.Name != "demo-plugin-v0.1.0" || manifest.Version != "0.1.0" {
-				t.Fatalf("Agent manifest identity = %#v, want demo-plugin-v0.1.0@0.1.0", manifest)
-			}
-			if _, err := os.Stat(filepath.Join(destination, "skills", "demo-plugin", "SKILL.md")); err != nil {
-				t.Fatalf("stat downloaded skill: %v", err)
-			}
-			sentinel, err := os.ReadFile(filepath.Join(destination, "agent.txt"))
-			if err != nil {
-				t.Fatalf("read Agent sentinel: %v", err)
-			}
-			if string(sentinel) != test.sentinel {
-				t.Fatalf("Agent sentinel = %q, want %q", sentinel, test.sentinel)
-			}
-			assertTreeHasNoPluginMarketplace(t, destination)
-		})
+	for _, required := range []string{
+		filepath.Join(".codex-plugin", "plugin.json"),
+		filepath.Join(".claude-plugin", "plugin.json"),
+		filepath.Join(".hermes-plugin", "__init__.py"),
+		filepath.Join(".hermes-plugin", "plugin.yaml"),
+		filepath.Join("skills", "demo-plugin", "SKILL.md"),
+	} {
+		if _, err := os.Stat(filepath.Join(destination, required)); err != nil {
+			t.Fatalf("stat downloaded shared entry %q: %v", required, err)
+		}
 	}
+	for _, forbidden := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes} {
+		if _, err := os.Lstat(filepath.Join(destination, string(forbidden))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Agent package directory %q stat error = %v, want absent", forbidden, err)
+		}
+	}
+	assertTreeHasNoPluginMarketplace(t, destination)
 }
 
 func TestLocalClientDownloadPluginRejectsDestinationInsideSourceWithoutMutation(t *testing.T) {
@@ -79,7 +57,7 @@ func TestLocalClientDownloadPluginRejectsDestinationInsideSourceWithoutMutation(
 		}
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			source := writeRawCodexPackage(t, root, ref)
+			source := writeRawSharedPluginPackage(t, root, ref)
 			destination := filepath.Join(source, "nested", "plugin")
 			if existing {
 				destination = filepath.Join(source, "nested")
@@ -93,7 +71,7 @@ func TestLocalClientDownloadPluginRejectsDestinationInsideSourceWithoutMutation(
 				t.Fatal(err)
 			}
 
-			if err := client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, destination); err == nil || errors.Is(err, cloud.ErrNotFound) {
+			if err := client.DownloadPlugin(context.Background(), ref, destination); err == nil || errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("DownloadPlugin() error = %v, want source-containment error", err)
 			}
 			after := snapshotTree(t, source)
@@ -125,7 +103,7 @@ func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *test
 				}
 				t.Cleanup(func() { _ = os.RemoveAll(root) })
 			}
-			source := writeRawCodexPackage(t, root, ref)
+			source := writeRawSharedPluginPackage(t, root, ref)
 			externalSentinel := filepath.Join(t.TempDir(), "outside-sentinel")
 			if err := os.WriteFile(externalSentinel, []byte("outside must remain unchanged"), 0o600); err != nil {
 				t.Fatal(err)
@@ -146,7 +124,7 @@ func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *test
 				}
 			case "source ancestor symlink":
 				externalRoot := t.TempDir()
-				externalSource := writeRawCodexPackage(t, externalRoot, ref)
+				externalSource := writeRawSharedPluginPackage(t, externalRoot, ref)
 				externalSentinel = filepath.Join(externalSource, "payload.txt")
 				logicalRoot := filepath.Join(root, "plugins", ref.Name)
 				if err := os.RemoveAll(logicalRoot); err != nil {
@@ -197,7 +175,7 @@ func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *test
 			}
 			destination := filepath.Join(t.TempDir(), "destination")
 
-			err = client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, destination)
+			err = client.DownloadPlugin(context.Background(), ref, destination)
 			if err == nil || errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("DownloadPlugin() error = %v, want physical-source rejection", err)
 			}
@@ -216,13 +194,13 @@ func TestLocalClientDownloadPluginAllowsDestinationWithSourceNamePrefix(t *testi
 	// 捕获错误变更：使用字符串前缀判定包含关系，误拒绝同级 codex-copy 目标。
 	root := t.TempDir()
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	source := writeRawCodexPackage(t, root, ref)
+	source := writeRawSharedPluginPackage(t, root, ref)
 	destination := source + "-copy"
 	client, err := cloud.NewLocalClient(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, destination); err != nil {
+	if err := client.DownloadPlugin(context.Background(), ref, destination); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(destination, "payload.txt")); err != nil || string(got) != "payload" {
@@ -241,21 +219,19 @@ func TestLocalClientDownloadPluginReturnsExactMissesBeforeTouchingDestination(t 
 		t.Fatal(err)
 	}
 	tests := []struct {
-		name  string
-		agent domain.AgentID
-		ref   domain.PowerRef
+		name string
+		ref  domain.PowerRef
 	}{
-		{name: "unsupported Agent", agent: "other", ref: domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}},
-		{name: "missing logical name", agent: domain.AgentCodex, ref: domain.PowerRef{Name: "missing", Type: domain.PowerTypePlugin, Version: "v0.1.0"}},
-		{name: "missing version", agent: domain.AgentCodex, ref: domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v9.9.9"}},
-		{name: "wrong Power type", agent: domain.AgentCodex, ref: domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypeSkill, Version: "v0.1.0"}},
-		{name: "escaping logical name", agent: domain.AgentCodex, ref: domain.PowerRef{Name: "../demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}},
-		{name: "escaping version", agent: domain.AgentCodex, ref: domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "../v0.1.0"}},
+		{name: "missing logical name", ref: domain.PowerRef{Name: "missing", Type: domain.PowerTypePlugin, Version: "v0.1.0"}},
+		{name: "missing version", ref: domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v9.9.9"}},
+		{name: "wrong Power type", ref: domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypeSkill, Version: "v0.1.0"}},
+		{name: "escaping logical name", ref: domain.PowerRef{Name: "../demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}},
+		{name: "escaping version", ref: domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "../v0.1.0"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "untouched")
-			err := client.DownloadPlugin(context.Background(), test.agent, test.ref, destination)
+			err := client.DownloadPlugin(context.Background(), test.ref, destination)
 			if !errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("DownloadPlugin() error = %v, want ErrNotFound", err)
 			}
@@ -283,7 +259,7 @@ func TestLocalClientDownloadPluginRejectsUnsafeDestinations(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, nonEmpty); err == nil || errors.Is(err, cloud.ErrNotFound) {
+	if err := client.DownloadPlugin(context.Background(), ref, nonEmpty); err == nil || errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("non-empty destination error = %v, want destination error", err)
 	}
 	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "keep" {
@@ -295,7 +271,7 @@ func TestLocalClientDownloadPluginRejectsUnsafeDestinations(t *testing.T) {
 	if err := os.Symlink(symlinkTarget, symlinkDestination); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, symlinkDestination); err == nil || errors.Is(err, cloud.ErrNotFound) {
+	if err := client.DownloadPlugin(context.Background(), ref, symlinkDestination); err == nil || errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("symlink destination error = %v, want destination error", err)
 	}
 	entries, err := os.ReadDir(symlinkTarget)
@@ -309,7 +285,7 @@ func TestLocalClientDownloadPluginRejectsUnsafeDestinations(t *testing.T) {
 		t.Fatal(err)
 	}
 	throughAncestor := filepath.Join(ancestorLink, "plugin")
-	if err := client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, throughAncestor); err == nil || errors.Is(err, cloud.ErrNotFound) {
+	if err := client.DownloadPlugin(context.Background(), ref, throughAncestor); err == nil || errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("symlink ancestor destination error = %v, want destination error", err)
 	}
 	entries, err = os.ReadDir(ancestorTarget)
@@ -331,7 +307,7 @@ func TestLocalClientDownloadPluginAllowsCallerControlledRelativeDestination(t *t
 	working := t.TempDir()
 	t.Chdir(working)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, "plugin"); err != nil {
+	if err := client.DownloadPlugin(context.Background(), ref, "plugin"); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(working, "plugin", ".codex-plugin", "plugin.json")); err != nil {
@@ -354,7 +330,7 @@ func TestLocalClientDownloadPluginDoesNotCreateCloudOwnedCacheOrStaging(t *testi
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := client.DownloadPlugin(context.Background(), domain.AgentCodex, ref, filepath.Join(t.TempDir(), "plugin")); err != nil {
+	if err := client.DownloadPlugin(context.Background(), ref, filepath.Join(t.TempDir(), "plugin")); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
 	for _, path := range []string{
@@ -394,9 +370,9 @@ type treeSnapshotEntry struct {
 	Content string
 }
 
-func writeRawCodexPackage(t *testing.T, root string, ref domain.PowerRef) string {
+func writeRawSharedPluginPackage(t *testing.T, root string, ref domain.PowerRef) string {
 	t.Helper()
-	source := filepath.Join(root, "plugins", ref.Name, ref.Version, string(domain.AgentCodex))
+	source := filepath.Join(root, "plugins", ref.Name, ref.Version)
 	if err := os.MkdirAll(filepath.Join(source, ".codex-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -441,13 +417,12 @@ func snapshotTree(t *testing.T, root string) map[string]treeSnapshotEntry {
 	return snapshot
 }
 
-func TestLocalClientListsPluginsFromAgentPackages(t *testing.T) {
+func TestLocalClientListsPluginsFromSharedPackages(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	writeRawPluginPackageDir(t, root, "demo-plugin", "v0.1.0", domain.AgentCodex)
-	writeRawPluginPackageDir(t, root, "demo-plugin", "v0.1.0", domain.AgentClaudeCode)
-	writeRawPluginPackageDir(t, root, "demo-plugin", "v0.0.1", domain.AgentHermes)
-	writeRawPluginPackageDir(t, root, "ignored", "v9.9.9", "unsupported")
+	writeRawPluginPackageDir(t, root, "demo-plugin", "v0.1.0")
+	writeRawPluginPackageDir(t, root, "demo-plugin", "v0.0.1")
+	writeRawPluginPackageDir(t, root, "ignored", "not-a-version")
 
 	client, err := cloud.NewLocalClient(root)
 	if err != nil {
@@ -466,20 +441,18 @@ func TestLocalClientListsPluginsFromAgentPackages(t *testing.T) {
 	}
 }
 
-func TestLocalClientListIgnoresVersionsWithoutSupportedAgentPackage(t *testing.T) {
+func TestLocalClientListAcceptsEmptySharedPackageWithoutAuditingAgentEntries(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	if err := os.MkdirAll(filepath.Join(root, "plugins", "empty", "v1.0.0"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeRawPluginPackageDir(t, root, "unsupported", "v1.0.0", "other")
+	writeRawPluginPackageDir(t, root, "empty", "v1.0.0")
 	client, err := cloud.NewLocalClient(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := client.List()
-	if err != nil || len(got) != 0 {
-		t.Fatalf("List() = %#v, %v; want no Plugin refs", got, err)
+	want := []domain.PowerRef{{Name: "empty", Type: domain.PowerTypePlugin, Version: "v1.0.0"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("List() = %#v, %v; want %#v", got, err, want)
 	}
 }
 
@@ -513,9 +486,9 @@ func TestBundledPluginResourcesContainNoMarketplaceOrLegacyLayout(t *testing.T) 
 	}
 }
 
-func writeRawPluginPackageDir(t *testing.T, root, logicalName, version string, agent domain.AgentID) {
+func writeRawPluginPackageDir(t *testing.T, root, logicalName, version string) {
 	t.Helper()
-	dir := filepath.Join(root, "plugins", logicalName, version, string(agent))
+	dir := filepath.Join(root, "plugins", logicalName, version)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

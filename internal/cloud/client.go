@@ -13,5 +13,5 @@ type Client interface {
 	List() ([]domain.PowerRef, error)
 	DownloadSkill(domain.PowerRef) error
 	GetMCP(domain.PowerRef) (domain.MCPServer, error)
-	DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error
+	DownloadPlugin(context.Context, domain.PowerRef, string) error
 }

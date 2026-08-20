@@ -9,9 +9,9 @@ import (
 	"apm/internal/domain"
 )
 
-// Downloader 下载指定 Agent 使用的 Plugin artifact。
+// Downloader 下载指定版本的完整共享 Plugin artifact。
 type Downloader interface {
-	DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error
+	DownloadPlugin(context.Context, domain.PowerRef, string) error
 }
 
 // Manager 管理本地 Plugin artifact 的缓存、查询和 Hermes 暂存。

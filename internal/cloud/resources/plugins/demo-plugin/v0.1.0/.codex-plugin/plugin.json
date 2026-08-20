@@ -1,6 +1,6 @@
 {
   "name": "demo-plugin-v0.1.0",
   "version": "0.1.0",
-  "description": "Second minimal Codex plugin fixture managed by APM Cloud",
+  "description": "Second shared Codex plugin fixture managed by APM Cloud",
   "skills": "./skills/"
 }

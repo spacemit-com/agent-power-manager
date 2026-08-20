@@ -26,7 +26,7 @@ func (*stubCloudClient) DownloadSkill(domain.PowerRef) error { return nil }
 func (*stubCloudClient) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*stubCloudClient) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+func (*stubCloudClient) DownloadPlugin(context.Context, domain.PowerRef, string) error {
 	return errors.New("unexpected Plugin download")
 }
 

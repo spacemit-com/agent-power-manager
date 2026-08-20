@@ -140,7 +140,7 @@ func (c *uninstallFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, erro
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
-func (*uninstallFakeCloud) DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error {
+func (*uninstallFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, string) error {
 	panic("Plugin uninstall must not call Cloud DownloadPlugin")
 }
 

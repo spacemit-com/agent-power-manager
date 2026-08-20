@@ -1,7 +1,7 @@
 {
   "name": "demo-plugin-v0.1.0",
   "version": "0.1.0",
-  "description": "Second minimal Claude plugin fixture managed by APM Cloud",
+  "description": "Second shared Claude plugin fixture managed by APM Cloud",
   "skills": [
     "./skills/"
   ]

@@ -277,7 +277,7 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	resources := filepath.Join(root, "cloud")
 	for _, logical := range []string{"demo-plugin", "side-plugin"} {
 		for _, release := range []string{"v0.0.1", "v0.1.0"} {
-			writeAcceptancePluginPackage(t, resources, agent, logical, release)
+			writeAcceptancePluginPackage(t, resources, logical, release)
 		}
 	}
 	calls := filepath.Join(root, "calls.log")
@@ -346,26 +346,33 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	}
 }
 
-func writeAcceptancePluginPackage(t *testing.T, root string, agent domain.AgentID, logical, release string) {
+func writeAcceptancePluginPackage(t *testing.T, root, logical, release string) {
 	t.Helper()
 	nativeVersion := strings.TrimPrefix(release, "v")
 	actual := logical + "-" + release
-	var manifestDirectory, manifest string
-	switch agent {
-	case domain.AgentCodex:
-		manifestDirectory = ".codex-plugin"
-		manifest = `{"name":"` + actual + `","version":"` + nativeVersion + `","description":"acceptance fixture"}`
-	case domain.AgentClaudeCode:
-		manifestDirectory = ".claude-plugin"
-		manifest = `{"name":"` + actual + `","version":"` + nativeVersion + `","description":"acceptance fixture"}`
-	default:
-		t.Fatalf("unsupported acceptance Agent %q", agent)
+	packageRoot := filepath.Join(root, "plugins", logical, release)
+	manifest := `{"name":"` + actual + `","version":"` + nativeVersion + `","description":"acceptance fixture"}`
+	for _, relative := range []string{
+		filepath.Join(".codex-plugin", "plugin.json"),
+		filepath.Join(".claude-plugin", "plugin.json"),
+	} {
+		path := filepath.Join(packageRoot, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	directory := filepath.Join(root, "plugins", logical, release, string(agent), manifestDirectory)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	hermesRoot := filepath.Join(packageRoot, ".hermes-plugin")
+	if err := os.MkdirAll(hermesRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "plugin.json"), []byte(manifest), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(hermesRoot, "__init__.py"), []byte("def register(ctx):\n    return None\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hermesManifest := "name: " + logical + "\nversion: " + nativeVersion + "\ndescription: acceptance fixture\nauthor: APM\n"
+	if err := os.WriteFile(filepath.Join(hermesRoot, "plugin.yaml"), []byte(hermesManifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

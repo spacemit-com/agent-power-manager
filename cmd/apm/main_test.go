@@ -18,17 +18,15 @@ import (
 
 type recordingPluginPackageDownloader struct {
 	ctx         context.Context
-	agent       domain.AgentID
 	ref         domain.PowerRef
 	destination string
 	err         error
 	calls       int
 }
 
-func (downloader *recordingPluginPackageDownloader) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
+func (downloader *recordingPluginPackageDownloader) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
 	downloader.calls++
 	downloader.ctx = ctx
-	downloader.agent = agent
 	downloader.ref = ref
 	downloader.destination = destination
 	return downloader.err
@@ -39,7 +37,7 @@ func TestNewPluginResourcesRejectsNilDownloaderAtConstruction(t *testing.T) {
 	tests := []struct {
 		name   string
 		source interface {
-			DownloadPlugin(context.Context, domain.AgentID, domain.PowerRef, string) error
+			DownloadPlugin(context.Context, domain.PowerRef, string) error
 		}
 	}{
 		{name: "nil"},

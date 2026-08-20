@@ -20,17 +20,8 @@ func TestNewSelectsAgentBuildersAndReturnsCompleteArtifacts(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg-cache"))
 	t.Setenv("APM_HOME", filepath.Join(root, "home"))
-	download := pluginDownloadFunc(func(_ context.Context, agent domain.AgentID, _ domain.PowerRef, destination string) error {
-		switch agent {
-		case domain.AgentCodex:
-			return writeTestPluginManifest(destination, codexManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
-		case domain.AgentClaudeCode:
-			return writeTestPluginManifest(destination, claudeManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
-		case domain.AgentHermes:
-			return writeTestPluginManifest(destination, claudeManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
-		default:
-			return errors.New("unexpected agent")
-		}
+	download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
+		return writeSharedTestPluginManifests(destination, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 	})
 	service, err := New(download)
 	if err != nil {
@@ -201,7 +192,7 @@ func TestEnsureRejectsInvalidAgentPackagesWithoutPublishingCache(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			roots := newTestRoots(t)
-			download := pluginDownloadFunc(func(_ context.Context, _ domain.AgentID, _ domain.PowerRef, destination string) error {
+			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				return test.write(t, destination)
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
@@ -222,7 +213,7 @@ func TestEnsureWithLocalCloudRejectsSymlinkedSourceBeforePublishingArtifact(t *t
 	resourceRoot := filepath.Join(t.TempDir(), "resources")
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "xdg-cache"))
 	ref := testPluginRef()
-	source := filepath.Join(resourceRoot, "plugins", ref.Name, ref.Version, string(domain.AgentCodex))
+	source := filepath.Join(resourceRoot, "plugins", ref.Name, ref.Version)
 	manifestPath := filepath.Join(source, codexManifestPath)
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
 		t.Fatal(err)
@@ -274,13 +265,9 @@ func TestLookupRejectsMarketplaceFilesOutsideAgentClosedWorld(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			roots := newTestRoots(t)
 			var calls atomic.Int32
-			download := pluginDownloadFunc(func(_ context.Context, agent domain.AgentID, _ domain.PowerRef, destination string) error {
+			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				calls.Add(1)
-				manifestPath := claudeManifestPath
-				if agent == domain.AgentCodex {
-					manifestPath = codexManifestPath
-				}
-				return writeTestPluginManifest(destination, manifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
+				return writeSharedTestPluginManifests(destination, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
 			ref := testPluginRef()
@@ -395,12 +382,9 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 		t.Run(test.name, func(t *testing.T) {
 			roots := newTestRoots(t)
 			var calls atomic.Int32
-			download := pluginDownloadFunc(func(_ context.Context, agent domain.AgentID, _ domain.PowerRef, destination string) error {
+			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				calls.Add(1)
-				if agent == domain.AgentCodex {
-					return writeTestPluginManifest(destination, codexManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
-				}
-				return writeTestPluginManifest(destination, claudeManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
+				return writeSharedTestPluginManifests(destination, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
 			ref := testPluginRef()
@@ -442,7 +426,7 @@ func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCach
 		t.Run(test.name, func(t *testing.T) {
 			roots := newTestRoots(t)
 			var calls atomic.Int32
-			download := pluginDownloadFunc(func(_ context.Context, _ domain.AgentID, _ domain.PowerRef, destination string) error {
+			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				calls.Add(1)
 				return writeTestPluginManifest(destination, codexManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0","description":"Demo","author":{"name":"APM"}}`)
 			})
@@ -481,7 +465,7 @@ func TestEnsureValidatesDownloadedPhysicalTreeBeforeAgentBuilder(t *testing.T) {
 				roots := newTestRoots(t)
 				external := t.TempDir()
 				var externalBefore string
-				download := pluginDownloadFunc(func(_ context.Context, _ domain.AgentID, _ domain.PowerRef, destination string) error {
+				download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 					if err := writeSymlinkScenario(t, agent, scenario, destination, external); err != nil {
 						return err
 					}
@@ -512,10 +496,10 @@ func TestEnsureValidatesDownloadedPhysicalTreeBeforeAgentBuilder(t *testing.T) {
 	}
 }
 
-type pluginDownloadFunc func(context.Context, domain.AgentID, domain.PowerRef, string) error
+type pluginDownloadFunc func(context.Context, domain.PowerRef, string) error
 
-func (download pluginDownloadFunc) DownloadPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef, destination string) error {
-	return download(ctx, agent, ref, destination)
+func (download pluginDownloadFunc) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
+	return download(ctx, ref, destination)
 }
 
 type observingArtifactBuilder struct {
@@ -538,6 +522,13 @@ func writeTestPluginManifest(pluginPath, relativePath, content string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+func writeSharedTestPluginManifests(pluginPath, content string) error {
+	if err := writeTestPluginManifest(pluginPath, codexManifestPath, content); err != nil {
+		return err
+	}
+	return writeTestPluginManifest(pluginPath, claudeManifestPath, content)
 }
 
 func writeFileForTest(t *testing.T, path, content string) {
