@@ -220,7 +220,7 @@ func validatePluginMarketplaceJournal(journal Journal, payload PluginJournalPayl
 			}
 			return nil
 		}
-		if err := validatePluginPreviousReference(journal, payload, expectedName); err != nil {
+		if err := validatePluginPreviousReference(journal, payload); err != nil {
 			return err
 		}
 		if !payload.PreviousPresent || !marketplace.PreviousPresent ||
@@ -239,7 +239,7 @@ func validatePluginMarketplaceJournal(journal Journal, payload PluginJournalPayl
 	}
 }
 
-func validatePluginPreviousReference(journal Journal, payload PluginJournalPayload, _ string) error {
+func validatePluginPreviousReference(journal Journal, payload PluginJournalPayload) error {
 	if journal.Previous == nil || payload.Previous == nil {
 		return fmt.Errorf("missing previous Plugin state: %w", ErrInvalidJournal)
 	}
