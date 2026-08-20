@@ -147,6 +147,17 @@ func TestClaudePluginInspectAbsentAndAmbiguous(t *testing.T) {
 	}
 }
 
+func TestClaudePluginInspectReportsSingleForeignSelector(t *testing.T) {
+	runner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(
+		`[{"id":"demo-plugin@foreign"}]`,
+	)}}
+	fact, err := newClaudePluginAdapter(runner).Inspect(context.Background(), "demo-plugin")
+	want := PluginFact{Presence: PluginPresent, ActualName: "demo-plugin", Selector: "demo-plugin@foreign"}
+	if err != nil || fact != want {
+		t.Fatalf("Inspect() = %#v, %v; want %#v", fact, err, want)
+	}
+}
+
 func TestClaudePluginInspectRejectsMalformedTopLevelCollection(t *testing.T) {
 	// 捕获错误变更：missing/null collection 被当成明确空列表，从而把未知状态误报为 absent。
 	for _, document := range []string{`{}`, `{"installed":null}`, `null`} {

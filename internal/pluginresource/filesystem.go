@@ -100,6 +100,26 @@ func validateStagingDisjoint(cacheRoot string, artifact Artifact, stagingRoot, s
 		}
 		targets = append(targets, resolved)
 	}
+	// 两个写入根也必须物理分离；否则临时根的前置清理可能经直接或 symlink 别名删除旧 staging。
+	for leftIndex := 0; leftIndex < len(targets); leftIndex++ {
+		for rightIndex := leftIndex + 1; rightIndex < len(targets); rightIndex++ {
+			left, right := targets[leftIndex], targets[rightIndex]
+			rightWithinLeft, err := filesystemutil.PathEqualOrWithin(left.physical, right.physical)
+			if err != nil {
+				return fmt.Errorf("compare physical %s and %s paths: %w", left.name, right.name, errors.Join(ErrInvalidArtifact, err))
+			}
+			leftWithinRight, err := filesystemutil.PathEqualOrWithin(right.physical, left.physical)
+			if err != nil {
+				return fmt.Errorf("compare physical %s and %s paths: %w", right.name, left.name, errors.Join(ErrInvalidArtifact, err))
+			}
+			if rightWithinLeft || leftWithinRight {
+				return fmt.Errorf(
+					"physical %s path %q overlaps %s path %q: %w",
+					right.name, right.logical, left.name, left.logical, ErrInvalidArtifact,
+				)
+			}
+		}
+	}
 
 	for _, source := range sources {
 		for _, target := range targets {

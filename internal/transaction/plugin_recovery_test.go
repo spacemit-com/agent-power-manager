@@ -63,6 +63,39 @@ func TestPluginRecoveryFilesystemPublishedTargetEnablesAndCommits(t *testing.T) 
 	}
 }
 
+func TestPluginRecoveryFilesystemAddingNewRejectsTargetAndPublishCoexistence(t *testing.T) {
+	fixture := newSamePathPluginRecoveryFixture(t)
+	fixture.store.journal.Phase = PhaseAddingNew
+	publish := fixture.store.journal.Plugin.Filesystem.PublishPath
+	if err := os.MkdirAll(publish, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(publish, "version.txt"), []byte("candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := fixture.service.Recover(context.Background())
+	if !errors.Is(err, ErrRecoveryFailed) || result.Recovered {
+		t.Fatalf("Recover() = %+v, %v; want fail-closed recovery", result, err)
+	}
+	if !fixture.store.found || fixture.store.journal.Phase != PhaseAddingNew {
+		t.Fatalf("ambiguous recovery journal = found %t phase %q; want retained adding-new", fixture.store.found, fixture.store.journal.Phase)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(fixture.target, "version.txt"):                                                 "new",
+		filepath.Join(fixture.store.journal.Plugin.Filesystem.PreviousQuarantinePath, "version.txt"): "old",
+		filepath.Join(publish, "version.txt"):                                                        "candidate",
+	} {
+		contents, readErr := os.ReadFile(path)
+		if readErr != nil || string(contents) != want {
+			t.Fatalf("retained %q = %q, %v; want %q", path, contents, readErr, want)
+		}
+	}
+	if len(fixture.plugin.added) != 0 || len(fixture.plugin.removed) != 0 {
+		t.Fatalf("ambiguous recovery mutated adapter: added=%+v removed=%+v", fixture.plugin.added, fixture.plugin.removed)
+	}
+}
+
 func TestPluginRecoveryFilesystemCommittingRejectsMissingInstallTarget(t *testing.T) {
 	events := []string{}
 	home := t.TempDir()
@@ -139,9 +172,140 @@ func TestPluginRecoveryFilesystemRemovingOldReenablesUnmovedPreviousTarget(t *te
 	if err != nil || result.Direction != RecoveryRollback || !result.Recovered {
 		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
-	want := []string{"resolver:hermes-agent", "adapter:inspect:demo", "update:rolling-back", "adapter:add:demo", "delete:journal"}
+	want := []string{"resolver:hermes-agent", "adapter:inspect:demo", "update:rolling-back", "update:removing-old", "adapter:add:demo", "delete:journal"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
+	}
+}
+
+func TestPluginRecoveryFilesystemResumesAfterRestoredPreviousActivationFailure(t *testing.T) {
+	fixture := newSamePathPluginRecoveryFixture(t)
+	activationErr := errors.New("restore activation failed")
+	fixture.plugin.addAnswers = []pluginMutationAnswer{
+		{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: activationErr},
+		{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}},
+	}
+
+	if result, err := fixture.service.Recover(context.Background()); !errors.Is(err, ErrRecoveryFailed) || result.Recovered {
+		t.Fatalf("first Recover() = %+v, %v; want retained recovery failure", result, err)
+	}
+	assertSamePathPreviousContents(t, fixture.target)
+	if !fixture.store.found {
+		t.Fatal("failed restore activation deleted journal")
+	}
+
+	result, err := fixture.service.Recover(context.Background())
+	if err != nil || !result.Recovered || result.Direction != RecoveryRollback {
+		t.Fatalf("second Recover() = %+v, %v; want converged rollback", result, err)
+	}
+	assertSamePathPreviousContents(t, fixture.target)
+	if fixture.store.found {
+		t.Fatal("converged rollback retained journal")
+	}
+}
+
+func TestPluginRecoveryFilesystemResumesAfterRestoreRenameCompletesThenReturnsError(t *testing.T) {
+	fixture := newSamePathPluginRecoveryFixture(t)
+	restoreErr := errors.New("interrupted after restore")
+	restored := false
+	fixture.service.files.rename = func(oldPath, newPath string) error {
+		if err := os.Rename(oldPath, newPath); err != nil {
+			return err
+		}
+		restored = true
+		return restoreErr
+	}
+
+	if result, err := fixture.service.Recover(context.Background()); !errors.Is(err, ErrRecoveryFailed) || result.Recovered {
+		t.Fatalf("first Recover() = %+v, %v; want retained recovery failure", result, err)
+	}
+	if !restored {
+		t.Fatal("first recovery did not reach previous restore")
+	}
+	assertSamePathPreviousContents(t, fixture.target)
+	fixture.service.files.rename = os.Rename
+
+	result, err := fixture.service.Recover(context.Background())
+	if err != nil || !result.Recovered || result.Direction != RecoveryRollback {
+		t.Fatalf("second Recover() = %+v, %v; want converged rollback", result, err)
+	}
+	assertSamePathPreviousContents(t, fixture.target)
+	if fixture.store.found {
+		t.Fatal("converged rollback retained journal")
+	}
+}
+
+type samePathPluginRecoveryFixture struct {
+	service *Service
+	store   *recordingJournalStore
+	plugin  *recordingPluginAdapter
+	target  string
+}
+
+func newSamePathPluginRecoveryFixture(t *testing.T) *samePathPluginRecoveryFixture {
+	t.Helper()
+	events := []string{}
+	t.Setenv("APM_HOME", t.TempDir())
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(staging, "plugins", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := "00112233445566778899aabbccddeeff"
+	pluginsRoot := filepath.Join(t.TempDir(), "plugins")
+	target := filepath.Join(pluginsRoot, "demo")
+	tx := filepath.Join(pluginsRoot, ".apm-transactions", id)
+	quarantine := filepath.Join(tx, "previous")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "version.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(quarantine, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(quarantine, "version.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	journal := Journal{
+		SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationInstall, Phase: PhaseRollingBack,
+		Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}, Previous: &previousRef,
+		Plugin: &PluginJournalPayload{Deployment: domain.PluginDeploymentFilesystem,
+			Target: adapter.PluginTarget{ActualName: "demo", Selector: "demo"}, Previous: &previousTarget, PreviousPresent: true,
+			Filesystem: &PluginFilesystemJournalPayload{
+				StagingRoot: staging, SourcePath: filepath.Join(staging, "plugins", "demo"), TargetPath: target,
+				PreviousTargetPath: target, TransactionDir: tx, PublishPath: filepath.Join(tx, "publish"), PreviousQuarantinePath: quarantine,
+			}},
+	}
+	store := &recordingJournalStore{journal: journal, found: true, events: &events, fail: map[string]error{}}
+	plugin := &recordingPluginAdapter{
+		events: &events, mode: domain.PluginDeploymentFilesystem,
+		facts: map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginAbsent, ActualName: "demo"}},
+		removeAnswers: []pluginMutationAnswer{
+			{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}},
+			{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}},
+		},
+		addAnswers: []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}},
+	}
+	resolver := &recordingPluginResolver{events: &events, plugin: plugin}
+	return &samePathPluginRecoveryFixture{
+		service: newService(&recordingManifestWriter{events: &events}, store, resolver),
+		store:   store,
+		plugin:  plugin,
+		target:  target,
+	}
+}
+
+func assertSamePathPreviousContents(t *testing.T, target string) {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join(target, "version.txt"))
+	if err != nil || string(contents) != "old" {
+		t.Fatalf("previous target contents = %q, %v; want preserved old version", contents, err)
 	}
 }
 

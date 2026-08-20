@@ -111,6 +111,28 @@ func TestInstallPluginMarketplaceRejectsUnmanagedFacts(t *testing.T) {
 	}
 }
 
+func TestInstallPluginMarketplaceClaudeForeignSelectorFailsClosed(t *testing.T) {
+	var calls []string
+	ref := pluginRef("v2.0.0")
+	service := newInstallService(t, &calls, installFixture{
+		pluginMode: domain.PluginDeploymentMarketplace,
+		marketplaceFacts: map[string]adapter.MarketplaceFact{
+			"apm-demo": {Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
+		},
+		pluginFacts: map[string]adapter.PluginFact{
+			"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@foreign"},
+		},
+	})
+
+	_, err := service.installForAgent(context.Background(), domain.AgentClaudeCode, ref)
+	if !errors.Is(err, adapter.ErrPluginConflict) {
+		t.Fatalf("installForAgent() error = %v, want ErrPluginConflict", err)
+	}
+	if containsEvent(calls, "transaction:install-plugin:"+string(domain.AgentClaudeCode)) {
+		t.Fatalf("calls = %v, foreign selector must not enter transaction", calls)
+	}
+}
+
 func TestInstallPluginMarketplaceSwitchUsesPreviousLookupOnly(t *testing.T) {
 	var calls []string
 	var requests []transaction.PluginInstallRequest

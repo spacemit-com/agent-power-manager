@@ -68,6 +68,9 @@ func (s *Service) installFilesystemPlugin(ctx context.Context, request PluginIns
 		if targetFact.Presence != adapter.PluginPresent || targetFact.ActualName != previousName || targetFact.Selector != previousName {
 			return fmt.Errorf("previous filesystem Plugin state does not match logical target: %w", ErrIndeterminateState)
 		}
+		if err := s.requirePhysicalPluginTarget(targetPath); err != nil {
+			return err
+		}
 		previousPresent = true
 		previousTarget = &adapter.PluginTarget{ActualName: previousName, Selector: previousName}
 	} else {
@@ -202,6 +205,11 @@ func (s *Service) rollbackFilesystemPluginInstall(ctx context.Context, journal J
 		}
 	}
 	if journal.Plugin.PreviousPresent && journal.Plugin.Previous != nil {
+		// 新目录已清除后先记录旧目录恢复相位，使恢复后的启用失败可由 Fix 安全重入。
+		journal.Phase = PhaseRemovingOld
+		if err := s.journals.Update(journal); err != nil {
+			return errors.Join(originalErr, fmt.Errorf("persist previous filesystem Plugin restore: %w", err))
+		}
 		quarantineExists, err := s.pathExists(filesystem.PreviousQuarantinePath)
 		if err != nil {
 			return errors.Join(originalErr, err)
@@ -240,6 +248,21 @@ func (s *Service) ensurePluginTransactionDirectories(target string, artifacts pl
 		return fmt.Errorf("Plugin root %q is not a physical directory: %w", pluginsRoot, ErrUnsafePath)
 	}
 	return ensureTransactionDirWithOps(transactionArtifacts{dir: artifacts.dir}, s.files)
+}
+
+// requirePhysicalPluginTarget 确认受管 Plugin 节点是可安全隔离的物理目录；CLI fact 不能替代磁盘身份校验。
+func (s *Service) requirePhysicalPluginTarget(target string) error {
+	info, err := s.files.lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("managed filesystem Plugin target %q is missing: %w", target, ErrIndeterminateState)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect managed filesystem Plugin target %q: %w", target, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("managed filesystem Plugin target %q is not a physical directory: %w", target, ErrUnsafePath)
+	}
+	return nil
 }
 
 func (s *Service) cleanupPluginTransactionDir(artifacts pluginFilesystemArtifacts) error {
@@ -285,6 +308,12 @@ func (s *Service) uninstallFilesystemPlugin(ctx context.Context, request PluginU
 	}
 	targetPath, err := request.Adapter.TargetPath(request.Target.ActualName)
 	if err != nil {
+		return result, err
+	}
+	if err := validateSafeAbsolutePath("Plugin target", targetPath); err != nil {
+		return result, err
+	}
+	if err := s.requirePhysicalPluginTarget(targetPath); err != nil {
 		return result, err
 	}
 	id, err := s.newID()

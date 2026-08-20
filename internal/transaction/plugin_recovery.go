@@ -43,6 +43,17 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 	}
 	switch journal.Operation {
 	case OperationInstall:
+		publishExists := false
+		if journal.Phase == PhaseAddingNew {
+			publishExists, err = s.pathExists(filesystem.PublishPath)
+			if err != nil {
+				return err
+			}
+			// publish 尚在而 target 又出现，无法证明 target 属于本事务；不得接管或清理任一目录。
+			if targetExists && publishExists {
+				return fmt.Errorf("filesystem Plugin target and unpublished candidate both exist: %w", ErrIndeterminateState)
+			}
+		}
 		if journal.Phase == PhaseAddingNew && targetExists {
 			mutation, err := pluginAdapter.Add(ctx, journal.Plugin.Target)
 			if err := requireAppliedPluginMutation("enable recovered filesystem Plugin", mutation, err); err != nil {
@@ -74,6 +85,11 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 			}
 		}
 		if journal.Plugin.PreviousPresent && journal.Plugin.Previous != nil {
+			// 同路径旧版本恢复前持久化 removing-old：此后 target 若存在，只能是未移动或已恢复的旧目录。
+			// 这样恢复后的启用失败或进程中断再次 Fix 时，不会把旧目录误当作新目录删除。
+			if err := s.persistRecoveryDirection(&journal, PhaseRemovingOld); err != nil {
+				return err
+			}
 			quarantineExists, err := s.pathExists(filesystem.PreviousQuarantinePath)
 			if err != nil {
 				return err

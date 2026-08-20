@@ -448,6 +448,86 @@ func TestStageFilesystemRejectsSymlinkAliasCacheOverlapBeforeRecursiveCleanup(t 
 	}
 }
 
+func TestStageFilesystemRejectsDirectStagingRootAndTempOverlapBeforeRecursiveCleanup(t *testing.T) {
+	// 捕获错误变更：staging 与临时根直接相同，前置清理会删除仍需保留的旧 staging。
+	roots := newTestRoots(t)
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
+	if err := os.MkdirAll(roots.staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := filepath.Join(roots.staging, "old-staging.txt")
+	if err := os.WriteFile(oldPath, []byte("old staging"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := newService(
+		roots.cache,
+		roots.cacheTemp,
+		roots.staging,
+		roots.staging,
+		&testDownloader{},
+		testBuilders(),
+	)
+	var cleanupCalls int
+	service.files.removeAll = func(path string) error {
+		cleanupCalls++
+		return os.RemoveAll(path)
+	}
+
+	if _, err := service.StageFilesystem(ref); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("StageFilesystem() error = %v, want ErrInvalidArtifact", err)
+	}
+	if cleanupCalls != 0 {
+		t.Fatalf("recursive cleanup calls = %d, want 0 before staging overlap rejection", cleanupCalls)
+	}
+	contents, err := os.ReadFile(oldPath)
+	if err != nil || string(contents) != "old staging" {
+		t.Fatalf("old staging = %q, %v; want preserved", contents, err)
+	}
+}
+
+func TestStageFilesystemRejectsSymlinkAliasBetweenStagingRootAndTempBeforeRecursiveCleanup(t *testing.T) {
+	// 捕获错误变更：.tmp 祖先 symlink 使临时根物理指向旧 staging，前置 RemoveAll 会删除旧树。
+	roots := newTestRoots(t)
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
+	if err := os.MkdirAll(roots.staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := filepath.Join(roots.staging, "old-staging.txt")
+	if err := os.WriteFile(oldPath, []byte("old staging"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tempParent := filepath.Dir(roots.stagingTemp)
+	if err := os.Symlink(filepath.Dir(roots.staging), tempParent); err != nil {
+		t.Fatal(err)
+	}
+	service := newService(
+		roots.cache,
+		roots.cacheTemp,
+		roots.staging,
+		roots.stagingTemp,
+		&testDownloader{},
+		testBuilders(),
+	)
+	var cleanupCalls int
+	service.files.removeAll = func(path string) error {
+		cleanupCalls++
+		return os.RemoveAll(path)
+	}
+
+	if _, err := service.StageFilesystem(ref); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("StageFilesystem() error = %v, want ErrInvalidArtifact", err)
+	}
+	if cleanupCalls != 0 {
+		t.Fatalf("recursive cleanup calls = %d, want 0 before staging alias rejection", cleanupCalls)
+	}
+	contents, err := os.ReadFile(oldPath)
+	if err != nil || string(contents) != "old staging" {
+		t.Fatalf("old staging = %q, %v; want preserved", contents, err)
+	}
+}
+
 func TestEnsurePublishesOneSharedArtifactForConcurrentCallers(t *testing.T) {
 	// 捕获错误变更：同一 Service 并发发布同版本，在第一个版本发布前启动第二次下载。
 	previous := runtime.GOMAXPROCS(1)
