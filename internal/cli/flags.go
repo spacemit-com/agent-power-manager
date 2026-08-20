@@ -20,18 +20,34 @@ type Flags struct {
 }
 
 func validateCommon(flags Flags) error {
+	if flags.Type == "agent" {
+		return validateAgentTypeFlags(flags)
+	}
 	if strings.TrimSpace(flags.Agent) == "" {
 		return errors.New("--agent is required")
 	}
 	return validatePowerType(flags)
 }
 
-func validatePowerType(flags Flags) error {
-	switch flags.Type {
-	case "", "skill", "plugin", "mcp":
+// validateAgentTypeFlags 约束 agent power 仅适用于 Bibit；空 --agent 由 lifecycle 默认 bibit。
+func validateAgentTypeFlags(flags Flags) error {
+	if err := validatePowerType(flags); err != nil {
+		return err
+	}
+	switch flags.Agent {
+	case "", "bibit":
 		return nil
 	default:
-		return fmt.Errorf("invalid --type %q: must be skill, plugin, or mcp", flags.Type)
+		return fmt.Errorf("--type agent only supports --agent bibit, got %q", flags.Agent)
+	}
+}
+
+func validatePowerType(flags Flags) error {
+	switch flags.Type {
+	case "", "skill", "plugin", "mcp", "agent":
+		return nil
+	default:
+		return fmt.Errorf("invalid --type %q: must be skill, plugin, mcp, or agent", flags.Type)
 	}
 }
 
