@@ -149,6 +149,16 @@ func TestRegistryResolversRejectUnsupportedAgent(t *testing.T) {
 	}
 }
 
+func TestRegistryResolvesBibitAgentAdapter(t *testing.T) {
+	registry := NewRegistry()
+	if _, err := registry.ResolveAgent(domain.AgentBibit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.ResolveAgent(domain.AgentCodex); err == nil {
+		t.Fatal("ResolveAgent(codex) error = nil, want unsupported")
+	}
+}
+
 func TestRegistryPluginMarketplaceCapabilitiesMatchAgentSupport(t *testing.T) {
 	registry := NewRegistry()
 	for _, test := range []struct {

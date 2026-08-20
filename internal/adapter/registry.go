@@ -14,6 +14,7 @@ type agentRegistration struct {
 	newSkill  func(agentProfile) SkillAdapter
 	newMCP    func(agentCLIRunner) MCPAdapter
 	newPlugin func(agentProfile, agentCLIRunner) PluginAdapter
+	newAgent  func(agentProfile) AgentAdapter
 }
 
 var builtInAgentRegistrations = []agentRegistration{
@@ -24,6 +25,7 @@ var builtInAgentRegistrations = []agentRegistration{
 		newPlugin: func(profile agentProfile, _ agentCLIRunner) PluginAdapter {
 			return newBibitPluginAdapter(profile)
 		},
+		newAgent: func(profile agentProfile) AgentAdapter { return newBibitAgentAdapter(profile) },
 	},
 	{
 		profile:  agentProfile{id: domain.AgentCodex, homeEnv: "CODEX_HOME", defaultRoot: ".codex", adaptSkill: noOpSkillAdapt},
@@ -59,6 +61,7 @@ type Registry struct {
 	skillByAgent  map[domain.AgentID]SkillAdapter
 	mcpByAgent    map[domain.AgentID]MCPAdapter
 	pluginByAgent map[domain.AgentID]PluginAdapter
+	agentByAgent  map[domain.AgentID]AgentAdapter
 }
 
 // NewRegistry 创建内置 Skill、MCP 与 Plugin 类型专属适配器注册表。
@@ -69,6 +72,7 @@ func NewRegistry() *Registry {
 		skillByAgent:  make(map[domain.AgentID]SkillAdapter, len(builtInAgentRegistrations)),
 		mcpByAgent:    make(map[domain.AgentID]MCPAdapter, len(builtInAgentRegistrations)),
 		pluginByAgent: make(map[domain.AgentID]PluginAdapter, len(builtInAgentRegistrations)),
+		agentByAgent:  make(map[domain.AgentID]AgentAdapter, len(builtInAgentRegistrations)),
 		detectProfile: func(profile agentProfile) (bool, error) { return profile.detectInstalled() },
 	}
 	runner := newDefaultAgentCLIRunner()
@@ -84,6 +88,9 @@ func NewRegistry() *Registry {
 		}
 		if registration.newPlugin != nil {
 			registry.pluginByAgent[agent] = registration.newPlugin(registration.profile, runner)
+		}
+		if registration.newAgent != nil {
+			registry.agentByAgent[agent] = registration.newAgent(registration.profile)
 		}
 	}
 	return registry
@@ -112,6 +119,15 @@ func (r *Registry) ResolvePlugin(agent domain.AgentID) (PluginAdapter, error) {
 	adapter, ok := r.pluginByAgent[agent]
 	if !ok {
 		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, domain.PowerTypePlugin, ErrUnsupportedAdapter)
+	}
+	return adapter, nil
+}
+
+// ResolveAgent 解析指定智能体的文件型 Agent Adapter。
+func (r *Registry) ResolveAgent(agent domain.AgentID) (AgentAdapter, error) {
+	adapter, ok := r.agentByAgent[agent]
+	if !ok {
+		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, domain.PowerTypeAgent, ErrUnsupportedAdapter)
 	}
 	return adapter, nil
 }

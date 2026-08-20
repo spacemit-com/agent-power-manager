@@ -31,4 +31,6 @@ var (
 	ErrPluginMutationUnknown = errors.New("plugin mutation result is unknown")
 	// ErrAgentCLIUnavailable 表示目标 Agent CLI 无法解析或启动。
 	ErrAgentCLIUnavailable = errors.New("agent CLI is unavailable")
+	// ErrInvalidAgent 表示 Agent 引用、staging 或 agent.yaml 不符合安装约束。
+	ErrInvalidAgent = errors.New("invalid agent")
 )
