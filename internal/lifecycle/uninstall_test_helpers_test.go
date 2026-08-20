@@ -31,6 +31,7 @@ type uninstallFixture struct {
 	pluginFact            adapter.PluginFact
 	pluginFacts           map[string]adapter.PluginFact
 	pluginInspectErrors   map[string]error
+	pluginTargets         map[string]string
 	marketplaceFacts      map[string]adapter.MarketplaceFact
 	marketplaceErrors     map[string]error
 	pluginMode            domain.PluginDeploymentMode
@@ -228,7 +229,13 @@ func (uninstallFakePluginAdapter) Add(context.Context, adapter.PluginTarget) (ad
 func (uninstallFakePluginAdapter) Remove(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
 	return adapter.PluginMutationResult{}, nil
 }
-func (uninstallFakePluginAdapter) TargetPath(string) (string, error) { return "", nil }
+func (a uninstallFakePluginAdapter) TargetPath(name string) (string, error) {
+	recordUninstallEvent(a.calls, a.fixture, "plugin:target-path:"+string(a.agent)+":"+name)
+	if target, ok := a.fixture.pluginTargets[name]; ok {
+		return target, nil
+	}
+	return "", adapter.ErrUnsupportedAdapter
+}
 
 func (a uninstallFakeMCPAdapter) Inspect(context.Context, string) (adapter.MCPPresence, error) {
 	recordUninstallEvent(a.calls, a.fixture, "mcp:inspect:"+string(a.agent))

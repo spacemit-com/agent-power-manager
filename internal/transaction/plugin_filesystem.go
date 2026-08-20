@@ -19,6 +19,42 @@ type pluginFilesystemArtifacts struct {
 	target   string
 }
 
+type filesystemPluginTargetState uint8
+
+const (
+	filesystemPluginTargetMissing filesystemPluginTargetState = iota
+	filesystemPluginTargetDirectory
+)
+
+func inspectFilesystemPluginTarget(target string, lstat func(string) (os.FileInfo, error)) (filesystemPluginTargetState, error) {
+	if err := validateSafeAbsolutePath("Plugin target", target); err != nil {
+		return 0, err
+	}
+	info, err := lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return filesystemPluginTargetMissing, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("inspect managed filesystem Plugin target %q: %w", target, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return 0, fmt.Errorf("managed filesystem Plugin target %q is not a physical directory: %w", target, ErrUnsafePath)
+	}
+	return filesystemPluginTargetDirectory, nil
+}
+
+// ValidateFilesystemPluginTargetAbsent 合并 CLI absent 与物理节点事实；仅物理缺失时允许清理受管 manifest。
+func ValidateFilesystemPluginTargetAbsent(target string) error {
+	state, err := inspectFilesystemPluginTarget(target, os.Lstat)
+	if err != nil {
+		return err
+	}
+	if state != filesystemPluginTargetMissing {
+		return fmt.Errorf("managed filesystem Plugin target %q still exists while Adapter reports absent: %w", target, ErrIndeterminateState)
+	}
+	return nil
+}
+
 func filesystemPluginArtifacts(target, transactionID string) (pluginFilesystemArtifacts, error) {
 	if err := validateSafeAbsolutePath("Plugin target", target); err != nil {
 		return pluginFilesystemArtifacts{}, err
@@ -252,17 +288,20 @@ func (s *Service) ensurePluginTransactionDirectories(target string, artifacts pl
 
 // requirePhysicalPluginTarget 确认受管 Plugin 节点是可安全隔离的物理目录；CLI fact 不能替代磁盘身份校验。
 func (s *Service) requirePhysicalPluginTarget(target string) error {
-	info, err := s.files.lstat(target)
-	if errors.Is(err, os.ErrNotExist) {
+	state, err := inspectFilesystemPluginTarget(target, s.files.lstat)
+	if err != nil {
+		return err
+	}
+	if state != filesystemPluginTargetDirectory {
 		return fmt.Errorf("managed filesystem Plugin target %q is missing: %w", target, ErrIndeterminateState)
 	}
-	if err != nil {
-		return fmt.Errorf("inspect managed filesystem Plugin target %q: %w", target, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("managed filesystem Plugin target %q is not a physical directory: %w", target, ErrUnsafePath)
-	}
 	return nil
+}
+
+// validateOptionalPhysicalPluginTarget 允许恢复产物已缺失，但存在时必须仍是可安全递归清理的物理目录。
+func (s *Service) validateOptionalPhysicalPluginTarget(target string) error {
+	_, err := inspectFilesystemPluginTarget(target, s.files.lstat)
+	return err
 }
 
 func (s *Service) cleanupPluginTransactionDir(artifacts pluginFilesystemArtifacts) error {

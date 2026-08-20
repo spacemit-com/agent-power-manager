@@ -2,9 +2,7 @@ package transaction
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 
 	"apm/internal/adapter"
 )
@@ -55,6 +53,9 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 			}
 		}
 		if journal.Phase == PhaseAddingNew && targetExists {
+			if err := s.requirePhysicalPluginTarget(filesystem.TargetPath); err != nil {
+				return err
+			}
 			mutation, err := pluginAdapter.Add(ctx, journal.Plugin.Target)
 			if err := requireAppliedPluginMutation("enable recovered filesystem Plugin", mutation, err); err != nil {
 				return err
@@ -79,6 +80,9 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 		}
 		// removing-old 阶段的同名 target 仍可能是尚未隔离的旧版本，不得按新发布目录删除。
 		if targetExists && startedPhase != PhaseRemovingOld {
+			if err := s.requirePhysicalPluginTarget(filesystem.TargetPath); err != nil {
+				return err
+			}
 			mutation, err := pluginAdapter.Remove(ctx, journal.Plugin.Target)
 			if err := requireAppliedPluginMutation("disable rolled-back filesystem Plugin", mutation, err); err != nil {
 				return err
@@ -105,6 +109,9 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 				return fmt.Errorf("previous Plugin target and quarantine both exist: %w", ErrIndeterminateState)
 			}
 			if quarantineExists {
+				if err := s.requirePhysicalPluginTarget(filesystem.PreviousQuarantinePath); err != nil {
+					return err
+				}
 				if err := s.files.rename(filesystem.PreviousQuarantinePath, filesystem.PreviousTargetPath); err != nil {
 					return err
 				}
@@ -112,6 +119,9 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 			}
 			if !previousExists {
 				return fmt.Errorf("originally present previous Plugin target %q is missing: %w", filesystem.PreviousTargetPath, ErrIndeterminateState)
+			}
+			if err := s.requirePhysicalPluginTarget(filesystem.PreviousTargetPath); err != nil {
+				return err
 			}
 			mutation, err := pluginAdapter.Add(ctx, *journal.Plugin.Previous)
 			if err := requireAppliedPluginMutation("restore previous filesystem Plugin", mutation, err); err != nil {
@@ -144,6 +154,9 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 			if targetExists {
 				return fmt.Errorf("filesystem Plugin target and quarantine both exist: %w", ErrIndeterminateState)
 			}
+			if err := s.requirePhysicalPluginTarget(filesystem.TargetQuarantinePath); err != nil {
+				return err
+			}
 			if err := s.files.rename(filesystem.TargetQuarantinePath, filesystem.TargetPath); err != nil {
 				return err
 			}
@@ -152,6 +165,9 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 		if journal.Plugin.TargetPresent {
 			if !targetExists {
 				return fmt.Errorf("originally present uninstalled Plugin target %q is missing: %w", filesystem.TargetPath, ErrIndeterminateState)
+			}
+			if err := s.requirePhysicalPluginTarget(filesystem.TargetPath); err != nil {
+				return err
 			}
 			mutation, err := pluginAdapter.Add(ctx, journal.Plugin.Target)
 			if err := requireAppliedPluginMutation("restore uninstalled filesystem Plugin", mutation, err); err != nil {
@@ -171,15 +187,15 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 func (s *Service) commitRecoveredFilesystemPlugin(journal Journal, result *RecoveryResult) error {
 	filesystem := journal.Plugin.Filesystem
 	if journal.Operation == OperationInstall {
-		info, err := s.files.lstat(filesystem.TargetPath)
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("committing filesystem Plugin target %q is missing: %w", filesystem.TargetPath, ErrIndeterminateState)
+		if err := s.requirePhysicalPluginTarget(filesystem.TargetPath); err != nil {
+			return fmt.Errorf("validate committing filesystem Plugin target: %w", err)
 		}
-		if err != nil {
-			return fmt.Errorf("inspect committing filesystem Plugin target %q: %w", filesystem.TargetPath, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("committing filesystem Plugin target %q is not a physical directory: %w", filesystem.TargetPath, ErrUnsafePath)
+	}
+	for _, path := range []string{filesystem.PreviousQuarantinePath, filesystem.TargetQuarantinePath} {
+		if path != "" {
+			if err := s.validateOptionalPhysicalPluginTarget(path); err != nil {
+				return fmt.Errorf("validate recovered filesystem Plugin quarantine: %w", err)
+			}
 		}
 	}
 	if err := s.commitRecoveredPluginManifest(journal, result); err != nil {

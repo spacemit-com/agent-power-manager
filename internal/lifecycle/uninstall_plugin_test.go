@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -158,9 +160,11 @@ func TestUninstallFilesystemPluginUsesFactsOfflineForBibitAndHermes(t *testing.T
 			t.Run(string(agent)+"/"+test.name, func(t *testing.T) {
 				var calls []string
 				resources := &fakePluginResources{}
+				target := filepath.Join(t.TempDir(), "demo")
 				service := newUninstallService(t, &calls, uninstallFixture{
 					pluginMode:      domain.PluginDeploymentFilesystem,
 					pluginFacts:     map[string]adapter.PluginFact{"demo": test.fact},
+					pluginTargets:   map[string]string{"demo": target},
 					pluginResources: resources,
 				})
 				result, err := service.uninstallPlugin(context.Background(), agent, ref)
@@ -172,5 +176,63 @@ func TestUninstallFilesystemPluginUsesFactsOfflineForBibitAndHermes(t *testing.T
 				}
 			})
 		}
+	}
+}
+
+func TestUninstallFilesystemPluginAbsentFactValidatesPhysicalManagedTargetBeforeManifestCleanup(t *testing.T) {
+	ref := pluginRef("v1.0.0")
+	tests := []struct {
+		name    string
+		create  func(*testing.T, string)
+		wantErr error
+	}{
+		{name: "physical directory", create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.Mkdir(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, wantErr: transaction.ErrIndeterminateState},
+		{name: "symlink", create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.Symlink(t.TempDir(), target); err != nil {
+				t.Fatal(err)
+			}
+		}, wantErr: transaction.ErrUnsafePath},
+		{name: "regular file", create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.WriteFile(target, []byte("foreign"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, wantErr: transaction.ErrUnsafePath},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := filepath.Join(t.TempDir(), "demo")
+			test.create(t, target)
+			before, err := os.Lstat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var calls []string
+			service := newUninstallService(t, &calls, uninstallFixture{
+				pluginMode:    domain.PluginDeploymentFilesystem,
+				pluginFacts:   map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginAbsent, ActualName: "demo"}},
+				pluginTargets: map[string]string{"demo": target},
+			})
+
+			result, err := service.uninstallPlugin(context.Background(), domain.AgentHermes, ref)
+			if !errors.Is(err, test.wantErr) || result.TargetMissing {
+				t.Fatalf("uninstallPlugin() = %+v, %v; want %v without cleanup", result, err, test.wantErr)
+			}
+			after, statErr := os.Lstat(target)
+			if statErr != nil || after.Mode() != before.Mode() {
+				t.Fatalf("managed target changed: before=%v after=%v err=%v", before.Mode(), after, statErr)
+			}
+			for _, forbidden := range []string{"config:remove:hermes-agent:plugin:demo", "transaction:uninstall-plugin:hermes-agent"} {
+				if containsEvent(calls, forbidden) {
+					t.Fatalf("calls = %v, want no mutation %q", calls, forbidden)
+				}
+			}
+		})
 	}
 }

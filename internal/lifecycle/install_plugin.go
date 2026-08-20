@@ -29,14 +29,6 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 	}
 	target := adapter.PluginTarget{ActualName: runtimeName, Selector: runtimeName}
 
-	// 目标版本允许 Ensure 下载；旧版本恢复材料只能由后续 Lookup 离线读取。
-	targetArtifact, err := s.plugins.Ensure(ctx, ref)
-	if err != nil {
-		return cli.InstallItem{}, fmt.Errorf("ensure target Plugin artifact %+v for agent %q: %w", ref, agent, err)
-	}
-	if err := validateLifecyclePluginArtifact(targetArtifact, ref); err != nil {
-		return cli.InstallItem{}, err
-	}
 	pluginAdapter, err := s.registry.ResolvePlugin(agent)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("resolve Plugin adapter for agent %q: %w", agent, err)
@@ -44,6 +36,14 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 
 	switch pluginAdapter.DeploymentMode() {
 	case domain.PluginDeploymentMarketplace:
+		// 目标版本允许 Ensure 下载；旧版本恢复材料只能由后续 Lookup 离线读取。
+		targetArtifact, err := s.plugins.Ensure(ctx, ref)
+		if err != nil {
+			return cli.InstallItem{}, fmt.Errorf("ensure target Plugin artifact %+v for agent %q: %w", ref, agent, err)
+		}
+		if err := validateLifecyclePluginArtifact(targetArtifact, ref); err != nil {
+			return cli.InstallItem{}, err
+		}
 		marketplaceAdapter, ok := pluginAdapter.(adapter.MarketplacePluginAdapter)
 		if !ok {
 			return cli.InstallItem{}, fmt.Errorf("resolve marketplace Plugin adapter for agent %q: %w", agent, adapter.ErrUnsupportedAdapter)
@@ -210,6 +210,13 @@ func (s *InstallService) installFilesystemPlugin(
 			if fact.ActualName != previousName {
 				return cli.InstallItem{}, fmt.Errorf("unexpected previous filesystem Plugin fact: %w", transaction.ErrIndeterminateState)
 			}
+			previousPath, err := pluginAdapter.TargetPath(previousName)
+			if err != nil {
+				return cli.InstallItem{}, fmt.Errorf("resolve previous filesystem Plugin target: %w", err)
+			}
+			if err := transaction.ValidateFilesystemPluginTargetAbsent(previousPath); err != nil {
+				return cli.InstallItem{}, fmt.Errorf("validate absent previous filesystem Plugin target: %w", err)
+			}
 			if err := s.config.Remove(agent, domain.PowerTypePlugin, ref.Name); err != nil {
 				return cli.InstallItem{}, fmt.Errorf("remove stale filesystem Plugin manifest: %w", err)
 			}
@@ -235,6 +242,14 @@ func (s *InstallService) installFilesystemPlugin(
 		}
 	}
 
+	// filesystem 资源写入必须晚于 manifest、Adapter 与物理目标事实校验。
+	targetArtifact, err := s.plugins.Ensure(ctx, ref)
+	if err != nil {
+		return cli.InstallItem{}, fmt.Errorf("ensure target Plugin artifact %+v for agent %q: %w", ref, agent, err)
+	}
+	if err := validateLifecyclePluginArtifact(targetArtifact, ref); err != nil {
+		return cli.InstallItem{}, err
+	}
 	// 通用 filesystem staging 仅在所有事实校验完成、即将进入发布事务时调用。
 	staging, err := s.plugins.StageFilesystem(ref)
 	if err != nil {

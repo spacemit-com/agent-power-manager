@@ -40,6 +40,7 @@ type installFixture struct {
 	pluginFact               adapter.PluginFact
 	pluginFacts              map[string]adapter.PluginFact
 	pluginInspectErrors      map[string]error
+	pluginTargets            map[string]string
 	marketplaceFacts         map[string]adapter.MarketplaceFact
 	marketplaceInspectErrors map[string]error
 	pluginMode               domain.PluginDeploymentMode
@@ -344,7 +345,13 @@ func (installFakePluginAdapter) Add(context.Context, adapter.PluginTarget) (adap
 func (installFakePluginAdapter) Remove(context.Context, adapter.PluginTarget) (adapter.PluginMutationResult, error) {
 	return adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, nil
 }
-func (installFakePluginAdapter) TargetPath(string) (string, error) { return "/plugins/demo", nil }
+func (a installFakePluginAdapter) TargetPath(name string) (string, error) {
+	*a.calls = append(*a.calls, "plugin:target-path:"+string(a.agent)+":"+name)
+	if target, ok := a.fixture.pluginTargets[name]; ok {
+		return target, nil
+	}
+	return "", adapter.ErrUnsupportedAdapter
+}
 
 func (a installFakeMCPAdapter) Inspect(context.Context, string) (adapter.MCPPresence, error) {
 	*a.calls = append(*a.calls, "mcp:inspect:"+string(a.agent))

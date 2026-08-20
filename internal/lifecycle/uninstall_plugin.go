@@ -112,6 +112,13 @@ func (s *UninstallService) uninstallFilesystemPlugin(
 		if fact.ActualName != actualName {
 			return transaction.UninstallResult{}, fmt.Errorf("missing filesystem Plugin fact does not match manifest: %w", transaction.ErrIndeterminateState)
 		}
+		targetPath, err := pluginAdapter.TargetPath(actualName)
+		if err != nil {
+			return transaction.UninstallResult{}, fmt.Errorf("resolve missing filesystem Plugin target: %w", err)
+		}
+		if err := transaction.ValidateFilesystemPluginTargetAbsent(targetPath); err != nil {
+			return transaction.UninstallResult{}, fmt.Errorf("validate missing filesystem Plugin target: %w", err)
+		}
 		result := transaction.UninstallResult{TargetMissing: true}
 		if err := s.config.Remove(agent, domain.PowerTypePlugin, ref.Name); err != nil {
 			return result, fmt.Errorf("remove missing filesystem Plugin manifest entry: %w", err)

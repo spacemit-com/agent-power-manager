@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -50,8 +52,8 @@ func TestInstallPluginMarketplaceFirstInstallUsesLocalArtifact(t *testing.T) {
 	}
 	wantCalls := []string{
 		"config:find:codex",
-		"resource:ensure:v2.0.0",
 		"resolve-plugin:codex",
+		"resource:ensure:v2.0.0",
 		"marketplace:inspect:codex:apm-demo",
 		"plugin:inspect:codex:demo",
 		"transaction:install-plugin:codex",
@@ -159,8 +161,8 @@ func TestInstallPluginMarketplaceSwitchUsesPreviousLookupOnly(t *testing.T) {
 	}
 	wantCalls := []string{
 		"config:find:codex",
-		"resource:ensure:v2.0.0",
 		"resolve-plugin:codex",
+		"resource:ensure:v2.0.0",
 		"marketplace:inspect:codex:apm-demo",
 		"plugin:inspect:codex:demo",
 		"resource:lookup:v1.0.0",
@@ -191,7 +193,7 @@ func TestInstallPluginMarketplaceStaleManifestClearsSingleEntryThenFirstInstalls
 		t.Fatalf("installForAgent() = %+v, %v, want fresh install", item, err)
 	}
 	wantCalls := []string{
-		"config:find:codex", "resource:ensure:v2.0.0", "resolve-plugin:codex",
+		"config:find:codex", "resolve-plugin:codex", "resource:ensure:v2.0.0",
 		"marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo",
 		"config:remove:codex:plugin:demo",
 		"marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo",
@@ -323,6 +325,96 @@ func TestInstallFilesystemPluginStagesOnlyAtPublishBoundaryForBibitAndHermes(t *
 				}
 			})
 		}
+	}
+}
+
+func TestInstallFilesystemPluginAbsentFactValidatesPhysicalManagedTargetBeforeMutation(t *testing.T) {
+	previous := pluginRef("v1.0.0")
+	targetRef := pluginRef("v2.0.0")
+	tests := []struct {
+		name    string
+		create  func(*testing.T, string)
+		wantErr error
+	}{
+		{name: "physical directory", create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.Mkdir(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, wantErr: transaction.ErrIndeterminateState},
+		{name: "symlink", create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.Symlink(t.TempDir(), target); err != nil {
+				t.Fatal(err)
+			}
+		}, wantErr: transaction.ErrUnsafePath},
+		{name: "regular file", create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.WriteFile(target, []byte("foreign"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, wantErr: transaction.ErrUnsafePath},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "demo")
+			test.create(t, target)
+			before, err := os.Lstat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var calls []string
+			resources := &fakePluginResources{}
+			service := newInstallService(t, &calls, installFixture{
+				installed:       map[domain.AgentID]domain.PowerRef{domain.AgentHermes: previous},
+				pluginMode:      domain.PluginDeploymentFilesystem,
+				pluginFacts:     map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginAbsent, ActualName: "demo"}},
+				pluginTargets:   map[string]string{"demo": target},
+				pluginResources: resources,
+			})
+
+			_, err = service.installForAgent(context.Background(), domain.AgentHermes, targetRef)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("installForAgent() error = %v, want %v", err, test.wantErr)
+			}
+			after, statErr := os.Lstat(target)
+			if statErr != nil || after.Mode() != before.Mode() {
+				t.Fatalf("managed target changed: before=%v after=%v err=%v", before.Mode(), after, statErr)
+			}
+			for _, forbidden := range []string{"config:remove:hermes-agent:plugin:demo", "resource:ensure:v2.0.0", "resource:stage-filesystem:v2.0.0", "transaction:install-plugin:hermes-agent"} {
+				if containsEvent(calls, forbidden) {
+					t.Fatalf("calls = %v, want no mutation %q", calls, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestInstallFilesystemPluginAbsentFactAndPhysicalTargetMissingCleansManifestThenInstalls(t *testing.T) {
+	previous := pluginRef("v1.0.0")
+	targetRef := pluginRef("v2.0.0")
+	target := filepath.Join(t.TempDir(), "demo")
+	var calls []string
+	service := newInstallService(t, &calls, installFixture{
+		installed:     map[domain.AgentID]domain.PowerRef{domain.AgentHermes: previous},
+		pluginMode:    domain.PluginDeploymentFilesystem,
+		pluginFacts:   map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginAbsent, ActualName: "demo"}},
+		pluginTargets: map[string]string{"demo": target},
+	})
+
+	item, err := service.installForAgent(context.Background(), domain.AgentHermes, targetRef)
+	if err != nil || item.Outcome != cli.InstallOutcomeInstalled {
+		t.Fatalf("installForAgent() = %+v, %v; want fresh install after stale manifest cleanup", item, err)
+	}
+	want := []string{
+		"config:find:hermes-agent", "resolve-plugin:hermes-agent", "plugin:inspect:hermes-agent:demo",
+		"plugin:target-path:hermes-agent:demo", "config:remove:hermes-agent:plugin:demo",
+		"plugin:inspect:hermes-agent:demo", "resource:ensure:v2.0.0", "resource:stage-filesystem:v2.0.0",
+		"transaction:install-plugin:hermes-agent",
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 }
 

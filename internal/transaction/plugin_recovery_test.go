@@ -96,6 +96,133 @@ func TestPluginRecoveryFilesystemAddingNewRejectsTargetAndPublishCoexistence(t *
 	}
 }
 
+func TestPluginRecoveryFilesystemAddingNewRejectsUnsafePhysicalTargetBeforeAdd(t *testing.T) {
+	for _, test := range unsafePluginRecoveryTargets() {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newUnsafePluginRecoveryFixture(t, PhaseAddingNew, test.create)
+			before, err := os.Lstat(fixture.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := fixture.service.Recover(context.Background())
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrUnsafePath) || result.Recovered {
+				t.Fatalf("Recover() = %+v, %v; want retained unsafe recovery", result, err)
+			}
+			after, statErr := os.Lstat(fixture.target)
+			if statErr != nil || after.Mode() != before.Mode() {
+				t.Fatalf("unsafe target changed: before=%v after=%v err=%v", before.Mode(), after, statErr)
+			}
+			if !fixture.store.found || fixture.store.journal.Phase != PhaseAddingNew {
+				t.Fatalf("journal = found %t phase %q; want retained adding-new", fixture.store.found, fixture.store.journal.Phase)
+			}
+			if len(fixture.plugin.added) != 0 || len(fixture.plugin.removed) != 0 {
+				t.Fatalf("unsafe recovery mutated adapter: added=%+v removed=%+v", fixture.plugin.added, fixture.plugin.removed)
+			}
+		})
+	}
+}
+
+func TestPluginRecoveryFilesystemRollingBackRejectsUnsafePhysicalTargetBeforeRemove(t *testing.T) {
+	for _, test := range unsafePluginRecoveryTargets() {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newUnsafePluginRecoveryFixture(t, PhaseRollingBack, test.create)
+			before, err := os.Lstat(fixture.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := fixture.service.Recover(context.Background())
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrUnsafePath) || result.Recovered {
+				t.Fatalf("Recover() = %+v, %v; want retained unsafe rollback", result, err)
+			}
+			after, statErr := os.Lstat(fixture.target)
+			if statErr != nil || after.Mode() != before.Mode() {
+				t.Fatalf("unsafe target changed: before=%v after=%v err=%v", before.Mode(), after, statErr)
+			}
+			if !fixture.store.found || fixture.store.journal.Phase != PhaseRollingBack {
+				t.Fatalf("journal = found %t phase %q; want retained rolling-back", fixture.store.found, fixture.store.journal.Phase)
+			}
+			if len(fixture.plugin.added) != 0 || len(fixture.plugin.removed) != 0 {
+				t.Fatalf("unsafe recovery mutated adapter: added=%+v removed=%+v", fixture.plugin.added, fixture.plugin.removed)
+			}
+		})
+	}
+}
+
+type unsafePluginRecoveryTarget struct {
+	name   string
+	create func(*testing.T, string)
+}
+
+func unsafePluginRecoveryTargets() []unsafePluginRecoveryTarget {
+	return []unsafePluginRecoveryTarget{
+		{name: "symlink", create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.Symlink(t.TempDir(), target); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "regular file", create: func(t *testing.T, target string) {
+			t.Helper()
+			if err := os.WriteFile(target, []byte("foreign"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+}
+
+type unsafePluginRecoveryFixture struct {
+	service *Service
+	store   *recordingJournalStore
+	plugin  *recordingPluginAdapter
+	target  string
+}
+
+func newUnsafePluginRecoveryFixture(t *testing.T, phase Phase, create func(*testing.T, string)) unsafePluginRecoveryFixture {
+	t.Helper()
+	events := []string{}
+	t.Setenv("APM_HOME", t.TempDir())
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(staging, "plugins", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := "00112233445566778899aabbccddeeff"
+	pluginsRoot := filepath.Join(t.TempDir(), "plugins")
+	if err := os.MkdirAll(pluginsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(pluginsRoot, "demo")
+	create(t, target)
+	tx := filepath.Join(pluginsRoot, ".apm-transactions", id)
+	if err := os.MkdirAll(tx, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	journal := Journal{
+		SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationInstall, Phase: phase,
+		Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+		Plugin: &PluginJournalPayload{Deployment: domain.PluginDeploymentFilesystem, Target: adapter.PluginTarget{ActualName: "demo", Selector: "demo"}, Filesystem: &PluginFilesystemJournalPayload{
+			StagingRoot: staging, SourcePath: filepath.Join(staging, "plugins", "demo"), TargetPath: target,
+			TransactionDir: tx, PublishPath: filepath.Join(tx, "publish"),
+		}},
+	}
+	store := &recordingJournalStore{journal: journal, found: true, events: &events, fail: map[string]error{}}
+	plugin := &recordingPluginAdapter{
+		events: &events, mode: domain.PluginDeploymentFilesystem,
+		facts:         map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginAbsent, ActualName: "demo"}},
+		addAnswers:    []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}},
+		removeAnswers: []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}},
+	}
+	resolver := &recordingPluginResolver{events: &events, plugin: plugin}
+	return unsafePluginRecoveryFixture{
+		service: newService(&recordingManifestWriter{events: &events}, store, resolver),
+		store:   store, plugin: plugin, target: target,
+	}
+}
+
 func TestPluginRecoveryFilesystemCommittingRejectsMissingInstallTarget(t *testing.T) {
 	events := []string{}
 	home := t.TempDir()
@@ -127,6 +254,51 @@ func TestPluginRecoveryFilesystemCommittingRejectsMissingInstallTarget(t *testin
 	}
 	if len(events) != 0 {
 		t.Fatalf("missing target recovery changed state: %v", events)
+	}
+}
+
+func TestPluginRecoveryFilesystemCommittingRejectsUnsafePhysicalQuarantineBeforeManifest(t *testing.T) {
+	for _, test := range unsafePluginRecoveryTargets() {
+		t.Run(test.name, func(t *testing.T) {
+			events := []string{}
+			id := "00112233445566778899aabbccddeeff"
+			pluginsRoot := filepath.Join(t.TempDir(), "plugins")
+			target := filepath.Join(pluginsRoot, "demo")
+			tx := filepath.Join(pluginsRoot, ".apm-transactions", id)
+			quarantine := filepath.Join(tx, "target")
+			if err := os.MkdirAll(tx, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			test.create(t, quarantine)
+			before, err := os.Lstat(quarantine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal := Journal{
+				SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationUninstall, Phase: PhaseCommitting,
+				Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+				Plugin: &PluginJournalPayload{Deployment: domain.PluginDeploymentFilesystem, TargetPresent: true,
+					Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+					Filesystem: &PluginFilesystemJournalPayload{TargetPath: target, TransactionDir: tx, TargetQuarantinePath: quarantine}},
+			}
+			store := &recordingJournalStore{journal: journal, found: true, events: &events, fail: map[string]error{}}
+			service := newService(&recordingManifestWriter{events: &events}, store)
+
+			result, err := service.Recover(context.Background())
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrUnsafePath) || result.Recovered {
+				t.Fatalf("Recover() = %+v, %v; want retained unsafe committing recovery", result, err)
+			}
+			after, statErr := os.Lstat(quarantine)
+			if statErr != nil || after.Mode() != before.Mode() {
+				t.Fatalf("unsafe quarantine changed: before=%v after=%v err=%v", before.Mode(), after, statErr)
+			}
+			if !store.found || store.journal.Phase != PhaseCommitting {
+				t.Fatalf("journal = found %t phase %q; want retained committing", store.found, store.journal.Phase)
+			}
+			if len(events) != 0 {
+				t.Fatalf("unsafe quarantine recovery mutated state: %v", events)
+			}
+		})
 	}
 }
 
