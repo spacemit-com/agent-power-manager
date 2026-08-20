@@ -130,25 +130,26 @@ func TestListInstalledAllReturnsPartialAndContinuesAfterAgentFailure(t *testing.
 
 func TestListInstalledAllKeepsFailureOrderAndReadsLaterAgents(t *testing.T) {
 	var calls []string
+	bibitErr := errors.New("bibit config failed")
 	claudeErr := errors.New("claude config failed")
 	codexErr := errors.New("codex config failed")
 	service := newListService(t, &calls, listFixture{
-		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}},
+		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}},
 		groups:     map[domain.AgentID]domain.PowerGroups{domain.AgentHermes: {domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "later", Version: "v1.0.0"}}}},
-		configErrs: map[domain.AgentID]error{domain.AgentClaudeCode: claudeErr, domain.AgentCodex: codexErr},
+		configErrs: map[domain.AgentID]error{domain.AgentBibit: bibitErr, domain.AgentClaudeCode: claudeErr, domain.AgentCodex: codexErr},
 	})
 	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
 	var partial *cli.PartialListError
-	if !errors.As(err, &partial) || !errors.Is(err, claudeErr) || !errors.Is(err, codexErr) || len(partial.Failures) != 2 {
-		t.Fatalf("List() error = %v, want both partial causes", err)
+	if !errors.As(err, &partial) || !errors.Is(err, bibitErr) || !errors.Is(err, claudeErr) || !errors.Is(err, codexErr) || len(partial.Failures) != 3 {
+		t.Fatalf("List() error = %v, want all three partial causes", err)
 	}
-	if got, want := []domain.AgentID{partial.Failures[0].Agent, partial.Failures[1].Agent}, []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}; !reflect.DeepEqual(got, want) {
+	if got, want := []domain.AgentID{partial.Failures[0].Agent, partial.Failures[1].Agent, partial.Failures[2].Agent}, []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("failure agents = %v, want %v", got, want)
 	}
 	if len(result.Powers) != 1 || result.Powers[0].Agent != domain.AgentHermes {
 		t.Fatalf("List() result = %#v, want later hermes success", result)
 	}
-	if want := []string{"inspect", "refresh", "config:claude-code", "config:codex", "config:hermes-agent"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"inspect", "refresh", "config:bibit", "config:claude-code", "config:codex", "config:hermes-agent"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 }

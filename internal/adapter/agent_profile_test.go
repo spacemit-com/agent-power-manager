@@ -17,6 +17,7 @@ func TestAgentProfileRootPath(t *testing.T) {
 		{"codex", "CODEX_HOME", ".codex", domain.AgentCodex},
 		{"claude", "CLAUDE_CONFIG_DIR", ".claude", domain.AgentClaudeCode},
 		{"hermes", "HERMES_HOME", ".hermes", domain.AgentHermes},
+		{"bibit", "BIANBU_AGENT_HOME", "bianbu-agent", domain.AgentBibit},
 	}
 
 	for _, tt := range tests {
@@ -56,6 +57,7 @@ func TestAgentProfileDetectInstalled(t *testing.T) {
 		{"codex", "CODEX_HOME", ".codex", domain.AgentCodex},
 		{"claude", "CLAUDE_CONFIG_DIR", ".claude", domain.AgentClaudeCode},
 		{"hermes", "HERMES_HOME", ".hermes", domain.AgentHermes},
+		{"bibit", "BIANBU_AGENT_HOME", "bianbu-agent", domain.AgentBibit},
 	}
 
 	for _, tt := range tests {

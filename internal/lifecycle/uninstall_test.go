@@ -77,14 +77,18 @@ func TestNewUninstallRejectsNilDependencies(t *testing.T) {
 }
 
 func TestUninstallAllUsesSnapshotOrderAndDistinctPowerPointers(t *testing.T) {
+	bibitRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v0.9.0"}
 	claudeRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 	codexRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}
+	hermesRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v3.0.0"}
 	var calls []string
 	service := newUninstallService(t, &calls, uninstallFixture{
-		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
+		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}},
 		groups: map[domain.AgentID]domain.PowerGroups{
+			domain.AgentBibit:      {domain.PowerTypeSkill: {bibitRef}},
 			domain.AgentClaudeCode: {domain.PowerTypeSkill: {claudeRef}},
 			domain.AgentCodex:      {domain.PowerTypeSkill: {codexRef}},
+			domain.AgentHermes:     {domain.PowerTypeSkill: {hermesRef}},
 		},
 	})
 
@@ -94,17 +98,25 @@ func TestUninstallAllUsesSnapshotOrderAndDistinctPowerPointers(t *testing.T) {
 	}
 	wantEvents := []string{
 		"acquire", "recover", "refresh",
+		"config:bibit", "resolve:bibit", "transaction:uninstall:bibit",
 		"config:claude-code", "resolve:claude-code", "transaction:uninstall:claude-code",
 		"config:codex", "resolve:codex", "transaction:uninstall:codex",
+		"config:hermes-agent", "resolve:hermes-agent", "transaction:uninstall:hermes-agent",
 		"release",
 	}
 	assertEventSubsequence(t, calls, wantEvents)
 	assertUninstallItems(t, result, []cli.UninstallItem{
+		{Agent: domain.AgentBibit, Power: powerPointer(bibitRef), Outcome: cli.UninstallOutcomeCompleted},
 		{Agent: domain.AgentClaudeCode, Power: powerPointer(claudeRef), Outcome: cli.UninstallOutcomeCompleted},
 		{Agent: domain.AgentCodex, Power: powerPointer(codexRef), Outcome: cli.UninstallOutcomeCompleted},
+		{Agent: domain.AgentHermes, Power: powerPointer(hermesRef), Outcome: cli.UninstallOutcomeCompleted},
 	})
-	if result.Items[0].Power == result.Items[1].Power {
-		t.Fatal("Uninstall() reused a Power pointer across Agent results")
+	seen := make(map[*domain.PowerRef]struct{}, len(result.Items))
+	for _, item := range result.Items {
+		if _, duplicate := seen[item.Power]; duplicate {
+			t.Fatal("Uninstall() reused a Power pointer across Agent results")
+		}
+		seen[item.Power] = struct{}{}
 	}
 }
 

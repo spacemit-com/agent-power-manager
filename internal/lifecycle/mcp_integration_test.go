@@ -30,6 +30,14 @@ esac
 printf '%s|%s\n' "$0" "$*" >> "$FAKE_MCP_CALLS"
 
 case "$agent:$1:$2" in
+  bianbu-agent:mcp:get)
+    name=$4; state="$FAKE_MCP_STATE/$agent-$name"
+    if [ -f "$state" ]; then printf '{"name":"%s"}\n' "$name"; exit 0; fi
+    printf "No MCP server named '%s' found." "$name" >&2; exit 1 ;;
+  bianbu-agent:mcp:add)
+    name=$3; : > "$FAKE_MCP_STATE/$agent-$name" ;;
+  bianbu-agent:mcp:remove)
+    name=$3; /bin/rm -f "$FAKE_MCP_STATE/$agent-$name" ;;
   codex:mcp:get)
     name=$4; state="$FAKE_MCP_STATE/$agent-$name"
     if [ -f "$state" ]; then printf '{"name":"%s"}\n' "$name"; exit 0; fi
@@ -67,6 +75,7 @@ esac
 
 type isolatedMCPHarness struct {
 	t          *testing.T
+	agent      domain.AgentID
 	root       string
 	fakeBin    string
 	state      string
@@ -89,7 +98,7 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 			t.Fatal(err)
 		}
 	}
-	for _, executable := range []string{"codex", "claude", "hermes"} {
+	for _, executable := range []string{"bianbu-agent", "codex", "claude", "hermes"} {
 		if err := os.WriteFile(filepath.Join(fakeBin, executable), []byte(fakeAgentCLIScript), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -103,6 +112,7 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	t.Setenv("APM_HOME", filepath.Join(root, "home"))
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	agentRoots := map[domain.AgentID]string{
+		domain.AgentBibit:      filepath.Join(root, "agents", "bibit"),
 		domain.AgentCodex:      filepath.Join(root, "agents", "codex"),
 		domain.AgentClaudeCode: filepath.Join(root, "agents", "claude"),
 		domain.AgentHermes:     filepath.Join(root, "agents", "hermes"),
@@ -110,6 +120,7 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	t.Setenv("CODEX_HOME", agentRoots[domain.AgentCodex])
 	t.Setenv("CLAUDE_CONFIG_DIR", agentRoots[domain.AgentClaudeCode])
 	t.Setenv("HERMES_HOME", agentRoots[domain.AgentHermes])
+	t.Setenv("BIANBU_AGENT_HOME", agentRoots[domain.AgentBibit])
 	if err := os.MkdirAll(agentRoots[installedAgent], 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -146,13 +157,13 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 		t.Fatal(err)
 	}
 	return &isolatedMCPHarness{
-		t: t, root: root, fakeBin: fakeBin, state: state, calls: calls, cacheHome: cacheHome,
+		t: t, agent: installedAgent, root: root, fakeBin: fakeBin, state: state, calls: calls, cacheHome: cacheHome,
 		repository: repository, registry: registry, cloud: cloudClient, install: installer, uninstall: uninstaller,
 	}
 }
 
 func TestMCPIntegrationInstallUpgradeUninstallForEveryAgent(t *testing.T) {
-	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes} {
+	for _, agent := range []domain.AgentID{domain.AgentBibit, domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes} {
 		t.Run(string(agent), func(t *testing.T) {
 			harness := newIsolatedMCPHarness(t, agent)
 			flags := cli.Flags{Agent: string(agent), Type: "mcp", Name: "filesystem", Version: "v0.0.1"}
@@ -234,13 +245,23 @@ func TestMCPIntegrationHTTPConflictAndStaleRepair(t *testing.T) {
 }
 
 func TestMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t *testing.T) {
-	harness := newIsolatedMCPHarness(t, domain.AgentCodex)
+	testMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t, domain.AgentCodex)
+}
+
+func TestBibitMCPIntegrationFixUsesResolvedFakeExecutablePath(t *testing.T) {
+	testMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t, domain.AgentBibit)
+}
+
+func testMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t *testing.T, agent domain.AgentID) {
+	t.Helper()
+	harness := newIsolatedMCPHarness(t, agent)
 	ref := domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}
 	server, err := harness.cloud.GetMCP(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(harness.state, "codex-filesystem"), nil, 0o600); err != nil {
+	statePath := filepath.Join(harness.state, fakeAgentName(agent)+"-filesystem")
+	if err := os.WriteFile(statePath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	journal := transaction.Journal{
@@ -249,7 +270,7 @@ func TestMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 		Driver:        transaction.DriverAgentCLI,
 		Operation:     transaction.OperationInstall,
 		Phase:         transaction.PhaseAddingNew,
-		Agent:         domain.AgentCodex,
+		Agent:         agent,
 		Power:         ref,
 		AgentCLI:      &transaction.AgentCLIJournalPayload{Server: server},
 	}
@@ -281,10 +302,10 @@ func TestMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 		t.Fatal(err)
 	}
 	assertActiveJournalReadOnly(t, journalPath, originalJournal, func() {
-		if _, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || found {
+		if _, found, err := harness.repository.Find(agent, ref.Type, ref.Name); err != nil || found {
 			t.Fatalf("read-only manifest found/error = %v/%v, want absent", found, err)
 		}
-		if _, err := os.Stat(filepath.Join(harness.state, "codex-filesystem")); err != nil {
+		if _, err := os.Stat(statePath); err != nil {
 			t.Fatalf("read-only command changed MCP target: %v", err)
 		}
 	},
@@ -294,7 +315,7 @@ func TestMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 		},
 		func() error { _, err := list.List(context.Background(), cli.Flags{}); return err },
 		func() error {
-			_, err := list.List(context.Background(), cli.Flags{Installed: true, Agent: string(domain.AgentCodex)})
+			_, err := list.List(context.Background(), cli.Flags{Installed: true, Agent: string(agent)})
 			return err
 		},
 	)
@@ -311,10 +332,10 @@ func TestMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
 	}
 	assertJournalAbsent(t, journalPath)
-	if got, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || !found || got != ref {
+	if got, found, err := harness.repository.Find(agent, ref.Type, ref.Name); err != nil || !found || got != ref {
 		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
-	if _, err := os.Stat(filepath.Join(harness.state, "codex-filesystem")); err != nil {
+	if _, err := os.Stat(statePath); err != nil {
 		t.Fatalf("Fix changed committed MCP target: %v", err)
 	}
 	contents, err = os.ReadFile(harness.calls)
@@ -324,11 +345,11 @@ func TestMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 	if got := len(strings.Split(strings.TrimSpace(string(contents)), "\n")); got != 1 {
 		t.Fatalf("Fix CLI calls = %d, want exactly 1 recovery inspection: %s", got, contents)
 	}
-	manifestPath, err := paths.ManifestPath(domain.AgentCodex)
+	manifestPath, err := paths.ManifestPath(agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertPathsWithinRoot(t, harness.root, journalPath, manifestPath, filepath.Join(harness.state, "codex-filesystem"))
+	assertPathsWithinRoot(t, harness.root, journalPath, manifestPath, statePath)
 	harness.assertOnlyFakeExecutables()
 }
 
@@ -376,16 +397,19 @@ func (h *isolatedMCPHarness) assertOnlyFakeExecutables() {
 	if len(lines) == 0 || lines[0] == "" {
 		h.t.Fatal("fake Agent CLI was never invoked")
 	}
-	prefix := h.fakeBin + string(filepath.Separator)
+	wantPath := filepath.Join(h.fakeBin, fakeAgentName(h.agent))
 	for _, line := range lines {
 		path, _, found := strings.Cut(line, "|")
-		if !found || !strings.HasPrefix(path, prefix) {
-			h.t.Fatalf("Agent CLI invocation escaped fake-bin: %q", line)
+		if !found || path != wantPath {
+			h.t.Fatalf("Agent CLI executable = %q, want isolated absolute path %q (call %q)", path, wantPath, line)
 		}
 	}
 }
 
 func fakeAgentName(agent domain.AgentID) string {
+	if agent == domain.AgentBibit {
+		return "bianbu-agent"
+	}
 	if agent == domain.AgentClaudeCode {
 		return "claude"
 	}

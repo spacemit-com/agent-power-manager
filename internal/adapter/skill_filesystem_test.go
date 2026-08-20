@@ -56,6 +56,36 @@ func TestSkillAdapterInstallPublishesSkillAndCleansStaging(t *testing.T) {
 	}
 }
 
+func TestBibitSkillAdapterInstallsUnderIsolatedAgentRoot(t *testing.T) {
+	home := t.TempDir()
+	bibitRoot := filepath.Join(home, "fake-agent-home", "bianbu-agent")
+	t.Setenv("APM_HOME", filepath.Join(home, "apm-home"))
+	t.Setenv("BIANBU_AGENT_HOME", bibitRoot)
+	if err := os.MkdirAll(bibitRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
+	writeSkillTree(t, skillSource(staging, ref), ref.Name)
+
+	subject, err := NewRegistry().ResolveSkill(domain.AgentBibit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := subject.Install(ref, staging)
+	if err != nil || !result.Published {
+		t.Fatalf("Install() = %+v, %v; want published", result, err)
+	}
+	assertFile(t, filepath.Join(bibitRoot, "skills", "demo", "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n# Demo\n", 0o640)
+	assertMissing(t, staging)
+	for _, outside := range []string{".codex", ".claude", ".hermes"} {
+		assertMissing(t, filepath.Join(home, outside))
+	}
+}
+
 func TestSkillAdapterInstallReturnsNotInstalledWithoutCreatingAgentRoot(t *testing.T) {
 	config, root, staging, ref := filesystemSkillAdapterFixture(t, false)
 	adapter := newFilesystemSkillAdapter(config)

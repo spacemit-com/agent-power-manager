@@ -18,6 +18,14 @@ type agentRegistration struct {
 
 var builtInAgentRegistrations = []agentRegistration{
 	{
+		profile:  agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: "bianbu-agent", adaptSkill: noOpSkillAdapt},
+		newSkill: func(profile agentProfile) SkillAdapter { return newFilesystemSkillAdapter(profile) },
+		newMCP:   func(runner agentCLIRunner) MCPAdapter { return newBibitMCPAdapter(runner) },
+		newPlugin: func(profile agentProfile, _ agentCLIRunner) PluginAdapter {
+			return newBibitPluginAdapter(profile)
+		},
+	},
+	{
 		profile:  agentProfile{id: domain.AgentCodex, homeEnv: "CODEX_HOME", defaultRoot: ".codex", adaptSkill: noOpSkillAdapt},
 		newSkill: func(profile agentProfile) SkillAdapter { return newFilesystemSkillAdapter(profile) },
 		newMCP:   func(runner agentCLIRunner) MCPAdapter { return newCodexMCPAdapter(runner) },
@@ -43,7 +51,7 @@ var builtInAgentRegistrations = []agentRegistration{
 	},
 }
 
-// Registry 按声明顺序保存 Agent profile 与类型专属 Adapter。
+// Registry 保存 Agent profile 与类型专属 Adapter；已安装快照始终按 Agent ID 排序。
 type Registry struct {
 	ordered       []domain.AgentID
 	profiles      map[domain.AgentID]agentProfile

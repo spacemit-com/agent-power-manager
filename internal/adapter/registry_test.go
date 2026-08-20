@@ -14,10 +14,11 @@ import (
 func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentIDOrder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
+	t.Setenv("BIANBU_AGENT_HOME", "")
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
-	for _, root := range []string{".codex", ".hermes"} {
+	for _, root := range []string{"bianbu-agent", ".claude", ".codex", ".hermes"} {
 		if err := os.Mkdir(filepath.Join(home, root), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -25,6 +26,7 @@ func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentI
 
 	registry := NewRegistry()
 	for _, agent := range []domain.AgentID{
+		domain.AgentBibit,
 		domain.AgentCodex,
 		domain.AgentClaudeCode,
 		domain.AgentHermes,
@@ -47,14 +49,31 @@ func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentI
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []domain.AgentID{domain.AgentCodex, domain.AgentHermes}
+	want := []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
 	if !slices.Equal(snapshot.Ordered(), want) {
 		t.Fatalf("snapshot = %v, want %v", snapshot.Ordered(), want)
 	}
 }
 
+func TestRegistryResolvesAllBibitPowerAdapters(t *testing.T) {
+	registry := NewRegistry()
+	if skill, err := registry.ResolveSkill(domain.AgentBibit); err != nil || skill == nil {
+		t.Fatalf("ResolveSkill(%q) = %v, %v", domain.AgentBibit, skill, err)
+	}
+	if mcp, err := registry.ResolveMCP(domain.AgentBibit); err != nil || mcp == nil {
+		t.Fatalf("ResolveMCP(%q) = %v, %v", domain.AgentBibit, mcp, err)
+	}
+	plugin, err := registry.ResolvePlugin(domain.AgentBibit)
+	if err != nil || plugin == nil {
+		t.Fatalf("ResolvePlugin(%q) = %v, %v", domain.AgentBibit, plugin, err)
+	}
+	if got := plugin.DeploymentMode(); got != domain.PluginDeploymentFilesystem {
+		t.Fatalf("ResolvePlugin(%q).DeploymentMode() = %q, want %q", domain.AgentBibit, got, domain.PluginDeploymentFilesystem)
+	}
+}
+
 func TestRegistryRefreshInstalledSortsSnapshotByAgentID(t *testing.T) {
-	registration := []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentClaudeCode}
+	registration := []domain.AgentID{domain.AgentCodex, domain.AgentHermes, domain.AgentBibit, domain.AgentClaudeCode}
 	profiles := make(map[domain.AgentID]agentProfile, len(registration))
 	for _, agent := range registration {
 		profiles[agent] = agentProfile{id: agent}
@@ -65,7 +84,7 @@ func TestRegistryRefreshInstalledSortsSnapshotByAgentID(t *testing.T) {
 		profiles: profiles,
 		detectProfile: func(profile agentProfile) (bool, error) {
 			detected = append(detected, profile.id)
-			return profile.id != domain.AgentCodex, nil
+			return true, nil
 		},
 	}
 
@@ -73,14 +92,14 @@ func TestRegistryRefreshInstalledSortsSnapshotByAgentID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSnapshot := []domain.AgentID{domain.AgentClaudeCode, domain.AgentHermes}
+	wantSnapshot := []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
 	if !slices.Equal(snapshot.Ordered(), wantSnapshot) {
 		t.Fatalf("snapshot = %v, want %v", snapshot.Ordered(), wantSnapshot)
 	}
 	if !slices.Equal(registry.ordered, registration) {
 		t.Fatalf("registration order = %v, want unchanged %v", registry.ordered, registration)
 	}
-	wantDetected := []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
+	wantDetected := []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
 	if !slices.Equal(detected, wantDetected) {
 		t.Fatalf("detection order = %v, want %v", detected, wantDetected)
 	}
@@ -139,6 +158,7 @@ func TestRegistryPluginMarketplaceCapabilitiesMatchAgentSupport(t *testing.T) {
 		{agent: domain.AgentCodex, wantMarketplace: true},
 		{agent: domain.AgentClaudeCode, wantMarketplace: true},
 		{agent: domain.AgentHermes, wantMarketplace: false},
+		{agent: domain.AgentBibit, wantMarketplace: false},
 	} {
 		plugin, err := registry.ResolvePlugin(test.agent)
 		if err != nil {
@@ -154,6 +174,7 @@ func TestRegistryPluginMarketplaceCapabilitiesMatchAgentSupport(t *testing.T) {
 func TestRegistryRefreshInstalledReturnsZeroSnapshotOnDetectionError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
+	t.Setenv("BIANBU_AGENT_HOME", filepath.Join(home, "missing-bibit"))
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")

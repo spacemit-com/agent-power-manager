@@ -19,7 +19,7 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 	var calls []string
 	service := newInstallService(t, &calls, installFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{
-			domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes,
+			domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes,
 		}},
 		cloudRefs: []domain.PowerRef{{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}},
 		selected:  "v2.0.0",
@@ -34,6 +34,7 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 	}
 	wantCalls := []string{
 		"acquire", "recover", "refresh", "cloud:list",
+		"resolve:bibit", "config:find:bibit", "cache:stage-skill:bibit", "transaction:install:bibit",
 		"resolve:claude-code", "config:find:claude-code", "cache:stage-skill:claude-code", "transaction:install:claude-code",
 		"resolve:codex", "config:find:codex",
 		"resolve:hermes-agent", "config:find:hermes-agent", "cache:stage-skill:hermes-agent", "transaction:install:hermes-agent",
@@ -43,6 +44,7 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 		t.Fatalf("calls = %v, want %v", calls, wantCalls)
 	}
 	assertInstallItems(t, result, []cli.InstallItem{
+		{Agent: domain.AgentBibit, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeInstalled},
 		{Agent: domain.AgentClaudeCode, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeInstalled},
 		{Agent: domain.AgentCodex, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeUnchanged},
 		{Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeInstalled},
@@ -53,7 +55,7 @@ func TestInstallExplicitPluginManifestHitSkipsCloudAndMutablePluginDependencies(
 	// 捕获错误变更：公共 Install 在 manifest 精确命中前仍先访问 Cloud 或进入资源、Adapter、Transaction。
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
 	cloudCause := errors.New("Cloud must remain offline on manifest hit")
-	agents := []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
+	agents := []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
 	installed := make(map[domain.AgentID]domain.PowerRef, len(agents))
 	for _, agent := range agents {
 		installed[agent] = ref
@@ -72,13 +74,14 @@ func TestInstallExplicitPluginManifestHitSkipsCloudAndMutablePluginDependencies(
 		t.Fatalf("Install() error = %v", err)
 	}
 	assertInstallItems(t, result, []cli.InstallItem{
+		{Agent: domain.AgentBibit, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
 		{Agent: domain.AgentClaudeCode, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
 		{Agent: domain.AgentCodex, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
 		{Agent: domain.AgentHermes, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
 	})
 	wantCalls := []string{
 		"acquire", "recover", "refresh",
-		"config:find:claude-code", "config:find:codex", "config:find:hermes-agent",
+		"config:find:bibit", "config:find:claude-code", "config:find:codex", "config:find:hermes-agent",
 		"release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
@@ -169,7 +172,7 @@ func TestInstallAllFailsFastAndCompletesResultAfterRelease(t *testing.T) {
 	var calls []string
 	service := newInstallService(t, &calls, installFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{
-			domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes,
+			domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes,
 		}},
 		cloudRefs: targetRefs(target),
 		selected:  target.Version,
@@ -183,6 +186,7 @@ func TestInstallAllFailsFastAndCompletesResultAfterRelease(t *testing.T) {
 		t.Fatal("Install() error = nil, want failed Agent marker")
 	}
 	assertInstallItems(t, result, []cli.InstallItem{
+		{Agent: domain.AgentBibit, Power: target, Outcome: cli.InstallOutcomeInstalled},
 		{Agent: domain.AgentClaudeCode, Power: target, Outcome: cli.InstallOutcomeInstalled},
 		{Agent: domain.AgentCodex, Power: target, Outcome: cli.InstallOutcomeFailed},
 		{Agent: domain.AgentHermes, Power: target, Outcome: cli.InstallOutcomeUnexecuted},

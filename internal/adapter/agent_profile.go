@@ -14,7 +14,7 @@ import (
 // skillAdaptFunc 定义 Agent 对 staging 中 Skill 的原地适配操作。
 type skillAdaptFunc func(domain.PowerRef, string) error
 
-// agentProfile 描述内置 Agent 的根目录与 Skill 适配规则。
+// agentProfile 描述内置 Agent 的根目录与 Skill 适配规则；安装探测仅依据 profile 根目录。
 type agentProfile struct {
 	id          domain.AgentID
 	homeEnv     string
@@ -37,7 +37,7 @@ func (c agentProfile) rootPath() (string, error) {
 	return filepath.Join(home, c.defaultRoot), nil
 }
 
-// detectInstalled 检查 Agent 根目录是否存在且为目录。
+// detectInstalled 检查 Agent 根目录是否存在且为目录，不以 CLI 是否位于 PATH 作为支持条件。
 func (c agentProfile) detectInstalled() (bool, error) {
 	root, err := c.rootPath()
 	if err != nil {
