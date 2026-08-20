@@ -104,12 +104,19 @@ func (m *uninstallFakeTransactions) Recover(context.Context) (transaction.Recove
 func (*uninstallFakeTransactions) InstallSkill(context.Context, transaction.SkillInstallRequest) error {
 	return nil
 }
+func (*uninstallFakeTransactions) InstallAgent(context.Context, transaction.AgentInstallRequest) error {
+	return nil
+}
 func (*uninstallFakeTransactions) InstallMCP(context.Context, transaction.MCPInstallRequest) error {
 	return nil
 }
 
 func (m *uninstallFakeTransactions) UninstallSkill(_ context.Context, request transaction.SkillUninstallRequest) (transaction.UninstallResult, error) {
 	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall:"+string(request.Agent))
+	return m.fixture.transactionResults[request.Agent], m.fixture.transactionErrors[request.Agent]
+}
+func (m *uninstallFakeTransactions) UninstallAgent(_ context.Context, request transaction.AgentUninstallRequest) (transaction.UninstallResult, error) {
+	recordUninstallEvent(m.calls, m.fixture, "transaction:uninstall-agent:"+string(request.Agent))
 	return m.fixture.transactionResults[request.Agent], m.fixture.transactionErrors[request.Agent]
 }
 func (m *uninstallFakeTransactions) UninstallMCP(_ context.Context, request transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {

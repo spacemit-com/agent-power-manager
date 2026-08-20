@@ -180,6 +180,11 @@ func (m *installFakeTransactions) InstallSkill(_ context.Context, request transa
 	return m.fixture.transactionInstallErr[request.Agent]
 }
 
+func (m *installFakeTransactions) InstallAgent(_ context.Context, request transaction.AgentInstallRequest) error {
+	*m.calls = append(*m.calls, "transaction:install-agent:"+string(request.Agent))
+	return m.fixture.transactionInstallErr[request.Agent]
+}
+
 func (m *installFakeTransactions) InstallMCP(_ context.Context, request transaction.MCPInstallRequest) error {
 	*m.calls = append(*m.calls, "transaction:install-mcp:"+string(request.Agent))
 	m.fixture.mcpRequests = append(m.fixture.mcpRequests, request)
@@ -187,6 +192,10 @@ func (m *installFakeTransactions) InstallMCP(_ context.Context, request transact
 }
 
 func (*installFakeTransactions) UninstallSkill(context.Context, transaction.SkillUninstallRequest) (transaction.UninstallResult, error) {
+	return transaction.UninstallResult{}, nil
+}
+
+func (*installFakeTransactions) UninstallAgent(context.Context, transaction.AgentUninstallRequest) (transaction.UninstallResult, error) {
 	return transaction.UninstallResult{}, nil
 }
 
