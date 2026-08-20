@@ -1,11 +1,11 @@
 classDiagram
-    note for CloudClient "List 返回全部精确 PowerRef；DownloadSkill 保持既有缓存语义；DownloadPlugin 仅把指定 Agent 的原始包写入调用方提供的 destination，不生成或读取 marketplace"
+    note for CloudClient "List 返回全部精确 PowerRef；DownloadSkill 保持既有缓存语义；DownloadPlugin 把完整多 Agent 原始包写入调用方 destination，不生成或读取 marketplace（ADR-014）"
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
         +DownloadSkill(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
-        +DownloadPlugin(Context, AgentID, PowerRef, destination) error
+        +DownloadPlugin(Context, PowerRef, destination) error
     }
     class MCPServer {
         +Transport MCPTransport
@@ -18,11 +18,11 @@ classDiagram
         +List() ([]PowerRef, error)
         +DownloadSkill(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
-        +DownloadPlugin(Context, AgentID, PowerRef, destination) error
+        +DownloadPlugin(Context, PowerRef, destination) error
     }
     LocalClient ..|> CloudClient
     CloudClient --> MCPServer : direct, no cache/staging
     class RawPluginDestination {
         <<caller-owned directory>>
     }
-    CloudClient --> RawPluginDestination : writes Agent-specific raw Plugin package
+    CloudClient --> RawPluginDestination : writes complete shared raw Plugin package

@@ -13,14 +13,14 @@ flowchart TD
     MCP -->|absent| MCPStale[UninstallMCP with nil definition]
     MCPTx --> CLIJournal[schema v1 agent-cli removing/committing/rolling-back]
     MCPStale --> Missing[remove only matching MCP manifest entry]
-    Type -->|Plugin| Plugin[ResolvePlugin + derive manifest exact actual name + Inspect]
+    Type -->|Plugin| Plugin[ResolvePlugin + 从 manifest 推导逻辑 runtime name/selector + Inspect]
     Plugin -->|Codex / Claude both absent| PluginStale[仅删除对应 manifest 项；不接管其他版本]
-    Plugin -->|Codex / Claude both present| PluginLookup[Plugin Resource Lookup 精确 artifact；验证 marketplace/source/selector]
+    Plugin -->|Codex / Claude both present| PluginLookup[Plugin Resource Lookup 共享 artifact；MarketplaceFor 验证 source 与逻辑 selector]
     PluginLookup --> PluginTx[offline UninstallPlugin：只 remove Plugin + manifest；保留 marketplace 与 artifact]
-    Plugin -->|Hermes| HermesPluginTx[offline filesystem UninstallPlugin；只处理精确目录]
+    Plugin -->|Hermes / Bibit| FilesystemPluginTx[offline filesystem UninstallPlugin；只处理逻辑名目录，不连接 Cloud]
     Plugin -->|部分、损坏或身份不符| PluginFail[fail closed；保留 manifest/artifact/journal]
     PluginTx --> PluginJournal[schema v1 plugin removing/committing/rolling-back；不连接 Cloud]
-    HermesPluginTx --> PluginJournal
+    FilesystemPluginTx --> PluginJournal
     FSJournal --> Result{TargetMissing? / error?}
     CLIJournal --> Result
     PluginJournal --> Result

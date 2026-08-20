@@ -29,12 +29,12 @@ flowchart TD
 
     Type -->|Plugin| PluginManifest[Config Find target exact version]
     PluginManifest -->|same version| Unchanged
-    PluginManifest -->|missing or different| PluginEnsure[Plugin Resource Ensure target artifact；仅 miss 时 Cloud 下载原始 Agent 包]
+    PluginManifest -->|missing or different| PluginEnsure[Plugin Resource Ensure 共享 artifact；仅 miss 时 Cloud 下载完整包并生成双 marketplace]
     PluginEnsure --> PluginResolve[ResolvePlugin]
     PluginResolve --> PluginFacts[检查目标及旧版本的精确 Agent 事实]
-    PluginFacts -->|Codex / Claude| PreviousLookup[旧版本仅 Plugin Resource Lookup；验证本地 marketplace/source/selector]
+    PluginFacts -->|Codex / Claude| PreviousLookup[Artifact MarketplaceFor；旧版本仅 Lookup，验证本地 marketplace/source 与逻辑 selector]
     PreviousLookup --> MarketplaceTx[plugin transaction：首装 register marketplace → add Plugin → manifest；切换 remove old Plugin → unregister old marketplace → register new marketplace → add Plugin → manifest]
-    PluginFacts -->|Hermes| HermesStage[事实完成后 Plugin Resource StageHermes] --> FilesystemPluginTx[filesystem Plugin transaction]
+    PluginFacts -->|Hermes / Bibit| FilesystemStage[事实完成后 Plugin Resource StageFilesystem] --> FilesystemPluginTx[逻辑名目录 filesystem Plugin transaction；Hermes CLI 激活，Bibit 无 Plugin CLI]
     MarketplaceTx --> PluginJournal[schema v1 driver=plugin；每次 Agent 写操作前持久 phase]
     FilesystemPluginTx --> PluginJournal
     PluginFacts -->|部分、损坏或身份不符| PluginFail[fail closed；保留 manifest/artifact]

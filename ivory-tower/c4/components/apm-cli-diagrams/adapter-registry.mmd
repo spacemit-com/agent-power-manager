@@ -1,5 +1,5 @@
 classDiagram
-    note for AdapterRegistry "按 Agent 分别解析 Skill/MCP/Plugin；RefreshInstalled 只检查 Agent 根，不执行能力 CLI（ADR-004/010/013）"
+    note for AdapterRegistry "按 Agent 分别解析 Skill/MCP/Plugin；RefreshInstalled 只检查 profile 根，不执行能力 CLI（ADR-004/010/014）"
     class AdapterRegistry {
         <<interface>>
         +ResolveSkill(AgentID) (Adapter, error)
@@ -24,10 +24,10 @@ classDiagram
     class PluginAdapter {
         <<interface>>
         +DeploymentMode() PluginDeploymentMode
-        +Inspect(Context, actualName) (PluginFact, error)
+        +Inspect(Context, name) (PluginFact, error)
         +Add(Context, PluginTarget) (PluginMutationResult, error)
         +Remove(Context, PluginTarget) (PluginMutationResult, error)
-        +TargetPath(actualName) (string, error)
+        +TargetPath(name) (string, error)
     }
     note for MarketplacePluginAdapter "Codex/Claude 的组合接口；本地 marketplace source 必须是绝对 clean artifact 路径"
     class MarketplacePluginAdapter {
@@ -37,9 +37,11 @@ classDiagram
         +UnregisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
     }
     class skillAdapter
+    class bibitMCPAdapter
     class codexMCPAdapter
     class claudeMCPAdapter
     class hermesMCPAdapter
+    class bibitPluginAdapter
     class codexPluginAdapter
     class claudePluginAdapter
     class hermesPluginAdapter
@@ -47,10 +49,11 @@ classDiagram
 
     Registry ..|> AdapterRegistry
     Registry --> skillAdapter : ResolveSkill
+    Registry --> bibitMCPAdapter : ResolveMCP(bibit)
     Registry --> codexMCPAdapter : ResolveMCP(codex)
     Registry --> claudeMCPAdapter : ResolveMCP(claude-code user scope)
     Registry --> hermesMCPAdapter : ResolveMCP(hermes-agent)
-    Registry --> PluginAdapter : ResolvePlugin(codex/claude/hermes)
+    Registry --> PluginAdapter : ResolvePlugin(bibit/codex/claude/hermes)
     skillAdapter ..|> Adapter
     codexMCPAdapter ..|> MCPAdapter
     claudeMCPAdapter ..|> MCPAdapter
@@ -60,3 +63,6 @@ classDiagram
     claudePluginAdapter ..|> MarketplacePluginAdapter
     hermesPluginAdapter ..|> PluginAdapter
     AdapterRegistry --> AgentSnapshot : lexical snapshot
+    note for bibitPluginAdapter "BIANBU_AGENT_HOME（默认 ~/bianbu-agent）；plugins/<name> 目录即状态，Add/Remove 不调用 Plugin CLI（ADR-014）"
+    bibitMCPAdapter ..|> MCPAdapter
+    bibitPluginAdapter ..|> PluginAdapter

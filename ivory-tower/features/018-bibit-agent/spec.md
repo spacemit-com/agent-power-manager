@@ -1,6 +1,6 @@
 # Bibit Agent 与共享多 Agent Plugin 设计规格
 
-> 状态：设计已于 2026-08-20 确认，尚未进入实现。
+> 状态：已于 2026-08-20 按 [ADR-014](../../adr/ADR-014-share-multi-agent-plugin-artifacts.md) 实现。
 
 ## 背景
 
@@ -227,8 +227,8 @@ Journal 保持 schema v1、`plugin` driver、phase、direction 和 payload 结�
 ### 删除或重组
 
 - 删除 Local Cloud Plugin 版本下的 `codex/`、`claude-code/`、`hermes-agent/` 分包目录，以共享内容替代。
-- 删除 Plugin Resource 的 Agent builder 映射、Hermes 空 builder 与 `StageHermes` 命名。
-- 删除或替代版本化 `ActualPluginName` 语义；不保留旧 selector/cache 兼容路径。
+- 删除 Plugin Resource 的 Agent builder 映射、Hermes 空 builder 与 Hermes 专用 staging 命名。
+- 删除或替代版本化实际名称语义；不保留旧 selector/cache 兼容路径。
 
 ## 迁移策略
 

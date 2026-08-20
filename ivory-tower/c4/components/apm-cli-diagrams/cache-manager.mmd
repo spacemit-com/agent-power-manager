@@ -13,7 +13,7 @@ classDiagram
     FilesystemCache ..|> PowerCache
     PowerCache --> PowerRef : consumes
 
-    note for PluginArtifactCache "Plugin Resource 独占 agent-aware immutable artifact：cache/plugins/<agent>/<logical-name>/<version>；Codex/Claude 其中生成单条目本地 marketplace，Hermes 从其中 staging"
+    note for PluginArtifactCache "Plugin Resource 独占共享 immutable artifact：cache/plugins/<logical-name>/<version>；同一根包含完整 Plugin、Codex/Claude marketplace，并供 Hermes/Bibit staging（ADR-014）"
     class PluginArtifactCache {
-        +artifactRoot(AgentID, PowerRef) string
+        +artifactRoot(PowerRef) string
     }

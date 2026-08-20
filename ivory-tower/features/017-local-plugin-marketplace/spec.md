@@ -1,6 +1,6 @@
 # Local Plugin Marketplace 设计规格
 
-> 状态：设计已于 2026-08-17 确认，尚未进入实现。
+> 状态：历史设计，已由 [Feature 018](../018-bibit-agent/spec.md) 与 [ADR-014](../../adr/ADR-014-share-multi-agent-plugin-artifacts.md) 取代。以下正文保留 Feature 017/ADR-013 当时的架构与迁移上下文，不代表当前实现。
 
 ## 背景
 
