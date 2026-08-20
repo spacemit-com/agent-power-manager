@@ -29,10 +29,13 @@ type pluginAuthor struct {
 	Name string `json:"name"`
 }
 
-type codexPluginManifest struct {
-	Name      string `json:"name"`
-	Version   string `json:"version"`
-	Interface struct {
+// CodexPluginManifest 定义 builder 与只读校验器共同解码的 Codex 原生 manifest 已知字段。
+type CodexPluginManifest struct {
+	Name        string       `json:"name"`
+	Version     string       `json:"version"`
+	Description string       `json:"description"`
+	Author      pluginAuthor `json:"author"`
+	Interface   struct {
 		DisplayName string `json:"displayName"`
 		Category    string `json:"category"`
 	} `json:"interface"`
@@ -173,7 +176,7 @@ func Validate(agent domain.AgentID, ref domain.PowerRef, root string) error {
 }
 
 func validateCodex(ref domain.PowerRef, root, pluginPath string) error {
-	var manifest codexPluginManifest
+	var manifest CodexPluginManifest
 	if err := decodeRequiredJSON(filepath.Join(pluginPath, codexManifestPath), &manifest); err != nil {
 		return fmt.Errorf("decode Codex Plugin manifest: %w", err)
 	}
@@ -270,7 +273,7 @@ func validateManifestIdentity(ref domain.PowerRef, actualName, nativeVersion str
 	return nil
 }
 
-func expectedCodexMarketplace(ref domain.PowerRef, manifest codexPluginManifest) (codexMarketplaceDocument, error) {
+func expectedCodexMarketplace(ref domain.PowerRef, manifest CodexPluginManifest) (codexMarketplaceDocument, error) {
 	name, err := domain.PluginMarketplaceName(ref)
 	if err != nil {
 		return codexMarketplaceDocument{}, errors.Join(ErrInvalid, err)

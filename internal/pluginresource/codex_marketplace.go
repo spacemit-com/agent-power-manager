@@ -16,16 +16,7 @@ const (
 
 type codexMarketplaceBuilder struct{}
 
-type codexPluginManifest struct {
-	Name        string       `json:"name"`
-	Version     string       `json:"version"`
-	Description string       `json:"description"`
-	Author      pluginAuthor `json:"author"`
-	Interface   struct {
-		DisplayName string `json:"displayName"`
-		Category    string `json:"category"`
-	} `json:"interface"`
-}
+type codexPluginManifest = pluginartifact.CodexPluginManifest
 
 type codexMarketplaceDocument struct {
 	Name      string `json:"name"`

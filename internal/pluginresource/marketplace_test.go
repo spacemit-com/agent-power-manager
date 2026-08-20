@@ -423,6 +423,55 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 	}
 }
 
+func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCache(t *testing.T) {
+	// 捕获错误变更：共享 validator 忽略 builder 已知字段的类型损坏，并将不可变 cache 当作有效命中。
+	tests := []struct {
+		name     string
+		manifest string
+	}{
+		{
+			name:     "description changed to object",
+			manifest: `{"name":"demo-v0.1.0","version":"0.1.0","description":{"text":"Demo"},"author":{"name":"APM"}}`,
+		},
+		{
+			name:     "author changed to string",
+			manifest: `{"name":"demo-v0.1.0","version":"0.1.0","description":"Demo","author":"APM"}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			roots := newTestRoots(t)
+			var calls atomic.Int32
+			download := pluginDownloadFunc(func(_ context.Context, _ domain.AgentID, _ domain.PowerRef, destination string) error {
+				calls.Add(1)
+				return writeTestPluginManifest(destination, codexManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0","description":"Demo","author":{"name":"APM"}}`)
+			})
+			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
+			ref := testPluginRef()
+			artifact, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
+			if err != nil {
+				t.Fatalf("initial Ensure() error = %v", err)
+			}
+			manifestPath := filepath.Join(artifact.PluginPath, codexManifestPath)
+			writeFileForTest(t, manifestPath, test.manifest)
+
+			if _, err := service.Lookup(domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+				t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
+			}
+			if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+				t.Fatalf("Ensure() error = %v, want immutable cache rejection", err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("DownloadPlugin calls = %d, want 1", calls.Load())
+			}
+			contents, err := os.ReadFile(manifestPath)
+			if err != nil || string(contents) != test.manifest {
+				t.Fatalf("immutable manifest = %q, %v, want unchanged corruption", contents, err)
+			}
+		})
+	}
+}
+
 func TestEnsureValidatesDownloadedPhysicalTreeBeforeAgentBuilder(t *testing.T) {
 	// 捕获错误变更：Agent builder 在物理树校验前跟随 Cloud 包中的 symlink 读取或写入外部目录。
 	scenarios := []string{"manifest parent", "marketplace parent", "plugin root"}

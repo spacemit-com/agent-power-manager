@@ -224,7 +224,7 @@ func writeValidMarketplaceRecoveryArtifact(t *testing.T, root string, ref domain
 		t.Fatal(err)
 	}
 	nativeVersion := strings.TrimPrefix(ref.Version, "v")
-	manifest := fmt.Sprintf(`{"name":%q,"version":%q}`, actualName, nativeVersion)
+	manifest := fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","author":{"name":"APM"}}`, actualName, nativeVersion)
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1343,6 +1343,43 @@ func TestRecoverMarketplacePluginRejectsIncompleteRequiredTargetArtifactBeforeWr
 				if readErr != nil || string(contents) != "outside unchanged" {
 					t.Fatalf("external sentinel = %q, %v, want unchanged", contents, readErr)
 				}
+			}
+		})
+	}
+}
+
+func TestRecoverMarketplacePluginRejectsCodexKnownFieldTypeCorruptionBeforeWrites(t *testing.T) {
+	// 捕获错误变更：恢复层的共享 schema 忽略 builder 已知字段类型损坏，并使用损坏的不可变 artifact 收敛事务。
+	tests := []struct {
+		name     string
+		manifest string
+	}{
+		{
+			name:     "description changed to object",
+			manifest: `{"name":"demo-v2.0.0","version":"2.0.0","description":{"text":"Demo"},"author":{"name":"APM"}}`,
+		},
+		{
+			name:     "author changed to string",
+			manifest: `{"name":"demo-v2.0.0","version":"2.0.0","description":"Demo","author":"APM"}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseCommitting, false)
+			setMarketplaceRecoveryState(fixture, "target", true, false)
+			manifestPath := filepath.Join(fixture.targetSource, "plugins", fixture.target.ActualName, ".codex-plugin", "plugin.json")
+			if err := os.WriteFile(manifestPath, []byte(test.manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := fixture.recover()
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != RecoveryCommit {
+				t.Fatalf("Recover() = %+v, %v, want indeterminate commit", result, err)
+			}
+			assertRequiredArtifactFailureRetainedState(t, fixture, PhaseCommitting)
+			contents, readErr := os.ReadFile(manifestPath)
+			if readErr != nil || string(contents) != test.manifest {
+				t.Fatalf("recovery manifest = %q, %v, want unchanged corruption", contents, readErr)
 			}
 		})
 	}
