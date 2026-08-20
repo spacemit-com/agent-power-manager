@@ -78,6 +78,12 @@ gofmt -w cmd internal
 ./apm uninstall filesystem --agent hermes-agent --type mcp
 ./apm uninstall demo-plugin --agent claude-code --type plugin
 ./apm uninstall demo-plugin --agent bibit --type plugin
+./apm install bianbu-agent-default=v1.0.0 --type agent
+./apm install bianbu-agent-default=v1.0.0 --type agent --agent bibit
+./apm uninstall bianbu-agent-default --type agent
+./apm list --installed --type agent --agent bibit
+./apm search bianbu-agent-default --type agent
+./apm list --type agent
 ./apm fix
 ./apm --verbose fix
 ```
@@ -117,7 +123,7 @@ Fix 是显式恢复命令。它不接受位置参数或 Agent/Type 等命令专�
 
 没有活动 journal 时普通模式静默成功，verbose 模式在 stderr 输出 Debug；恢复成功时输出 `transaction recovered` Warn。损坏、未知或不可读 journal 无法自动修复，Fix 会保留原文件和现场、记录 Error 并非零退出；不要手工删除 journal，除非已人工确认事务状态和数据所有权。
 
-Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名 Cloud 候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、Cloud 和串行 Transaction；Skill 使用 Cache/Staging，MCP 直接读取 Cloud 精确版本定义并调用目标 Agent CLI。Plugin 当前语义见 [Feature 018](ivory-tower/features/018-bibit-agent/spec.md) 与 [ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md)：Cloud 按 `PowerRef` 下载一份完整多 Agent 包，Plugin Resource 原子发布共享制品，再由目标 Agent 消费 marketplace 或 filesystem staging。只有成功 Release 后 CLI 才渲染。
+Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名 Cloud 候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、Cloud 和串行 Transaction；Skill 与 Agent 使用 Cache/Staging（Agent 为单文件、原样字节发布，仅 Bibit），MCP 直接读取 Cloud 精确版本定义并调用目标 Agent CLI。Plugin 当前语义见 [Feature 018](ivory-tower/features/018-bibit-agent/spec.md) 与 [ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md)：Cloud 按 `PowerRef` 下载一份完整多 Agent 包，Plugin Resource 原子发布共享制品，再由目标 Agent 消费 marketplace 或 filesystem staging。只有成功 Release 后 CLI 才渲染。
 
 每个目标 Agent 的 stdout 精确为以下六种 outcome 之一：
 
@@ -149,14 +155,16 @@ MCP 支持 Bibit、Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互�
 
 ### Agent 能力矩阵
 
-| Agent ID | Skill | MCP | Plugin |
-| --- | --- | --- | --- |
-| `bibit` | `<BIANBU_AGENT_HOME>/skills/<name>` | 独立 `bianbu-agent mcp` Adapter | `<BIANBU_AGENT_HOME>/plugins/<name>`；目录发布，不调用 Plugin CLI |
-| `claude-code` | `<CLAUDE_CONFIG_DIR>/skills/<name>` | Claude CLI user scope | 共享制品中的 Claude 本地 marketplace |
-| `codex` | `<CODEX_HOME>/skills/<name>` | Codex CLI | 共享制品中的 Codex 本地 marketplace |
-| `hermes-agent` | `<HERMES_HOME>/skills/<name>` | Hermes CLI | `<HERMES_HOME>/plugins/<name>`；Hermes CLI enable/disable |
+| Agent ID | Skill | MCP | Plugin | Agent |
+| --- | --- | --- | --- | --- |
+| `bibit` | `<BIANBU_AGENT_HOME>/skills/<name>` | 独立 `bianbu-agent mcp` Adapter | `<BIANBU_AGENT_HOME>/plugins/<name>`；目录发布，不调用 Plugin CLI | `<BIANBU_AGENT_HOME>/agents/<agent.id>/agent.yaml`；单文件、原样字节 |
+| `claude-code` | `<CLAUDE_CONFIG_DIR>/skills/<name>` | Claude CLI user scope | 共享制品中的 Claude 本地 marketplace | 不支持 |
+| `codex` | `<CODEX_HOME>/skills/<name>` | Codex CLI | 共享制品中的 Codex 本地 marketplace | 不支持 |
+| `hermes-agent` | `<HERMES_HOME>/skills/<name>` | Hermes CLI | `<HERMES_HOME>/plugins/<name>`；Hermes CLI enable/disable | 不支持 |
 
 Bibit profile 根优先使用 `BIANBU_AGENT_HOME`，未设置时为 `<有效 HOME>/.bianbu-agent`；根目录存在且为目录才进入本次命令的已安装 Agent 快照。完整契约见 [Feature 018](ivory-tower/features/018-bibit-agent/spec.md) 和 [ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md)。
+
+Agent Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-power/spec.md) 与 [ADR-015](ivory-tower/adr/ADR-015-agent-power-bibit.md)）：Cloud 资源布局与 skill 对齐，为 `agents/<name>/<version>/agent.yaml`，下载单元是单个 `agent.yaml`，走版本化缓存 `cache/agents/<name>/<version>/agent.yaml` + staging；本地安装到 `<bibit根>/agents/<agent.id>/agent.yaml`（单文件、原样字节，本地不版本化，版本仅记 manifest）。`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`；`list --installed` 需显式 `--agent bibit`；`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`。显式 `--agent bibit` 允许，其它值（含 `all`）报错。例如 `./apm install bianbu-agent-default=v1.0.0 --type agent`。
 
 ### Plugin 共享 artifact 与操作顺序
 

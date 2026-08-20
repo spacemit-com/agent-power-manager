@@ -1,9 +1,10 @@
 classDiagram
-    note for CloudClient "List 返回全部精确 PowerRef；DownloadSkill 保持既有缓存语义；DownloadPlugin 把完整多 Agent 原始包写入调用方 destination，不生成或读取 marketplace（ADR-014）"
+    note for CloudClient "List 返回全部精确 PowerRef；DownloadSkill/DownloadAgent 保持单文件缓存语义；DownloadPlugin 把完整多 Agent 原始包写入调用方 destination，不生成或读取 marketplace（ADR-014/015）"
     class CloudClient {
         <<interface>>
         +List() ([]PowerRef, error)
         +DownloadSkill(PowerRef) error
+        +DownloadAgent(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
         +DownloadPlugin(Context, PowerRef, destination) error
     }
@@ -17,6 +18,7 @@ classDiagram
     class LocalClient {
         +List() ([]PowerRef, error)
         +DownloadSkill(PowerRef) error
+        +DownloadAgent(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
         +DownloadPlugin(Context, PowerRef, destination) error
     }

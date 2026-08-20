@@ -8,9 +8,10 @@ classDiagram
         +Remove(AgentID, PowerType, name) error
     }
 
-    note for PowerGroups "跨组件共享的三类 Power 分组；每个 key 对应一组版本已确定的 PowerRef"
+    note for PowerGroups "跨组件共享的四类 Power 分组；每个 key 对应一组版本已确定的 PowerRef"
     class PowerGroups {
         +skill []PowerRef
+        +agent []PowerRef
         +plugin []PowerRef
         +mcp []PowerRef
     }

@@ -1,8 +1,9 @@
 classDiagram
-    note for AdapterRegistry "按 Agent 分别解析 Skill/MCP/Plugin；RefreshInstalled 只检查 profile 根，不执行能力 CLI（ADR-004/010/014）"
+    note for AdapterRegistry "按 Agent 分别解析 Skill/Agent/MCP/Plugin；RefreshInstalled 只检查 profile 根，不执行能力 CLI（ADR-004/010/014/015）"
     class AdapterRegistry {
         <<interface>>
         +ResolveSkill(AgentID) (Adapter, error)
+        +ResolveAgent(AgentID) (AgentAdapter, error)
         +ResolveMCP(AgentID) (MCPAdapter, error)
         +ResolvePlugin(AgentID) (PluginAdapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
@@ -36,7 +37,14 @@ classDiagram
         +RegisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
         +UnregisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
     }
+    note for AgentAdapter "仅 Bibit 的 agent.yaml 单文件发布；TargetPath 为 <bibit根>/agents/<agent.id>/agent.yaml，Install 原样字节原子发布（ADR-015）"
+    class AgentAdapter {
+        <<interface>>
+        +TargetPath(PowerRef) (string, error)
+        +Install(PowerRef, staging) (AgentInstallResult, error)
+    }
     class skillAdapter
+    class bibitAgentAdapter
     class bibitMCPAdapter
     class codexMCPAdapter
     class claudeMCPAdapter
@@ -49,12 +57,14 @@ classDiagram
 
     Registry ..|> AdapterRegistry
     Registry --> skillAdapter : ResolveSkill
+    Registry --> bibitAgentAdapter : ResolveAgent(bibit only)
     Registry --> bibitMCPAdapter : ResolveMCP(bibit)
     Registry --> codexMCPAdapter : ResolveMCP(codex)
     Registry --> claudeMCPAdapter : ResolveMCP(claude-code user scope)
     Registry --> hermesMCPAdapter : ResolveMCP(hermes-agent)
     Registry --> PluginAdapter : ResolvePlugin(bibit/codex/claude/hermes)
     skillAdapter ..|> Adapter
+    bibitAgentAdapter ..|> AgentAdapter
     codexMCPAdapter ..|> MCPAdapter
     claudeMCPAdapter ..|> MCPAdapter
     hermesMCPAdapter ..|> MCPAdapter

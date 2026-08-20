@@ -81,6 +81,7 @@ classDiagram
     class AdapterRegistry {
         <<interface>>
         +ResolveSkill(AgentID) (Adapter, error)
+        +ResolveAgent(AgentID) (AgentAdapter, error)
         +ResolveMCP(AgentID) (MCPAdapter, error)
         +ResolvePlugin(AgentID) (PluginAdapter, error)
         +RefreshInstalled() (AgentSnapshot, error)
@@ -90,6 +91,15 @@ classDiagram
         <<interface>>
         +TargetPath(PowerRef) (string, error)
         +Install(PowerRef, stagingRoot) (AdapterInstallResult, error)
+    }
+    note for AgentAdapter "仅 Bibit；单文件 agent.yaml 原样字节发布到 agents/<agent.id>/agent.yaml（ADR-015）"
+    class AgentAdapter {
+        <<interface>>
+        +TargetPath(PowerRef) (string, error)
+        +Install(PowerRef, staging) (AgentInstallResult, error)
+    }
+    class AgentInstallResult {
+        +Published bool
     }
     class AdapterInstallResult {
         +Published bool
@@ -116,13 +126,15 @@ classDiagram
         <<interface>>
         +Recover(Context) (RecoveryResult, error)
     }
-    note for TransactionManager "组合 Inspector 与 Recoverer，并提供 Skill/MCP/Plugin 变更事务；非法 journal 保留"
+    note for TransactionManager "组合 Inspector 与 Recoverer，并提供 Skill/Agent/MCP/Plugin 变更事务；非法 journal 保留"
     class TransactionManager {
         <<interface>>
         +InstallSkill(Context, SkillInstallRequest) error
+        +InstallAgent(Context, AgentInstallRequest) error
         +InstallMCP(Context, MCPInstallRequest) error
         +InstallPlugin(Context, PluginInstallRequest) error
         +UninstallSkill(Context, SkillUninstallRequest) (TransactionUninstallResult, error)
+        +UninstallAgent(Context, AgentUninstallRequest) (TransactionUninstallResult, error)
         +UninstallMCP(Context, MCPUninstallRequest) (TransactionUninstallResult, error)
         +UninstallPlugin(Context, PluginUninstallRequest) (TransactionUninstallResult, error)
     }
@@ -144,6 +156,7 @@ classDiagram
     class PowerCache {
         <<interface>>
         +StageSkill(PowerRef) (stagingRoot string, error)
+        +StageAgent(PowerRef) (stagingRoot string, error)
     }
     class PluginResourceManager {
         <<interface>>
@@ -163,6 +176,7 @@ classDiagram
         <<interface>>
         +List() ([]PowerRef, error)
         +DownloadSkill(PowerRef) error
+        +DownloadAgent(PowerRef) error
         +GetMCP(PowerRef) (MCPServer, error)
         +DownloadPlugin(Context, PowerRef, destination) error
     }
@@ -192,11 +206,11 @@ classDiagram
     installService --> InstallResult : returns
     installService --> InstallBatchError : successful Release only
     installService --> Locker : one lock interval
-    installService --> TransactionManager : Recover / InstallSkill / InstallMCP / InstallPlugin
-    installService --> CloudClient : List / DownloadSkill / GetMCP
-    installService --> PowerCache : Skill StageSkill only
+    installService --> TransactionManager : Recover / InstallSkill / InstallAgent / InstallMCP / InstallPlugin
+    installService --> CloudClient : List / DownloadSkill / DownloadAgent / GetMCP
+    installService --> PowerCache : Skill StageSkill / Agent StageAgent only
     installService --> PluginResourceManager : Plugin Ensure / Lookup / StageFilesystem
-    installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
+    installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveAgent / ResolveMCP / ResolvePlugin
     installService --> ConfigRepository : Find
     installService --> VersionSelector : resolve version
 
@@ -204,16 +218,19 @@ classDiagram
     uninstallService --> UninstallResult : returns after Release
     uninstallService --> UninstallBatchError : successful Release only
     uninstallService --> Locker : one lock interval
-    uninstallService --> TransactionManager : Recover / UninstallSkill / UninstallMCP / UninstallPlugin
-    uninstallService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
+    uninstallService --> TransactionManager : Recover / UninstallSkill / UninstallAgent / UninstallMCP / UninstallPlugin
+    uninstallService --> AdapterRegistry : Refresh / ResolveSkill / ResolveAgent / ResolveMCP / ResolvePlugin
     uninstallService --> ConfigRepository : List
     uninstallService --> CloudClient : MCP GetMCP only when present
     uninstallService --> PluginResourceManager : Plugin Lookup only, never Cloud
 
     AdapterRegistry --> Adapter : resolves
+    AdapterRegistry --> AgentAdapter : resolves
     AdapterRegistry --> AgentSnapshot : returns
     Adapter --> AdapterInstallResult : Install returns
+    AgentAdapter --> AgentInstallResult : Install returns
     TransactionManager --> Adapter : TargetPath / Install
+    TransactionManager --> AgentAdapter : TargetPath / Install
     TransactionManager --> TransactionUninstallResult : returns
     TransactionManager --|> Inspector : embeds
     TransactionManager --|> Recoverer : embeds

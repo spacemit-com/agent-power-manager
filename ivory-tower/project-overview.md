@@ -7,7 +7,7 @@
 - 项目名称：Agent Power Manager，简称 APM
 - 交付目标：面向多 Agent，统一管理 Skill、Plugin、MCP 等 Power，提供能力发现、分发、安装和配置治理，并通过 Adapter 适配不同目标 Agent 的本地命令行工具。
 - 代码工程：`apm`之下，`ivory-tower`仅作为文档归档目录。
-- 当前状态：Search、List、Install、Uninstall 和 Fix 已通过独立 lifecycle 端口接线；Bibit、Codex、Claude Code 与 Hermes Agent 均支持 Skill、MCP 与 Plugin。Plugin 当前架构见 [Feature 018](features/018-bibit-agent/spec.md) 和 [ADR-014](adr/ADR-014-share-multi-agent-plugin-artifacts.md)，journal 正式格式见 [ADR-011](adr/ADR-011-reset-journal-schema-before-release.md)。
+- 当前状态：Search、List、Install、Uninstall 和 Fix 已通过独立 lifecycle 端口接线；Bibit、Codex、Claude Code 与 Hermes Agent 均支持 Skill、MCP 与 Plugin，Bibit 还支持专属 Agent Power（[Feature 019](features/019-agent-power/spec.md) 与 [ADR-015](adr/ADR-015-agent-power-bibit.md)）。Plugin 当前架构见 [Feature 018](features/018-bibit-agent/spec.md) 和 [ADR-014](adr/ADR-014-share-multi-agent-plugin-artifacts.md)，journal 正式格式见 [ADR-011](adr/ADR-011-reset-journal-schema-before-release.md)。
 - 最小业务上下文：用户通过APM从云服务发现所需 Power，APM根据目标Agent将通用Power格式适配并安装到对应目录。
 
 Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行时。
@@ -23,9 +23,9 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
     - 默认 `list` 在 Inspect 后列出 Cloud 全部版本；`list --installed` 无锁刷新已安装 Agent 并读取 Config。`--agent=all` 继续输出成功记录和 partial error，但不承诺跨 Agent manifest、journal 与 target 的全局一致快照。
     - installed List、Install 和 Uninstall 在本地操作前扫描已注册 Agent 的根目录，生成当前命令内按 Agent ID 字典序的“已支持且已安装 Agent”快照；installed List 的快照是无锁观察，Install/Uninstall 的快照位于各自锁区间内。
     - Fix 在一次全局锁区间内恰好 Recover 一次并退出；没有 journal 时普通模式静默、verbose 模式 Debug，恢复成功时同步 Warn。损坏 journal 不能自动修复，Fix 会保留现场并非零退出。
-    - Install 在一个锁区间内完成 Recover、Warn、快照刷新、Cloud 和串行 Transaction；Skill 使用 Cache/Staging，MCP 由 `GetMCP` 直接取得定义；Plugin Resource 按版本生成或复验一份共享不可变 artifact，Codex/Claude 使用其中的本地 marketplace，Hermes/Bibit 使用同一 Plugin 叶子的 filesystem staging。成功 Release 后才返回 outcome。
+    - Install 在一个锁区间内完成 Recover、Warn、快照刷新、Cloud 和串行 Transaction；Skill 与 Agent 使用 Cache/Staging（Agent 为单文件、原样字节、仅 Bibit），MCP 由 `GetMCP` 直接取得定义；Plugin Resource 按版本生成或复验一份共享不可变 artifact，Codex/Claude 使用其中的本地 marketplace，Hermes/Bibit 使用同一 Plugin 叶子的 filesystem staging。成功 Release 后才返回 outcome。
     - Uninstall 在一个锁区间内完成 Recover、Warn、快照刷新、逐 Agent 本地清单解析和串行 Transaction；Plugin 卸载离线执行，不连接 Cloud，只移除 manifest 指向的精确 Plugin，正常路径保留本地 marketplace 与 artifact。
-    - Skill、MCP 与 Plugin 共用唯一 `transactions/active.json`。schema v1 shared envelope 以 `filesystem`/`agent-cli`/`plugin` driver 区分互斥载荷；其他格式返回 `ErrInvalidJournal` 并原样保留。
+    - Skill、Agent、MCP 与 Plugin 共用唯一 `transactions/active.json`（Agent 复用 `filesystem` driver，target 为文件路径）。schema v1 shared envelope 以 `filesystem`/`agent-cli`/`plugin` driver 区分互斥载荷；其他格式返回 `ErrInvalidJournal` 并原样保留。
     - 实现类似apt的文件锁，保证软件执行安全。
     - 缓存下载的Power。
     - 可增添的Agent Power Adapters。
@@ -38,25 +38,27 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 - 系统边界与外部依赖：Agent Power Manager 位于能力提供方、能力使用方与目标 Agent 之间；对外依赖目标 Agent的Power接入方式。目标 Agent 自身的运行时位于 Agent Power Manager 边界之外。
 - 模块边界与职责：
     - 核心生命周期：提供独立的 Search、List、Install、Uninstall 与 Fix 用例。Search/List 返回结构化结果且不渲染业务输出；三种只读查询只无锁检查 journal，Fix/Install/Uninstall 才在 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md) 定义的边界内锁定并恢复。
-    - 配置模型：通过无状态 Repository 维护每个 Agent 按 Skill、Plugin、MCP 分组的 Power 安装清单。
+    - 配置模型：通过无状态 Repository 维护每个 Agent 按 Skill、Agent、Plugin、MCP 分组的 Power 安装清单。
     - Plugin Resource：独占完整原始 Plugin 下载、`cache/plugins/<name>/<version>` 共享不可变 artifact、Codex/Claude 两份单条目本地 marketplace 和通用 filesystem staging。它依赖 Cloud、共享缓存根、并列的 Codex/Claude marketplace builder，以及与 Transaction recovery 共用的中立只读 Plugin Artifact Validator。
-    - Adapter Registry：按 Agent 分别提供 `ResolveSkill`、`ResolveMCP`、`ResolvePlugin`。Codex/Claude Plugin Adapter 管理本地 marketplace；Hermes/Bibit Plugin Adapter 管理逻辑名目录，其中 Hermes 通过 CLI enable/disable，Bibit 不执行 Plugin CLI。Bibit MCP 使用独立 Adapter；MCP/Plugin 都不追加安装后的 list 验证。
+    - Adapter Registry：按 Agent 分别提供 `ResolveSkill`、`ResolveAgent`、`ResolveMCP`、`ResolvePlugin`；其中 `ResolveAgent` 仅 Bibit，对应 `<bibit根>/agents/<agent.id>/agent.yaml` 单文件发布。Codex/Claude Plugin Adapter 管理本地 marketplace；Hermes/Bibit Plugin Adapter 管理逻辑名目录，其中 Hermes 通过 CLI enable/disable，Bibit 不执行 Plugin CLI。Bibit MCP 使用独立 Adapter；MCP/Plugin 都不追加安装后的 list 验证。
     - CLI：提供入口，校验并解析命令参数；Search、List、Install、Uninstall 与 Fix 通过五个独立 factory 创建专属端口。CLI 渲染前四者的结构化结果；Fix 没有 stdout 业务结果。
-- 数据与接口：每个 Agent 单独维护一份固定 `skills`、`plugins`、`mcps` 分组的 JSON 安装清单，条目统一为精确 `vMAJOR.MINOR.PATCH` 的 `PowerRef`。Config Repository 在 `List/Find/Set/Remove` 内封装完整 manifest 验证、读取和原子读改写；同一 Type/Name 重复合法，Find 取第一条而 Remove 清除全部，非法历史版本不会迁移或清理，详见 [ADR-007](adr/ADR-007-use-stateless-config-repository.md)。用户侧 CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)：Search 没有 Agent 维度；默认 List 禁止显式 `--agent`，installed List 必须提供 Agent。本地 Power 操作中，`--agent` 的具体值必须存在于按 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md) 排序的快照，`all` 对快照中的全部 Agent 执行。Search 与两种 List 都在业务前无锁 Inspect，合法活动 journal 提示 `apm fix`，损坏 journal Warn 后继续；Fix/Install/Uninstall 才锁内 Recover，见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。Cloud `list` 返回带版本的全部 `PowerRef`；Search 选择最新版本，List 保留所有版本。
+- 数据与接口：每个 Agent 单独维护一份固定 `skills`、`agents`、`plugins`、`mcps` 分组的 JSON 安装清单，条目统一为精确 `vMAJOR.MINOR.PATCH` 的 `PowerRef`。Config Repository 在 `List/Find/Set/Remove` 内封装完整 manifest 验证、读取和原子读改写；同一 Type/Name 重复合法，Find 取第一条而 Remove 清除全部，非法历史版本不会迁移或清理，详见 [ADR-007](adr/ADR-007-use-stateless-config-repository.md)。用户侧 CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)：Search 没有 Agent 维度；默认 List 禁止显式 `--agent`，installed List 必须提供 Agent。本地 Power 操作中，`--agent` 的具体值必须存在于按 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md) 排序的快照，`all` 对快照中的全部 Agent 执行。Search 与两种 List 都在业务前无锁 Inspect，合法活动 journal 提示 `apm fix`，损坏 journal Warn 后继续；Fix/Install/Uninstall 才锁内 Recover，见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。Cloud `list` 返回带版本的全部 `PowerRef`；Search 选择最新版本，List 保留所有版本。
 
 Install 与 Uninstall 分别以独立 factory 和生命周期端口接线，不复用或耦合 Search/List 的锁边界。Install 显式版本必须为规范 `vMAJOR.MINOR.PATCH`，结果行精确为 `<agent>/<type>/<name>@<version> <outcome>`。Uninstall 拒绝版本，从每个 Agent 的本地清单独立解析 Type/Version，并输出完整 PowerRef 或 Agent-only 的结果行。
 - 技术与运行方式：使用 Go 实现，交付为单个静态二进制；开发阶段以 `internal/cloud/resources` 模拟云端。Skill 使用既有 Cache/Staging，MCP 不进入 Cache；Plugin Resource 独占 `cache/plugins/<logical-name>/<version>` 的共享 artifact 与 filesystem staging。详见 [ADR-010](adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)、[ADR-011](adr/ADR-011-reset-journal-schema-before-release.md) 与 [ADR-014](adr/ADR-014-share-multi-agent-plugin-artifacts.md)。
 
 ### Agent 与 Power 能力
 
-| Agent ID | Profile 根 | Skill | MCP | Plugin |
-| --- | --- | --- | --- | --- |
-| `bibit` | `BIANBU_AGENT_HOME`，默认 `~/.bianbu-agent` | `skills/<name>` | 独立 `bianbu-agent mcp` Adapter | `plugins/<name>`；目录即状态，不调用 Plugin CLI |
-| `claude-code` | `CLAUDE_CONFIG_DIR`，默认 `~/.claude` | `skills/<name>` | Claude CLI user scope | 共享制品中的 Claude marketplace |
-| `codex` | `CODEX_HOME`，默认 `~/.codex` | `skills/<name>` | Codex CLI | 共享制品中的 Codex marketplace |
-| `hermes-agent` | `HERMES_HOME`，默认 `~/.hermes` | `skills/<name>` | Hermes CLI | `plugins/<name>`；CLI enable/disable |
+| Agent ID | Profile 根 | Skill | MCP | Plugin | Agent |
+| --- | --- | --- | --- | --- | --- |
+| `bibit` | `BIANBU_AGENT_HOME`，默认 `~/.bianbu-agent` | `skills/<name>` | 独立 `bianbu-agent mcp` Adapter | `plugins/<name>`；目录即状态，不调用 Plugin CLI | `agents/<agent.id>/agent.yaml`；单文件、原样字节，仅 Bibit |
+| `claude-code` | `CLAUDE_CONFIG_DIR`，默认 `~/.claude` | `skills/<name>` | Claude CLI user scope | 共享制品中的 Claude marketplace | 不支持 |
+| `codex` | `CODEX_HOME`，默认 `~/.codex` | `skills/<name>` | Codex CLI | 共享制品中的 Codex marketplace | 不支持 |
+| `hermes-agent` | `HERMES_HOME`，默认 `~/.hermes` | `skills/<name>` | Hermes CLI | `plugins/<name>`；CLI enable/disable | 不支持 |
 
 Registry 仅以 profile 根存在且为目录判断 Agent 已安装；`--agent=all` 按 Agent ID 字典序使用当前快照。Bibit 的接口与路径约束见 [Feature 018](features/018-bibit-agent/spec.md) 和 [ADR-014](adr/ADR-014-share-multi-agent-plugin-artifacts.md)。
+
+Agent Power 仅 Bibit 支持（[Feature 019](features/019-agent-power/spec.md) 与 [ADR-015](adr/ADR-015-agent-power-bibit.md)）：Cloud 为 `agents/<name>/<version>/agent.yaml`，缓存为 `cache/agents/<name>/<version>/agent.yaml`，安装到 `<bibit根>/agents/<agent.id>/agent.yaml`（单文件、原样字节，本地不版本化）；`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`，`list --installed` 需显式 `--agent bibit`，`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`；显式 `--agent bibit` 允许，其它值（含 `all`）报错。
 
 ### Plugin 当前安装与卸载边界
 

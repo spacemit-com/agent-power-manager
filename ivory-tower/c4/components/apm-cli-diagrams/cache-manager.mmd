@@ -1,13 +1,15 @@
 classDiagram
-    note for PowerCache "只服务 Skill 的版本化 Cache/Staging；MCP 与所有 Plugin 均不使用此接口"
+    note for PowerCache "只服务 Skill 与 Agent 的版本化 Cache/Staging；MCP 与所有 Plugin 均不使用此接口"
     class PowerCache {
         <<interface>>
         +StageSkill(PowerRef) (stagingRoot string, error)
+        +StageAgent(PowerRef) (stagingRoot string, error)
     }
 
     note for FilesystemCache "按 type/name/version 读取缓存；把叶子复制到 staging/<type-directory>/<name>，返回 staging 根"
     class FilesystemCache {
         +StageSkill(PowerRef) (stagingRoot string, error)
+        +StageAgent(PowerRef) (stagingRoot string, error)
     }
 
     FilesystemCache ..|> PowerCache
