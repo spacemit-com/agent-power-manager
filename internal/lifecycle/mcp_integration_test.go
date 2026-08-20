@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -105,7 +106,12 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	}
 	calls := filepath.Join(root, "calls.log")
 	cacheHome := filepath.Join(root, "cache")
-	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	isolatedHome := filepath.Join(root, "user-home")
+	if err := os.MkdirAll(isolatedHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin)
+	t.Setenv("HOME", isolatedHome)
 	t.Setenv("FAKE_MCP_BIN", fakeBin)
 	t.Setenv("FAKE_MCP_STATE", state)
 	t.Setenv("FAKE_MCP_CALLS", calls)
@@ -121,6 +127,7 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	t.Setenv("CLAUDE_CONFIG_DIR", agentRoots[domain.AgentClaudeCode])
 	t.Setenv("HERMES_HOME", agentRoots[domain.AgentHermes])
 	t.Setenv("BIANBU_AGENT_HOME", agentRoots[domain.AgentBibit])
+	assertMCPHarnessEnvironment(t, fakeBin, isolatedHome)
 	if err := os.MkdirAll(agentRoots[installedAgent], 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +166,23 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	return &isolatedMCPHarness{
 		t: t, agent: installedAgent, root: root, fakeBin: fakeBin, state: state, calls: calls, cacheHome: cacheHome,
 		repository: repository, registry: registry, cloud: cloudClient, install: installer, uninstall: uninstaller,
+	}
+}
+
+func assertMCPHarnessEnvironment(t *testing.T, fakeBin, isolatedHome string) {
+	t.Helper()
+	if got := os.Getenv("PATH"); got != fakeBin {
+		t.Fatalf("PATH = %q, want fake-bin only %q", got, fakeBin)
+	}
+	if got := os.Getenv("HOME"); got != isolatedHome {
+		t.Fatalf("HOME = %q, want isolated home %q", got, isolatedHome)
+	}
+	for _, executable := range []string{"bianbu-agent", "codex", "claude", "hermes"} {
+		want := filepath.Join(fakeBin, executable)
+		got, err := exec.LookPath(executable)
+		if err != nil || got != want {
+			t.Fatalf("LookPath(%q) = %q, %v; want exact fake executable %q", executable, got, err, want)
+		}
 	}
 }
 
