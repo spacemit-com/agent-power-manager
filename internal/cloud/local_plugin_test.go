@@ -376,7 +376,7 @@ func writeRawSharedPluginPackage(t *testing.T, root string, ref domain.PowerRef)
 	if err := os.MkdirAll(filepath.Join(source, ".codex-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"name":"demo-plugin-v0.1.0","version":"0.1.0"}`
+	manifest := `{"name":"demo-plugin","version":"0.1.0"}`
 	if err := os.WriteFile(filepath.Join(source, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}

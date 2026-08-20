@@ -9,13 +9,13 @@ import (
 
 func TestClaudePluginInspectAndMutations(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
-		successfulMCPResponse(`[{"id":"demo-plugin-v0.0.1@apm","scope":"user","enabled":false}]`),
+		successfulMCPResponse(`[{"id":"demo-plugin","scope":"user","enabled":false}]`),
 		successfulMCPResponse(""),
 		successfulMCPResponse(""),
 	}}
 	adapter := newClaudePluginAdapter(runner)
-	fact, err := adapter.Inspect(context.Background(), "demo-plugin-v0.0.1")
-	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin-v0.0.1", Selector: "demo-plugin-v0.0.1@apm"}) {
+	fact, err := adapter.Inspect(context.Background(), "demo-plugin")
+	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin", Selector: "demo-plugin"}) {
 		t.Fatalf("Inspect() = %#v, %v", fact, err)
 	}
 	target := PluginTarget{ActualName: fact.ActualName, Selector: fact.Selector}
@@ -27,8 +27,8 @@ func TestClaudePluginInspectAndMutations(t *testing.T) {
 	}
 	assertPluginCommands(t, runner, "claude", [][]string{
 		{"plugin", "list", "--json"},
-		{"plugin", "install", "demo-plugin-v0.0.1@apm", "--scope", "user"},
-		{"plugin", "uninstall", "demo-plugin-v0.0.1@apm", "--scope", "user"},
+		{"plugin", "install", "demo-plugin", "--scope", "user"},
+		{"plugin", "uninstall", "demo-plugin", "--scope", "user"},
 	})
 }
 
@@ -90,7 +90,7 @@ func TestClaudePluginMarketplaceInspectRejectsAmbiguousInvalidOrTruncatedOutput(
 }
 
 func TestClaudePluginMarketplaceMutationCommands(t *testing.T) {
-	source := "/abs/cache/plugins/claude-code/demo/v0.1.0"
+	source := "/abs/cache/plugins/demo/v0.1.0"
 	target := MarketplaceTarget{Name: "apm-demo", Source: source}
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
 		successfulMCPResponse(""),
@@ -110,7 +110,7 @@ func TestClaudePluginMarketplaceMutationCommands(t *testing.T) {
 }
 
 func TestClaudePluginMarketplaceMutationsClassifyRunnerFailures(t *testing.T) {
-	target := MarketplaceTarget{Name: "apm-demo", Source: "/abs/cache/plugins/claude-code/demo/v0.1.0"}
+	target := MarketplaceTarget{Name: "apm-demo", Source: "/abs/cache/plugins/demo/v0.1.0"}
 	tests := []struct {
 		name      string
 		response  queuedMCPResponse
@@ -134,15 +134,15 @@ func TestClaudePluginMarketplaceMutationsClassifyRunnerFailures(t *testing.T) {
 
 func TestClaudePluginInspectAbsentAndAmbiguous(t *testing.T) {
 	absentRunner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(`[]`)}}
-	fact, err := newClaudePluginAdapter(absentRunner).Inspect(context.Background(), "demo-plugin-v0.0.1")
-	if err != nil || fact != (PluginFact{Presence: PluginAbsent, ActualName: "demo-plugin-v0.0.1"}) {
+	fact, err := newClaudePluginAdapter(absentRunner).Inspect(context.Background(), "demo-plugin")
+	if err != nil || fact != (PluginFact{Presence: PluginAbsent, ActualName: "demo-plugin"}) {
 		t.Fatalf("absent Inspect() = %#v, %v", fact, err)
 	}
 
 	ambiguousRunner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(
-		`[{"id":"demo-plugin-v0.0.1@one"},{"id":"demo-plugin-v0.0.1@two"}]`,
+		`[{"id":"demo-plugin@one"},{"id":"demo-plugin@two"}]`,
 	)}}
-	if _, err := newClaudePluginAdapter(ambiguousRunner).Inspect(context.Background(), "demo-plugin-v0.0.1"); !errors.Is(err, ErrPluginStateUnknown) {
+	if _, err := newClaudePluginAdapter(ambiguousRunner).Inspect(context.Background(), "demo-plugin"); !errors.Is(err, ErrPluginStateUnknown) {
 		t.Fatalf("ambiguous Inspect() error = %v", err)
 	}
 }
@@ -151,7 +151,7 @@ func TestClaudePluginInspectRejectsMalformedTopLevelCollection(t *testing.T) {
 	// 捕获错误变更：missing/null collection 被当成明确空列表，从而把未知状态误报为 absent。
 	for _, document := range []string{`{}`, `{"installed":null}`, `null`} {
 		runner := &recordingMCPRunner{responses: []queuedMCPResponse{successfulMCPResponse(document)}}
-		_, err := newClaudePluginAdapter(runner).Inspect(context.Background(), "demo-plugin-v0.0.1")
+		_, err := newClaudePluginAdapter(runner).Inspect(context.Background(), "demo-plugin")
 		if !errors.Is(err, ErrPluginStateUnknown) {
 			t.Fatalf("Inspect(%s) error = %v, want ErrPluginStateUnknown", document, err)
 		}

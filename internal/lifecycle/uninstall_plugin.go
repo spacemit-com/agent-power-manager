@@ -15,7 +15,7 @@ func (s *UninstallService) uninstallPlugin(ctx context.Context, agent domain.Age
 	if err != nil {
 		return transaction.UninstallResult{}, fmt.Errorf("resolve Plugin adapter for agent %q: %w", agent, err)
 	}
-	actualName, err := domain.ActualPluginName(ref)
+	actualName, err := domain.PluginRuntimeName(ref)
 	if err != nil {
 		return transaction.UninstallResult{}, fmt.Errorf("derive installed Plugin actual name: %w", err)
 	}
@@ -28,7 +28,7 @@ func (s *UninstallService) uninstallPlugin(ctx context.Context, agent domain.Age
 		}
 		return s.uninstallMarketplacePlugin(ctx, agent, ref, actualName, pluginAdapter, marketplaceAdapter)
 	case domain.PluginDeploymentFilesystem:
-		return s.uninstallHermesPlugin(ctx, agent, ref, actualName, pluginAdapter)
+		return s.uninstallFilesystemPlugin(ctx, agent, ref, actualName, pluginAdapter)
 	default:
 		return transaction.UninstallResult{}, fmt.Errorf("unsupported Plugin deployment %q: %w", pluginAdapter.DeploymentMode(), adapter.ErrUnsupportedAdapter)
 	}
@@ -76,11 +76,15 @@ func (s *UninstallService) uninstallMarketplacePlugin(
 	if err != nil {
 		return transaction.UninstallResult{}, fmt.Errorf("lookup installed Plugin artifact %+v for agent %q: %w", ref, agent, err)
 	}
-	if err := validateLifecyclePluginArtifact(artifact, agent, ref); err != nil {
+	if err := validateLifecyclePluginArtifact(artifact, ref); err != nil {
 		return transaction.UninstallResult{}, err
 	}
-	target := marketplacePluginTarget(artifact)
-	marketplace := marketplaceTarget(artifact)
+	marketplaceResource, err := artifact.MarketplaceFor(agent)
+	if err != nil {
+		return transaction.UninstallResult{}, fmt.Errorf("resolve installed Plugin marketplace for agent %q: %w", agent, err)
+	}
+	target := adapter.PluginTarget{ActualName: actualName, Selector: actualName}
+	marketplace := marketplaceTarget(marketplaceResource)
 	if marketplaceFact.Name != marketplace.Name || marketplaceFact.Source != marketplace.Source ||
 		pluginFact.ActualName != target.ActualName || pluginFact.Selector != target.Selector {
 		return transaction.UninstallResult{}, fmt.Errorf("installed marketplace/Plugin state conflicts with manifest: %w", transaction.ErrIndeterminateState)
@@ -91,36 +95,34 @@ func (s *UninstallService) uninstallMarketplacePlugin(
 	})
 }
 
-func (s *UninstallService) uninstallHermesPlugin(
+// uninstallFilesystemPlugin 仅依据 manifest 与 Agent 本地事实卸载 filesystem Plugin，禁止访问 Plugin Resource 或 Cloud。
+func (s *UninstallService) uninstallFilesystemPlugin(
 	ctx context.Context,
 	agent domain.AgentID,
 	ref domain.PowerRef,
 	actualName string,
 	pluginAdapter adapter.PluginAdapter,
 ) (transaction.UninstallResult, error) {
-	if agent != domain.AgentHermes {
-		return transaction.UninstallResult{}, fmt.Errorf("filesystem Plugin adapter for agent %q: %w", agent, adapter.ErrUnsupportedAdapter)
-	}
 	fact, err := pluginAdapter.Inspect(ctx, actualName)
 	if err != nil {
-		return transaction.UninstallResult{}, fmt.Errorf("inspect installed Hermes Plugin %q: %w", actualName, err)
+		return transaction.UninstallResult{}, fmt.Errorf("inspect installed filesystem Plugin %q: %w", actualName, err)
 	}
 	switch fact.Presence {
 	case adapter.PluginAbsent:
 		if fact.ActualName != actualName {
-			return transaction.UninstallResult{}, fmt.Errorf("missing Hermes Plugin fact does not match manifest: %w", transaction.ErrIndeterminateState)
+			return transaction.UninstallResult{}, fmt.Errorf("missing filesystem Plugin fact does not match manifest: %w", transaction.ErrIndeterminateState)
 		}
 		result := transaction.UninstallResult{TargetMissing: true}
 		if err := s.config.Remove(agent, domain.PowerTypePlugin, ref.Name); err != nil {
-			return result, fmt.Errorf("remove missing Hermes Plugin manifest entry: %w", err)
+			return result, fmt.Errorf("remove missing filesystem Plugin manifest entry: %w", err)
 		}
 		return result, nil
 	case adapter.PluginPresent:
 		if fact.ActualName != actualName || fact.Selector != actualName {
-			return transaction.UninstallResult{}, fmt.Errorf("Hermes Plugin fact conflicts with manifest: %w", transaction.ErrIndeterminateState)
+			return transaction.UninstallResult{}, fmt.Errorf("filesystem Plugin fact conflicts with manifest: %w", transaction.ErrIndeterminateState)
 		}
 	default:
-		return transaction.UninstallResult{}, fmt.Errorf("unexpected Hermes Plugin presence %q: %w", fact.Presence, transaction.ErrIndeterminateState)
+		return transaction.UninstallResult{}, fmt.Errorf("unexpected filesystem Plugin presence %q: %w", fact.Presence, transaction.ErrIndeterminateState)
 	}
 	return s.transactions.UninstallPlugin(ctx, transaction.PluginUninstallRequest{
 		Agent: agent, Power: ref, Adapter: pluginAdapter,

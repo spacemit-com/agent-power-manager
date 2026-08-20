@@ -60,32 +60,32 @@ func TestMarketplaceFactRejectsContradictoryOrUnknownPresence(t *testing.T) {
 
 func TestValidatePluginFactRejectsContradictoryState(t *testing.T) {
 	for _, fact := range []PluginFact{
-		{Presence: PluginAbsent, ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm"},
-		{Presence: PluginPresent, ActualName: "demo-v1.0.0"},
-		{Presence: "unknown", ActualName: "demo-v1.0.0"},
+		{Presence: PluginAbsent, ActualName: "demo", Selector: "demo@apm"},
+		{Presence: PluginPresent, ActualName: "demo"},
+		{Presence: "unknown", ActualName: "demo"},
 		{Presence: PluginPresent, ActualName: "../demo", Selector: "demo@apm"},
 	} {
 		if err := validatePluginFact(fact); !errors.Is(err, ErrInvalidPlugin) {
 			t.Fatalf("validatePluginFact(%#v) error = %v, want ErrInvalidPlugin", fact, err)
 		}
 	}
-	if err := validatePluginFact(PluginFact{Presence: PluginAbsent, ActualName: "demo-v1.0.0"}); err != nil {
+	if err := validatePluginFact(PluginFact{Presence: PluginAbsent, ActualName: "demo"}); err != nil {
 		t.Fatalf("validate absent fact: %v", err)
 	}
-	if err := validatePluginFact(PluginFact{Presence: PluginPresent, ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm"}); err != nil {
+	if err := validatePluginFact(PluginFact{Presence: PluginPresent, ActualName: "demo", Selector: "demo"}); err != nil {
 		t.Fatalf("validate present fact: %v", err)
 	}
 }
 
 func TestValidatePluginTargetAndDeployment(t *testing.T) {
-	valid := PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm"}
+	valid := PluginTarget{ActualName: "demo", Selector: "demo"}
 	if err := validatePluginTarget(valid); err != nil {
 		t.Fatalf("validate target: %v", err)
 	}
 	for _, target := range []PluginTarget{
 		{},
 		{ActualName: "../demo", Selector: "demo@apm"},
-		{ActualName: "demo-v1.0.0"},
+		{ActualName: "demo"},
 	} {
 		if err := validatePluginTarget(target); !errors.Is(err, ErrInvalidPlugin) {
 			t.Fatalf("validatePluginTarget(%#v) error = %v", target, err)
@@ -117,7 +117,7 @@ func TestPluginMutationFromCommandClassifiesSideEffects(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := pluginMutationFromCommand("codex", "install", PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm"}, test.result, test.runErr, test.success)
+			got, err := pluginMutationFromCommand("codex", "install", PluginTarget{ActualName: "demo", Selector: "demo"}, test.result, test.runErr, test.success)
 			if got.State != test.wantState || !errors.Is(err, test.wantErr) {
 				t.Fatalf("pluginMutationFromCommand() = %#v, %v; want %q, %v", got, err, test.wantState, test.wantErr)
 			}

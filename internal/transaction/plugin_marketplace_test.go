@@ -153,8 +153,8 @@ func newMarketplacePluginFixture(t *testing.T) *marketplacePluginFixture {
 	t.Helper()
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
-	target := adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"}
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v2.0.0")
+	target := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
 
 	fixture := &marketplacePluginFixture{}
 	fixture.journals = &recordingMarketplaceJournalStore{events: &fixture.events}
@@ -222,7 +222,7 @@ func TestMarketplacePluginVersionSwitchOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"inspect-marketplace", "inspect-plugin", "inspect-plugin",
+		"inspect-marketplace", "inspect-plugin",
 		"create:removing-old-plugin", "remove-plugin",
 		"update:unregistering-old-marketplace", "unregister-marketplace",
 		"update:registering-new-marketplace", "register-marketplace",
@@ -248,7 +248,7 @@ func TestMarketplacePluginVersionSwitchOrder(t *testing.T) {
 
 func configureMarketplaceVersionSwitch(fixture *marketplacePluginFixture) (adapter.PluginTarget, adapter.MarketplaceTarget) {
 	previous := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
-	previousTarget := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
 	previousMarketplace := adapter.MarketplaceTarget{
 		Name: "apm-demo", Source: filepath.Join(filepath.Dir(fixture.request.Marketplace.Target.Source), "v1.0.0"),
 	}
@@ -640,7 +640,7 @@ func TestMarketplacePluginUninstallPartialOrConflictingStateFailsClosed(t *testi
 		{
 			name:            "Plugin selector conflict",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, Selector: "demo-v2.0.0@other"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, Selector: "other"},
 		},
 	}
 	for _, test := range tests {

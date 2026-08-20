@@ -43,9 +43,6 @@ func (s *Service) installFilesystemPlugin(ctx context.Context, request PluginIns
 	if err != nil {
 		return fmt.Errorf("inspect filesystem Plugin target: %w", err)
 	}
-	if targetFact.Presence == adapter.PluginPresent {
-		return fmt.Errorf("filesystem Plugin target is already registered: %w", adapter.ErrPluginConflict)
-	}
 	targetPath, err := request.Adapter.TargetPath(request.Target.ActualName)
 	if err != nil {
 		return fmt.Errorf("resolve filesystem Plugin target: %w", err)
@@ -53,35 +50,39 @@ func (s *Service) installFilesystemPlugin(ctx context.Context, request PluginIns
 	if err := validateSafeAbsolutePath("Plugin target", targetPath); err != nil {
 		return err
 	}
-	if exists, err := s.pathExists(targetPath); err != nil {
-		return err
-	} else if exists {
-		return fmt.Errorf("filesystem Plugin target %q exists: %w", targetPath, adapter.ErrTargetConflict)
-	}
 	var previousTarget *adapter.PluginTarget
 	var previousPath string
 	previousPresent := false
 	if request.Previous != nil && request.Previous.Version != request.Power.Version {
-		previousName, err := domain.ActualPluginName(*request.Previous)
+		previousName, err := domain.PluginRuntimeName(*request.Previous)
 		if err != nil {
 			return err
-		}
-		previousFact, err := request.Adapter.Inspect(ctx, previousName)
-		if err != nil {
-			return fmt.Errorf("inspect previous filesystem Plugin: %w", err)
 		}
 		previousPath, err = request.Adapter.TargetPath(previousName)
 		if err != nil {
 			return fmt.Errorf("resolve previous filesystem Plugin target: %w", err)
 		}
-		previousPresent = previousFact.Presence == adapter.PluginPresent
-		selector := previousName
-		if previousPresent {
-			selector = previousFact.Selector
+		if previousPath != targetPath {
+			return fmt.Errorf("filesystem Plugin version switch changed logical target path from %q to %q: %w", previousPath, targetPath, ErrInvalidRequest)
 		}
-		previousTarget = &adapter.PluginTarget{ActualName: previousName, Selector: selector}
+		if targetFact.Presence != adapter.PluginPresent || targetFact.ActualName != previousName || targetFact.Selector != previousName {
+			return fmt.Errorf("previous filesystem Plugin state does not match logical target: %w", ErrIndeterminateState)
+		}
+		previousPresent = true
+		previousTarget = &adapter.PluginTarget{ActualName: previousName, Selector: previousName}
 	} else {
 		request.Previous = nil
+		if targetFact.Presence == adapter.PluginPresent {
+			return fmt.Errorf("filesystem Plugin target is already registered: %w", adapter.ErrPluginConflict)
+		}
+		if targetFact.Presence != adapter.PluginAbsent || targetFact.ActualName != request.Target.ActualName {
+			return fmt.Errorf("filesystem Plugin target fact is not absent: %w", ErrIndeterminateState)
+		}
+		if exists, err := s.pathExists(targetPath); err != nil {
+			return err
+		} else if exists {
+			return fmt.Errorf("filesystem Plugin target %q exists: %w", targetPath, adapter.ErrTargetConflict)
+		}
 	}
 	id, err := s.newID()
 	if err != nil {
@@ -123,6 +124,7 @@ func (s *Service) installFilesystemPlugin(ctx context.Context, request PluginIns
 		return err
 	}
 	if previousPresent {
+		// 同名版本切换必须先隔离旧目录，之后 targetPath 才能用于原子发布新版本。
 		mutation, removeErr := request.Adapter.Remove(ctx, *previousTarget)
 		if err := requireAppliedPluginMutation("disable previous filesystem Plugin", mutation, removeErr); err != nil {
 			return err

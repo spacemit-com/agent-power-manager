@@ -214,7 +214,7 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 
 func writeValidMarketplaceRecoveryArtifact(t *testing.T, root string, ref domain.PowerRef) {
 	t.Helper()
-	actualName, err := domain.ActualPluginName(ref)
+	actualName, err := domain.PluginRuntimeName(ref)
 	if err != nil {
 		t.Fatal(err)
 	}

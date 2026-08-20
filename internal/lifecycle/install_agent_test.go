@@ -16,7 +16,7 @@ func TestInstallPluginDispatchesThroughPluginAdapterOnly(t *testing.T) {
 		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
 		cloudRefs:  []domain.PowerRef{ref},
 		selected:   ref.Version,
-		pluginFact: adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo-v1.0.0"},
+		pluginFact: adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"},
 		pluginMode: domain.PluginDeploymentMarketplace,
 	})
 

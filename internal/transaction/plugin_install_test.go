@@ -65,7 +65,7 @@ func newPluginInstallFixture() *pluginInstallFixture {
 	f.manifests = &recordingManifestWriter{events: &f.events}
 	f.adapter = &recordingPluginAdapter{
 		events: &f.events, mode: domain.PluginDeploymentFilesystem,
-		facts:      map[string]adapter.PluginFact{"demo-v2.0.0": {Presence: adapter.PluginAbsent, ActualName: "demo-v2.0.0"}},
+		facts:      map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginAbsent, ActualName: "demo"}},
 		addAnswers: []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}},
 	}
 	f.service = newService(f.manifests, f.journals)
@@ -74,7 +74,7 @@ func newPluginInstallFixture() *pluginInstallFixture {
 		Agent:   domain.AgentHermes,
 		Power:   domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
 		Adapter: f.adapter,
-		Target:  adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0"},
+		Target:  adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 	}
 	return f
 }

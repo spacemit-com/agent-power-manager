@@ -58,11 +58,13 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 		if journal.Phase != PhaseAddingNew && journal.Phase != PhaseRemovingOld && journal.Phase != PhaseRollingBack {
 			return fmt.Errorf("filesystem Plugin install phase %q: %w", journal.Phase, ErrIndeterminateState)
 		}
+		startedPhase := journal.Phase
 		result.Direction = RecoveryRollback
 		if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 			return err
 		}
-		if targetExists {
+		// removing-old 阶段的同名 target 仍可能是尚未隔离的旧版本，不得按新发布目录删除。
+		if targetExists && startedPhase != PhaseRemovingOld {
 			mutation, err := pluginAdapter.Remove(ctx, journal.Plugin.Target)
 			if err := requireAppliedPluginMutation("disable rolled-back filesystem Plugin", mutation, err); err != nil {
 				return err

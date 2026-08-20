@@ -17,7 +17,7 @@ import (
 // DownloadPlugin 复制指定版本的完整共享 Plugin 包；Cloud 不生成 marketplace，也不按 Agent 裁剪入口。
 // 目标必须不存在或为空物理目录，复制失败后的半成品由调用方清理。
 func (c *LocalClient) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
-	if _, err := domain.ActualPluginName(ref); err != nil {
+	if _, err := domain.PluginRuntimeName(ref); err != nil {
 		return ErrNotFound
 	}
 	if err := ctx.Err(); err != nil {
@@ -126,7 +126,7 @@ func (c *LocalClient) listPlugins() ([]domain.PowerRef, error) {
 				continue
 			}
 			ref := domain.PowerRef{Name: logical.Name(), Type: domain.PowerTypePlugin, Version: version.Name()}
-			if _, err := domain.ActualPluginName(ref); err != nil {
+			if _, err := domain.PluginRuntimeName(ref); err != nil {
 				continue
 			}
 			refs = append(refs, ref)

@@ -121,7 +121,7 @@ func (adapter *claudePluginAdapter) Inspect(ctx context.Context, actualName stri
 	selectors := make([]string, 0, 1)
 	for _, plugin := range installed {
 		name, _, found := strings.Cut(plugin.ID, "@")
-		if found && name == actualName {
+		if plugin.ID == actualName || found && name == actualName {
 			selectors = append(selectors, plugin.ID)
 		}
 	}

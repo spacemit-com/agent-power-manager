@@ -349,9 +349,8 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 func writeAcceptancePluginPackage(t *testing.T, root, logical, release string) {
 	t.Helper()
 	nativeVersion := strings.TrimPrefix(release, "v")
-	actual := logical + "-" + release
 	packageRoot := filepath.Join(root, "plugins", logical, release)
-	manifest := `{"name":"` + actual + `","version":"` + nativeVersion + `","description":"acceptance fixture"}`
+	manifest := `{"name":"` + logical + `","version":"` + nativeVersion + `","description":"acceptance fixture"}`
 	for _, relative := range []string{
 		filepath.Join(".codex-plugin", "plugin.json"),
 		filepath.Join(".claude-plugin", "plugin.json"),
@@ -398,16 +397,42 @@ func (h *pluginAcceptanceHarness) marketplacePath(logical string) string {
 }
 
 func (h *pluginAcceptanceHarness) pluginPath(logical, release string) string {
-	return filepath.Join(h.stateRoot(), "plugins", logical+"-"+release)
+	return filepath.Join(h.stateRoot(), "plugins", logical)
 }
 
 func (h *pluginAcceptanceHarness) artifact(logical, release string) pluginresource.Artifact {
 	h.t.Helper()
-	artifact, err := h.plugins.Lookup(h.agent, h.ref(logical, release))
+	artifact, err := h.plugins.Lookup(h.ref(logical, release))
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	return artifact
+}
+
+func (h *pluginAcceptanceHarness) marketplace(artifact pluginresource.Artifact) pluginresource.Marketplace {
+	h.t.Helper()
+	marketplace, err := artifact.MarketplaceFor(h.agent)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return marketplace
+}
+
+func (h *pluginAcceptanceHarness) marketplaceSource(artifact pluginresource.Artifact) string {
+	return h.marketplace(artifact).Source
+}
+
+func (h *pluginAcceptanceHarness) marketplaceName(artifact pluginresource.Artifact) string {
+	return h.marketplace(artifact).Name
+}
+
+func (h *pluginAcceptanceHarness) runtimeName(artifact pluginresource.Artifact) string {
+	h.t.Helper()
+	name, err := domain.PluginRuntimeName(artifact.Power)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return name
 }
 
 func (h *pluginAcceptanceHarness) callLines() []string {
@@ -571,7 +596,7 @@ func (h *pluginAcceptanceHarness) setPlugin(logical, release string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		h.t.Fatal(err)
 	}
-	selector := logical + "-" + release + "@apm-" + logical
+	selector := logical
 	if err := os.WriteFile(path, []byte(selector), 0o600); err != nil {
 		h.t.Fatal(err)
 	}
@@ -799,18 +824,18 @@ func TestPluginAcceptanceFirstRepeatUninstallAndIsolation(t *testing.T) {
 			}
 			artifact := h.artifact("demo-plugin", "v0.0.1")
 			h.assertManifest("demo-plugin", "v0.0.1", true)
-			h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-			h.assertPlugins("demo-plugin-v0.0.1")
-			assertAcceptanceMarketplaceDocument(t, agent, artifact, "demo-plugin-v0.0.1")
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+			h.assertPlugins("demo-plugin")
+			assertAcceptanceMarketplaceDocument(t, agent, artifact, "demo-plugin")
 			if agent == domain.AgentCodex {
 				h.assertMutationCallsSince(0,
-					h.expectedCall("plugin", "marketplace", "add", artifact.MarketplaceSource, "--json"),
-					h.expectedCall("plugin", "add", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"),
+					h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(artifact), "--json"),
+					h.expectedCall("plugin", "add", "demo-plugin", "--json"),
 				)
 			} else {
 				h.assertMutationCallsSince(0,
-					h.expectedCall("plugin", "marketplace", "add", artifact.MarketplaceSource, "--scope", "user"),
-					h.expectedCall("plugin", "install", "demo-plugin-v0.0.1@apm-demo-plugin", "--scope", "user"),
+					h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(artifact), "--scope", "user"),
+					h.expectedCall("plugin", "install", "demo-plugin", "--scope", "user"),
 				)
 			}
 			callsAfterFirst := len(h.callLines())
@@ -829,12 +854,12 @@ func TestPluginAcceptanceFirstRepeatUninstallAndIsolation(t *testing.T) {
 				t.Fatalf("Uninstall() = %+v, %v", uninstalled, err)
 			}
 			h.assertManifest("demo-plugin", "", false)
-			h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 			h.assertPlugins()
 			if agent == domain.AgentCodex {
-				h.assertMutationCallsSince(uninstallStart, h.expectedCall("plugin", "remove", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"))
+				h.assertMutationCallsSince(uninstallStart, h.expectedCall("plugin", "remove", "demo-plugin", "--json"))
 			} else {
-				h.assertMutationCallsSince(uninstallStart, h.expectedCall("plugin", "uninstall", "demo-plugin-v0.0.1@apm-demo-plugin", "--scope", "user"))
+				h.assertMutationCallsSince(uninstallStart, h.expectedCall("plugin", "uninstall", "demo-plugin", "--scope", "user"))
 			}
 			if info, statErr := os.Stat(artifact.Root); statErr != nil || !info.IsDir() {
 				t.Fatalf("retained cache = %v, %v", info, statErr)
@@ -862,7 +887,7 @@ func TestPluginAcceptanceUpgradeDowngradeAndMultiPluginIsolation(t *testing.T) {
 			if result, err := h.installRef("side-plugin", "v0.0.1"); err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
 				t.Fatalf("install side v0.0.1 = %+v, %v", result, err)
 			}
-			sideSource := h.artifact("side-plugin", "v0.0.1").MarketplaceSource
+			sideSource := h.marketplaceSource(h.artifact("side-plugin", "v0.0.1"))
 			for _, step := range []struct {
 				release string
 				outcome cli.InstallOutcome
@@ -875,11 +900,11 @@ func TestPluginAcceptanceUpgradeDowngradeAndMultiPluginIsolation(t *testing.T) {
 					t.Fatalf("install demo %s = %+v, %v", step.release, result, err)
 				}
 				artifact := h.artifact("demo-plugin", step.release)
-				h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 				h.assertMarketplace("side-plugin", sideSource, true)
-				h.assertPlugins("demo-plugin-"+step.release, "side-plugin-v0.0.1")
+				h.assertPlugins("demo-plugin", "side-plugin")
 				h.assertManifest("demo-plugin", step.release, true)
-				assertAcceptanceMarketplaceDocument(t, agent, artifact, "demo-plugin-"+step.release)
+				assertAcceptanceMarketplaceDocument(t, agent, artifact, "demo-plugin")
 			}
 			for _, release := range []string{"v0.0.1", "v0.1.0"} {
 				if info, err := os.Stat(h.artifact("demo-plugin", release).Root); err != nil || !info.IsDir() {
@@ -923,8 +948,8 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 		}
 		artifact := h.artifact("demo-plugin", "v0.1.0")
 		h.assertManifest("demo-plugin", "v0.1.0", true)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.1.0")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertPlugins("demo-plugin")
 		h.assertOnlyFakeExecutables()
 	})
 
@@ -980,12 +1005,12 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 	} {
 		t.Run("no manifest "+test.name+" remains unmanaged", func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-			artifact, err := h.plugins.Ensure(context.Background(), h.agent, h.ref("demo-plugin", "v0.0.1"))
+			artifact, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if test.marketplace {
-				h.setMarketplace("demo-plugin", artifact.MarketplaceSource)
+				h.setMarketplace("demo-plugin", h.marketplaceSource(artifact))
 			}
 			if test.plugin {
 				h.setPlugin("demo-plugin", "v0.0.1")
@@ -995,9 +1020,9 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 				t.Fatal("Install() error = nil, want unmanaged conflict")
 			}
 			h.assertManifest("demo-plugin", "", false)
-			h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, test.marketplace)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), test.marketplace)
 			if test.plugin {
-				h.assertPlugins("demo-plugin-v0.0.1")
+				h.assertPlugins("demo-plugin")
 			} else {
 				h.assertPlugins()
 			}
@@ -1036,12 +1061,12 @@ func (h *pluginAcceptanceHarness) writeInstallJournal(logical, targetRelease, pr
 		Plugin: &transaction.PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
 			Target: adapter.PluginTarget{
-				ActualName: target.ActualName,
-				Selector:   target.ActualName + "@" + target.MarketplaceName,
+				ActualName: h.runtimeName(target),
+				Selector:   h.runtimeName(target),
 			},
 			Marketplace: &transaction.PluginMarketplaceJournalPayload{
-				Name:         target.MarketplaceName,
-				TargetSource: target.MarketplaceSource,
+				Name:         h.marketplaceName(target),
+				TargetSource: h.marketplaceSource(target),
 			},
 		},
 	}
@@ -1049,14 +1074,14 @@ func (h *pluginAcceptanceHarness) writeInstallJournal(logical, targetRelease, pr
 		previous := h.artifact(logical, previousRelease)
 		previousRef := h.ref(logical, previousRelease)
 		previousTarget := adapter.PluginTarget{
-			ActualName: previous.ActualName,
-			Selector:   previous.ActualName + "@" + previous.MarketplaceName,
+			ActualName: h.runtimeName(previous),
+			Selector:   h.runtimeName(previous),
 		}
 		journal.Previous = &previousRef
 		journal.Plugin.Previous = &previousTarget
 		journal.Plugin.PreviousPresent = true
 		journal.Plugin.Marketplace.PreviousPresent = true
-		journal.Plugin.Marketplace.PreviousSource = previous.MarketplaceSource
+		journal.Plugin.Marketplace.PreviousSource = h.marketplaceSource(previous)
 	}
 	return writeIntegrationJournal(h.t, journal)
 }
@@ -1076,12 +1101,12 @@ func (h *pluginAcceptanceHarness) writeUninstallJournal(logical, release string,
 			Deployment:    domain.PluginDeploymentMarketplace,
 			TargetPresent: true,
 			Target: adapter.PluginTarget{
-				ActualName: artifact.ActualName,
-				Selector:   artifact.ActualName + "@" + artifact.MarketplaceName,
+				ActualName: h.runtimeName(artifact),
+				Selector:   h.runtimeName(artifact),
 			},
 			Marketplace: &transaction.PluginMarketplaceJournalPayload{
-				Name:         artifact.MarketplaceName,
-				TargetSource: artifact.MarketplaceSource,
+				Name:         h.marketplaceName(artifact),
+				TargetSource: h.marketplaceSource(artifact),
 			},
 		},
 	})
@@ -1104,12 +1129,12 @@ func TestFixPluginAcceptanceFirstInstallJournalPhases(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-			artifact, err := h.plugins.Ensure(context.Background(), h.agent, h.ref("demo-plugin", "v0.0.1"))
+			artifact, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if test.marketplace {
-				h.setMarketplace("demo-plugin", artifact.MarketplaceSource)
+				h.setMarketplace("demo-plugin", h.marketplaceSource(artifact))
 			}
 			if test.plugin {
 				h.setPlugin("demo-plugin", "v0.0.1")
@@ -1125,9 +1150,9 @@ func TestFixPluginAcceptanceFirstInstallJournalPhases(t *testing.T) {
 			}
 			h.assertJournal(false)
 			h.assertManifest("demo-plugin", "v0.0.1", test.wantCommitted)
-			h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, test.wantCommitted)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), test.wantCommitted)
 			if test.wantCommitted {
-				h.assertPlugins("demo-plugin-v0.0.1")
+				h.assertPlugins("demo-plugin")
 			} else {
 				h.assertPlugins()
 			}
@@ -1157,17 +1182,17 @@ func TestPluginAcceptanceActualFirstInstallPhaseWritesInterrupt(t *testing.T) {
 			artifact := h.artifact("demo-plugin", "v0.0.1")
 			h.assertPhase(test.phase)
 			h.assertManifest("demo-plugin", "", false)
-			h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, test.marketplace)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), test.marketplace)
 			h.assertPlugins()
 			wantCalls := []string{
 				h.expectedCall("plugin", "marketplace", "list", "--json"),
 				h.expectedCall("plugin", "list", "--json"),
 				h.expectedCall("plugin", "marketplace", "list", "--json"),
 				h.expectedCall("plugin", "list", "--json"),
-				h.expectedCall("plugin", "marketplace", "add", artifact.MarketplaceSource, "--json"),
+				h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(artifact), "--json"),
 			}
 			if test.barrier == "codex:plugin-add" {
-				wantCalls = append(wantCalls, h.expectedCall("plugin", "add", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"))
+				wantCalls = append(wantCalls, h.expectedCall("plugin", "add", "demo-plugin", "--json"))
 			}
 			h.assertCallsSince(0, wantCalls...)
 
@@ -1178,7 +1203,7 @@ func TestPluginAcceptanceActualFirstInstallPhaseWritesInterrupt(t *testing.T) {
 			}
 			h.assertPhase(test.phase)
 			h.assertManifest("demo-plugin", "", false)
-			h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, test.marketplace)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), test.marketplace)
 			h.assertPlugins()
 			h.disableBarrier()
 			if err := h.fix.Fix(context.Background()); err != nil {
@@ -1211,11 +1236,11 @@ func TestFixPluginAcceptanceVersionSwitchJournalPhases(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-			old, err := h.plugins.Ensure(context.Background(), h.agent, h.ref("demo-plugin", "v0.0.1"))
+			old, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			target, err := h.plugins.Ensure(context.Background(), h.agent, h.ref("demo-plugin", "v0.1.0"))
+			target, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.1.0"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1224,9 +1249,9 @@ func TestFixPluginAcceptanceVersionSwitchJournalPhases(t *testing.T) {
 			}
 			switch test.marketplace {
 			case "old":
-				h.setMarketplace("demo-plugin", old.MarketplaceSource)
+				h.setMarketplace("demo-plugin", h.marketplaceSource(old))
 			case "target":
-				h.setMarketplace("demo-plugin", target.MarketplaceSource)
+				h.setMarketplace("demo-plugin", h.marketplaceSource(target))
 			}
 			if test.oldPlugin {
 				h.setPlugin("demo-plugin", "v0.0.1")
@@ -1241,12 +1266,12 @@ func TestFixPluginAcceptanceVersionSwitchJournalPhases(t *testing.T) {
 			h.assertJournal(false)
 			if test.wantCommitted {
 				h.assertManifest("demo-plugin", "v0.1.0", true)
-				h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
-				h.assertPlugins("demo-plugin-v0.1.0")
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
+				h.assertPlugins("demo-plugin")
 			} else {
 				h.assertManifest("demo-plugin", "v0.0.1", true)
-				h.assertMarketplace("demo-plugin", old.MarketplaceSource, true)
-				h.assertPlugins("demo-plugin-v0.0.1")
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(old), true)
+				h.assertPlugins("demo-plugin")
 			}
 			h.assertOnlyFakeExecutables()
 		})
@@ -1283,14 +1308,14 @@ func TestPluginAcceptanceActualVersionSwitchPhaseWritesInterrupt(t *testing.T) {
 			h.assertManifest("demo-plugin", "v0.0.1", true)
 			switch test.marketplace {
 			case "old":
-				h.assertMarketplace("demo-plugin", old.MarketplaceSource, true)
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(old), true)
 			case "target":
-				h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
 			default:
 				h.assertMarketplace("demo-plugin", "", false)
 			}
 			if test.phase == transaction.PhaseRemovingOldPlugin {
-				h.assertPlugins("demo-plugin-v0.0.1")
+				h.assertPlugins("demo-plugin")
 			} else {
 				h.assertPlugins()
 			}
@@ -1299,17 +1324,16 @@ func TestPluginAcceptanceActualVersionSwitchPhaseWritesInterrupt(t *testing.T) {
 				h.expectedCall("plugin", "list", "--json"),
 				h.expectedCall("plugin", "marketplace", "list", "--json"),
 				h.expectedCall("plugin", "list", "--json"),
-				h.expectedCall("plugin", "list", "--json"),
-				h.expectedCall("plugin", "remove", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"),
+				h.expectedCall("plugin", "remove", "demo-plugin", "--json"),
 			}
 			if test.phase == transaction.PhaseUnregisteringOldMarketplace || test.phase == transaction.PhaseRegisteringNewMarketplace || test.phase == transaction.PhaseAddingNewPlugin {
 				wantCalls = append(wantCalls, h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"))
 			}
 			if test.phase == transaction.PhaseRegisteringNewMarketplace || test.phase == transaction.PhaseAddingNewPlugin {
-				wantCalls = append(wantCalls, h.expectedCall("plugin", "marketplace", "add", target.MarketplaceSource, "--json"))
+				wantCalls = append(wantCalls, h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(target), "--json"))
 			}
 			if test.phase == transaction.PhaseAddingNewPlugin {
-				wantCalls = append(wantCalls, h.expectedCall("plugin", "add", "demo-plugin-v0.1.0@apm-demo-plugin", "--json"))
+				wantCalls = append(wantCalls, h.expectedCall("plugin", "add", "demo-plugin", "--json"))
 			}
 			h.assertCallsSince(start, wantCalls...)
 
@@ -1325,8 +1349,8 @@ func TestPluginAcceptanceActualVersionSwitchPhaseWritesInterrupt(t *testing.T) {
 			}
 			h.assertJournal(false)
 			h.assertManifest("demo-plugin", "v0.0.1", true)
-			h.assertMarketplace("demo-plugin", old.MarketplaceSource, true)
-			h.assertPlugins("demo-plugin-v0.0.1")
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(old), true)
+			h.assertPlugins("demo-plugin")
 			h.assertOnlyFakeExecutables()
 		})
 	}
@@ -1344,16 +1368,16 @@ func TestPluginAcceptanceActualCommittingPhaseWritesFailBeforeManifest(t *testin
 		artifact := h.artifact("demo-plugin", "v0.0.1")
 		h.assertPhase(transaction.PhaseCommitting)
 		h.assertManifest("demo-plugin", "", false)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.0.1")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertPlugins("demo-plugin")
 		h.manifests.setErr = nil
 		if err := h.fix.Fix(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		h.assertJournal(false)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.0.1")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertPlugins("demo-plugin")
 		h.assertOnlyFakeExecutables()
 	})
 
@@ -1371,16 +1395,16 @@ func TestPluginAcceptanceActualCommittingPhaseWritesFailBeforeManifest(t *testin
 		target := h.artifact("demo-plugin", "v0.1.0")
 		h.assertPhase(transaction.PhaseCommitting)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.1.0")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
+		h.assertPlugins("demo-plugin")
 		h.manifests.setErr = nil
 		if err := h.fix.Fix(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		h.assertJournal(false)
 		h.assertManifest("demo-plugin", "v0.1.0", true)
-		h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.1.0")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
+		h.assertPlugins("demo-plugin")
 		h.assertOnlyFakeExecutables()
 	})
 }
@@ -1397,10 +1421,10 @@ func TestPluginAcceptanceActualRollingBackPhaseKeepsFakeExecutablePinned(t *test
 		artifact := h.artifact("demo-plugin", "v0.0.1")
 		h.assertPhase(transaction.PhaseRegisteringMarketplace)
 		h.assertManifest("demo-plugin", "", false)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 		h.assertPlugins()
 		h.assertMutationCallsSince(installStart,
-			h.expectedCall("plugin", "marketplace", "add", artifact.MarketplaceSource, "--json"),
+			h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(artifact), "--json"),
 		)
 		h.assertFakeExecutablePresent()
 
@@ -1411,7 +1435,7 @@ func TestPluginAcceptanceActualRollingBackPhaseKeepsFakeExecutablePinned(t *test
 		}
 		h.assertPhase(transaction.PhaseRollingBack)
 		h.assertManifest("demo-plugin", "", false)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 		h.assertPlugins()
 		h.assertMutationCallsSince(fixStart,
 			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
@@ -1446,12 +1470,12 @@ func TestPluginAcceptanceActualRollingBackPhaseKeepsFakeExecutablePinned(t *test
 		target := h.artifact("demo-plugin", "v0.1.0")
 		h.assertPhase(transaction.PhaseRegisteringNewMarketplace)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
 		h.assertPlugins()
 		h.assertMutationCallsSince(installStart,
-			h.expectedCall("plugin", "remove", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"),
+			h.expectedCall("plugin", "remove", "demo-plugin", "--json"),
 			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
-			h.expectedCall("plugin", "marketplace", "add", target.MarketplaceSource, "--json"),
+			h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(target), "--json"),
 		)
 		h.assertFakeExecutablePresent()
 
@@ -1462,7 +1486,7 @@ func TestPluginAcceptanceActualRollingBackPhaseKeepsFakeExecutablePinned(t *test
 		}
 		h.assertPhase(transaction.PhaseRollingBack)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
 		h.assertPlugins()
 		h.assertMutationCallsSince(fixStart,
 			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
@@ -1475,13 +1499,13 @@ func TestPluginAcceptanceActualRollingBackPhaseKeepsFakeExecutablePinned(t *test
 		}
 		h.assertJournal(false)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", old.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.0.1")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(old), true)
+		h.assertPlugins("demo-plugin")
 		h.assertMutationCallsSince(fixStart,
 			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
 			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
-			h.expectedCall("plugin", "marketplace", "add", old.MarketplaceSource, "--json"),
-			h.expectedCall("plugin", "add", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"),
+			h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(old), "--json"),
+			h.expectedCall("plugin", "add", "demo-plugin", "--json"),
 		)
 		h.assertOnlyFakeExecutables()
 	})
@@ -1499,11 +1523,11 @@ func TestFixPluginAcceptanceRecoversEveryMarketplaceCLIMutation(t *testing.T) {
 		useNextInstall bool
 	}{
 		{name: "first marketplace registered unknown", firstInstall: true, interrupt: "codex:marketplace-add", phase: transaction.PhaseRegisteringMarketplace, marketplace: "target", useNextInstall: true},
-		{name: "first Plugin added unknown", firstInstall: true, interrupt: "codex:plugin-add", phase: transaction.PhaseAddingNewPlugin, marketplace: "target", plugins: []string{"demo-plugin-v0.0.1"}, wantCommitted: true},
+		{name: "first Plugin added unknown", firstInstall: true, interrupt: "codex:plugin-add", phase: transaction.PhaseAddingNewPlugin, marketplace: "target", plugins: []string{"demo-plugin"}, wantCommitted: true},
 		{name: "old Plugin removed unknown", interrupt: "codex:plugin-remove", phase: transaction.PhaseRemovingOldPlugin, marketplace: "old"},
 		{name: "old marketplace removed unknown", interrupt: "codex:marketplace-remove", phase: transaction.PhaseUnregisteringOldMarketplace},
 		{name: "target marketplace registered unknown", interrupt: "codex:marketplace-add", phase: transaction.PhaseRegisteringNewMarketplace, marketplace: "target"},
-		{name: "target Plugin added unknown", interrupt: "codex:plugin-add", phase: transaction.PhaseAddingNewPlugin, marketplace: "target", plugins: []string{"demo-plugin-v0.1.0"}, wantCommitted: true},
+		{name: "target Plugin added unknown", interrupt: "codex:plugin-add", phase: transaction.PhaseAddingNewPlugin, marketplace: "target", plugins: []string{"demo-plugin"}, wantCommitted: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
@@ -1531,29 +1555,29 @@ func TestFixPluginAcceptanceRecoversEveryMarketplaceCLIMutation(t *testing.T) {
 			}
 			switch test.marketplace {
 			case "target":
-				h.assertMarketplace("demo-plugin", target.MarketplaceSource, true)
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
 			case "old":
-				h.assertMarketplace("demo-plugin", h.artifact("demo-plugin", "v0.0.1").MarketplaceSource, true)
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(h.artifact("demo-plugin", "v0.0.1")), true)
 			default:
 				h.assertMarketplace("demo-plugin", "", false)
 			}
 			h.assertPlugins(test.plugins...)
 			mutations := make([]string, 0, 4)
 			if test.firstInstall {
-				mutations = append(mutations, h.expectedCall("plugin", "marketplace", "add", target.MarketplaceSource, "--json"))
+				mutations = append(mutations, h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(target), "--json"))
 				if test.phase == transaction.PhaseAddingNewPlugin {
-					mutations = append(mutations, h.expectedCall("plugin", "add", target.ActualName+"@apm-demo-plugin", "--json"))
+					mutations = append(mutations, h.expectedCall("plugin", "add", h.runtimeName(target), "--json"))
 				}
 			} else {
-				mutations = append(mutations, h.expectedCall("plugin", "remove", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"))
+				mutations = append(mutations, h.expectedCall("plugin", "remove", "demo-plugin", "--json"))
 				if test.phase != transaction.PhaseRemovingOldPlugin {
 					mutations = append(mutations, h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"))
 				}
 				if test.phase == transaction.PhaseRegisteringNewMarketplace || test.phase == transaction.PhaseAddingNewPlugin {
-					mutations = append(mutations, h.expectedCall("plugin", "marketplace", "add", target.MarketplaceSource, "--json"))
+					mutations = append(mutations, h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(target), "--json"))
 				}
 				if test.phase == transaction.PhaseAddingNewPlugin {
-					mutations = append(mutations, h.expectedCall("plugin", "add", target.ActualName+"@apm-demo-plugin", "--json"))
+					mutations = append(mutations, h.expectedCall("plugin", "add", h.runtimeName(target), "--json"))
 				}
 			}
 			h.assertMutationCallsSince(start, mutations...)
@@ -1575,13 +1599,13 @@ func TestFixPluginAcceptanceRecoversEveryMarketplaceCLIMutation(t *testing.T) {
 				}
 				artifact := h.artifact("demo-plugin", release)
 				h.assertManifest("demo-plugin", release, true)
-				h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-				h.assertPlugins("demo-plugin-" + release)
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+				h.assertPlugins("demo-plugin")
 			} else {
 				old := h.artifact("demo-plugin", "v0.0.1")
 				h.assertManifest("demo-plugin", "v0.0.1", true)
-				h.assertMarketplace("demo-plugin", old.MarketplaceSource, true)
-				h.assertPlugins("demo-plugin-v0.0.1")
+				h.assertMarketplace("demo-plugin", h.marketplaceSource(old), true)
+				h.assertPlugins("demo-plugin")
 			}
 			h.assertOnlyFakeExecutables()
 		})
@@ -1590,11 +1614,11 @@ func TestFixPluginAcceptanceRecoversEveryMarketplaceCLIMutation(t *testing.T) {
 
 func TestFixPluginAcceptanceUnknownFactsRetainJournalUntilReadable(t *testing.T) {
 	h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-	artifact, err := h.plugins.Ensure(context.Background(), h.agent, h.ref("demo-plugin", "v0.0.1"))
+	artifact, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.setMarketplace("demo-plugin", artifact.MarketplaceSource)
+	h.setMarketplace("demo-plugin", h.marketplaceSource(artifact))
 	h.writeInstallJournal("demo-plugin", "v0.0.1", "", transaction.PhaseAddingNewPlugin)
 	h.setUnreadable("codex:marketplace-list")
 	start := len(h.callLines())
@@ -1602,7 +1626,7 @@ func TestFixPluginAcceptanceUnknownFactsRetainJournalUntilReadable(t *testing.T)
 		t.Fatalf("Fix() error = %v, want recovery/indeterminate", err)
 	}
 	h.assertJournal(true)
-	h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+	h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 	h.assertManifest("demo-plugin", "", false)
 	h.assertNoMutationCallsSince(start)
 	h.clearUnreadable()
@@ -1632,11 +1656,11 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-			artifact, err := h.plugins.Ensure(context.Background(), h.agent, h.ref("demo-plugin", "v0.0.1"))
+			artifact, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			h.setMarketplace("demo-plugin", artifact.MarketplaceSource)
+			h.setMarketplace("demo-plugin", h.marketplaceSource(artifact))
 			if test.pluginPresent {
 				h.setPlugin("demo-plugin", "v0.0.1")
 			}
@@ -1651,9 +1675,9 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 			}
 			h.assertJournal(false)
 			h.assertManifest("demo-plugin", "v0.0.1", test.wantManifest)
-			h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 			if test.pluginPresent {
-				h.assertPlugins("demo-plugin-v0.0.1")
+				h.assertPlugins("demo-plugin")
 			} else {
 				h.assertPlugins()
 			}
@@ -1675,15 +1699,15 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 		}
 		h.assertPhase(transaction.PhaseRemovingPlugin)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 		h.assertPlugins()
-		h.assertMutationCallsSince(start, h.expectedCall("plugin", "remove", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"))
+		h.assertMutationCallsSince(start, h.expectedCall("plugin", "remove", "demo-plugin", "--json"))
 		if err := h.fix.Fix(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		h.assertJournal(false)
 		h.assertManifest("demo-plugin", "", false)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 		h.assertPlugins()
 		h.assertOnlyFakeExecutables()
 	})
@@ -1705,14 +1729,14 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 
 		h.assertPhase(transaction.PhaseRemovingPlugin)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.0.1")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertPlugins("demo-plugin")
 		h.assertCallsSince(start,
 			h.expectedCall("plugin", "marketplace", "list", "--json"),
 			h.expectedCall("plugin", "list", "--json"),
 			h.expectedCall("plugin", "marketplace", "list", "--json"),
 			h.expectedCall("plugin", "list", "--json"),
-			h.expectedCall("plugin", "remove", "demo-plugin-v0.0.1@apm-demo-plugin", "--json"),
+			h.expectedCall("plugin", "remove", "demo-plugin", "--json"),
 		)
 		cancel()
 		answer := <-completed
@@ -1721,8 +1745,8 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 		}
 		h.assertPhase(transaction.PhaseRemovingPlugin)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.0.1")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertPlugins("demo-plugin")
 		h.disableBarrier()
 		heldArtifact := artifact.Root + ".held"
 		if err := os.Rename(artifact.Root, heldArtifact); err != nil {
@@ -1733,8 +1757,8 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 		}
 		h.assertPhase(transaction.PhaseRollingBack)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.0.1")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertPlugins("demo-plugin")
 		if err := os.Rename(heldArtifact, artifact.Root); err != nil {
 			t.Fatal(err)
 		}
@@ -1743,8 +1767,8 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 		}
 		h.assertJournal(false)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
-		h.assertPlugins("demo-plugin-v0.0.1")
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertPlugins("demo-plugin")
 		h.assertOnlyFakeExecutables()
 	})
 
@@ -1762,7 +1786,7 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 		}
 		h.assertPhase(transaction.PhaseCommitting)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 		h.assertPlugins()
 		h.manifests.removeErr = nil
 		if err := h.fix.Fix(context.Background()); err != nil {
@@ -1770,7 +1794,7 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 		}
 		h.assertJournal(false)
 		h.assertManifest("demo-plugin", "", false)
-		h.assertMarketplace("demo-plugin", artifact.MarketplaceSource, true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 		h.assertPlugins()
 		h.assertOnlyFakeExecutables()
 	})

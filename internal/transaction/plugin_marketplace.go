@@ -102,13 +102,9 @@ func (s *Service) switchLocalMarketplacePlugin(ctx context.Context, request Plug
 	if err != nil {
 		return fmt.Errorf("inspect previous Plugin before switch: %w", err)
 	}
-	targetFact, err := request.Adapter.Inspect(ctx, request.Target.ActualName)
-	if err != nil {
-		return fmt.Errorf("inspect target Plugin before switch: %w", err)
-	}
+	// 版本切换前只有一个同名 Plugin 事实；版本差异由 marketplace source 与 manifest 表达。
 	if marketplaceFact.Presence != adapter.MarketplacePresent || marketplaceFact.Name != previousMarketplace.Name || marketplaceFact.Source != previousMarketplace.Source ||
-		previousFact.Presence != adapter.PluginPresent || previousFact.ActualName != previousTarget.ActualName || previousFact.Selector != previousTarget.Selector ||
-		targetFact.Presence != adapter.PluginAbsent {
+		previousFact.Presence != adapter.PluginPresent || previousFact.ActualName != previousTarget.ActualName || previousFact.Selector != previousTarget.Selector {
 		return fmt.Errorf("marketplace Plugin version-switch pre-state is not exact: %w", ErrIndeterminateState)
 	}
 

@@ -142,7 +142,7 @@ func (s *InstallService) explicitPluginManifestHit(flags cli.Flags, agents []dom
 		return cli.InstallResult{}, false
 	}
 	ref := domain.PowerRef{Name: flags.Name, Type: domain.PowerTypePlugin, Version: flags.Version}
-	if _, err := domain.ActualPluginName(ref); err != nil {
+	if _, err := domain.PluginRuntimeName(ref); err != nil {
 		return cli.InstallResult{}, false
 	}
 	items := make([]cli.InstallItem, 0, len(agents))

@@ -28,9 +28,9 @@ func TestPluginInstallFilesystemPublishesThenEnables(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "plugin.txt"), []byte("plugin"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(t.TempDir(), "plugins", "demo-v2.0.0")
+	target := filepath.Join(t.TempDir(), "plugins", "demo")
 	f.adapter.mode = domain.PluginDeploymentFilesystem
-	f.adapter.targets = map[string]string{"demo-v2.0.0": target}
+	f.adapter.targets = map[string]string{"demo": target}
 	f.request.StagingRoot = staging
 	if err := f.service.InstallPlugin(context.Background(), f.request); err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestPluginInstallFilesystemPublishesThenEnables(t *testing.T) {
 	if err != nil || string(contents) != "plugin" {
 		t.Fatalf("published contents = %q, %v", contents, err)
 	}
-	want := []string{"adapter:inspect:demo-v2.0.0", "create:adding-new", "adapter:add:demo-v2.0.0", "update:committing", "manifest:set", "delete:journal"}
+	want := []string{"adapter:inspect:demo", "create:adding-new", "adapter:add:demo", "update:committing", "manifest:set", "delete:journal"}
 	if !reflect.DeepEqual(f.events, want) {
 		t.Fatalf("events = %v, want %v", f.events, want)
 	}
@@ -48,7 +48,7 @@ func TestPluginInstallFilesystemPublishesThenEnables(t *testing.T) {
 	}
 }
 
-func TestPluginInstallFilesystemUpdateQuarantinesPrevious(t *testing.T) {
+func TestFilesystemPluginVersionSwitchQuarantinesSameLogicalTargetBeforePublish(t *testing.T) {
 	f := newPluginInstallFixture()
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
@@ -61,27 +61,29 @@ func TestPluginInstallFilesystemUpdateQuarantinesPrevious(t *testing.T) {
 		t.Fatal(err)
 	}
 	pluginsRoot := filepath.Join(t.TempDir(), "plugins")
-	oldTarget := filepath.Join(pluginsRoot, "demo-v1.0.0")
-	newTarget := filepath.Join(pluginsRoot, "demo-v2.0.0")
-	if err := os.MkdirAll(oldTarget, 0o755); err != nil {
+	target := filepath.Join(pluginsRoot, "demo")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "old.txt"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	previous := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 	f.request.Previous, f.request.StagingRoot = &previous, staging
 	f.adapter.mode = domain.PluginDeploymentFilesystem
-	f.adapter.targets = map[string]string{"demo-v1.0.0": oldTarget, "demo-v2.0.0": newTarget}
-	f.adapter.facts["demo-v1.0.0"] = adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0"}
+	f.adapter.targets = map[string]string{"demo": target}
+	f.adapter.facts["demo"] = adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}
 	f.adapter.removeAnswers = []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}}
 	if err := f.service.InstallPlugin(context.Background(), f.request); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(oldTarget); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("old target remains: %v", err)
+	if _, err := os.Stat(filepath.Join(target, "old.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old contents remain: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(newTarget, "new.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(target, "new.txt")); err != nil {
 		t.Fatalf("new target missing: %v", err)
 	}
-	want := []string{"adapter:inspect:demo-v2.0.0", "adapter:inspect:demo-v1.0.0", "create:removing-old", "adapter:remove:demo-v1.0.0", "update:adding-new", "adapter:add:demo-v2.0.0", "update:committing", "manifest:set", "delete:journal"}
+	want := []string{"adapter:inspect:demo", "create:removing-old", "adapter:remove:demo", "update:adding-new", "adapter:add:demo", "update:committing", "manifest:set", "delete:journal"}
 	if !reflect.DeepEqual(f.events, want) {
 		t.Fatalf("events = %v, want %v", f.events, want)
 	}
@@ -96,9 +98,9 @@ func TestPluginInstallFilesystemEnableNotAppliedRollsBackPublishedTarget(t *test
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(t.TempDir(), "plugins", "demo-v2.0.0")
+	target := filepath.Join(t.TempDir(), "plugins", "demo")
 	f.adapter.mode = domain.PluginDeploymentFilesystem
-	f.adapter.targets = map[string]string{"demo-v2.0.0": target}
+	f.adapter.targets = map[string]string{"demo": target}
 	f.adapter.addAnswers = []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: errors.New("enable failed")}}
 	f.request.StagingRoot = staging
 	if err := f.service.InstallPlugin(context.Background(), f.request); err == nil {
@@ -109,5 +111,52 @@ func TestPluginInstallFilesystemEnableNotAppliedRollsBackPublishedTarget(t *test
 	}
 	if f.journals.found {
 		t.Fatal("rolled-back journal remains")
+	}
+}
+
+func TestFilesystemPluginVersionSwitchRollbackRestoresSameLogicalTarget(t *testing.T) {
+	f := newPluginInstallFixture()
+	t.Setenv("APM_HOME", t.TempDir())
+	staging, _ := paths.StagingPath()
+	source := filepath.Join(staging, "plugins", "demo")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "version.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "plugins", "demo")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "version.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	f.request.Previous, f.request.StagingRoot = &previous, staging
+	f.adapter.targets = map[string]string{"demo": target}
+	f.adapter.facts["demo"] = adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}
+	f.adapter.removeAnswers = []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}}
+	f.adapter.addAnswers = []pluginMutationAnswer{
+		{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: errors.New("enable failed")},
+		{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}},
+	}
+
+	if err := f.service.InstallPlugin(context.Background(), f.request); err == nil {
+		t.Fatal("InstallPlugin() error = nil")
+	}
+	contents, err := os.ReadFile(filepath.Join(target, "version.txt"))
+	if err != nil || string(contents) != "old" {
+		t.Fatalf("rolled-back target = %q, %v; want old contents", contents, err)
+	}
+	if f.journals.found {
+		t.Fatal("rolled-back journal remains")
+	}
+	want := []string{
+		"adapter:inspect:demo", "create:removing-old", "adapter:remove:demo", "update:adding-new",
+		"adapter:add:demo", "update:rolling-back", "adapter:add:demo", "delete:journal",
+	}
+	if !reflect.DeepEqual(f.events, want) {
+		t.Fatalf("events = %v, want %v", f.events, want)
 	}
 }

@@ -6,14 +6,6 @@ import (
 	"apm/internal/domain"
 )
 
-func TestActualPluginNameUsesLogicalName(t *testing.T) {
-	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
-	actual, err := domain.ActualPluginName(ref)
-	if err != nil || actual != "demo-plugin" {
-		t.Fatalf("ActualPluginName() = %q, %v", actual, err)
-	}
-}
-
 func TestPluginRuntimeNameUsesLogicalNameAndValidatesVersion(t *testing.T) {
 	got, err := domain.PluginRuntimeName(domain.PowerRef{
 		Type: domain.PowerTypePlugin, Name: "demo-plugin", Version: "v1.2.3",
@@ -78,8 +70,8 @@ func TestPluginNameMappingRejectsUnsafeOrNonCanonicalValues(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := domain.ActualPluginName(test.ref); err == nil {
-				t.Fatalf("ActualPluginName(%#v) error = nil", test.ref)
+			if _, err := domain.PluginRuntimeName(test.ref); err == nil {
+				t.Fatalf("PluginRuntimeName(%#v) error = nil", test.ref)
 			}
 		})
 	}

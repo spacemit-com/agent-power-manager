@@ -260,7 +260,7 @@ func decodeRequiredJSON(path string, target any) error {
 }
 
 func validateManifestIdentity(ref domain.PowerRef, actualName, nativeVersion string) error {
-	wantActualName, err := domain.ActualPluginName(ref)
+	wantActualName, err := domain.PluginRuntimeName(ref)
 	if err != nil {
 		return errors.Join(ErrInvalid, err)
 	}

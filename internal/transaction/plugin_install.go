@@ -9,7 +9,7 @@ import (
 	"apm/internal/domain"
 )
 
-// InstallPlugin 按已解析部署模式进入 Hermes filesystem 或本地 marketplace 事务；不再接受 Cloud 定义。
+// InstallPlugin 按 Adapter 的部署模式进入通用 filesystem 或本地 marketplace 事务；不接受 Cloud 定义。
 func (s *Service) InstallPlugin(ctx context.Context, request PluginInstallRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err

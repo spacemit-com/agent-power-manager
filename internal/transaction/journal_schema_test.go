@@ -285,18 +285,18 @@ func TestValidatePluginFilesystemJournals(t *testing.T) {
 	pluginsRoot := filepath.Join(t.TempDir(), "plugins")
 	transactionDir := filepath.Join(pluginsRoot, ".apm-transactions", id)
 	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
-	previousTarget := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
 	update := Journal{
 		SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationInstall,
 		Phase: PhaseRemovingOld, Agent: domain.AgentHermes,
 		Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}, Previous: &previousRef,
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentFilesystem,
-			Target:     adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0"},
+			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 			Previous:   &previousTarget, PreviousPresent: true,
 			Filesystem: &PluginFilesystemJournalPayload{
 				StagingRoot: staging, SourcePath: filepath.Join(staging, "plugins", "demo"),
-				TargetPath: filepath.Join(pluginsRoot, "demo-v2.0.0"), PreviousTargetPath: filepath.Join(pluginsRoot, "demo-v1.0.0"),
+				TargetPath: filepath.Join(pluginsRoot, "demo"), PreviousTargetPath: filepath.Join(pluginsRoot, "demo"),
 				TransactionDir: transactionDir, PublishPath: filepath.Join(transactionDir, "publish"),
 				PreviousQuarantinePath: filepath.Join(transactionDir, "previous"),
 			},
@@ -311,7 +311,7 @@ func TestValidatePluginFilesystemJournals(t *testing.T) {
 	uninstall.Plugin = &PluginJournalPayload{
 		Deployment: domain.PluginDeploymentFilesystem, Target: previousTarget, TargetPresent: true,
 		Filesystem: &PluginFilesystemJournalPayload{
-			TargetPath: filepath.Join(pluginsRoot, "demo-v1.0.0"), TransactionDir: transactionDir,
+			TargetPath: filepath.Join(pluginsRoot, "demo"), TransactionDir: transactionDir,
 			TargetQuarantinePath: filepath.Join(transactionDir, "target"),
 		},
 	}

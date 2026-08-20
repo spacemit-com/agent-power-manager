@@ -143,21 +143,16 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 		if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != target.outcome {
 			t.Fatalf("install %s = %+v, %v", target.version, result, err)
 		}
-		actualName, err := domain.ActualPluginName(domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: target.version})
+		actualName, err := domain.PluginRuntimeName(domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: target.version})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if info, err := os.Stat(filepath.Join(hermesHome, "plugins", actualName)); err != nil || !info.IsDir() {
 			t.Fatalf("Hermes target %q is not a directory: %v", actualName, err)
 		}
-		for _, otherVersion := range []string{"v0.0.1", "v0.1.0"} {
-			if otherVersion == target.version {
-				continue
-			}
-			otherName, _ := domain.ActualPluginName(domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: otherVersion})
-			if _, err := os.Lstat(filepath.Join(hermesHome, "plugins", otherName)); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("old Hermes target %q remains: %v", otherName, err)
-			}
+		manifest, err := os.ReadFile(filepath.Join(hermesHome, "plugins", actualName, ".hermes-plugin", "plugin.yaml"))
+		if err != nil || !strings.Contains(string(manifest), "version: "+strings.TrimPrefix(target.version, "v")) {
+			t.Fatalf("Hermes logical target version = %q, %v; want %s", manifest, err, target.version)
 		}
 		if _, err := os.Lstat(filepath.Join(root, "apm-home", ".apm", "staging")); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("Hermes staging remains after %s: %v", target.version, err)
@@ -167,13 +162,13 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.UninstallOutcomeCompleted {
 		t.Fatalf("uninstall = %+v, %v", result, err)
 	}
-	if _, err := os.Stat(filepath.Join(hermesHome, "plugins", "demo-plugin-v0.0.1")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(hermesHome, "plugins", "demo-plugin")); !os.IsNotExist(err) {
 		t.Fatalf("Hermes target remains: %v", err)
 	}
 	for _, release := range []string{"v0.0.1", "v0.1.0"} {
-		cachePath := filepath.Join(root, "cache", "apm", "plugins", string(domain.AgentHermes), "demo-plugin", release)
+		cachePath := filepath.Join(root, "cache", "apm", "plugins", "demo-plugin", release)
 		if info, err := os.Stat(cachePath); err != nil || !info.IsDir() {
-			t.Fatalf("Hermes agent-aware immutable cache %q missing: %v", cachePath, err)
+			t.Fatalf("Hermes shared immutable cache %q missing: %v", cachePath, err)
 		}
 	}
 	contents, err := os.ReadFile(filepath.Join(root, "calls.log"))
@@ -262,7 +257,7 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 					t.Fatalf("unsafe CLI call %q", line)
 				}
 			}
-			if info, err := os.Stat(filepath.Join(cacheHome, "apm", "plugins", string(agent), "demo-plugin")); err != nil || !info.IsDir() {
+			if info, err := os.Stat(filepath.Join(cacheHome, "apm", "plugins", "demo-plugin")); err != nil || !info.IsDir() {
 				t.Fatalf("marketplace install did not persist Plugin cache: %v", err)
 			}
 		})
@@ -363,7 +358,7 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 func TestPluginIntegrationRejectsUnmanagedTargetAndMarketplaceConflict(t *testing.T) {
 	t.Run("unmanaged target", func(t *testing.T) {
 		harness := newIsolatedPluginHarness(t, domain.AgentCodex)
-		if err := os.WriteFile(filepath.Join(harness.state, "plugin-codex"), []byte("demo-plugin-v0.0.1@foreign"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(harness.state, "plugin-codex"), []byte("demo-plugin@foreign"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		_, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"})
@@ -420,15 +415,23 @@ func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
 func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJournal(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
-	artifact, err := harness.plugins.Ensure(context.Background(), domain.AgentCodex, ref)
+	artifact, err := harness.plugins.Ensure(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	selector := artifact.ActualName + "@" + artifact.MarketplaceName
+	runtimeName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marketplace, err := artifact.MarketplaceFor(domain.AgentCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := runtimeName
 	if err := os.WriteFile(filepath.Join(harness.state, "plugin-codex"), []byte(selector), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(harness.state, "marketplace-codex"), []byte(artifact.MarketplaceSource), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(harness.state, "marketplace-codex"), []byte(marketplace.Source), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	journal := transaction.Journal{
@@ -436,9 +439,9 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJou
 		Operation: transaction.OperationInstall, Phase: transaction.PhaseAddingNewPlugin, Agent: domain.AgentCodex, Power: ref,
 		Plugin: &transaction.PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: artifact.ActualName, Selector: selector},
+			Target:     adapter.PluginTarget{ActualName: runtimeName, Selector: selector},
 			Marketplace: &transaction.PluginMarketplaceJournalPayload{
-				Name: artifact.MarketplaceName, TargetSource: artifact.MarketplaceSource,
+				Name: marketplace.Name, TargetSource: marketplace.Source,
 			},
 		},
 	}
@@ -524,7 +527,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJou
 func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesystemJournal(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentHermes)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
-	actualName, err := domain.ActualPluginName(ref)
+	actualName, err := domain.PluginRuntimeName(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +655,7 @@ func TestPluginIntegrationMultiAgentInstallFailsFast(t *testing.T) {
 
 func (h *isolatedPluginHarness) assertMarketplaceCachePresentAndStagingAbsent(agent domain.AgentID, version string) {
 	h.t.Helper()
-	cachePath := filepath.Join(h.cacheHome, "apm", "plugins", string(agent), "demo-plugin", version)
+	cachePath := filepath.Join(h.cacheHome, "apm", "plugins", "demo-plugin", version)
 	if info, err := os.Stat(cachePath); err != nil || !info.IsDir() {
 		h.t.Fatalf("Plugin cache %q is not persisted: %v", cachePath, err)
 	}

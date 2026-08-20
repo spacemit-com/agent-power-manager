@@ -22,17 +22,6 @@ const (
 // ErrInvalidPluginIdentity 表示 Plugin 逻辑名称、类型或版本不满足规范。
 var ErrInvalidPluginIdentity = errors.New("invalid plugin identity")
 
-// ActualPluginName 返回 Agent 使用的逻辑 Plugin 名称；版本只参与身份校验。
-func ActualPluginName(ref PowerRef) (string, error) {
-	if ref.Type != PowerTypePlugin || !isSafePluginSegment(ref.Name) {
-		return "", fmt.Errorf("plugin reference %+v: %w", ref, ErrInvalidPluginIdentity)
-	}
-	if _, err := canonicalAPMPluginVersion(ref.Version); err != nil {
-		return "", err
-	}
-	return ref.Name, nil
-}
-
 // PluginRuntimeName 返回目标 Agent 使用的逻辑 Plugin 名称；版本只用于身份校验。
 func PluginRuntimeName(ref PowerRef) (string, error) {
 	if ref.Type != PowerTypePlugin || !isSafePluginSegment(ref.Name) {

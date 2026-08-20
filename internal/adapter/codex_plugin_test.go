@@ -10,13 +10,13 @@ import (
 
 func TestCodexPluginInspectAndMutations(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
-		successfulMCPResponse(`{"installed":[{"name":"demo-plugin-v0.0.1","pluginId":"demo-plugin-v0.0.1@apm","enabled":false}]}`),
+		successfulMCPResponse(`{"installed":[{"name":"demo-plugin","pluginId":"demo-plugin","enabled":false}]}`),
 		successfulMCPResponse(""),
 		successfulMCPResponse(""),
 	}}
 	adapter := newCodexPluginAdapter(runner)
-	fact, err := adapter.Inspect(context.Background(), "demo-plugin-v0.0.1")
-	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin-v0.0.1", Selector: "demo-plugin-v0.0.1@apm"}) {
+	fact, err := adapter.Inspect(context.Background(), "demo-plugin")
+	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin", Selector: "demo-plugin"}) {
 		t.Fatalf("Inspect() = %#v, %v", fact, err)
 	}
 	target := PluginTarget{ActualName: fact.ActualName, Selector: fact.Selector}
@@ -28,8 +28,8 @@ func TestCodexPluginInspectAndMutations(t *testing.T) {
 	}
 	assertPluginCommands(t, runner, "codex", [][]string{
 		{"plugin", "list", "--json"},
-		{"plugin", "add", "demo-plugin-v0.0.1@apm", "--json"},
-		{"plugin", "remove", "demo-plugin-v0.0.1@apm", "--json"},
+		{"plugin", "add", "demo-plugin", "--json"},
+		{"plugin", "remove", "demo-plugin", "--json"},
 	})
 }
 
@@ -86,7 +86,7 @@ func TestCodexPluginMarketplaceInspectRejectsAmbiguousInvalidOrTruncatedOutput(t
 }
 
 func TestCodexPluginMarketplaceMutationCommands(t *testing.T) {
-	source := "/abs/cache/plugins/codex/demo/v0.1.0"
+	source := "/abs/cache/plugins/demo/v0.1.0"
 	target := MarketplaceTarget{Name: "apm-demo", Source: source}
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
 		successfulMCPResponse(""),
@@ -106,7 +106,7 @@ func TestCodexPluginMarketplaceMutationCommands(t *testing.T) {
 }
 
 func TestCodexPluginMarketplaceMutationsClassifyRunnerFailures(t *testing.T) {
-	target := MarketplaceTarget{Name: "apm-demo", Source: "/abs/cache/plugins/codex/demo/v0.1.0"}
+	target := MarketplaceTarget{Name: "apm-demo", Source: "/abs/cache/plugins/demo/v0.1.0"}
 	tests := []struct {
 		name      string
 		response  queuedMCPResponse
@@ -130,7 +130,7 @@ func TestCodexPluginMarketplaceMutationsClassifyRunnerFailures(t *testing.T) {
 
 func TestCodexPluginInspectRejectsAmbiguousOrInvalidOutput(t *testing.T) {
 	tests := []queuedMCPResponse{
-		successfulMCPResponse(`{"installed":[{"name":"demo-plugin-v0.0.1","pluginId":"demo-plugin-v0.0.1@one"},{"name":"demo-plugin-v0.0.1","pluginId":"demo-plugin-v0.0.1@two"}]}`),
+		successfulMCPResponse(`{"installed":[{"name":"demo-plugin","pluginId":"demo-plugin@one"},{"name":"demo-plugin","pluginId":"demo-plugin@two"}]}`),
 		successfulMCPResponse(`{}`),
 		successfulMCPResponse(`{"installed":null}`),
 		successfulMCPResponse(`null`),
@@ -140,7 +140,7 @@ func TestCodexPluginInspectRejectsAmbiguousOrInvalidOutput(t *testing.T) {
 	}
 	for index, response := range tests {
 		runner := &recordingMCPRunner{responses: []queuedMCPResponse{response}}
-		_, err := newCodexPluginAdapter(runner).Inspect(context.Background(), "demo-plugin-v0.0.1")
+		_, err := newCodexPluginAdapter(runner).Inspect(context.Background(), "demo-plugin")
 		if !errors.Is(err, ErrPluginStateUnknown) {
 			t.Fatalf("case %d error = %v, want ErrPluginStateUnknown", index, err)
 		}
