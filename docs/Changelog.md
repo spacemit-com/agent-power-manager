@@ -2,6 +2,54 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-17
+
+分类：功能变更
+
+用户需求：
+
+以每个 Agent 的原始 Plugin 文件替换 Cloud 托管 marketplace 的权威来源：持久化按 Agent/Plugin/版本划分的本地不可变制品，并由 APM 为 Codex、Claude Code 按 Agent/Plugin 生成本地 marketplace，Hermes 保持 filesystem 部署；安装和卸载改为 manifest-first，版本切换和离线恢复必须事务化；删除旧 API，并将设计、架构和使用文档与新模型对齐。
+
+相关提交：
+
+- `4557a2a docs(plugin): design local marketplace artifacts`
+- `45716f2 docs(plugin): plan local marketplace implementation`
+- `b36105f feat(plugin): define local artifact contracts`
+- `4e7bd42 feat(plugin): persist agent artifacts immutably`
+- `879fe8c fix(plugin): harden artifact staging`
+- `045bba4 feat(plugin): generate local marketplaces`
+- `2398586 fix(plugin): validate downloads before marketplace build`
+- `c82c074 feat(cloud): download agent plugin packages`
+- `9e7e372 fix(cloud): reject plugin self-copy destinations`
+- `552199b feat(adapter): expose marketplace mutations`
+- `5091795 feat(transaction): model marketplace switching`
+- `c31feeb fix(transaction): tighten marketplace validation`
+- `f363d68 feat(transaction): switch local marketplaces safely`
+- `a300600 test(transaction): cover marketplace rollback failures`
+- `6c76bf9 test(transaction): use reachable first-install rollback`
+- `63b9106 feat(transaction): recover marketplace plugin state`
+- `d97f6e9 fix(transaction): validate recovery cache by direction`
+- `6a97944 feat(lifecycle): install plugins from local artifacts`
+- `9e580aa fix(lifecycle): validate absent plugin identities`
+- `ff4c425 refactor(plugin): remove remote marketplace APIs`
+- `e0be847 test(plugin): cover local marketplace recovery`
+- `9a1e9b1 test(plugin): strengthen interruption acceptance`
+- `b2d6014 test(plugin): prevent fake CLI path fallback`
+- `e17f66e docs(plugin): document local marketplace artifacts`
+- `47c5768 docs(plugin): split marketplace builders`
+- `a263a0c fix(plugin): close final marketplace validation gaps`
+- `fc0be17 fix(plugin): share Codex manifest validation schema`
+
+解决方案或完成结果：
+
+Cloud 只下载调用方目标目录中的单个 Agent 原始 Plugin 包；Plugin Resource 以 Agent/名称/版本保存并先校验后命中，构建和缓存命中均拒绝损坏或不符合语义的制品。Codex 与 Claude Code 各自生成只含当前 Plugin 的本地 marketplace，Hermes 不生成 marketplace。Install 在锁内恢复并取得 Agent 快照、完成选择后，全部 manifest 精确命中时不访问 Cloud、Plugin Resource 或 Plugin Adapter，且不启动安装事务；首装和版本切换通过可恢复的 Plugin transaction 写入 marketplace、Plugin 和 manifest。Fix 不连接 Cloud 或 Plugin Resource、不重建缓存，使用 journal、已有缓存、manifest 与 Agent Adapter/CLI 离线收敛。旧 Cloud marketplace/API 已移除，ADR-013、Feature、C4、BUILD 和项目概览均已同步。
+
+验证结果或限制：
+
+以下新鲜命令均以退出码 0 完成：`test -z "$(gofmt -l cmd internal)"`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`build_verify_dir="$(mktemp -d)"; go build -o "$build_verify_dir/apm" ./cmd/apm; test -x "$build_verify_dir/apm"`、`go test -count=1 -v ./internal/lifecycle -run 'Test(Plugin|Fix.*Plugin)'`、`git diff --check`，以及旧 Go API、旧 Cloud 资源路径、当前文档/图中的旧 marketplace/API/FETCH 文字和 Transaction 对 Cloud/Plugin Resource 直接依赖扫描。Plugin/Fix 集成测试将 PATH、APM home、cache 和所有 Agent home 隔离在 `t.TempDir()`，所有记录的可执行文件均位于 fake-bin，未调用真实 `/home/liangff/.local/bin/hermes`，也未修改真实 Agent home 或 cache。
+
+现有限制：已有不匹配或损坏的 marketplace/cache 状态严格 fail closed；同版本 manifest 命中会返回 unchanged，不再与 Agent 状态核对；缓存没有 refresh/GC，同版本内容不可变。
+
 ## 2026-08-14
 
 分类：新增功能
