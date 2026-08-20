@@ -81,3 +81,49 @@ func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, r
 
 	return c.stagingPath, nil
 }
+
+// StageAgent 将指定版本的缓存 Agent yaml 复制到公共 staging。
+func (c *FilesystemCache) StageAgent(ref domain.PowerRef) (string, error) {
+	return c.stageAgent(ref)
+}
+
+func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (stagingRoot string, resultErr error) {
+	if ref.Version == "" {
+		return "", errors.New("power version is required")
+	}
+	if err := os.RemoveAll(c.stagingPath); err != nil {
+		return "", fmt.Errorf("remove staging path %q: %w", c.stagingPath, err)
+	}
+	if err := os.RemoveAll(c.stagingTempPath); err != nil {
+		return "", fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err)
+	}
+	defer func() {
+		if err := os.RemoveAll(c.stagingTempPath); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err))
+		}
+	}()
+
+	source := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version, "agent.yaml")
+	contents, err := os.ReadFile(source)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrMiss
+		}
+		return "", fmt.Errorf("read cache path %q: %w", source, err)
+	}
+
+	target := filepath.Join(c.stagingTempPath, "agents", ref.Name)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return "", fmt.Errorf("create staging target %q: %w", target, err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "agent.yaml"), contents, 0o644); err != nil {
+		return "", fmt.Errorf("write staging agent %q: %w", filepath.Join(target, "agent.yaml"), err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.stagingPath), 0o755); err != nil {
+		return "", fmt.Errorf("create staging parent path %q: %w", filepath.Dir(c.stagingPath), err)
+	}
+	if err := os.Rename(c.stagingTempPath, c.stagingPath); err != nil {
+		return "", fmt.Errorf("rename staging temporary path %q to staging path %q: %w", c.stagingTempPath, c.stagingPath, err)
+	}
+	return c.stagingPath, nil
+}
