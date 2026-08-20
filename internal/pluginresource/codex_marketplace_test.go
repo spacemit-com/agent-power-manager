@@ -13,12 +13,12 @@ import (
 func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 	// 捕获错误变更：Codex marketplace 的身份、source 或安装策略偏离原生约束。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo-v0.1.0")
+	pluginPath := filepath.Join(root, "plugins", "demo")
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".codex-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	manifest := `{
-  "name": "demo-v0.1.0",
+  "name": "demo",
   "version": "0.1.0",
   "description": "Demo tools",
   "author": {"name": "Example Author"},
@@ -28,7 +28,7 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (codexMarketplaceBuilder{}).Build(domain.AgentCodex, ref, root, pluginPath); err != nil {
+	if err := (codexMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 
@@ -64,8 +64,8 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 		t.Fatalf("plugins count = %d, want 1", len(document.Plugins))
 	}
 	plugin := document.Plugins[0]
-	if plugin.Name != "demo-v0.1.0" || plugin.Source.Source != "local" || plugin.Source.Path != "./plugins/demo-v0.1.0" {
-		t.Fatalf("plugin identity/source = %#v, want demo-v0.1.0 local ./plugins/demo-v0.1.0", plugin)
+	if plugin.Name != "demo" || plugin.Source.Source != "local" || plugin.Source.Path != "./plugins/demo" {
+		t.Fatalf("plugin identity/source = %#v, want demo local ./plugins/demo", plugin)
 	}
 	if plugin.Policy.Installation != "AVAILABLE" || plugin.Policy.Authentication != "ON_INSTALL" || plugin.Category != "Productivity" {
 		t.Fatalf("plugin policy/category = %#v/%q, want AVAILABLE ON_INSTALL/Productivity", plugin.Policy, plugin.Category)
@@ -78,15 +78,15 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 func TestCodexMarketplaceUsesUnbrandedDisplayDefaults(t *testing.T) {
 	// 捕获错误变更：缺失展示字段时输出空值或复制外部品牌默认值。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo-v0.1.0")
+	pluginPath := filepath.Join(root, "plugins", "demo")
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".codex-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginPath, ".codex-plugin", "plugin.json"), []byte(`{"name":"demo-v0.1.0","version":"0.1.0"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginPath, ".codex-plugin", "plugin.json"), []byte(`{"name":"demo","version":"0.1.0"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (codexMarketplaceBuilder{}).Build(domain.AgentCodex, ref, root, pluginPath); err != nil {
+	if err := (codexMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 	var document struct {

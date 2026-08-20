@@ -14,14 +14,14 @@ import (
 	"apm/internal/utils/filesystem"
 )
 
-// Service 管理按 Agent 隔离且不可变的 Plugin artifact。
+// Service 管理共享且不可变的 Plugin artifact。
 type Service struct {
 	cacheRoot       string
 	cacheTempRoot   string
 	stagingRoot     string
 	stagingTempRoot string
 	downloader      Downloader
-	builders        map[domain.AgentID]artifactBuilder
+	builder         artifactBuilder
 	locksMu         sync.Mutex
 	pathLocks       map[string]*sync.Mutex
 	files           serviceFiles
@@ -36,16 +36,16 @@ type serviceFiles struct {
 	removeAll func(string) error
 }
 
-// artifactBuilder 在下载后的 artifact 根目录中构建并复验 Agent 专属内容。
+// artifactBuilder 在下载后的同一个 artifact 根目录中构建并复验共享派生内容。
 type artifactBuilder interface {
-	Build(domain.AgentID, domain.PowerRef, string, string) error
-	Validate(domain.AgentID, domain.PowerRef, string) error
+	Build(domain.PowerRef, string, string) error
+	Validate(domain.PowerRef, string) error
 }
 
 func newService(
 	cacheRoot, cacheTempRoot, stagingRoot, stagingTempRoot string,
 	downloader Downloader,
-	builders map[domain.AgentID]artifactBuilder,
+	builder artifactBuilder,
 ) *Service {
 	return &Service{
 		cacheRoot:       cacheRoot,
@@ -53,7 +53,7 @@ func newService(
 		stagingRoot:     stagingRoot,
 		stagingTempRoot: stagingTempRoot,
 		downloader:      downloader,
-		builders:        builders,
+		builder:         builder,
 		pathLocks:       make(map[string]*sync.Mutex),
 		files: serviceFiles{
 			copyDir:   filesystem.CopyDir,
@@ -118,7 +118,7 @@ func (service *Service) Ensure(ctx context.Context, agent domain.AgentID, ref do
 		}
 	}()
 
-	temporaryPluginPath := filepath.Join(temporaryRoot, "plugins", artifact.ActualName)
+	temporaryPluginPath := filepath.Join(temporaryRoot, "plugins", ref.Name)
 	if err := service.files.mkdirAll(temporaryPluginPath, 0o700); err != nil {
 		return Artifact{}, fmt.Errorf("create plugin artifact temporary path %q: %w", temporaryPluginPath, err)
 	}
@@ -137,14 +137,14 @@ func (service *Service) Ensure(ctx context.Context, agent domain.AgentID, ref do
 	if err := pluginartifact.ValidateRawPackage(temporaryPluginPath); err != nil {
 		return Artifact{}, errors.Join(ErrInvalidArtifact, err)
 	}
-	if err := builder.Build(agent, ref, temporaryRoot, temporaryPluginPath); err != nil {
+	if err := builder.Build(ref, temporaryRoot, temporaryPluginPath); err != nil {
 		return Artifact{}, fmt.Errorf("build plugin artifact: %w", err)
 	}
 	// 构建后再次复验，覆盖 APM 新生成的 marketplace 目录和文件。
 	if err := validatePhysicalTree(temporaryRoot); err != nil {
 		return Artifact{}, err
 	}
-	if err := builder.Validate(agent, ref, temporaryRoot); err != nil {
+	if err := builder.Validate(ref, temporaryRoot); err != nil {
 		return Artifact{}, err
 	}
 
@@ -197,7 +197,7 @@ func (service *Service) Lookup(agent domain.AgentID, ref domain.PowerRef) (Artif
 	if err := validatePhysicalTree(artifact.Root); err != nil {
 		return Artifact{}, err
 	}
-	if err := builder.Validate(agent, ref, artifact.Root); err != nil {
+	if err := builder.Validate(ref, artifact.Root); err != nil {
 		return Artifact{}, err
 	}
 	return artifact, nil
@@ -260,15 +260,14 @@ func (service *Service) StageHermes(ref domain.PowerRef) (staging string, result
 
 func (service *Service) builderFor(agent domain.AgentID) (artifactBuilder, error) {
 	switch agent {
-	case domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes:
+	case domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes, domain.AgentBibit:
 	default:
 		return nil, fmt.Errorf("plugin artifact agent %q: %w", agent, ErrUnsupportedAgent)
 	}
-	builder, ok := service.builders[agent]
-	if !ok || isNilDependency(builder) {
+	if isNilDependency(service.builder) {
 		return nil, fmt.Errorf("plugin artifact agent %q: %w", agent, ErrUnsupportedAgent)
 	}
-	return builder, nil
+	return service.builder, nil
 }
 
 func (service *Service) downloaderFor() (Downloader, error) {
@@ -303,29 +302,28 @@ func (service *Service) pathLock(key string) *sync.Mutex {
 }
 
 func (service *Service) artifactFor(agent domain.AgentID, ref domain.PowerRef) (Artifact, error) {
-	actualName, err := domain.ActualPluginName(ref)
+	if _, err := service.builderFor(agent); err != nil {
+		return Artifact{}, err
+	}
+	logicalName, err := domain.PluginRuntimeName(ref)
 	if err != nil {
 		return Artifact{}, fmt.Errorf("plugin artifact reference %+v: %w", ref, err)
 	}
-	root := filepath.Join(service.cacheRoot, "plugins", string(agent), ref.Name, ref.Version)
-	artifact := Artifact{
-		Agent:      agent,
-		Power:      ref,
-		ActualName: actualName,
-		Root:       root,
-		PluginPath: filepath.Join(root, "plugins", actualName),
+	root := filepath.Join(service.cacheRoot, "plugins", ref.Name, ref.Version)
+	marketplaceSource, err := filepath.Abs(root)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("resolve plugin artifact marketplace source %q: %w", root, err)
 	}
-	if agent == domain.AgentCodex || agent == domain.AgentClaudeCode {
-		marketplaceName, err := domain.PluginMarketplaceName(ref)
-		if err != nil {
-			return Artifact{}, fmt.Errorf("plugin artifact marketplace: %w", err)
-		}
-		marketplaceSource, err := filepath.Abs(root)
-		if err != nil {
-			return Artifact{}, fmt.Errorf("resolve plugin artifact marketplace source %q: %w", root, err)
-		}
-		artifact.MarketplaceName = marketplaceName
-		artifact.MarketplaceSource = filepath.Clean(marketplaceSource)
+	root = filepath.Clean(marketplaceSource)
+	artifact := Artifact{
+		Power:                   ref,
+		Root:                    root,
+		PluginPath:              filepath.Join(root, "plugins", logicalName),
+		CodexMarketplaceSource:  root,
+		ClaudeMarketplaceSource: root,
+	}
+	if err := artifact.Validate(); err != nil {
+		return Artifact{}, err
 	}
 	return artifact, nil
 }

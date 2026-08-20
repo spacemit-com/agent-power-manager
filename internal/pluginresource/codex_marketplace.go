@@ -1,9 +1,9 @@
 package pluginresource
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 
 	"apm/internal/domain"
 	"apm/internal/pluginartifact"
@@ -39,11 +39,8 @@ type codexMarketplacePlugin struct {
 	Category string `json:"category"`
 }
 
-// Build 根据 Codex 原生 manifest 生成只含当前版本的本地 marketplace。
-func (codexMarketplaceBuilder) Build(agent domain.AgentID, ref domain.PowerRef, root, pluginPath string) error {
-	if agent != domain.AgentCodex {
-		return fmt.Errorf("build Codex marketplace for agent %q: %w", agent, ErrUnsupportedAgent)
-	}
+// Build 根据 Codex 原生 manifest 生成只含当前逻辑 Plugin 的本地 marketplace。
+func (codexMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath string) error {
 	var manifest codexPluginManifest
 	if err := decodePluginManifest(pluginPath, codexManifestPath, &manifest); err != nil {
 		return fmt.Errorf("decode Codex plugin manifest: %w", err)
@@ -61,13 +58,30 @@ func (codexMarketplaceBuilder) Build(agent domain.AgentID, ref domain.PowerRef, 
 	return nil
 }
 
-// Validate 复验 Codex manifest，并按类型语义比较本地 marketplace。
-func (codexMarketplaceBuilder) Validate(agent domain.AgentID, ref domain.PowerRef, root string) error {
-	if agent != domain.AgentCodex {
-		return fmt.Errorf("validate Codex marketplace for agent %q: %w", agent, ErrUnsupportedAgent)
+// Validate 复验 Codex manifest，并按类型语义比较共享根中的 Codex marketplace。
+func (codexMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error {
+	logicalName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		return err
 	}
-	if err := pluginartifact.Validate(agent, ref, root); err != nil {
-		return errors.Join(ErrInvalidArtifact, err)
+	pluginPath := filepath.Join(root, "plugins", logicalName)
+	var manifest codexPluginManifest
+	if err := decodePluginManifest(pluginPath, codexManifestPath, &manifest); err != nil {
+		return fmt.Errorf("decode Codex plugin manifest: %w", err)
+	}
+	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
+		return err
+	}
+	want, err := newCodexMarketplaceDocument(ref, manifest)
+	if err != nil {
+		return err
+	}
+	var got codexMarketplaceDocument
+	if err := decodePluginManifest(root, codexMarketplacePath, &got); err != nil {
+		return fmt.Errorf("decode Codex marketplace: %w", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		return fmt.Errorf("Codex marketplace semantic value does not match manifest: %w", ErrInvalidArtifact)
 	}
 	return nil
 }

@@ -2,9 +2,9 @@ package pluginresource
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"apm/internal/domain"
 )
@@ -14,39 +14,58 @@ type Downloader interface {
 	DownloadPlugin(context.Context, domain.PowerRef, string) error
 }
 
-// Manager 管理本地 Plugin artifact 的缓存、查询和 Hermes 暂存。
+// Manager 管理本地共享 Plugin artifact；Agent 参数与 Hermes 命名将在共享缓存任务中移除。
 type Manager interface {
 	Ensure(context.Context, domain.AgentID, domain.PowerRef) (Artifact, error)
 	Lookup(domain.AgentID, domain.PowerRef) (Artifact, error)
 	StageHermes(domain.PowerRef) (string, error)
 }
 
-// Artifact 描述某个 Agent 可消费的不可变 Plugin artifact。
-type Artifact struct {
-	Agent             domain.AgentID
-	Power             domain.PowerRef
-	ActualName        string
-	Root              string
-	PluginPath        string
-	MarketplaceName   string
-	MarketplaceSource string
+// Marketplace 是 Plugin Resource 返回的 Agent marketplace 注册信息。
+// Lifecycle 负责在事务边界将其映射为 Adapter 的目标类型。
+type Marketplace struct {
+	Name   string
+	Source string
 }
 
-// Validate 校验 artifact 的 Agent marketplace 约束。
-func (artifact Artifact) Validate() error {
-	switch artifact.Agent {
-	case domain.AgentCodex, domain.AgentClaudeCode:
-		if strings.TrimSpace(artifact.MarketplaceName) == "" ||
-			strings.TrimSpace(artifact.MarketplaceSource) == "" ||
-			!filepath.IsAbs(artifact.MarketplaceSource) {
-			return fmt.Errorf("plugin artifact %+v: %w", artifact, ErrInvalidArtifact)
-		}
-	case domain.AgentHermes:
-		if artifact.MarketplaceName != "" || artifact.MarketplaceSource != "" {
-			return fmt.Errorf("plugin artifact %+v: %w", artifact, ErrInvalidArtifact)
-		}
+// Artifact 描述不携带 Agent 身份的共享、不可变 Plugin artifact。
+// Codex 与 Claude marketplace 必须位于同一个 Root，PluginPath 使用逻辑名称。
+type Artifact struct {
+	Power                   domain.PowerRef
+	Root                    string
+	PluginPath              string
+	CodexMarketplaceSource  string
+	ClaudeMarketplaceSource string
+}
+
+// MarketplaceFor 返回指定 marketplace Agent 对应的资源层注册信息。
+// Hermes 与 Bibit 使用文件系统 staging，不提供 marketplace。
+func (artifact Artifact) MarketplaceFor(agent domain.AgentID) (Marketplace, error) {
+	name, err := domain.PluginMarketplaceName(artifact.Power)
+	if err != nil {
+		return Marketplace{}, err
+	}
+	switch agent {
+	case domain.AgentCodex:
+		return Marketplace{Name: name, Source: artifact.CodexMarketplaceSource}, nil
+	case domain.AgentClaudeCode:
+		return Marketplace{Name: name, Source: artifact.ClaudeMarketplaceSource}, nil
 	default:
-		return fmt.Errorf("plugin artifact agent %q: %w", artifact.Agent, ErrUnsupportedAgent)
+		return Marketplace{}, fmt.Errorf("plugin artifact marketplace agent %q: %w", agent, ErrUnsupportedAgent)
+	}
+}
+
+// Validate 校验共享 Artifact 的路径恒等式；不读取或审计 Cloud Plugin 内容。
+func (artifact Artifact) Validate() error {
+	logicalName, err := domain.PluginRuntimeName(artifact.Power)
+	if err != nil {
+		return fmt.Errorf("plugin artifact identity: %w", errors.Join(ErrInvalidArtifact, err))
+	}
+	root := filepath.Clean(artifact.Root)
+	if !filepath.IsAbs(root) || artifact.Root != root ||
+		artifact.PluginPath != filepath.Join(root, "plugins", logicalName) ||
+		artifact.CodexMarketplaceSource != root || artifact.ClaudeMarketplaceSource != root {
+		return fmt.Errorf("plugin artifact %+v: %w", artifact, ErrInvalidArtifact)
 	}
 	return nil
 }

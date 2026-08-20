@@ -114,7 +114,7 @@ func TestEnsureRejectsUnsafeAgentBeforeConstructingCachePath(t *testing.T) {
 		roots.staging,
 		roots.stagingTemp,
 		&testDownloader{},
-		map[domain.AgentID]artifactBuilder{unsafeAgent: testBuilder{}},
+		testBuilder{},
 	)
 	outsideRoot := filepath.Join(filepath.Dir(roots.cache), "outside")
 	if err := os.MkdirAll(outsideRoot, 0o700); err != nil {
@@ -149,7 +149,8 @@ func TestValidatePhysicalTreeRejectsSymlinkWithoutTrustingDirectoryType(t *testi
 }
 
 func testArtifactRoot(cacheRoot string, agent domain.AgentID, ref domain.PowerRef) string {
-	return filepath.Join(cacheRoot, "plugins", string(agent), ref.Name, ref.Version)
+	_ = agent
+	return filepath.Join(cacheRoot, "plugins", ref.Name, ref.Version)
 }
 
 func writeValidTestArtifact(t *testing.T, root string) {

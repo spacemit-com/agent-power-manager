@@ -15,13 +15,70 @@ import (
 	"apm/internal/domain"
 )
 
-func TestNewSelectsAgentBuildersAndReturnsCompleteArtifacts(t *testing.T) {
-	// 捕获错误变更：公共构造器遗漏内建 Agent builder 或未补全 marketplace 身份。
+func TestSharedMarketplaceBuilderBuildsBothDocumentsInOneRoot(t *testing.T) {
+	// 捕获错误变更：协调器只生成某个 Agent 的 marketplace，或把两份 source 指向不同 Plugin 叶子。
+	root := t.TempDir()
+	pluginPath := filepath.Join(root, "plugins", "demo")
+	if err := writeSharedTestPluginManifests(pluginPath, `{"name":"demo","version":"1.2.3"}`); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}
+	if err := (sharedMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	var codex codexMarketplaceDocument
+	if err := decodeJSONFile(filepath.Join(root, codexMarketplacePath), &codex); err != nil {
+		t.Fatal(err)
+	}
+	if len(codex.Plugins) != 1 || codex.Plugins[0].Name != "demo" ||
+		codex.Plugins[0].Source.Source != "local" || codex.Plugins[0].Source.Path != "./plugins/demo" {
+		t.Fatalf("Codex marketplace plugins = %+v, want one logical demo entry", codex.Plugins)
+	}
+
+	var claude claudeMarketplaceDocument
+	if err := decodeJSONFile(filepath.Join(root, claudeMarketplacePath), &claude); err != nil {
+		t.Fatal(err)
+	}
+	if len(claude.Plugins) != 1 || claude.Plugins[0].Name != "demo" || claude.Plugins[0].Source != "./plugins/demo" {
+		t.Fatalf("Claude marketplace plugins = %+v, want one logical demo entry", claude.Plugins)
+	}
+}
+
+func TestSharedMarketplaceBuilderRejectsEitherInvalidNativeManifest(t *testing.T) {
+	// 捕获错误变更：协调器只校验一份原生 manifest，或容忍版本/逻辑名称不精确匹配。
+	for _, test := range []struct {
+		name           string
+		codexManifest  string
+		claudeManifest string
+	}{
+		{name: "Codex versioned name", codexManifest: `{"name":"demo-v1.2.3","version":"1.2.3"}`, claudeManifest: `{"name":"demo","version":"1.2.3"}`},
+		{name: "Claude wrong version", codexManifest: `{"name":"demo","version":"1.2.3"}`, claudeManifest: `{"name":"demo","version":"1.2.4"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			pluginPath := filepath.Join(root, "plugins", "demo")
+			if err := writeTestPluginManifest(pluginPath, codexManifestPath, test.codexManifest); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeTestPluginManifest(pluginPath, claudeManifestPath, test.claudeManifest); err != nil {
+				t.Fatal(err)
+			}
+			ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}
+			if err := (sharedMarketplaceBuilder{}).Build(ref, root, pluginPath); !errors.Is(err, ErrInvalidArtifact) {
+				t.Fatalf("Build() error = %v, want ErrInvalidArtifact", err)
+			}
+		})
+	}
+}
+
+func TestSharedMarketplaceNewBuildsCompleteArtifacts(t *testing.T) {
+	// 捕获错误变更：公共构造器遗漏共享 builder 或未补全任一 marketplace。
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg-cache"))
 	t.Setenv("APM_HOME", filepath.Join(root, "home"))
 	download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
-		return writeSharedTestPluginManifests(destination, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
+		return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0"}`)
 	})
 	service, err := New(download)
 	if err != nil {
@@ -36,14 +93,17 @@ func TestNewSelectsAgentBuildersAndReturnsCompleteArtifacts(t *testing.T) {
 		if err := artifact.Validate(); err != nil {
 			t.Fatalf("Artifact.Validate(%s) error = %v", agent, err)
 		}
-		if agent == domain.AgentHermes {
-			if artifact.MarketplaceName != "" || artifact.MarketplaceSource != "" {
-				t.Fatalf("Hermes marketplace = %q/%q, want empty", artifact.MarketplaceName, artifact.MarketplaceSource)
+		for _, marketplacePath := range []string{codexMarketplacePath, claudeMarketplacePath} {
+			if _, err := os.Stat(filepath.Join(artifact.Root, marketplacePath)); err != nil {
+				t.Fatalf("stat shared marketplace %q: %v", marketplacePath, err)
 			}
+		}
+		if agent == domain.AgentHermes {
 			continue
 		}
-		if artifact.MarketplaceName != "apm-demo" || artifact.MarketplaceSource != filepath.Clean(artifact.Root) {
-			t.Fatalf("%s marketplace = %q/%q, want apm-demo/%q", agent, artifact.MarketplaceName, artifact.MarketplaceSource, filepath.Clean(artifact.Root))
+		marketplace, err := artifact.MarketplaceFor(agent)
+		if err != nil || marketplace.Name != "apm-demo" || marketplace.Source != filepath.Clean(artifact.Root) {
+			t.Fatalf("%s marketplace = %+v, %v, want apm-demo/%q", agent, marketplace, err, filepath.Clean(artifact.Root))
 		}
 	}
 }
@@ -195,7 +255,7 @@ func TestEnsureRejectsInvalidAgentPackagesWithoutPublishingCache(t *testing.T) {
 			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				return test.write(t, destination)
 			})
-			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
+			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
 			if _, err := service.Ensure(context.Background(), test.agent, ref); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
@@ -231,7 +291,7 @@ func TestEnsureWithLocalCloudRejectsSymlinkedSourceBeforePublishingArtifact(t *t
 		t.Fatal(err)
 	}
 	roots := newTestRoots(t)
-	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, client, builtInBuilders())
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, client, builtInBuilder())
 
 	if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); err == nil {
 		t.Fatal("Ensure() error = nil, want non-physical Local Cloud source rejection")
@@ -269,7 +329,7 @@ func TestLookupRejectsMarketplaceFilesOutsideAgentClosedWorld(t *testing.T) {
 				calls.Add(1)
 				return writeSharedTestPluginManifests(destination, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 			})
-			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
+			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
 			artifact, err := service.Ensure(context.Background(), test.agent, ref)
 			if err != nil {
@@ -386,7 +446,7 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 				calls.Add(1)
 				return writeSharedTestPluginManifests(destination, `{"name":"demo-v0.1.0","version":"0.1.0"}`)
 			})
-			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
+			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
 			artifact, err := service.Ensure(context.Background(), test.agent, ref)
 			if err != nil {
@@ -430,7 +490,7 @@ func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCach
 				calls.Add(1)
 				return writeTestPluginManifest(destination, codexManifestPath, `{"name":"demo-v0.1.0","version":"0.1.0","description":"Demo","author":{"name":"APM"}}`)
 			})
-			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilders())
+			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
 			artifact, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
 			if err != nil {
@@ -472,10 +532,8 @@ func TestEnsureValidatesDownloadedPhysicalTreeBeforeAgentBuilder(t *testing.T) {
 					externalBefore = snapshotTestTree(t, external)
 					return nil
 				})
-				builders := builtInBuilders()
-				observer := &observingArtifactBuilder{delegate: builders[agent]}
-				builders[agent] = observer
-				service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builders)
+				observer := &observingArtifactBuilder{delegate: builtInBuilder()}
+				service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, observer)
 				ref := testPluginRef()
 
 				if _, err := service.Ensure(context.Background(), agent, ref); !errors.Is(err, ErrInvalidArtifact) {
@@ -507,13 +565,13 @@ type observingArtifactBuilder struct {
 	buildCalls atomic.Int32
 }
 
-func (builder *observingArtifactBuilder) Build(agent domain.AgentID, ref domain.PowerRef, root, pluginPath string) error {
+func (builder *observingArtifactBuilder) Build(ref domain.PowerRef, root, pluginPath string) error {
 	builder.buildCalls.Add(1)
-	return builder.delegate.Build(agent, ref, root, pluginPath)
+	return builder.delegate.Build(ref, root, pluginPath)
 }
 
-func (builder *observingArtifactBuilder) Validate(agent domain.AgentID, ref domain.PowerRef, root string) error {
-	return builder.delegate.Validate(agent, ref, root)
+func (builder *observingArtifactBuilder) Validate(ref domain.PowerRef, root string) error {
+	return builder.delegate.Validate(ref, root)
 }
 
 func writeTestPluginManifest(pluginPath, relativePath, content string) error {

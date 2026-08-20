@@ -13,12 +13,12 @@ import (
 func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 	// 捕获错误变更：Claude marketplace 未保留原生作者、版本、描述或本地 source。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo-v0.1.0")
+	pluginPath := filepath.Join(root, "plugins", "demo")
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".claude-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	manifest := `{
-  "name": "demo-v0.1.0",
+  "name": "demo",
   "version": "0.1.0",
   "description": "Demo tools",
   "author": {"name": "Example Author"}
@@ -27,7 +27,7 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (claudeMarketplaceBuilder{}).Build(domain.AgentClaudeCode, ref, root, pluginPath); err != nil {
+	if err := (claudeMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 
@@ -63,8 +63,8 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 		t.Fatalf("plugins count = %d, want 1", len(document.Plugins))
 	}
 	plugin := document.Plugins[0]
-	if plugin.Name != "demo-v0.1.0" || plugin.Source != "./plugins/demo-v0.1.0" || plugin.Description != "Demo tools" {
-		t.Fatalf("plugin = %#v, want demo-v0.1.0 ./plugins/demo-v0.1.0/Demo tools", plugin)
+	if plugin.Name != "demo" || plugin.Source != "./plugins/demo" || plugin.Description != "Demo tools" {
+		t.Fatalf("plugin = %#v, want demo ./plugins/demo/Demo tools", plugin)
 	}
 	if _, err := os.Lstat(filepath.Join(root, ".agents", "plugins", "marketplace.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Codex marketplace stat error = %v, want not exist", err)
@@ -74,15 +74,15 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 func TestClaudeMarketplaceUsesExactAPMDefaults(t *testing.T) {
 	// 捕获错误变更：缺失作者或描述时输出空值或非 APM 约定默认值。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo-v0.1.0")
+	pluginPath := filepath.Join(root, "plugins", "demo")
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".claude-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginPath, ".claude-plugin", "plugin.json"), []byte(`{"name":"demo-v0.1.0","version":"0.1.0"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginPath, ".claude-plugin", "plugin.json"), []byte(`{"name":"demo","version":"0.1.0"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (claudeMarketplaceBuilder{}).Build(domain.AgentClaudeCode, ref, root, pluginPath); err != nil {
+	if err := (claudeMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 	var document struct {

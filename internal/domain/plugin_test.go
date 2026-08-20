@@ -6,10 +6,10 @@ import (
 	"apm/internal/domain"
 )
 
-func TestActualPluginNameMapsLogicalVersion(t *testing.T) {
+func TestActualPluginNameUsesLogicalName(t *testing.T) {
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
 	actual, err := domain.ActualPluginName(ref)
-	if err != nil || actual != "demo-plugin-v0.0.1" {
+	if err != nil || actual != "demo-plugin" {
 		t.Fatalf("ActualPluginName() = %q, %v", actual, err)
 	}
 }

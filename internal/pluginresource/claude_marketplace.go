@@ -1,12 +1,11 @@
 package pluginresource
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 
 	"apm/internal/domain"
-	"apm/internal/pluginartifact"
 )
 
 const (
@@ -41,11 +40,8 @@ type claudeMarketplacePlugin struct {
 	Description string `json:"description"`
 }
 
-// Build 根据 Claude 原生 manifest 生成只含当前版本的本地 marketplace。
-func (claudeMarketplaceBuilder) Build(agent domain.AgentID, ref domain.PowerRef, root, pluginPath string) error {
-	if agent != domain.AgentClaudeCode {
-		return fmt.Errorf("build Claude marketplace for agent %q: %w", agent, ErrUnsupportedAgent)
-	}
+// Build 根据 Claude 原生 manifest 生成只含当前逻辑 Plugin 的本地 marketplace。
+func (claudeMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath string) error {
 	var manifest claudePluginManifest
 	if err := decodePluginManifest(pluginPath, claudeManifestPath, &manifest); err != nil {
 		return fmt.Errorf("decode Claude plugin manifest: %w", err)
@@ -63,13 +59,30 @@ func (claudeMarketplaceBuilder) Build(agent domain.AgentID, ref domain.PowerRef,
 	return nil
 }
 
-// Validate 复验 Claude manifest，并按类型语义比较本地 marketplace。
-func (claudeMarketplaceBuilder) Validate(agent domain.AgentID, ref domain.PowerRef, root string) error {
-	if agent != domain.AgentClaudeCode {
-		return fmt.Errorf("validate Claude marketplace for agent %q: %w", agent, ErrUnsupportedAgent)
+// Validate 复验 Claude manifest，并按类型语义比较共享根中的 Claude marketplace。
+func (claudeMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error {
+	logicalName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		return err
 	}
-	if err := pluginartifact.Validate(agent, ref, root); err != nil {
-		return errors.Join(ErrInvalidArtifact, err)
+	pluginPath := filepath.Join(root, "plugins", logicalName)
+	var manifest claudePluginManifest
+	if err := decodePluginManifest(pluginPath, claudeManifestPath, &manifest); err != nil {
+		return fmt.Errorf("decode Claude plugin manifest: %w", err)
+	}
+	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
+		return err
+	}
+	want, err := newClaudeMarketplaceDocument(ref, manifest)
+	if err != nil {
+		return err
+	}
+	var got claudeMarketplaceDocument
+	if err := decodePluginManifest(root, claudeMarketplacePath, &got); err != nil {
+		return fmt.Errorf("decode Claude marketplace: %w", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		return fmt.Errorf("Claude marketplace semantic value does not match manifest: %w", ErrInvalidArtifact)
 	}
 	return nil
 }

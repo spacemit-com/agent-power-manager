@@ -43,8 +43,8 @@ func TestLocalCloudSharedPluginPackagesBuildAgentArtifactsWithoutLegacyMarketpla
 			if err != nil {
 				t.Fatalf("Ensure() error = %v", err)
 			}
-			if artifact.Agent != agent || artifact.ActualName != "demo-plugin-v0.1.0" {
-				t.Fatalf("Artifact identity = %#v, want %s/demo-plugin-v0.1.0", artifact, agent)
+			if artifact.Power != ref || filepath.Base(artifact.PluginPath) != "demo-plugin" {
+				t.Fatalf("Artifact identity = %#v, want shared demo-plugin", artifact)
 			}
 			if err := artifact.Validate(); err != nil {
 				t.Fatalf("Artifact.Validate() error = %v", err)
@@ -302,7 +302,7 @@ func TestEnsureConcurrentPublishersReturnTheValidatedImmutableArtifact(t *testin
 		roots.staging,
 		roots.stagingTemp,
 		downloader,
-		map[domain.AgentID]artifactBuilder{domain.AgentCodex: testBuilder{}},
+		testBuilder{},
 	)
 	ref := testPluginRef()
 	results := make(chan error, 2)
@@ -422,7 +422,7 @@ func TestEnsureRejectsTypedNilDependencies(t *testing.T) {
 		t.Fatalf("Ensure() typed-nil downloader error = %v, want ErrInvalidArtifact", err)
 	}
 	var builder *typedNilBuilder
-	service = newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, map[domain.AgentID]artifactBuilder{domain.AgentCodex: builder})
+	service = newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, builder)
 	if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); !errors.Is(err, ErrUnsupportedAgent) {
 		t.Fatalf("Ensure() typed-nil builder error = %v, want ErrUnsupportedAgent", err)
 	}
@@ -518,12 +518,12 @@ func (downloader *testDownloader) DownloadPlugin(_ context.Context, _ domain.Pow
 
 type testBuilder struct{}
 
-func (testBuilder) Build(_ domain.AgentID, _ domain.PowerRef, root, pluginPath string) error {
+func (testBuilder) Build(_ domain.PowerRef, root, pluginPath string) error {
 	return os.WriteFile(filepath.Join(root, "builder.txt"), []byte(pluginPath), 0o600)
 }
 
-func (testBuilder) Validate(_ domain.AgentID, _ domain.PowerRef, root string) error {
-	if _, err := os.Stat(filepath.Join(root, "plugins", "demo-v0.1.0", "payload.txt")); err != nil {
+func (testBuilder) Validate(_ domain.PowerRef, root string) error {
+	if _, err := os.Stat(filepath.Join(root, "plugins", "demo", "payload.txt")); err != nil {
 		return errors.Join(ErrInvalidArtifact, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "builder.txt")); err != nil {
@@ -532,12 +532,8 @@ func (testBuilder) Validate(_ domain.AgentID, _ domain.PowerRef, root string) er
 	return nil
 }
 
-func testBuilders() map[domain.AgentID]artifactBuilder {
-	return map[domain.AgentID]artifactBuilder{
-		domain.AgentCodex:      testBuilder{},
-		domain.AgentClaudeCode: testBuilder{},
-		domain.AgentHermes:     testBuilder{},
-	}
+func testBuilders() artifactBuilder {
+	return testBuilder{}
 }
 
 type blockingDownloader struct {
@@ -588,11 +584,11 @@ func (*typedNilDownloader) DownloadPlugin(context.Context, domain.PowerRef, stri
 
 type typedNilBuilder struct{}
 
-func (*typedNilBuilder) Build(domain.AgentID, domain.PowerRef, string, string) error {
+func (*typedNilBuilder) Build(domain.PowerRef, string, string) error {
 	panic("typed nil builder must not be called")
 }
 
-func (*typedNilBuilder) Validate(domain.AgentID, domain.PowerRef, string) error {
+func (*typedNilBuilder) Validate(domain.PowerRef, string) error {
 	panic("typed nil builder must not be called")
 }
 

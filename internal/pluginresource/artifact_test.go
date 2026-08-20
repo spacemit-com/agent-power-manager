@@ -1,57 +1,61 @@
 package pluginresource_test
 
 import (
+	"errors"
 	"testing"
 
 	"apm/internal/domain"
 	"apm/internal/pluginresource"
 )
 
-func TestArtifactValidateRequiresAbsoluteMarketplaceSourceForMarketplaceAgents(t *testing.T) {
+func TestSharedArtifactSelectsAgentMarketplace(t *testing.T) {
+	// 捕获错误变更：共享 Artifact 再次携带 Agent 身份，或为两个 marketplace 返回不同缓存根。
+	artifact := pluginresource.Artifact{
+		Power:                   domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"},
+		Root:                    "/cache/plugins/demo/v1.2.3",
+		PluginPath:              "/cache/plugins/demo/v1.2.3/plugins/demo",
+		CodexMarketplaceSource:  "/cache/plugins/demo/v1.2.3",
+		ClaudeMarketplaceSource: "/cache/plugins/demo/v1.2.3",
+	}
 	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
-		t.Run(string(agent), func(t *testing.T) {
-			artifact := validArtifact(agent)
-			if err := artifact.Validate(); err != nil {
-				t.Fatalf("Validate() = %v", err)
-			}
-
-			artifact.MarketplaceSource = "relative/marketplace"
-			if err := artifact.Validate(); err == nil {
-				t.Fatal("Validate() error = nil for relative marketplace source")
-			}
-		})
+		target, err := artifact.MarketplaceFor(agent)
+		if err != nil || target.Name != "apm-demo" || target.Source != artifact.Root {
+			t.Fatalf("MarketplaceFor(%s) = %+v, %v", agent, target, err)
+		}
 	}
-}
-
-func TestArtifactValidateRequiresEmptyMarketplaceForHermes(t *testing.T) {
-	artifact := validArtifact(domain.AgentHermes)
-	if err := artifact.Validate(); err != nil {
-		t.Fatalf("Validate() = %v", err)
-	}
-
-	for _, update := range []func(*pluginresource.Artifact){
-		func(artifact *pluginresource.Artifact) { artifact.MarketplaceName = "apm-demo" },
-		func(artifact *pluginresource.Artifact) { artifact.MarketplaceSource = "/srv/apm-marketplace" },
-	} {
-		invalid := artifact
-		update(&invalid)
-		if err := invalid.Validate(); err == nil {
-			t.Fatalf("Validate() error = nil for %#v", invalid)
+	for _, agent := range []domain.AgentID{domain.AgentHermes, domain.AgentBibit} {
+		if _, err := artifact.MarketplaceFor(agent); !errors.Is(err, pluginresource.ErrUnsupportedAgent) {
+			t.Fatalf("MarketplaceFor(%s) error = %v, want ErrUnsupportedAgent", agent, err)
 		}
 	}
 }
 
-func validArtifact(agent domain.AgentID) pluginresource.Artifact {
-	artifact := pluginresource.Artifact{
-		Agent:      agent,
-		Power:      domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"},
-		ActualName: "demo-v0.1.0",
-		Root:       "/srv/apm/plugins/demo-v0.1.0",
-		PluginPath: "/srv/apm/plugins/demo-v0.1.0/plugin.json",
+func TestSharedArtifactRejectsInvalidMarketplaceSources(t *testing.T) {
+	// 捕获错误变更：允许 marketplace source 逃离 Artifact 根或两个 Agent 指向不同根。
+	valid := pluginresource.Artifact{
+		Power:                   domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"},
+		Root:                    "/cache/plugins/demo/v1.2.3",
+		PluginPath:              "/cache/plugins/demo/v1.2.3/plugins/demo",
+		CodexMarketplaceSource:  "/cache/plugins/demo/v1.2.3",
+		ClaudeMarketplaceSource: "/cache/plugins/demo/v1.2.3",
 	}
-	if agent != domain.AgentHermes {
-		artifact.MarketplaceName = "apm-demo"
-		artifact.MarketplaceSource = "/srv/apm/marketplaces/apm-demo"
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
-	return artifact
+
+	for _, mutate := range []func(*pluginresource.Artifact){
+		func(artifact *pluginresource.Artifact) { artifact.CodexMarketplaceSource = "relative/cache" },
+		func(artifact *pluginresource.Artifact) {
+			artifact.ClaudeMarketplaceSource = "/cache/plugins/other/v1.2.3"
+		},
+		func(artifact *pluginresource.Artifact) {
+			artifact.PluginPath = "/cache/plugins/demo/v1.2.3/plugins/other"
+		},
+	} {
+		artifact := valid
+		mutate(&artifact)
+		if err := artifact.Validate(); !errors.Is(err, pluginresource.ErrInvalidArtifact) {
+			t.Fatalf("Validate(%+v) error = %v, want ErrInvalidArtifact", artifact, err)
+		}
+	}
 }
