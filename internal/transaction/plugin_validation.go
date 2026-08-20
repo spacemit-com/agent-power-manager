@@ -214,7 +214,10 @@ func validatePluginMarketplaceJournal(journal Journal, payload PluginJournalPayl
 			return fmt.Errorf("Plugin install target was already present: %w", ErrInvalidJournal)
 		}
 		if journal.Previous == nil {
-			if payload.Previous != nil || payload.PreviousPresent || marketplace.PreviousSource != "" || marketplace.PreviousPresent ||
+			retainedMarketplace := marketplace.PreviousPresent && marketplace.PreviousSource == marketplace.TargetSource &&
+				journal.Phase != PhaseRegisteringMarketplace
+			if payload.Previous != nil || payload.PreviousPresent ||
+				((marketplace.PreviousSource != "" || marketplace.PreviousPresent) && !retainedMarketplace) ||
 				!validFirstMarketplaceInstallPhase(journal.Phase) {
 				return fmt.Errorf("invalid first marketplace Plugin install state: %w", ErrInvalidJournal)
 			}

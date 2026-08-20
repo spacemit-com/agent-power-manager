@@ -157,10 +157,13 @@ func (s *InstallService) installUnmanagedMarketplacePlugin(
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("inspect target Plugin for agent %q: %w", agent, err)
 	}
-	if marketplaceFact.Presence == adapter.MarketplacePresent {
+	// 正常卸载会保留 marketplace；仅允许复用名称与缓存来源都精确匹配、且 Plugin 缺失的状态。
+	retainedMarketplace := marketplaceFact.Presence == adapter.MarketplacePresent &&
+		marketplaceFact.Name == marketplace.Name && marketplaceFact.Source == marketplace.Source
+	if marketplaceFact.Presence == adapter.MarketplacePresent && !retainedMarketplace {
 		return cli.InstallItem{}, fmt.Errorf("unmanaged marketplace %q already exists: %w", marketplace.Name, adapter.ErrMarketplaceConflict)
 	}
-	if marketplaceFact.Presence != adapter.MarketplaceAbsent {
+	if marketplaceFact.Presence != adapter.MarketplaceAbsent && !retainedMarketplace {
 		return cli.InstallItem{}, fmt.Errorf("unexpected target marketplace presence %q: %w", marketplaceFact.Presence, transaction.ErrIndeterminateState)
 	}
 	if pluginFact.Presence == adapter.PluginPresent {

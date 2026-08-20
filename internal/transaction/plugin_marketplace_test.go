@@ -212,6 +212,58 @@ func TestMarketplacePluginFirstInstallOrder(t *testing.T) {
 	}
 }
 
+func TestMarketplacePluginReinstallReusesExactRetainedMarketplace(t *testing.T) {
+	fixture := newMarketplacePluginFixture(t)
+	fixture.adapter.marketplaceFact = adapter.MarketplaceFact{
+		Presence: adapter.MarketplacePresent,
+		Name:     fixture.request.Marketplace.Target.Name,
+		Source:   fixture.request.Marketplace.Target.Source,
+	}
+
+	if err := fixture.service.InstallPlugin(context.Background(), fixture.request); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"inspect-marketplace", "inspect-plugin",
+		"create:adding-new-plugin", "add-plugin",
+		"update:committing", "set-manifest", "delete-journal",
+	}
+	if !reflect.DeepEqual(fixture.events, want) {
+		t.Fatalf("events = %v, want %v", fixture.events, want)
+	}
+	if len(fixture.adapter.registered) != 0 || len(fixture.adapter.unregistered) != 0 {
+		t.Fatalf("reinstall changed retained marketplace: registered=%+v unregistered=%+v", fixture.adapter.registered, fixture.adapter.unregistered)
+	}
+}
+
+func TestMarketplacePluginReinstallAddFailureKeepsRetainedMarketplace(t *testing.T) {
+	fixture := newMarketplacePluginFixture(t)
+	fixture.adapter.marketplaceFact = adapter.MarketplaceFact{
+		Presence: adapter.MarketplacePresent,
+		Name:     fixture.request.Marketplace.Target.Name,
+		Source:   fixture.request.Marketplace.Target.Source,
+	}
+	injected := errors.New("injected Plugin add failure")
+	fixture.adapter.addAnswers = []pluginMutationAnswer{{
+		result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied},
+		err:    injected,
+	}}
+
+	if err := fixture.service.InstallPlugin(context.Background(), fixture.request); !errors.Is(err, injected) {
+		t.Fatalf("InstallPlugin() error = %v, want injected failure", err)
+	}
+	want := []string{
+		"inspect-marketplace", "inspect-plugin", "create:adding-new-plugin", "add-plugin",
+		"update:rolling-back", "delete-journal",
+	}
+	if !reflect.DeepEqual(fixture.events, want) {
+		t.Fatalf("events = %v, want %v", fixture.events, want)
+	}
+	if fixture.journals.found || len(fixture.adapter.registered) != 0 || len(fixture.adapter.unregistered) != 0 {
+		t.Fatalf("failed reinstall changed retained marketplace: journal=%v registered=%+v unregistered=%+v", fixture.journals.found, fixture.adapter.registered, fixture.adapter.unregistered)
+	}
+}
+
 func TestMarketplacePluginVersionSwitchOrder(t *testing.T) {
 	fixture := newMarketplacePluginFixture(t)
 	_, previousMarketplace := configureMarketplaceVersionSwitch(fixture)

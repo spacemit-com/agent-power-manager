@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,6 +21,7 @@ import (
 	"apm/internal/paths"
 	"apm/internal/pluginresource"
 	"apm/internal/transaction"
+	"apm/internal/utils/filesystem"
 	"apm/internal/version"
 )
 
@@ -86,6 +89,43 @@ case "$agent:$1:$2:$3" in
 esac
 `
 
+const fakeBibitPluginScript = `#!/bin/sh
+case "$0" in "$FAKE_PLUGIN_BIN"/*) ;; *) exit 97 ;; esac
+printf '%s|%s\n' "$0" "$*" >> "$FAKE_PLUGIN_CALLS"
+exit 98
+`
+
+func writePluginHarnessExecutables(t *testing.T, fakeBin string) {
+	t.Helper()
+	for executable, script := range map[string]string{
+		"bianbu-agent": fakeBibitPluginScript,
+		"codex":        fakeMarketplacePluginScript,
+		"claude":       fakeMarketplacePluginScript,
+		"hermes":       fakeHermesPluginScript,
+	} {
+		if err := os.WriteFile(filepath.Join(fakeBin, executable), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertPluginHarnessEnvironment(t *testing.T, fakeBin, isolatedHome string) {
+	t.Helper()
+	if got := os.Getenv("PATH"); got != fakeBin {
+		t.Fatalf("PATH = %q, want fake-bin only %q", got, fakeBin)
+	}
+	if got := os.Getenv("HOME"); got != isolatedHome {
+		t.Fatalf("HOME = %q, want isolated home %q", got, isolatedHome)
+	}
+	for _, executable := range []string{"bianbu-agent", "codex", "claude", "hermes"} {
+		resolved, err := exec.LookPath(executable)
+		within, withinErr := filesystem.PathEqualOrWithin(fakeBin, resolved)
+		if err != nil || withinErr != nil || !within || resolved != filepath.Join(fakeBin, executable) {
+			t.Fatalf("resolved %s = %q, lookup=%v containment=%v; want fake-bin", executable, resolved, err, withinErr)
+		}
+	}
+}
+
 func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "fake-bin")
@@ -96,10 +136,13 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(fakeBin, "hermes"), []byte(fakeHermesPluginScript), 0o700); err != nil {
+	writePluginHarnessExecutables(t, fakeBin)
+	isolatedHome := filepath.Join(root, "user-home")
+	if err := os.MkdirAll(isolatedHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	t.Setenv("PATH", fakeBin)
+	t.Setenv("HOME", isolatedHome)
 	t.Setenv("FAKE_PLUGIN_BIN", fakeBin)
 	t.Setenv("FAKE_PLUGIN_STATE", state)
 	t.Setenv("FAKE_PLUGIN_CALLS", filepath.Join(root, "calls.log"))
@@ -108,6 +151,8 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	t.Setenv("HERMES_HOME", hermesHome)
 	t.Setenv("CODEX_HOME", filepath.Join(root, "absent-codex"))
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "absent-claude"))
+	t.Setenv("BIANBU_AGENT_HOME", filepath.Join(root, "absent-bibit"))
+	assertPluginHarnessEnvironment(t, fakeBin, isolatedHome)
 	resources, _ := filepath.Abs(filepath.Join("..", "cloud", "resources"))
 	cloudClient, err := cloud.NewLocalClient(resources)
 	if err != nil {
@@ -176,7 +221,7 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
-		if !strings.HasPrefix(line, fakeBin+string(filepath.Separator)) || strings.Contains(line, "/home/liangff/.local/bin/hermes") {
+		if !strings.HasPrefix(line, fakeBin+string(filepath.Separator)) {
 			t.Fatalf("unsafe CLI call %q", line)
 		}
 	}
@@ -193,13 +238,10 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 					t.Fatal(err)
 				}
 			}
-			for _, executable := range []string{"codex", "claude"} {
-				if err := os.WriteFile(filepath.Join(fakeBin, executable), []byte(fakeMarketplacePluginScript), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
+			writePluginHarnessExecutables(t, fakeBin)
 			agentRoots := map[domain.AgentID]string{
-				domain.AgentCodex: filepath.Join(root, "agents", "codex"), domain.AgentClaudeCode: filepath.Join(root, "agents", "claude"),
+				domain.AgentBibit: filepath.Join(root, "agents", "bibit"), domain.AgentCodex: filepath.Join(root, "agents", "codex"),
+				domain.AgentClaudeCode: filepath.Join(root, "agents", "claude"), domain.AgentHermes: filepath.Join(root, "agents", "hermes"),
 			}
 			if err := os.MkdirAll(agentRoots[agent], 0o700); err != nil {
 				t.Fatal(err)
@@ -207,7 +249,12 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 			resources, _ := filepath.Abs(filepath.Join("..", "cloud", "resources"))
 			calls := filepath.Join(root, "calls.log")
 			cacheHome := filepath.Join(root, "cache")
-			t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+			isolatedHome := filepath.Join(root, "user-home")
+			if err := os.MkdirAll(isolatedHome, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", fakeBin)
+			t.Setenv("HOME", isolatedHome)
 			t.Setenv("FAKE_PLUGIN_BIN", fakeBin)
 			t.Setenv("FAKE_PLUGIN_STATE", state)
 			t.Setenv("FAKE_PLUGIN_CALLS", calls)
@@ -216,7 +263,9 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 			t.Setenv("XDG_CACHE_HOME", cacheHome)
 			t.Setenv("CODEX_HOME", agentRoots[domain.AgentCodex])
 			t.Setenv("CLAUDE_CONFIG_DIR", agentRoots[domain.AgentClaudeCode])
-			t.Setenv("HERMES_HOME", filepath.Join(root, "absent-hermes"))
+			t.Setenv("HERMES_HOME", agentRoots[domain.AgentHermes])
+			t.Setenv("BIANBU_AGENT_HOME", agentRoots[domain.AgentBibit])
+			assertPluginHarnessEnvironment(t, fakeBin, isolatedHome)
 			cloudClient, err := cloud.NewLocalClient(resources)
 			if err != nil {
 				t.Fatal(err)
@@ -253,7 +302,7 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 				t.Fatal(err)
 			}
 			for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
-				if !strings.HasPrefix(line, fakeBin+string(os.PathSeparator)) || strings.Contains(line, "/home/liangff/.local/bin/hermes") {
+				if !strings.HasPrefix(line, fakeBin+string(os.PathSeparator)) {
 					t.Fatalf("unsafe CLI call %q", line)
 				}
 			}
@@ -271,12 +320,26 @@ type isolatedPluginHarness struct {
 	state      string
 	calls      string
 	cacheHome  string
+	agentRoots map[domain.AgentID]string
 	repository *config.JSONRepository
+	manifests  *acceptanceManifestRepository
 	registry   *adapter.Registry
 	cloud      cloud.Client
 	plugins    pluginresource.Manager
+	downloader *countingPluginDownloader
 	install    *InstallService
 	uninstall  *UninstallService
+	fix        *FixService
+}
+
+type countingPluginDownloader struct {
+	source pluginresource.Downloader
+	calls  int
+}
+
+func (d *countingPluginDownloader) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
+	d.calls++
+	return d.source.DownloadPlugin(ctx, ref, destination)
 }
 
 func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *isolatedPluginHarness {
@@ -289,14 +352,9 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 			t.Fatal(err)
 		}
 	}
-	for executable, script := range map[string]string{
-		"codex": fakeMarketplacePluginScript, "claude": fakeMarketplacePluginScript, "hermes": fakeHermesPluginScript,
-	} {
-		if err := os.WriteFile(filepath.Join(fakeBin, executable), []byte(script), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
+	writePluginHarnessExecutables(t, fakeBin)
 	agentRoots := map[domain.AgentID]string{
+		domain.AgentBibit:      filepath.Join(root, "agents", "bibit"),
 		domain.AgentCodex:      filepath.Join(root, "agents", "codex"),
 		domain.AgentClaudeCode: filepath.Join(root, "agents", "claude"),
 		domain.AgentHermes:     filepath.Join(root, "agents", "hermes"),
@@ -312,7 +370,12 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	}
 	calls := filepath.Join(root, "calls.log")
 	cacheHome := filepath.Join(root, "cache")
-	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	isolatedHome := filepath.Join(root, "user-home")
+	if err := os.MkdirAll(isolatedHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin)
+	t.Setenv("HOME", isolatedHome)
 	t.Setenv("FAKE_PLUGIN_BIN", fakeBin)
 	t.Setenv("FAKE_PLUGIN_STATE", state)
 	t.Setenv("FAKE_PLUGIN_CALLS", calls)
@@ -322,13 +385,16 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	t.Setenv("CODEX_HOME", agentRoots[domain.AgentCodex])
 	t.Setenv("CLAUDE_CONFIG_DIR", agentRoots[domain.AgentClaudeCode])
 	t.Setenv("HERMES_HOME", agentRoots[domain.AgentHermes])
+	t.Setenv("BIANBU_AGENT_HOME", agentRoots[domain.AgentBibit])
+	assertPluginHarnessEnvironment(t, fakeBin, isolatedHome)
 	cloudClient, err := cloud.NewLocalClient(resources)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repository := config.NewJSONRepository()
+	manifests := &acceptanceManifestRepository{base: repository}
 	registry := adapter.NewRegistry()
-	transactions, err := transaction.NewManager(repository, registry)
+	transactions, err := transaction.NewManager(manifests, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,18 +406,328 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	pluginResources := newIntegrationPluginResources(t, cloudClient)
-	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
+	downloader := &countingPluginDownloader{source: cloudClient}
+	pluginResources := newIntegrationPluginResources(t, downloader)
+	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, manifests, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}
-	uninstaller, err := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
+	uninstaller, err := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, manifests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixer, err := NewFix(locker, transactions)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &isolatedPluginHarness{
 		t: t, root: root, fakeBin: fakeBin, state: state, calls: calls, cacheHome: cacheHome,
-		repository: repository, registry: registry, cloud: cloudClient, plugins: pluginResources, install: installer, uninstall: uninstaller,
+		agentRoots: agentRoots, repository: repository, manifests: manifests, registry: registry, cloud: cloudClient,
+		plugins: pluginResources, downloader: downloader, install: installer, uninstall: uninstaller, fix: fixer,
+	}
+}
+
+var pluginAcceptanceAgents = []domain.AgentID{
+	domain.AgentCodex,
+	domain.AgentClaudeCode,
+	domain.AgentHermes,
+	domain.AgentBibit,
+}
+
+func (h *isolatedPluginHarness) installPlugin(agent domain.AgentID, release string) (cli.InstallResult, error) {
+	h.t.Helper()
+	return h.install.Install(context.Background(), cli.Flags{
+		Agent: string(agent), Type: "plugin", Name: "demo-plugin", Version: release,
+	})
+}
+
+func (h *isolatedPluginHarness) uninstallPlugin(agent domain.AgentID) (cli.UninstallResult, error) {
+	h.t.Helper()
+	return h.uninstall.Uninstall(context.Background(), cli.Flags{
+		Agent: string(agent), Type: "plugin", Name: "demo-plugin",
+	})
+}
+
+func (h *isolatedPluginHarness) pluginTarget(agent domain.AgentID) string {
+	h.t.Helper()
+	switch agent {
+	case domain.AgentCodex:
+		return filepath.Join(h.state, "plugin-codex")
+	case domain.AgentClaudeCode:
+		return filepath.Join(h.state, "plugin-claude")
+	case domain.AgentHermes, domain.AgentBibit:
+		pluginAdapter, err := h.registry.ResolvePlugin(agent)
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		target, err := pluginAdapter.TargetPath("demo-plugin")
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		return target
+	default:
+		h.t.Fatalf("unsupported test Agent %q", agent)
+		return ""
+	}
+}
+
+func (h *isolatedPluginHarness) marketplaceState(agent domain.AgentID) string {
+	h.t.Helper()
+	switch agent {
+	case domain.AgentCodex:
+		return filepath.Join(h.state, "marketplace-codex")
+	case domain.AgentClaudeCode:
+		return filepath.Join(h.state, "marketplace-claude")
+	default:
+		return ""
+	}
+}
+
+func (h *isolatedPluginHarness) hermesActivationState() string {
+	return filepath.Join(h.state, "demo-plugin")
+}
+
+func (h *isolatedPluginHarness) assertManagedPlugin(agent domain.AgentID, release string, present bool) {
+	h.t.Helper()
+	ref, found, err := h.repository.Find(agent, domain.PowerTypePlugin, "demo-plugin")
+	if err != nil || found != present {
+		h.t.Fatalf("manifest for %q found=%v ref=%+v err=%v, want present=%v", agent, found, ref, err, present)
+	}
+	if present && ref != (domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: release}) {
+		h.t.Fatalf("manifest for %q = %+v, want release %s", agent, ref, release)
+	}
+	target := h.pluginTarget(agent)
+	info, statErr := os.Lstat(target)
+	if !present {
+		if !errors.Is(statErr, os.ErrNotExist) {
+			h.t.Fatalf("target for %q remains at %q: %v", agent, target, statErr)
+		}
+		return
+	}
+	if agent == domain.AgentCodex || agent == domain.AgentClaudeCode {
+		contents, readErr := os.ReadFile(target)
+		if readErr != nil || string(contents) != "demo-plugin" {
+			h.t.Fatalf("marketplace target for %q = %q, %v", agent, contents, readErr)
+		}
+		if _, err := os.Stat(h.marketplaceState(agent)); err != nil {
+			h.t.Fatalf("marketplace for %q missing: %v", agent, err)
+		}
+		return
+	}
+	if statErr != nil || !info.IsDir() {
+		h.t.Fatalf("filesystem target for %q = %v, %v", agent, info, statErr)
+	}
+	manifest, err := os.ReadFile(filepath.Join(target, ".hermes-plugin", "plugin.yaml"))
+	if err != nil || !strings.Contains(string(manifest), "version: "+strings.TrimPrefix(release, "v")) {
+		h.t.Fatalf("filesystem target for %q version = %q, %v; want %s", agent, manifest, err, release)
+	}
+}
+
+func (h *isolatedPluginHarness) removeManagedPluginState(agent domain.AgentID) {
+	h.t.Helper()
+	for _, path := range []string{h.pluginTarget(agent), h.marketplaceState(agent)} {
+		if path != "" {
+			if err := os.RemoveAll(path); err != nil {
+				h.t.Fatal(err)
+			}
+		}
+	}
+	if agent == domain.AgentHermes {
+		if err := os.RemoveAll(h.hermesActivationState()); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+}
+
+func (h *isolatedPluginHarness) createUnmanagedPluginState(agent domain.AgentID) {
+	h.t.Helper()
+	target := h.pluginTarget(agent)
+	if agent == domain.AgentCodex || agent == domain.AgentClaudeCode {
+		if err := os.WriteFile(target, []byte("demo-plugin"), 0o600); err != nil {
+			h.t.Fatal(err)
+		}
+		return
+	}
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		h.t.Fatal(err)
+	}
+	if agent == domain.AgentHermes {
+		if err := os.WriteFile(h.hermesActivationState(), nil, 0o600); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+}
+
+func TestPluginIntegrationFourAgentBibitLifecycleMatrix(t *testing.T) {
+	for _, agent := range pluginAcceptanceAgents {
+		t.Run(string(agent), func(t *testing.T) {
+			h := newIsolatedPluginHarness(t, agent)
+			for _, step := range []struct {
+				release string
+				outcome cli.InstallOutcome
+			}{
+				{release: "v0.0.1", outcome: cli.InstallOutcomeInstalled},
+				{release: "v0.0.1", outcome: cli.InstallOutcomeUnchanged},
+				{release: "v0.1.0", outcome: cli.InstallOutcomeUpgraded},
+				{release: "v0.0.1", outcome: cli.InstallOutcomeDowngraded},
+			} {
+				result, err := h.installPlugin(agent, step.release)
+				if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != step.outcome {
+					t.Fatalf("Install(%s) = %+v, %v; want %s", step.release, result, err, step.outcome)
+				}
+				h.assertManagedPlugin(agent, step.release, true)
+			}
+
+			removed, err := h.uninstallPlugin(agent)
+			if err != nil || len(removed.Items) != 1 || removed.Items[0].Outcome != cli.UninstallOutcomeCompleted {
+				t.Fatalf("Uninstall() = %+v, %v", removed, err)
+			}
+			h.assertManagedPlugin(agent, "", false)
+
+			reinstalled, err := h.installPlugin(agent, "v0.0.1")
+			if err != nil || len(reinstalled.Items) != 1 || reinstalled.Items[0].Outcome != cli.InstallOutcomeInstalled {
+				t.Fatalf("reinstall = %+v, %v", reinstalled, err)
+			}
+			h.assertManagedPlugin(agent, "v0.0.1", true)
+
+			h.removeManagedPluginState(agent)
+			cleaned, err := h.uninstallPlugin(agent)
+			if err != nil || len(cleaned.Items) != 1 || cleaned.Items[0].Outcome != cli.UninstallOutcomeCompleted {
+				t.Fatalf("missing-target Uninstall() = %+v, %v", cleaned, err)
+			}
+			h.assertManagedPlugin(agent, "", false)
+
+			h.createUnmanagedPluginState(agent)
+			if _, err := h.installPlugin(agent, "v0.0.1"); !errors.Is(err, adapter.ErrPluginConflict) || !errors.Is(err, adapter.ErrTargetConflict) {
+				t.Fatalf("unmanaged Install() error = %v, want Plugin and target conflict", err)
+			}
+			if _, found, err := h.repository.Find(agent, domain.PowerTypePlugin, "demo-plugin"); err != nil || found {
+				t.Fatalf("unmanaged conflict manifest found=%v err=%v", found, err)
+			}
+			h.assertOnlyFakeExecutables()
+		})
+	}
+}
+
+func TestFixPluginIntegrationFourAgentBibitRecoveryRetries(t *testing.T) {
+	for _, agent := range pluginAcceptanceAgents {
+		t.Run(string(agent), func(t *testing.T) {
+			h := newIsolatedPluginHarness(t, agent)
+			injected := errors.New("injected manifest commit failure")
+			h.manifests.setErr = injected
+			result, err := h.installPlugin(agent, "v0.0.1")
+			if !errors.Is(err, injected) || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeFailed {
+				t.Fatalf("interrupted Install() = %+v, %v", result, err)
+			}
+			journalPath, err := paths.JournalPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertJournalExists(t, journalPath)
+			if err := h.fix.Fix(context.Background()); !errors.Is(err, transaction.ErrRecoveryFailed) || !errors.Is(err, injected) {
+				t.Fatalf("first Fix() error = %v, want recovery and injected failure", err)
+			}
+			assertJournalExists(t, journalPath)
+			h.manifests.setErr = nil
+			if err := h.fix.Fix(context.Background()); err != nil {
+				t.Fatalf("second Fix() error = %v", err)
+			}
+			assertJournalAbsent(t, journalPath)
+			h.assertManagedPlugin(agent, "v0.0.1", true)
+			h.assertOnlyFakeExecutables()
+		})
+	}
+}
+
+func TestPluginAcceptanceSharedArtifact(t *testing.T) {
+	h := newIsolatedPluginHarness(t, pluginAcceptanceAgents...)
+	for _, agent := range pluginAcceptanceAgents {
+		result, err := h.installPlugin(agent, "v0.1.0")
+		if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+			t.Fatalf("Install(%s) = %+v, %v", agent, result, err)
+		}
+		h.assertManagedPlugin(agent, "v0.1.0", true)
+	}
+	if h.downloader.calls != 1 {
+		t.Fatalf("Cloud Plugin downloads = %d, want 1", h.downloader.calls)
+	}
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+	artifact, err := h.plugins.Lookup(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRoot := filepath.Join(h.cacheHome, "apm", "plugins", "demo-plugin", "v0.1.0")
+	if artifact.Root != wantRoot {
+		t.Fatalf("shared Artifact root = %q, want %q", artifact.Root, wantRoot)
+	}
+	for _, marketplace := range []string{
+		filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"),
+		filepath.Join(artifact.Root, ".claude-plugin", "marketplace.json"),
+	} {
+		if info, err := os.Stat(marketplace); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("shared marketplace %q missing: %v", marketplace, err)
+		}
+	}
+	assertCompleteAcceptancePluginTree(t, artifact.PluginPath)
+	for _, agent := range []domain.AgentID{domain.AgentHermes, domain.AgentBibit} {
+		target := h.pluginTarget(agent)
+		assertCompleteAcceptancePluginTree(t, target)
+		assertTreesEqual(t, artifact.PluginPath, target)
+	}
+	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
+		source, err := os.ReadFile(h.marketplaceState(agent))
+		if err != nil || string(source) != artifact.Root {
+			t.Fatalf("marketplace source for %q = %q, %v; want shared root %q", agent, source, err, artifact.Root)
+		}
+	}
+	h.assertOnlyFakeExecutables()
+}
+
+func assertCompleteAcceptancePluginTree(t *testing.T, root string) {
+	t.Helper()
+	for _, relative := range []string{
+		filepath.Join(".codex-plugin", "plugin.json"),
+		filepath.Join(".claude-plugin", "plugin.json"),
+		filepath.Join(".hermes-plugin", "plugin.yaml"),
+		filepath.Join(".hermes-plugin", "__init__.py"),
+		filepath.Join("skills", "demo-plugin", "SKILL.md"),
+	} {
+		if info, err := os.Stat(filepath.Join(root, relative)); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("complete Plugin tree %q missing %q: %v", root, relative, err)
+		}
+	}
+}
+
+func assertTreesEqual(t *testing.T, wantRoot, gotRoot string) {
+	t.Helper()
+	snapshot := func(root string) map[string]string {
+		result := make(map[string]string)
+		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			result[relative] = string(contents)
+			return nil
+		}); err != nil {
+			t.Fatalf("snapshot Plugin tree %q: %v", root, err)
+		}
+		return result
+	}
+	want := snapshot(wantRoot)
+	got := snapshot(gotRoot)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("published Plugin tree %q differs from shared Artifact %q: got=%v want=%v", gotRoot, wantRoot, got, want)
 	}
 }
 
@@ -671,15 +1047,27 @@ func (h *isolatedPluginHarness) assertMarketplaceCachePresentAndStagingAbsent(ag
 
 func (h *isolatedPluginHarness) assertOnlyFakeExecutables() {
 	h.t.Helper()
+	assertPluginHarnessEnvironment(h.t, h.fakeBin, filepath.Join(h.root, "user-home"))
 	contents, err := os.ReadFile(h.calls)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
+		contents = nil
+	} else if err != nil {
 		h.t.Fatal(err)
 	}
-	prefix := h.fakeBin + string(filepath.Separator)
 	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		if line == "" {
+			continue
+		}
 		path, _, found := strings.Cut(line, "|")
-		if !found || !strings.HasPrefix(path, prefix) || strings.Contains(line, "/home/liangff/.local/bin/hermes") {
+		within, withinErr := filesystem.PathEqualOrWithin(h.fakeBin, path)
+		if !found || withinErr != nil || !within || path != filepath.Join(h.fakeBin, filepath.Base(path)) {
 			h.t.Fatalf("Agent CLI invocation escaped fake-bin: %q", line)
 		}
+	}
+	for _, path := range []string{
+		os.Getenv("HOME"), os.Getenv("APM_HOME"), os.Getenv("XDG_CACHE_HOME"),
+		os.Getenv("CODEX_HOME"), os.Getenv("CLAUDE_CONFIG_DIR"), os.Getenv("HERMES_HOME"), os.Getenv("BIANBU_AGENT_HOME"),
+	} {
+		assertPathsWithinRoot(h.t, h.root, path)
 	}
 }

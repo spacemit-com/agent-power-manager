@@ -188,6 +188,12 @@ case "$agent:$1:$2:$3" in
 esac
 `
 
+const acceptanceBibitPluginCLIScript = `#!/bin/sh
+case "$0" in "$FAKE_PLUGIN_BIN"/*) ;; *) exit 97 ;; esac
+printf '%s|%s\n' "$0" "$*" >> "$FAKE_PLUGIN_CALLS"
+exit 98
+`
+
 type pluginAcceptanceHarness struct {
 	t            *testing.T
 	root         string
@@ -261,14 +267,21 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, executable := range []string{"codex", "claude"} {
-		if err := os.WriteFile(filepath.Join(fakeBin, executable), []byte(acceptanceMarketplaceCLIScript), 0o700); err != nil {
+	for executable, script := range map[string]string{
+		"bianbu-agent": acceptanceBibitPluginCLIScript,
+		"codex":        acceptanceMarketplaceCLIScript,
+		"claude":       acceptanceMarketplaceCLIScript,
+		"hermes":       fakeHermesPluginScript,
+	} {
+		if err := os.WriteFile(filepath.Join(fakeBin, executable), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	agentHomes := map[domain.AgentID]string{
+		domain.AgentBibit:      filepath.Join(root, "agents", "bibit"),
 		domain.AgentCodex:      filepath.Join(root, "agents", "codex"),
 		domain.AgentClaudeCode: filepath.Join(root, "agents", "claude"),
+		domain.AgentHermes:     filepath.Join(root, "agents", "hermes"),
 	}
 	agentHome := agentHomes[agent]
 	if err := os.MkdirAll(agentHome, 0o700); err != nil {
@@ -288,7 +301,12 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	barrierGate := filepath.Join(root, "barrier-gate")
 	failBefore := filepath.Join(root, "fail-before")
 	cacheHome := filepath.Join(root, "cache")
-	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	isolatedHome := filepath.Join(root, "user-home")
+	if err := os.MkdirAll(isolatedHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin)
+	t.Setenv("HOME", isolatedHome)
 	t.Setenv("FAKE_PLUGIN_BIN", fakeBin)
 	t.Setenv("FAKE_PLUGIN_CALLS", calls)
 	t.Setenv("FAKE_PLUGIN_INTERRUPT", interrupt)
@@ -301,7 +319,9 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	t.Setenv("CODEX_HOME", agentHomes[domain.AgentCodex])
 	t.Setenv("CLAUDE_CONFIG_DIR", agentHomes[domain.AgentClaudeCode])
-	t.Setenv("HERMES_HOME", filepath.Join(root, "agents", "hermes"))
+	t.Setenv("HERMES_HOME", agentHomes[domain.AgentHermes])
+	t.Setenv("BIANBU_AGENT_HOME", agentHomes[domain.AgentBibit])
+	assertPluginHarnessEnvironment(t, fakeBin, isolatedHome)
 
 	cloudClient, err := cloud.NewLocalClient(resources)
 	if err != nil {
@@ -680,25 +700,27 @@ func (h *pluginAcceptanceHarness) assertOnlyFakeExecutables() {
 	wantPrefix := h.fakeBin + string(filepath.Separator)
 	for _, line := range h.callLines() {
 		executable, _, found := strings.Cut(line, "|")
-		if !found || !strings.HasPrefix(executable, wantPrefix) || executable == "/home/liangff/.local/bin/hermes" ||
-			executable != filepath.Join(h.fakeBin, filepath.Base(executable)) {
+		if !found || !strings.HasPrefix(executable, wantPrefix) || executable != filepath.Join(h.fakeBin, filepath.Base(executable)) {
 			h.t.Fatalf("Agent executable escaped fake-bin: %q", line)
 		}
 	}
-	if got, want := os.Getenv("PATH"), h.fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin"; got != want {
+	if got, want := os.Getenv("PATH"), h.fakeBin; got != want {
 		h.t.Fatalf("PATH = %q, want %q", got, want)
 	}
-	for _, path := range []string{os.Getenv("CODEX_HOME"), os.Getenv("CLAUDE_CONFIG_DIR"), os.Getenv("HERMES_HOME"), os.Getenv("APM_HOME"), os.Getenv("XDG_CACHE_HOME")} {
+	for _, path := range []string{os.Getenv("HOME"), os.Getenv("CODEX_HOME"), os.Getenv("CLAUDE_CONFIG_DIR"), os.Getenv("HERMES_HOME"), os.Getenv("BIANBU_AGENT_HOME"), os.Getenv("APM_HOME"), os.Getenv("XDG_CACHE_HOME")} {
 		assertPathsWithinRoot(h.t, h.root, path)
 	}
 }
 
 func (h *pluginAcceptanceHarness) assertFakeExecutablePresent() {
 	h.t.Helper()
-	executable := "codex"
-	if h.agent == domain.AgentClaudeCode {
-		executable = "claude"
+	executables := map[domain.AgentID]string{
+		domain.AgentBibit:      "bianbu-agent",
+		domain.AgentCodex:      "codex",
+		domain.AgentClaudeCode: "claude",
+		domain.AgentHermes:     "hermes",
 	}
+	executable := executables[h.agent]
 	want := filepath.Join(h.fakeBin, executable)
 	info, err := os.Stat(want)
 	if err != nil {
@@ -999,7 +1021,6 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 		marketplace bool
 		plugin      bool
 	}{
-		{name: "marketplace only", marketplace: true},
 		{name: "Plugin only", plugin: true},
 		{name: "both", marketplace: true, plugin: true},
 	} {

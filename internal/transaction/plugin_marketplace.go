@@ -23,38 +23,51 @@ func (s *Service) installLocalMarketplacePlugin(ctx context.Context, request Plu
 	if err != nil {
 		return fmt.Errorf("inspect target Plugin before install: %w", err)
 	}
-	if marketplaceFact.Presence != adapter.MarketplaceAbsent || pluginFact.Presence != adapter.PluginAbsent {
+	// 重装可复用卸载后保留的精确 marketplace，但 journal 必须记录其回滚后仍需存在。
+	retainedMarketplace := marketplaceFact.Presence == adapter.MarketplacePresent &&
+		marketplaceFact.Name == request.Marketplace.Target.Name && marketplaceFact.Source == request.Marketplace.Target.Source
+	if (marketplaceFact.Presence != adapter.MarketplaceAbsent && !retainedMarketplace) || pluginFact.Presence != adapter.PluginAbsent {
 		return fmt.Errorf("marketplace Plugin first-install pre-state is not absent: %w", ErrIndeterminateState)
 	}
 
-	journal, err := s.newLocalMarketplacePluginInstallJournal(request, PhaseRegisteringMarketplace)
+	phase := PhaseRegisteringMarketplace
+	if retainedMarketplace {
+		phase = PhaseAddingNewPlugin
+	}
+	journal, err := s.newLocalMarketplacePluginInstallJournal(request, phase)
 	if err != nil {
 		return err
+	}
+	if retainedMarketplace {
+		journal.Plugin.Marketplace.PreviousSource = request.Marketplace.Target.Source
+		journal.Plugin.Marketplace.PreviousPresent = true
 	}
 	if err := s.journals.Create(journal); err != nil {
 		return fmt.Errorf("create marketplace Plugin install journal: %w", err)
 	}
 	progress := marketplacePluginProgress{}
-	mutation, mutationErr := marketplaceAdapter.RegisterMarketplace(ctx, request.Marketplace.Target)
-	switch mutation.State {
-	case adapter.PluginMutationApplied:
-		progress.targetMarketplaceRegistered = true
-	case adapter.PluginMutationNotApplied:
-		return s.rollbackLocalMarketplacePlugin(ctx, journal, marketplaceAdapter, progress, pluginMutationError("register target marketplace", mutationErr))
-	case adapter.PluginMutationUnknown:
-		return indeterminatePluginMutation("register target marketplace", mutationErr)
-	default:
-		return indeterminatePluginMutation(fmt.Sprintf("register target marketplace returned state %q", mutation.State), mutationErr)
-	}
-	journal.Phase = PhaseAddingNewPlugin
-	if err := s.journals.Update(journal); err != nil {
-		return errors.Join(mutationErr, fmt.Errorf("persist Plugin add intent: %w", err))
-	}
-	if mutationErr != nil {
-		return mutationErr
+	if !retainedMarketplace {
+		mutation, mutationErr := marketplaceAdapter.RegisterMarketplace(ctx, request.Marketplace.Target)
+		switch mutation.State {
+		case adapter.PluginMutationApplied:
+			progress.targetMarketplaceRegistered = true
+		case adapter.PluginMutationNotApplied:
+			return s.rollbackLocalMarketplacePlugin(ctx, journal, marketplaceAdapter, progress, pluginMutationError("register target marketplace", mutationErr))
+		case adapter.PluginMutationUnknown:
+			return indeterminatePluginMutation("register target marketplace", mutationErr)
+		default:
+			return indeterminatePluginMutation(fmt.Sprintf("register target marketplace returned state %q", mutation.State), mutationErr)
+		}
+		journal.Phase = PhaseAddingNewPlugin
+		if err := s.journals.Update(journal); err != nil {
+			return errors.Join(mutationErr, fmt.Errorf("persist Plugin add intent: %w", err))
+		}
+		if mutationErr != nil {
+			return mutationErr
+		}
 	}
 
-	mutation, mutationErr = request.Adapter.Add(ctx, request.Target)
+	mutation, mutationErr := request.Adapter.Add(ctx, request.Target)
 	switch mutation.State {
 	case adapter.PluginMutationApplied:
 		progress.targetPluginAdded = true

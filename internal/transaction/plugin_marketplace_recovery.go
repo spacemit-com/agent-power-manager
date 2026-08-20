@@ -153,8 +153,12 @@ func (s *Service) recoverLocalMarketplacePluginInstall(ctx context.Context, jour
 	if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 		return err
 	}
-	if journal.Plugin.PreviousPresent && (facts.marketplace != marketplaceRecoveryPrevious || !facts.previousPresent) {
-		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, *journal.Previous, journal.Plugin.Marketplace.PreviousSource); err != nil {
+	if journal.Plugin.Marketplace.PreviousPresent && facts.marketplace != marketplaceRecoveryPrevious {
+		previousRef := journal.Power
+		if journal.Previous != nil {
+			previousRef = *journal.Previous
+		}
+		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, previousRef, journal.Plugin.Marketplace.PreviousSource); err != nil {
 			return err
 		}
 	}

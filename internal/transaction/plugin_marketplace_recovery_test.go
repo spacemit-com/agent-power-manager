@@ -544,6 +544,42 @@ func TestRecoverMarketplacePluginRollbackResumesAfterEveryAction(t *testing.T) {
 	}
 }
 
+func TestRecoverRetainedMarketplaceReinstallRollbackPreservesSourceAcrossRetry(t *testing.T) {
+	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
+		t.Run(string(agent), func(t *testing.T) {
+			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseAddingNewPlugin, false)
+			fixture.journal.Agent = agent
+			fixture.journal.Plugin.Marketplace.PreviousSource = fixture.targetSource
+			fixture.journal.Plugin.Marketplace.PreviousPresent = true
+			fixture.store.journal = fixture.journal
+			fixture.setMarketplace(fixture.targetSource)
+
+			interrupted := errors.New("injected retained marketplace rollback interruption")
+			unregister := "unregister-marketplace:" + fixture.targetSource
+			fixture.adapter.interrupt[unregister] = interrupted
+			first, err := fixture.recover()
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, interrupted) || first.Recovered || first.Direction != RecoveryRollback {
+				t.Fatalf("first Recover() = %+v, %v", first, err)
+			}
+			if !fixture.store.found || fixture.store.journal.Phase != PhaseRollingBack || fixture.adapter.marketplace.Presence != adapter.MarketplaceAbsent {
+				t.Fatalf("first recovery state = journal %v/%q marketplace %+v", fixture.store.found, fixture.store.journal.Phase, fixture.adapter.marketplace)
+			}
+
+			fixture.adapter.interrupt = map[string]error{}
+			second, err := fixture.recover()
+			if err != nil || !second.Recovered || second.Direction != RecoveryRollback {
+				t.Fatalf("second Recover() = %+v, %v", second, err)
+			}
+			if fixture.store.found || fixture.adapter.marketplace.Presence != adapter.MarketplacePresent || fixture.adapter.marketplace.Source != fixture.targetSource {
+				t.Fatalf("second recovery state = journal %v marketplace %+v", fixture.store.found, fixture.adapter.marketplace)
+			}
+			if fact := fixture.adapter.plugins[fixture.target.ActualName]; fact.Presence != adapter.PluginAbsent {
+				t.Fatalf("rollback adopted Plugin target: %+v", fact)
+			}
+		})
+	}
+}
+
 func TestRecoverMarketplacePluginRollbackMutationMatrix(t *testing.T) {
 	operations := []struct {
 		name    string

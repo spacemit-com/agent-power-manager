@@ -3,14 +3,17 @@ package cloud_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"apm/internal/cloud"
 	"apm/internal/domain"
+	"apm/internal/utils/filesystem"
 )
 
 func TestLocalClientDownloadsOneSharedPluginPackage(t *testing.T) {
@@ -469,21 +472,93 @@ func TestLocalClientPluginMissingRootReturnsEmptyList(t *testing.T) {
 	}
 }
 
-func TestBundledPluginResourcesContainNoMarketplaceOrLegacyLayout(t *testing.T) {
-	t.Helper()
+func TestBundledPluginResourcesAreCompleteSharedPackagesForEveryVersion(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("resources", "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{
-		filepath.Join(root, ".agents", "plugins", "marketplace.json"),
-		filepath.Join(root, ".claude-plugin", "marketplace.json"),
-		filepath.Join(root, "plugins"),
-	} {
-		if _, err := os.Lstat(forbidden); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("legacy Cloud Plugin resource %q stat error = %v, want not exist", forbidden, err)
+	if err := validateBundledPluginFixtures(root); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBundledPluginResourceGuardRejectsRecursiveLegacyLayout(t *testing.T) {
+	source, err := filepath.Abs(filepath.Join("resources", "plugins"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "plugins")
+	if err := filesystem.CopyDir(source, root); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(root, "demo-plugin", "v0.0.1", "skills", "demo-plugin", "nested", "codex")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateBundledPluginFixtures(root); err == nil {
+		t.Fatal("fixture validation accepted recursively nested legacy Agent layout")
+	}
+}
+
+func validateBundledPluginFixtures(root string) error {
+	plugins, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	for _, plugin := range plugins {
+		if !plugin.IsDir() {
+			return fmt.Errorf("Plugin fixture root entry %q is not a directory", plugin.Name())
+		}
+		pluginRoot := filepath.Join(root, plugin.Name())
+		versions, err := os.ReadDir(pluginRoot)
+		if err != nil {
+			return err
+		}
+		for _, version := range versions {
+			if !version.IsDir() {
+				return fmt.Errorf("Plugin fixture version %q is not a directory", filepath.Join(plugin.Name(), version.Name()))
+			}
+			versionRoot := filepath.Join(pluginRoot, version.Name())
+			for _, required := range []string{
+				filepath.Join(".codex-plugin", "plugin.json"),
+				filepath.Join(".claude-plugin", "plugin.json"),
+				filepath.Join(".hermes-plugin", "plugin.yaml"),
+				filepath.Join(".hermes-plugin", "__init__.py"),
+			} {
+				info, err := os.Stat(filepath.Join(versionRoot, required))
+				if err != nil || !info.Mode().IsRegular() {
+					return fmt.Errorf("Plugin fixture %s@%s missing regular %q: %w", plugin.Name(), version.Name(), required, err)
+				}
+			}
+			legacyNames := map[string]bool{"codex": true, "claude-code": true, "hermes-agent": true}
+			if err := filepath.WalkDir(versionRoot, func(path string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				relative, err := filepath.Rel(versionRoot, path)
+				if err != nil {
+					return err
+				}
+				if entry.IsDir() {
+					for _, component := range strings.Split(relative, string(filepath.Separator)) {
+						if legacyNames[component] {
+							return fmt.Errorf("Plugin fixture %s@%s contains recursive legacy Agent layout %q", plugin.Name(), version.Name(), relative)
+						}
+					}
+					return nil
+				}
+				normalized := filepath.ToSlash(relative)
+				if strings.HasSuffix(normalized, "/.agents/plugins/marketplace.json") || normalized == ".agents/plugins/marketplace.json" ||
+					strings.HasSuffix(normalized, "/.claude-plugin/marketplace.json") || normalized == ".claude-plugin/marketplace.json" {
+					return fmt.Errorf("Plugin fixture %s@%s contains marketplace %q", plugin.Name(), version.Name(), relative)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func writeRawPluginPackageDir(t *testing.T, root, logicalName, version string) {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"apm/internal/utils/filesystem"
 )
 
 func TestMCPAdapterResultStatesSupportFailClosedRecovery(t *testing.T) {
@@ -64,6 +66,24 @@ printf 'ok'
 	}
 	if string(stdin) != "answer\n" {
 		t.Fatalf("stdin = %q, want scripted input", stdin)
+	}
+}
+
+func TestDefaultAgentCLIRunnerResolvesEveryAgentInsideFakeBin(t *testing.T) {
+	fakeBin := t.TempDir()
+	isolatedHome := t.TempDir()
+	for _, executable := range []string{"bianbu-agent", "codex", "claude", "hermes"} {
+		writeRunnerFake(t, fakeBin, executable, "#!/bin/sh\nexit 0\n")
+	}
+	t.Setenv("PATH", fakeBin)
+	t.Setenv("HOME", isolatedHome)
+
+	for _, executable := range []string{"bianbu-agent", "codex", "claude", "hermes"} {
+		result, err := newDefaultAgentCLIRunner().Run(context.Background(), executable, nil, "")
+		within, withinErr := filesystem.PathEqualOrWithin(fakeBin, result.Path)
+		if err != nil || withinErr != nil || !within || result.Path != filepath.Join(fakeBin, executable) {
+			t.Fatalf("Run(%q) path = %q, run=%v containment=%v; want fake-bin", executable, result.Path, err, withinErr)
+		}
 	}
 }
 
