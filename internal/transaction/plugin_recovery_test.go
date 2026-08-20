@@ -172,9 +172,51 @@ func TestPluginRecoveryFilesystemRemovingOldReenablesUnmovedPreviousTarget(t *te
 	if err != nil || result.Direction != RecoveryRollback || !result.Recovered {
 		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
-	want := []string{"resolver:hermes-agent", "adapter:inspect:demo", "update:rolling-back", "update:removing-old", "adapter:add:demo", "delete:journal"}
+	want := []string{"resolver:hermes-agent", "adapter:inspect:demo", "adapter:add:demo", "delete:journal"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
+	}
+}
+
+func TestPluginRecoveryFilesystemRemovingOldPhaseWriteFailureRetryPreservesRestoredTarget(t *testing.T) {
+	fixture := newSamePathPluginRecoveryFixture(t)
+	filesystem := fixture.store.journal.Plugin.Filesystem
+	if err := os.RemoveAll(fixture.target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filesystem.PreviousQuarantinePath, fixture.target); err != nil {
+		t.Fatal(err)
+	}
+	fixture.store.journal.Phase = PhaseRemovingOld
+	phaseErr := errors.New("persist removing-old failed")
+	fixture.store.onUpdate = func(journal Journal) {
+		if journal.Phase == PhaseRollingBack {
+			fixture.store.fail["update:"+string(PhaseRemovingOld)] = phaseErr
+		}
+	}
+	activationErr := errors.New("restore activation failed")
+	fixture.plugin.addAnswers = []pluginMutationAnswer{
+		{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: activationErr},
+		{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}},
+	}
+
+	if result, err := fixture.service.Recover(context.Background()); !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, activationErr) || errors.Is(err, phaseErr) || result.Recovered {
+		t.Fatalf("first Recover() = %+v, %v; want activation failure without phase-write failure", result, err)
+	}
+	assertSamePathPreviousContents(t, fixture.target)
+	if !fixture.store.found || fixture.store.journal.Phase != PhaseRemovingOld {
+		t.Fatalf("failed recovery journal = found %t phase %q; want retained removing-old", fixture.store.found, fixture.store.journal.Phase)
+	}
+	delete(fixture.store.fail, "update:"+string(PhaseRemovingOld))
+	fixture.store.onUpdate = nil
+
+	result, err := fixture.service.Recover(context.Background())
+	if err != nil || !result.Recovered || result.Direction != RecoveryRollback {
+		t.Fatalf("second Recover() = %+v, %v; want converged rollback", result, err)
+	}
+	assertSamePathPreviousContents(t, fixture.target)
+	if fixture.store.found {
+		t.Fatal("converged retry retained journal")
 	}
 }
 

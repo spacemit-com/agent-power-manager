@@ -71,8 +71,11 @@ func (s *Service) recoverFilesystemPlugin(ctx context.Context, journal Journal, 
 		}
 		startedPhase := journal.Phase
 		result.Direction = RecoveryRollback
-		if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
-			return err
+		// removing-old 已单义标识旧目录恢复；先降级为 rolling-back 会让 target 的旧目录身份丢失。
+		if startedPhase != PhaseRemovingOld {
+			if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
+				return err
+			}
 		}
 		// removing-old 阶段的同名 target 仍可能是尚未隔离的旧版本，不得按新发布目录删除。
 		if targetExists && startedPhase != PhaseRemovingOld {
