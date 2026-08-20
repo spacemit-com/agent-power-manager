@@ -244,6 +244,10 @@ func (c *installFakeCache) StageSkill(domain.PowerRef) (string, error) {
 	return c.stage("skill")
 }
 
+func (c *installFakeCache) StageAgent(domain.PowerRef) (string, error) {
+	return c.stage("agent")
+}
+
 func (c *installFakeCache) stage(power string) (string, error) {
 	agent := c.fixture.currentAgent
 	*c.calls = append(*c.calls, "cache:stage-"+power+":"+string(agent))
