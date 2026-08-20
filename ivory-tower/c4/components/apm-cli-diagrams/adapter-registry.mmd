@@ -63,6 +63,6 @@ classDiagram
     claudePluginAdapter ..|> MarketplacePluginAdapter
     hermesPluginAdapter ..|> PluginAdapter
     AdapterRegistry --> AgentSnapshot : lexical snapshot
-    note for bibitPluginAdapter "BIANBU_AGENT_HOME（默认 ~/bianbu-agent）；plugins/<name> 目录即状态，Add/Remove 不调用 Plugin CLI（ADR-014）"
+    note for bibitPluginAdapter "BIANBU_AGENT_HOME（默认 ~/.bianbu-agent）；plugins/<name> 目录即状态，Add/Remove 不调用 Plugin CLI（ADR-014）"
     bibitMCPAdapter ..|> MCPAdapter
     bibitPluginAdapter ..|> PluginAdapter

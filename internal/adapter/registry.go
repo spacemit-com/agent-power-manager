@@ -18,7 +18,7 @@ type agentRegistration struct {
 
 var builtInAgentRegistrations = []agentRegistration{
 	{
-		profile:  agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: "bianbu-agent", adaptSkill: noOpSkillAdapt},
+		profile:  agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: ".bianbu-agent", adaptSkill: noOpSkillAdapt},
 		newSkill: func(profile agentProfile) SkillAdapter { return newFilesystemSkillAdapter(profile) },
 		newMCP:   func(runner agentCLIRunner) MCPAdapter { return newBibitMCPAdapter(runner) },
 		newPlugin: func(profile agentProfile, _ agentCLIRunner) PluginAdapter {

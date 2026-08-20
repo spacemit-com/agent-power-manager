@@ -131,5 +131,5 @@ func TestBibitPluginAdapterRejectsUnsafeNamesAndSelectorMismatches(t *testing.T)
 }
 
 func bibitPluginProfile() agentProfile {
-	return agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: "bianbu-agent"}
+	return agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: ".bianbu-agent"}
 }

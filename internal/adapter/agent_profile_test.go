@@ -17,7 +17,7 @@ func TestAgentProfileRootPath(t *testing.T) {
 		{"codex", "CODEX_HOME", ".codex", domain.AgentCodex},
 		{"claude", "CLAUDE_CONFIG_DIR", ".claude", domain.AgentClaudeCode},
 		{"hermes", "HERMES_HOME", ".hermes", domain.AgentHermes},
-		{"bibit", "BIANBU_AGENT_HOME", "bianbu-agent", domain.AgentBibit},
+		{"bibit", "BIANBU_AGENT_HOME", ".bianbu-agent", domain.AgentBibit},
 	}
 
 	for _, tt := range tests {
@@ -57,7 +57,7 @@ func TestAgentProfileDetectInstalled(t *testing.T) {
 		{"codex", "CODEX_HOME", ".codex", domain.AgentCodex},
 		{"claude", "CLAUDE_CONFIG_DIR", ".claude", domain.AgentClaudeCode},
 		{"hermes", "HERMES_HOME", ".hermes", domain.AgentHermes},
-		{"bibit", "BIANBU_AGENT_HOME", "bianbu-agent", domain.AgentBibit},
+		{"bibit", "BIANBU_AGENT_HOME", ".bianbu-agent", domain.AgentBibit},
 	}
 
 	for _, tt := range tests {
@@ -160,7 +160,7 @@ func TestAgentProfileSkillTargetPath(t *testing.T) {
 }
 
 func TestPluginTargetPath(t *testing.T) {
-	config := agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: "bianbu-agent"}
+	config := agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: ".bianbu-agent"}
 	root := filepath.Join(t.TempDir(), "agent-root")
 	t.Setenv("BIANBU_AGENT_HOME", root)
 	got, err := config.pluginTargetPath("demo-plugin")
@@ -175,13 +175,13 @@ func TestPluginTargetPath(t *testing.T) {
 }
 
 func TestBibitPluginTargetPathUsesBianbuAgentDefaultRoot(t *testing.T) {
-	config := agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: "bianbu-agent"}
+	config := agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: ".bianbu-agent"}
 	home := t.TempDir()
 	t.Setenv("APM_HOME", home)
 	t.Setenv("BIANBU_AGENT_HOME", "")
 
 	got, err := config.pluginTargetPath("demo-plugin")
-	want := filepath.Join(home, "bianbu-agent", "plugins", "demo-plugin")
+	want := filepath.Join(home, ".bianbu-agent", "plugins", "demo-plugin")
 	if err != nil || got != want {
 		t.Fatalf("pluginTargetPath() = %q, %v; want %q, nil", got, err, want)
 	}

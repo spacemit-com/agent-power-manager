@@ -18,7 +18,7 @@ func TestRegistryResolvesBuiltInSkillAdaptersAndRefreshesInstalledAgentsInAgentI
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
-	for _, root := range []string{"bianbu-agent", ".claude", ".codex", ".hermes"} {
+	for _, root := range []string{".bianbu-agent", ".claude", ".codex", ".hermes"} {
 		if err := os.Mkdir(filepath.Join(home, root), 0o755); err != nil {
 			t.Fatal(err)
 		}

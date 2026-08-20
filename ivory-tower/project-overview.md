@@ -51,7 +51,7 @@ Install 与 Uninstall 分别以独立 factory 和生命周期端口接线，不�
 
 | Agent ID | Profile 根 | Skill | MCP | Plugin |
 | --- | --- | --- | --- | --- |
-| `bibit` | `BIANBU_AGENT_HOME`，默认 `~/bianbu-agent` | `skills/<name>` | 独立 `bianbu-agent mcp` Adapter | `plugins/<name>`；目录即状态，不调用 Plugin CLI |
+| `bibit` | `BIANBU_AGENT_HOME`，默认 `~/.bianbu-agent` | `skills/<name>` | 独立 `bianbu-agent mcp` Adapter | `plugins/<name>`；目录即状态，不调用 Plugin CLI |
 | `claude-code` | `CLAUDE_CONFIG_DIR`，默认 `~/.claude` | `skills/<name>` | Claude CLI user scope | 共享制品中的 Claude marketplace |
 | `codex` | `CODEX_HOME`，默认 `~/.codex` | `skills/<name>` | Codex CLI | 共享制品中的 Codex marketplace |
 | `hermes-agent` | `HERMES_HOME`，默认 `~/.hermes` | `skills/<name>` | Hermes CLI | `plugins/<name>`；CLI enable/disable |

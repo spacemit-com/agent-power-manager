@@ -4,7 +4,7 @@
 
 ## 背景
 
-APM 已为 Codex、Claude Code 与 Hermes 提供 Skill、MCP、Plugin 的统一 lifecycle。内部开发 Agent Bibit 使用 `~/bianbu-agent` 作为资源根，Skill 与 Plugin 分别位于 `skills/` 和 `plugins/`，MCP 通过 `bianbu-agent mcp add/get/remove` 管理。
+APM 已为 Codex、Claude Code 与 Hermes 提供 Skill、MCP、Plugin 的统一 lifecycle。内部开发 Agent Bibit 使用 `~/.bianbu-agent` 作为资源根，Skill 与 Plugin 分别位于 `skills/` 和 `plugins/`，MCP 通过 `bianbu-agent mcp add/get/remove` 管理。
 
 当前 Plugin Cloud 与持久缓存仍按 Agent 分包，同一个 Plugin 版本需要维护多份几乎相同的内容。实际 Plugin 可以在一棵目录中同时携带 Codex、Claude Code 与 Hermes 的原生入口；新增 Bibit 应同时完成共享资源治理，而不是增加第四份资源。
 
@@ -13,7 +13,7 @@ APM 已为 Codex、Claude Code 与 Hermes 提供 Skill、MCP、Plugin 的统一 
 ## 目标
 
 - 新增内置 Agent ID `bibit`，完整适配 Skill、MCP 与 Plugin。
-- Bibit 默认根目录为 `~/bianbu-agent`，允许 `BIANBU_AGENT_HOME` 覆盖。
+- Bibit 默认根目录为 `~/.bianbu-agent`，允许 `BIANBU_AGENT_HOME` 覆盖。
 - Bibit Skill 发布到 `skills/<name>`，不做内容转换。
 - Bibit MCP 以独立 Adapter 实现理想化的 Codex 同款命令契约，便于后续独立演进。
 - Bibit Plugin 发布到 `plugins/<name>`，目录存在即表示 Agent 状态，不调用 Plugin enable/disable CLI。
@@ -41,7 +41,7 @@ APM 已为 Codex、Claude Code 与 Hermes 提供 Skill、MCP、Plugin 的统一 
 Agent ID       bibit
 CLI            bianbu-agent
 环境变量       BIANBU_AGENT_HOME
-默认根目录     <有效 HOME>/bianbu-agent
+默认根目录     <有效 HOME>/.bianbu-agent
 Skill 根       <bibit-root>/skills
 Plugin 根      <bibit-root>/plugins
 ```

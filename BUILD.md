@@ -156,7 +156,7 @@ MCP 支持 Bibit、Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互�
 | `codex` | `<CODEX_HOME>/skills/<name>` | Codex CLI | 共享制品中的 Codex 本地 marketplace |
 | `hermes-agent` | `<HERMES_HOME>/skills/<name>` | Hermes CLI | `<HERMES_HOME>/plugins/<name>`；Hermes CLI enable/disable |
 
-Bibit profile 根优先使用 `BIANBU_AGENT_HOME`，未设置时为 `<有效 HOME>/bianbu-agent`；根目录存在且为目录才进入本次命令的已安装 Agent 快照。完整契约见 [Feature 018](ivory-tower/features/018-bibit-agent/spec.md) 和 [ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md)。
+Bibit profile 根优先使用 `BIANBU_AGENT_HOME`，未设置时为 `<有效 HOME>/.bianbu-agent`；根目录存在且为目录才进入本次命令的已安装 Agent 快照。完整契约见 [Feature 018](ivory-tower/features/018-bibit-agent/spec.md) 和 [ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md)。
 
 ### Plugin 共享 artifact 与操作顺序
 

@@ -58,7 +58,7 @@ func TestSkillAdapterInstallPublishesSkillAndCleansStaging(t *testing.T) {
 
 func TestBibitSkillAdapterInstallsUnderIsolatedAgentRoot(t *testing.T) {
 	home := t.TempDir()
-	bibitRoot := filepath.Join(home, "fake-agent-home", "bianbu-agent")
+	bibitRoot := filepath.Join(home, "fake-agent-home", ".bianbu-agent")
 	t.Setenv("APM_HOME", filepath.Join(home, "apm-home"))
 	t.Setenv("BIANBU_AGENT_HOME", bibitRoot)
 	if err := os.MkdirAll(bibitRoot, 0o755); err != nil {
