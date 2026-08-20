@@ -124,19 +124,19 @@ func ValidateRawPackage(pluginPath string) error {
 	if err := ValidatePhysicalTree(pluginPath); err != nil {
 		return err
 	}
-	return validateMarketplaceClosedWorld(pluginPath, "")
+	return validateMarketplaceClosedWorld(pluginPath)
 }
 
-// Validate 完整复验不可变 artifact 的物理树、原生 manifest 与 Agent marketplace 语义。
-func Validate(agent domain.AgentID, ref domain.PowerRef, root string) error {
+// ValidateShared 检查共享 Plugin 制品的物理边界和逻辑身份，不审计 Cloud 的多 Agent 完整性。
+func ValidateShared(ref domain.PowerRef, root string) error {
 	if err := ValidatePhysicalTree(root); err != nil {
 		return err
 	}
-	actualName, err := domain.ActualPluginName(ref)
+	logicalName, err := domain.PluginRuntimeName(ref)
 	if err != nil {
 		return errors.Join(ErrInvalid, err)
 	}
-	pluginPath := filepath.Join(root, "plugins", actualName)
+	pluginPath := filepath.Join(root, "plugins", logicalName)
 	pluginInfo, err := os.Lstat(pluginPath)
 	if err != nil {
 		return fmt.Errorf("lstat Plugin content root %q: %w", pluginPath, errors.Join(ErrInvalid, err))
@@ -144,34 +144,26 @@ func Validate(agent domain.AgentID, ref domain.PowerRef, root string) error {
 	if pluginInfo.Mode()&os.ModeSymlink != 0 || !pluginInfo.IsDir() {
 		return fmt.Errorf("Plugin content root %q is not a physical directory: %w", pluginPath, ErrInvalid)
 	}
+	return validateMarketplaceClosedWorld(root, codexMarketplacePath, claudeMarketplacePath)
+}
 
-	allowedMarketplace := ""
-	switch agent {
-	case domain.AgentCodex:
-		allowedMarketplace = codexMarketplacePath
-	case domain.AgentClaudeCode:
-		allowedMarketplace = claudeMarketplacePath
-	case domain.AgentHermes:
-	default:
-		return fmt.Errorf("validate Plugin artifact agent %q: %w", agent, ErrInvalid)
-	}
-	if err := validateMarketplaceClosedWorld(root, allowedMarketplace); err != nil {
+// ValidateMarketplace 复验目标 Agent 所需的 APM 派生 marketplace；不连接或修改资源层。
+func ValidateMarketplace(agent domain.AgentID, ref domain.PowerRef, root string) error {
+	if err := ValidateShared(ref, root); err != nil {
 		return err
 	}
-
+	logicalName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		return errors.Join(ErrInvalid, err)
+	}
+	pluginPath := filepath.Join(root, "plugins", logicalName)
 	switch agent {
 	case domain.AgentCodex:
 		return validateCodex(ref, root, pluginPath)
 	case domain.AgentClaudeCode:
 		return validateClaude(ref, root, pluginPath)
-	case domain.AgentHermes:
-		var manifest claudePluginManifest
-		if err := decodeRequiredJSON(filepath.Join(pluginPath, claudeManifestPath), &manifest); err != nil {
-			return fmt.Errorf("decode Hermes Plugin manifest: %w", err)
-		}
-		return validateManifestIdentity(ref, manifest.Name, manifest.Version)
 	default:
-		panic("validated Agent switch became unreachable")
+		return fmt.Errorf("validate Plugin artifact agent %q: %w", agent, ErrInvalid)
 	}
 }
 
@@ -219,7 +211,11 @@ func validateClaude(ref domain.PowerRef, root, pluginPath string) error {
 	return nil
 }
 
-func validateMarketplaceClosedWorld(root, allowed string) error {
+func validateMarketplaceClosedWorld(root string, allowed ...string) error {
+	allowedPaths := make(map[string]struct{}, len(allowed))
+	for _, path := range allowed {
+		allowedPaths[path] = struct{}{}
+	}
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -228,7 +224,8 @@ func validateMarketplaceClosedWorld(root, allowed string) error {
 		if err != nil {
 			return err
 		}
-		if !isMarketplacePath(relative) || relative == allowed {
+		_, permitted := allowedPaths[relative]
+		if !isMarketplacePath(relative) || permitted {
 			return nil
 		}
 		return fmt.Errorf("Plugin artifact contains disallowed marketplace %q: %w", relative, ErrInvalid)

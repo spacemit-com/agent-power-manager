@@ -159,14 +159,14 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 	t.Helper()
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
-	previousSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v2.0.0")
+	previousSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 	targetRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
 	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 	writeValidMarketplaceRecoveryArtifact(t, targetSource, targetRef)
 	writeValidMarketplaceRecoveryArtifact(t, previousSource, previousRef)
-	target := adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"}
-	previous := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
+	target := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	previous := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
 	journal := Journal{
 		SchemaVersion: 1,
 		TransactionID: "00112233445566778899aabbccddeeff",
@@ -201,8 +201,7 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 		events:      &fixture.events,
 		marketplace: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
 		plugins: map[string]adapter.PluginFact{
-			target.ActualName:   {Presence: adapter.PluginAbsent, ActualName: target.ActualName},
-			previous.ActualName: {Presence: adapter.PluginAbsent, ActualName: previous.ActualName},
+			target.ActualName: {Presence: adapter.PluginAbsent, ActualName: target.ActualName},
 		},
 		pluginErrors:    map[string]error{},
 		interrupt:       map[string]error{},
@@ -219,26 +218,30 @@ func writeValidMarketplaceRecoveryArtifact(t *testing.T, root string, ref domain
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestPath := filepath.Join(root, "plugins", actualName, ".codex-plugin", "plugin.json")
-	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	nativeVersion := strings.TrimPrefix(ref.Version, "v")
-	manifest := fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","author":{"name":"APM"}}`, actualName, nativeVersion)
-	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	marketplacePath := filepath.Join(root, ".agents", "plugins", "marketplace.json")
-	if err := os.MkdirAll(filepath.Dir(marketplacePath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	marketplace := fmt.Sprintf(`{
+	files := map[string]string{
+		filepath.Join("plugins", actualName, ".codex-plugin", "plugin.json"):  fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","author":{"name":"APM"}}`, actualName, nativeVersion),
+		filepath.Join("plugins", actualName, ".claude-plugin", "plugin.json"): fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","author":{"name":"APM"}}`, actualName, nativeVersion),
+		filepath.Join(".agents", "plugins", "marketplace.json"): fmt.Sprintf(`{
   "name":"apm-%s",
   "interface":{"displayName":%q},
   "plugins":[{"name":%q,"source":{"source":"local","path":%q},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Coding"}]
-}`, ref.Name, ref.Name, actualName, "./plugins/"+actualName)
-	if err := os.WriteFile(marketplacePath, []byte(marketplace), 0o600); err != nil {
-		t.Fatal(err)
+		}`, ref.Name, ref.Name, actualName, "./plugins/"+actualName),
+		filepath.Join(".claude-plugin", "marketplace.json"): fmt.Sprintf(`{
+  "name":"apm-%s",
+  "owner":{"name":"APM"},
+  "metadata":{"description":"Demo","version":%q},
+  "plugins":[{"name":%q,"source":%q,"description":"Demo"}]
+		}`, ref.Name, nativeVersion, actualName, "./plugins/"+actualName),
+	}
+	for relative, contents := range files {
+		path := filepath.Join(root, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -271,27 +274,27 @@ func TestRecoverMarketplacePluginDirection(t *testing.T) {
 		{
 			name: "committing exact target continues commit", phase: PhaseCommitting, marketplace: "target", targetPresent: true,
 			wantDirection: RecoveryCommit,
-			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo-v2.0.0", "manifest:set", "delete:journal"},
+			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo", "manifest:set", "delete:journal"},
 		},
 		{
 			name: "adding exact target fixes commit", phase: PhaseAddingNewPlugin, marketplace: "target", targetPresent: true,
 			wantDirection: RecoveryCommit,
-			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo-v2.0.0", "update:committing", "manifest:set", "delete:journal"},
+			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo", "update:committing", "manifest:set", "delete:journal"},
 		},
 		{
 			name: "adding absent target fixes rollback", phase: PhaseAddingNewPlugin, marketplace: "target",
 			wantDirection: RecoveryRollback,
-			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo-v2.0.0", "update:rolling-back", "unregister-marketplace:"},
+			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo", "update:rolling-back", "unregister-marketplace:"},
 		},
 		{
 			name: "earlier install without target fixes rollback", phase: PhaseRegisteringMarketplace,
 			wantDirection: RecoveryRollback,
-			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo-v2.0.0", "update:rolling-back", "delete:journal"},
+			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo", "update:rolling-back", "delete:journal"},
 		},
 		{
 			name: "rolling back never reverses", phase: PhaseRollingBack, marketplace: "target", targetPresent: true,
 			wantDirection: RecoveryRollback,
-			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo-v2.0.0", "remove-plugin:demo-v2.0.0", "unregister-marketplace:"},
+			wantEvents:    []string{"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo", "remove-plugin:demo", "unregister-marketplace:"},
 		},
 	}
 	for _, test := range tests {
@@ -368,7 +371,7 @@ func TestRecoverMarketplacePluginFactFailuresAreReadOnly(t *testing.T) {
 			mutate: func(f *marketplaceRecoveryFixture) {
 				f.setMarketplace(f.targetSource)
 				f.adapter.plugins[f.target.ActualName] = adapter.PluginFact{
-					Presence: adapter.PluginPresent, ActualName: f.target.ActualName, Selector: "demo-v2.0.0@other",
+					Presence: adapter.PluginPresent, ActualName: f.target.ActualName, Selector: "other",
 				}
 			},
 		},
@@ -410,41 +413,14 @@ func TestRecoverMarketplacePluginFactFailuresAreReadOnly(t *testing.T) {
 }
 
 func TestRecoverMarketplacePluginRejectsUnreachableRollbackFacts(t *testing.T) {
-	tests := []struct {
-		name            string
-		marketplace     string
-		targetPresent   bool
-		previousPresent bool
-	}{
-		{name: "target marketplace with previous Plugin", marketplace: "target", previousPresent: true},
-		{name: "previous marketplace with target Plugin", marketplace: "previous", targetPresent: true},
-		{name: "absent marketplace with previous Plugin", marketplace: "absent", previousPresent: true},
-		{name: "absent marketplace with target Plugin", marketplace: "absent", targetPresent: true},
-		{name: "both Plugins present", marketplace: "target", targetPresent: true, previousPresent: true},
+	fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, true)
+	fixture.setPlugin(fixture.target, adapter.PluginPresent)
+	result, err := fixture.recover()
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered {
+		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, true)
-			switch test.marketplace {
-			case "target":
-				fixture.setMarketplace(fixture.targetSource)
-			case "previous":
-				fixture.setMarketplace(fixture.previousSource)
-			}
-			if test.targetPresent {
-				fixture.setPlugin(fixture.target, adapter.PluginPresent)
-			}
-			if test.previousPresent {
-				fixture.setPlugin(fixture.previous, adapter.PluginPresent)
-			}
-			result, err := fixture.recover()
-			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered {
-				t.Fatalf("Recover() = %+v, %v", result, err)
-			}
-			if !fixture.store.found || hasMarketplaceRecoveryWrite(fixture.events) {
-				t.Fatalf("unreachable facts changed state: found=%t events=%v", fixture.store.found, fixture.events)
-			}
-		})
+	if !fixture.store.found || hasMarketplaceRecoveryWrite(fixture.events) {
+		t.Fatalf("unreachable facts changed state: found=%t events=%v", fixture.store.found, fixture.events)
 	}
 }
 
@@ -716,11 +692,9 @@ func assertMarketplaceRollbackState(t *testing.T, fixture *marketplaceRecoveryFi
 			fixture.adapter.plugins[fixture.previous.ActualName].Presence != adapter.PluginPresent {
 			t.Fatalf("previous state not restored: marketplace=%+v plugins=%+v", fixture.adapter.marketplace, fixture.adapter.plugins)
 		}
-	} else if fixture.adapter.marketplace.Presence != adapter.MarketplaceAbsent {
-		t.Fatalf("first-install marketplace remains: %+v", fixture.adapter.marketplace)
-	}
-	if fixture.adapter.plugins[fixture.target.ActualName].Presence != adapter.PluginAbsent {
-		t.Fatalf("target Plugin remains: %+v", fixture.adapter.plugins[fixture.target.ActualName])
+	} else if fixture.adapter.marketplace.Presence != adapter.MarketplaceAbsent ||
+		fixture.adapter.plugins[fixture.target.ActualName].Presence != adapter.PluginAbsent {
+		t.Fatalf("first-install state remains: marketplace=%+v plugins=%+v", fixture.adapter.marketplace, fixture.adapter.plugins)
 	}
 	if fixture.manifests.setRef != (domain.PowerRef{}) || fixture.manifests.removed != (domain.PowerRef{}) {
 		t.Fatalf("rollback changed manifest: set=%+v removed=%+v", fixture.manifests.setRef, fixture.manifests.removed)
@@ -787,7 +761,6 @@ func TestRecoverMarketplacePluginCommitRejectsInexactFacts(t *testing.T) {
 		{name: "marketplace absent", marketplace: "absent", targetPresent: true},
 		{name: "previous marketplace selected", marketplace: "previous", targetPresent: true},
 		{name: "target Plugin absent", marketplace: "target"},
-		{name: "previous Plugin remains", marketplace: "target", targetPresent: true, previousPresent: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -821,13 +794,61 @@ func TestRecoverMarketplacePluginCommitDoesNotRequirePreviousCache(t *testing.T)
 	want := []string{
 		"resolve:codex",
 		"inspect-marketplace:apm-demo",
-		"inspect-plugin:demo-v2.0.0",
-		"inspect-plugin:demo-v1.0.0",
+		"inspect-plugin:demo",
 		"manifest:set",
 		"delete:journal",
 	}
 	if !reflect.DeepEqual(fixture.events, want) {
 		t.Fatalf("events = %v, want %v", fixture.events, want)
+	}
+}
+
+func TestRecoverMarketplacePluginValidatesOnlyJournalAgentMarketplace(t *testing.T) {
+	tests := []struct {
+		name              string
+		agent             domain.AgentID
+		unrelatedRelative string
+		old               string
+		replacement       string
+	}{
+		{
+			name: "Codex ignores corrupted Claude marketplace", agent: domain.AgentCodex,
+			unrelatedRelative: filepath.Join(".claude-plugin", "marketplace.json"),
+			old:               `"name":"apm-demo"`, replacement: `"name":"apm-other"`,
+		},
+		{
+			name: "Claude ignores corrupted Codex marketplace", agent: domain.AgentClaudeCode,
+			unrelatedRelative: filepath.Join(".agents", "plugins", "marketplace.json"),
+			old:               `"name":"apm-demo"`, replacement: `"name":"apm-other"`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseCommitting, false)
+			fixture.journal.Agent = test.agent
+			fixture.store.journal.Agent = test.agent
+			setMarketplaceRecoveryState(fixture, "target", true, false)
+			path := filepath.Join(fixture.targetSource, test.unrelatedRelative)
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			corrupt := strings.Replace(string(contents), test.old, test.replacement, 1)
+			if corrupt == string(contents) {
+				t.Fatalf("fixture %q does not contain %q", path, test.old)
+			}
+			if err := os.WriteFile(path, []byte(corrupt), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := fixture.recover()
+			if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
+				t.Fatalf("Recover() = %+v, %v", result, err)
+			}
+			if fixture.store.found || fixture.manifests.setRef != fixture.journal.Power {
+				t.Fatalf("commit did not finish: journal=%t manifest=%+v", fixture.store.found, fixture.manifests.setRef)
+			}
+		})
 	}
 }
 
@@ -875,8 +896,8 @@ func TestRecoverMarketplacePluginRollbackValidatesOnlyRequiredCache(t *testing.T
 				if got := marketplaceRecoveryWrites(fixture.events); len(got) != 0 {
 					t.Fatalf("missing required cache caused later writes: %v", fixture.events)
 				}
-				if len(fixture.events) < 5 || !reflect.DeepEqual(fixture.events[:5], []string{
-					"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo-v2.0.0", "inspect-plugin:demo-v1.0.0", "update:rolling-back",
+				if len(fixture.events) < 4 || !reflect.DeepEqual(fixture.events[:4], []string{
+					"resolve:codex", "inspect-marketplace:apm-demo", "inspect-plugin:demo", "update:rolling-back",
 				}) {
 					t.Fatalf("facts/direction order = %v", fixture.events)
 				}
@@ -1058,7 +1079,7 @@ func TestRecoverMarketplacePluginUninstallResumesAfterManifestRemovedBeforeJourn
 	want := []string{
 		"resolve:codex",
 		"inspect-marketplace:apm-demo",
-		"inspect-plugin:demo-v2.0.0",
+		"inspect-plugin:demo",
 		"manifest:remove-absent",
 		"delete:journal",
 	}
@@ -1114,7 +1135,7 @@ func TestRecoverMarketplacePluginEarlierInstallPhasesRollback(t *testing.T) {
 			if err != nil || !result.Recovered || result.Direction != RecoveryRollback {
 				t.Fatalf("Recover() = %+v, %v", result, err)
 			}
-			if len(fixture.events) < 5 || fixture.events[4] != "update:rolling-back" {
+			if len(fixture.events) < 4 || fixture.events[3] != "update:rolling-back" {
 				t.Fatalf("direction was not persisted before mutation: %v", fixture.events)
 			}
 			if got := marketplaceRecoveryWrites(fixture.events); !reflect.DeepEqual(got, test.wantWrites) {
@@ -1134,8 +1155,7 @@ func TestRecoverMarketplacePluginInspectsOnlyJournalIdentities(t *testing.T) {
 	want := []string{
 		"resolve:codex",
 		"inspect-marketplace:apm-demo",
-		"inspect-plugin:demo-v2.0.0",
-		"inspect-plugin:demo-v1.0.0",
+		"inspect-plugin:demo",
 		"delete:journal",
 	}
 	if !reflect.DeepEqual(fixture.events, want) {
@@ -1356,11 +1376,11 @@ func TestRecoverMarketplacePluginRejectsCodexKnownFieldTypeCorruptionBeforeWrite
 	}{
 		{
 			name:     "description changed to object",
-			manifest: `{"name":"demo-v2.0.0","version":"2.0.0","description":{"text":"Demo"},"author":{"name":"APM"}}`,
+			manifest: `{"name":"demo","version":"2.0.0","description":{"text":"Demo"},"author":{"name":"APM"}}`,
 		},
 		{
 			name:     "author changed to string",
-			manifest: `{"name":"demo-v2.0.0","version":"2.0.0","description":"Demo","author":"APM"}`,
+			manifest: `{"name":"demo","version":"2.0.0","description":"Demo","author":"APM"}`,
 		},
 	}
 	for _, test := range tests {

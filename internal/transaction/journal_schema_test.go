@@ -58,7 +58,7 @@ func TestValidatePluginJournalEnvelope(t *testing.T) {
 		"unsafe target":     func(j *Journal) { j.Plugin.Target.ActualName = "../demo" },
 		"illegal phase":     func(j *Journal) { j.Phase = PhasePreparing },
 		"first previous": func(j *Journal) {
-			j.Plugin.Previous = &adapter.PluginTarget{ActualName: "demo-v0.9.0", Selector: "demo-v0.9.0@apm"}
+			j.Plugin.Previous = &adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
 		},
 	}
 	for name, mutate := range invalid {
@@ -77,10 +77,10 @@ func TestValidatePluginJournalEnvelope(t *testing.T) {
 func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
-	previousSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v2.0.0")
+	previousSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
-	previousTarget := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
 
 	firstInstall := Journal{
 		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverPlugin,
@@ -88,7 +88,7 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 		Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 			Marketplace: &PluginMarketplaceJournalPayload{
 				Name: "apm-demo", TargetSource: targetSource,
 			},
@@ -107,7 +107,7 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 	uninstall.Operation = OperationUninstall
 	uninstall.Plugin = &PluginJournalPayload{
 		Deployment:    domain.PluginDeploymentMarketplace,
-		Target:        adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+		Target:        adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 		TargetPresent: true,
 		Marketplace: &PluginMarketplaceJournalPayload{
 			Name: "apm-demo", TargetSource: targetSource,
@@ -174,17 +174,17 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 func TestPluginMarketplaceJournalRejectsMissingPayloadInEveryOperation(t *testing.T) {
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
-	previousSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v2.0.0")
+	previousSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
-	previousTarget := adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
 	firstInstall := Journal{
 		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverPlugin,
 		Operation: OperationInstall, Phase: PhaseRegisteringMarketplace, Agent: domain.AgentCodex,
 		Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 			Marketplace: &PluginMarketplaceJournalPayload{
 				Name: "apm-demo", TargetSource: targetSource,
 			},
@@ -205,7 +205,7 @@ func TestPluginMarketplaceJournalRejectsMissingPayloadInEveryOperation(t *testin
 	uninstall.Phase = PhaseRemovingPlugin
 	uninstall.Plugin = &PluginJournalPayload{
 		Deployment:    domain.PluginDeploymentMarketplace,
-		Target:        adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+		Target:        adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 		TargetPresent: true,
 		Marketplace: &PluginMarketplaceJournalPayload{
 			Name: "apm-demo", TargetSource: targetSource,
@@ -231,7 +231,7 @@ func TestPluginMarketplaceJournalRejectsMissingPayloadInEveryOperation(t *testin
 func TestPluginMarketplaceInvalidJournalPayloads(t *testing.T) {
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v2.0.0")
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v2.0.0")
 	valid := func() Journal {
 		return Journal{
 			SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverPlugin,
@@ -239,7 +239,7 @@ func TestPluginMarketplaceInvalidJournalPayloads(t *testing.T) {
 			Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
 			Plugin: &PluginJournalPayload{
 				Deployment: domain.PluginDeploymentMarketplace,
-				Target:     adapter.PluginTarget{ActualName: "demo-v2.0.0", Selector: "demo-v2.0.0@apm-demo"},
+				Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 				Marketplace: &PluginMarketplaceJournalPayload{
 					Name: "apm-demo", TargetSource: targetSource,
 				},
@@ -247,21 +247,21 @@ func TestPluginMarketplaceInvalidJournalPayloads(t *testing.T) {
 		}
 	}
 	tests := map[string]func(*Journal){
-		"relative source": func(j *Journal) { j.Plugin.Marketplace.TargetSource = "cache/plugins/codex/demo/v2.0.0" },
+		"relative source": func(j *Journal) { j.Plugin.Marketplace.TargetSource = "cache/plugins/demo/v2.0.0" },
 		"remote source":   func(j *Journal) { j.Plugin.Marketplace.TargetSource = "https://example.test/demo" },
 		"missing source":  func(j *Journal) { j.Plugin.Marketplace.TargetSource = "" },
 		"dirty source": func(j *Journal) {
 			j.Plugin.Marketplace.TargetSource = targetSource + string(filepath.Separator) + "child" + string(filepath.Separator) + ".."
 		},
-		"wrong agent path": func(j *Journal) { j.Agent = domain.AgentClaudeCode },
+		"unsupported marketplace agent": func(j *Journal) { j.Agent = domain.AgentHermes },
 		"wrong logical name path": func(j *Journal) {
-			j.Plugin.Marketplace.TargetSource = filepath.Join(cacheHome, "apm", "plugins", "codex", "other", "v2.0.0")
+			j.Plugin.Marketplace.TargetSource = filepath.Join(cacheHome, "apm", "plugins", "other", "v2.0.0")
 		},
 		"wrong version path": func(j *Journal) {
-			j.Plugin.Marketplace.TargetSource = filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+			j.Plugin.Marketplace.TargetSource = filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 		},
 		"previous source without reference": func(j *Journal) {
-			j.Plugin.Marketplace.PreviousSource = filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+			j.Plugin.Marketplace.PreviousSource = filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 		},
 		"filesystem payload too":      func(j *Journal) { j.Plugin.Filesystem = &PluginFilesystemJournalPayload{} },
 		"legacy phase":                func(j *Journal) { j.Phase = PhaseAddingNew },
@@ -324,7 +324,7 @@ func validPluginMarketplaceJournal(t *testing.T) Journal {
 	t.Helper()
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	targetSource := filepath.Join(cacheHome, "apm", "plugins", "codex", "demo", "v1.0.0")
+	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 	return Journal{
 		SchemaVersion: 1,
 		TransactionID: "00112233445566778899aabbccddeeff",
@@ -335,7 +335,7 @@ func validPluginMarketplaceJournal(t *testing.T) Journal {
 		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: "demo-v1.0.0", Selector: "demo-v1.0.0@apm-demo"},
+			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 			Marketplace: &PluginMarketplaceJournalPayload{
 				Name: "apm-demo", TargetSource: targetSource,
 			},

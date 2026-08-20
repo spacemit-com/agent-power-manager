@@ -92,10 +92,10 @@ func validatePluginMarketplaceInstallRequest(request PluginInstallRequest) error
 		return fmt.Errorf("target marketplace %q does not match %q: %v: %w", marketplace.Target.Name, expectedName, err, ErrInvalidRequest)
 	}
 	expectedTarget, err := domain.ActualPluginName(request.Power)
-	if err != nil || request.Target.ActualName != expectedTarget || request.Target.Selector != expectedTarget+"@"+expectedName {
+	if err != nil || request.Target != (adapter.PluginTarget{ActualName: expectedTarget, Selector: expectedTarget}) {
 		return fmt.Errorf("target Plugin %+v does not match %q: %v: %w", request.Target, expectedTarget, err, ErrInvalidRequest)
 	}
-	if err := validatePluginMarketplaceSource(request.Agent, request.Power, marketplace.Target.Source, ErrInvalidRequest); err != nil {
+	if err := validatePluginMarketplaceSource(request.Power, marketplace.Target.Source, ErrInvalidRequest); err != nil {
 		return err
 	}
 	if request.Previous == nil {
@@ -111,10 +111,10 @@ func validatePluginMarketplaceInstallRequest(request PluginInstallRequest) error
 		return fmt.Errorf("previous marketplace %+v does not match target identity: %w", *marketplace.Previous, ErrInvalidRequest)
 	}
 	expectedPrevious, err := domain.ActualPluginName(*request.Previous)
-	if err != nil || request.PreviousTarget.ActualName != expectedPrevious || request.PreviousTarget.Selector != expectedPrevious+"@"+expectedName {
+	if err != nil || *request.PreviousTarget != (adapter.PluginTarget{ActualName: expectedPrevious, Selector: expectedPrevious}) {
 		return fmt.Errorf("previous Plugin %+v does not match %q: %v: %w", request.PreviousTarget, expectedPrevious, err, ErrInvalidRequest)
 	}
-	return validatePluginMarketplaceSource(request.Agent, *request.Previous, marketplace.Previous.Source, ErrInvalidRequest)
+	return validatePluginMarketplaceSource(*request.Previous, marketplace.Previous.Source, ErrInvalidRequest)
 }
 
 func validatePluginMarketplaceUninstallRequest(request PluginUninstallRequest) error {
@@ -132,10 +132,10 @@ func validatePluginMarketplaceUninstallRequest(request PluginUninstallRequest) e
 		return fmt.Errorf("uninstall marketplace %q does not match %q: %v: %w", request.Marketplace.Name, expectedName, err, ErrInvalidRequest)
 	}
 	expectedTarget, err := domain.ActualPluginName(request.Power)
-	if err != nil || request.Target.ActualName != expectedTarget || request.Target.Selector != expectedTarget+"@"+expectedName {
+	if err != nil || request.Target != (adapter.PluginTarget{ActualName: expectedTarget, Selector: expectedTarget}) {
 		return fmt.Errorf("uninstall Plugin target %+v does not match %q: %v: %w", request.Target, expectedTarget, err, ErrInvalidRequest)
 	}
-	return validatePluginMarketplaceSource(request.Agent, request.Power, request.Marketplace.Source, ErrInvalidRequest)
+	return validatePluginMarketplaceSource(request.Power, request.Marketplace.Source, ErrInvalidRequest)
 }
 
 // validatePluginJournal 校验 Plugin driver 的部署载荷、阶段与前序版本。
@@ -201,10 +201,10 @@ func validatePluginMarketplaceJournal(journal Journal, payload PluginJournalPayl
 		return fmt.Errorf("marketplace name %q does not match %q: %v: %w", marketplace.Name, expectedName, err, ErrInvalidJournal)
 	}
 	expectedTarget, err := domain.ActualPluginName(journal.Power)
-	if err != nil || payload.Target.ActualName != expectedTarget || payload.Target.Selector != expectedTarget+"@"+expectedName {
+	if err != nil || payload.Target != (adapter.PluginTarget{ActualName: expectedTarget, Selector: expectedTarget}) {
 		return fmt.Errorf("Plugin target %+v does not match %q: %v: %w", payload.Target, expectedTarget, err, ErrInvalidJournal)
 	}
-	if err := validatePluginMarketplaceSource(journal.Agent, journal.Power, marketplace.TargetSource, ErrInvalidJournal); err != nil {
+	if err := validatePluginMarketplaceSource(journal.Power, marketplace.TargetSource, ErrInvalidJournal); err != nil {
 		return err
 	}
 
@@ -227,7 +227,7 @@ func validatePluginMarketplaceJournal(journal Journal, payload PluginJournalPayl
 			!validMarketplaceUpgradePhase(journal.Phase) {
 			return fmt.Errorf("invalid previous marketplace Plugin presence or phase: %w", ErrInvalidJournal)
 		}
-		return validatePluginMarketplaceSource(journal.Agent, *journal.Previous, marketplace.PreviousSource, ErrInvalidJournal)
+		return validatePluginMarketplaceSource(*journal.Previous, marketplace.PreviousSource, ErrInvalidJournal)
 	case OperationUninstall:
 		if journal.Previous != nil || payload.Previous != nil || payload.PreviousPresent || !payload.TargetPresent ||
 			marketplace.PreviousSource != "" || marketplace.PreviousPresent || !validMarketplaceUninstallPhase(journal.Phase) {
@@ -239,7 +239,7 @@ func validatePluginMarketplaceJournal(journal Journal, payload PluginJournalPayl
 	}
 }
 
-func validatePluginPreviousReference(journal Journal, payload PluginJournalPayload, marketplaceName string) error {
+func validatePluginPreviousReference(journal Journal, payload PluginJournalPayload, _ string) error {
 	if journal.Previous == nil || payload.Previous == nil {
 		return fmt.Errorf("missing previous Plugin state: %w", ErrInvalidJournal)
 	}
@@ -249,13 +249,13 @@ func validatePluginPreviousReference(journal Journal, payload PluginJournalPaylo
 		return fmt.Errorf("invalid previous Plugin reference: %w", ErrInvalidJournal)
 	}
 	expected, err := domain.ActualPluginName(previous)
-	if err != nil || payload.Previous.ActualName != expected || payload.Previous.Selector != expected+"@"+marketplaceName {
+	if err != nil || *payload.Previous != (adapter.PluginTarget{ActualName: expected, Selector: expected}) {
 		return fmt.Errorf("previous Plugin target %+v does not match %q: %v: %w", payload.Previous, expected, err, ErrInvalidJournal)
 	}
 	return nil
 }
 
-func validatePluginMarketplaceSource(agent domain.AgentID, power domain.PowerRef, source string, sentinel error) error {
+func validatePluginMarketplaceSource(power domain.PowerRef, source string, sentinel error) error {
 	if source == "" || !filepath.IsAbs(source) || filepath.Clean(source) != source || source == filepath.VolumeName(source)+string(filepath.Separator) {
 		return fmt.Errorf("Plugin marketplace source path %q: %w", source, sentinel)
 	}
@@ -267,7 +267,7 @@ func validatePluginMarketplaceSource(agent domain.AgentID, power domain.PowerRef
 	if err != nil {
 		return fmt.Errorf("resolve absolute Plugin cache root: %v: %w", err, sentinel)
 	}
-	expected := filepath.Join(cacheRoot, "plugins", string(agent), power.Name, power.Version)
+	expected := filepath.Join(cacheRoot, "plugins", power.Name, power.Version)
 	if source != expected {
 		return fmt.Errorf("Plugin marketplace source %q does not match %q: %w", source, expected, sentinel)
 	}

@@ -67,15 +67,19 @@ func inspectMarketplaceRecoveryFacts(ctx context.Context, journal Journal, marke
 	if err != nil {
 		return marketplaceRecoveryFacts{}, err
 	}
-	targetPresent, err := inspectExactRecoveryPlugin(ctx, marketplaceAdapter, payload.Target)
+	pluginPresent, err := inspectExactRecoveryPlugin(ctx, marketplaceAdapter, payload.Target)
 	if err != nil {
 		return marketplaceRecoveryFacts{}, err
 	}
-	facts := marketplaceRecoveryFacts{marketplace: selection, targetPresent: targetPresent}
-	if payload.Previous != nil {
-		facts.previousPresent, err = inspectExactRecoveryPlugin(ctx, marketplaceAdapter, *payload.Previous)
-		if err != nil {
-			return marketplaceRecoveryFacts{}, err
+	facts := marketplaceRecoveryFacts{marketplace: selection}
+	if pluginPresent {
+		switch selection {
+		case marketplaceRecoveryTarget:
+			facts.targetPresent = true
+		case marketplaceRecoveryPrevious:
+			facts.previousPresent = true
+		case marketplaceRecoveryAbsent:
+			return marketplaceRecoveryFacts{}, fmt.Errorf("logical Plugin is present without its marketplace during recovery: %w", ErrIndeterminateState)
 		}
 	}
 	return facts, nil
@@ -322,7 +326,7 @@ func (s *Service) validateMarketplaceRecoveryArtifact(agent domain.AgentID, ref 
 	if err := validateMarketplaceRecoverySourceTree(cacheRoot, source, s.files); err != nil {
 		return err
 	}
-	if err := pluginartifact.Validate(agent, ref, source); err != nil {
+	if err := pluginartifact.ValidateMarketplace(agent, ref, source); err != nil {
 		return errors.Join(fmt.Errorf("validate Plugin recovery artifact %+v for agent %q at %q: %w", ref, agent, source, err), ErrIndeterminateState)
 	}
 	return nil
