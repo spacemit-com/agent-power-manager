@@ -23,6 +23,7 @@ func (c *stubCloudClient) List() ([]domain.PowerRef, error) {
 }
 
 func (*stubCloudClient) DownloadSkill(domain.PowerRef) error { return nil }
+func (*stubCloudClient) DownloadAgent(domain.PowerRef) error { return nil }
 func (*stubCloudClient) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }

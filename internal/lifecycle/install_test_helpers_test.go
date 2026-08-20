@@ -220,6 +220,11 @@ func (c *installFakeCloud) DownloadSkill(domain.PowerRef) error {
 	return c.fixture.cloudGetErr
 }
 
+func (c *installFakeCloud) DownloadAgent(domain.PowerRef) error {
+	*c.calls = append(*c.calls, "cloud:download-agent")
+	return nil
+}
+
 func (c *installFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error) {
 	*c.calls = append(*c.calls, "cloud:get-mcp:"+ref.Version)
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]

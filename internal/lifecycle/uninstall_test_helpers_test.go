@@ -145,6 +145,10 @@ func (*uninstallFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, stri
 	panic("Plugin uninstall must not call Cloud DownloadPlugin")
 }
 
+func (*uninstallFakeCloud) DownloadAgent(domain.PowerRef) error {
+	panic("Agent uninstall must not call Cloud DownloadAgent")
+}
+
 type uninstallFakeRegistry struct {
 	calls   *[]string
 	fixture *uninstallFixture

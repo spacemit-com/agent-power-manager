@@ -50,6 +50,7 @@ func (c *listFakeCloud) List() ([]domain.PowerRef, error) {
 	return c.fixture.cloudRefs, c.fixture.cloudErr
 }
 func (*listFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
+func (*listFakeCloud) DownloadAgent(domain.PowerRef) error { return nil }
 func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
