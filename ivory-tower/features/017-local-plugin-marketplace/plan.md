@@ -1,5 +1,7 @@
 # Local Plugin Marketplace Implementation Plan
 
+> 状态：历史实施计划，已由 [Feature 018](../018-bibit-agent/spec.md) 与 [ADR-014](../../adr/ADR-014-share-multi-agent-plugin-artifacts.md) 取代。以下正文保留 Feature 017/ADR-013 当时的实施步骤，不代表当前实现。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 Cloud 的 Agent-specific Plugin 文件组装为不可变本地 marketplace artifact，并让 Codex/Claude 的 marketplace 与 Plugin 版本切换在 manifest-first lifecycle 中可恢复。

@@ -66,7 +66,7 @@ lifecycle -> configModel "installed List、Install 与 Uninstall 读取/处理 m
 lifecycle -> lockManager "仅 Fix、Install、Uninstall 在各自边界获取/释放；Search 与两种 List 不获取"
 lifecycle -> cacheManager "Skill Install：为每个实际安装 Agent StageSkill 到公共 staging"
 lifecycle -> cloudClient "Search/List/Install List；Skill DownloadSkill；MCP GetMCP"
-lifecycle -> pluginResource "Plugin Ensure / Lookup / MarketplaceFor / StageFilesystem"
+lifecycle -> pluginResource "Plugin Ensure / Lookup / StageFilesystem；返回的 Artifact 再由调用方 MarketplaceFor(agent)"
 lifecycle -> transactionManager "Install/Uninstall/Fix 的可恢复事务"
 pluginResource -> cloudClient "DownloadPlugin(ref, destination) 到共享制品临时 Plugin 叶子"
 pluginResource -> rawPluginDestination "创建并控制空的原始包 destination"

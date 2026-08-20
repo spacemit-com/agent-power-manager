@@ -158,7 +158,7 @@ marketplace name  apm-demo-plugin
 cache root        cache/plugins/demo-plugin/v0.1.0
 ```
 
-Codex/Claude 首装依次注册目标版本缓存根、安装 `<name>`、提交 manifest。版本切换依次删除旧 `<name>`、注销旧 source、以同名 marketplace 注册新版本 source、重新安装 `<name>`、提交 manifest。不同版本由 journal 的 `Power`/`Previous` 与 marketplace source 区分。
+Codex/Claude 在 marketplace absent 的首次安装中依次注册目标版本缓存根、安装 `<name>`、提交 manifest。正常卸载会保留 marketplace；此后重装若发现名称和 source 都与目标共享制品精确一致且 Plugin absent，则直接复用该 retained marketplace，只安装 `<name>` 并提交 manifest。该重装的正常提交、回滚与恢复都不做多余的 unregister/register；仅当恢复方向已固定为 `rolling-back` 且 retained source 缺失时，才离线复验缓存并恢复原 source。版本切换仍依次删除旧 `<name>`、注销旧 source、以同名 marketplace 注册新版本 source、重新安装 `<name>`、提交 manifest。不同版本由 journal 的 `Power`/`Previous` 与 marketplace source 区分。
 
 Hermes/Bibit 首装把 staging 原子发布到 `plugins/<name>`；版本切换把同一目标路径的旧目录隔离，再发布新目录。Hermes 执行 disable/enable，Bibit 激活钩子不调用 CLI。rollback 恢复被隔离的旧目录和 Agent 激活状态。
 

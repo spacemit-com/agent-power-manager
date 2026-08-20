@@ -17,7 +17,9 @@ flowchart TD
     Plugin -->|Codex / Claude both absent| PluginStale[仅删除对应 manifest 项；不接管其他版本]
     Plugin -->|Codex / Claude both present| PluginLookup[Plugin Resource Lookup 共享 artifact；MarketplaceFor 验证 source 与逻辑 selector]
     PluginLookup --> PluginTx[offline UninstallPlugin：只 remove Plugin + manifest；保留 marketplace 与 artifact]
-    Plugin -->|Hermes / Bibit| FilesystemPluginTx[offline filesystem UninstallPlugin；只处理逻辑名目录，不连接 Cloud]
+    Plugin -->|Hermes / Bibit target absent| FilesystemStale[删除对应 manifest；返回 TargetMissing]
+    Plugin -->|Hermes / Bibit exact present| FilesystemPluginTx[offline filesystem UninstallPlugin；只处理逻辑名目录，不连接 Cloud]
+    Plugin -->|Hermes / Bibit partial / conflict| PluginFail
     Plugin -->|部分、损坏或身份不符| PluginFail[fail closed；保留 manifest/artifact/journal]
     PluginTx --> PluginJournal[schema v1 plugin removing/committing/rolling-back；不连接 Cloud]
     FilesystemPluginTx --> PluginJournal
@@ -26,6 +28,7 @@ flowchart TD
     PluginJournal --> Result
     Missing --> Result
     PluginStale --> Result
+    FilesystemStale --> Result
     PluginFail --> Fail
     Result -->|missing| WarnMissing[lock-held target-missing Warn]
     Result -->|error| Fail[full-ref failed + fail-fast]

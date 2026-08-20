@@ -195,7 +195,7 @@ classDiagram
     installService --> TransactionManager : Recover / InstallSkill / InstallMCP / InstallPlugin
     installService --> CloudClient : List / DownloadSkill / GetMCP
     installService --> PowerCache : Skill StageSkill only
-    installService --> PluginResourceManager : Plugin Ensure / Lookup / MarketplaceFor / StageFilesystem
+    installService --> PluginResourceManager : Plugin Ensure / Lookup / StageFilesystem
     installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveMCP / ResolvePlugin
     installService --> ConfigRepository : Find
     installService --> VersionSelector : resolve version
@@ -219,4 +219,4 @@ classDiagram
     TransactionManager --|> Recoverer : embeds
     Inspector --> InspectionResult : returns
     TransactionManager --> ConfigRepository : Set / Remove
-    PluginResourceManager --> PluginArtifact : returns immutable shared artifact (ADR-014)
+    PluginResourceManager --> PluginArtifact : returns immutable shared artifact, caller uses MarketplaceFor (ADR-014)

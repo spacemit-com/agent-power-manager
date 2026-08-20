@@ -33,9 +33,15 @@ flowchart TD
     PluginEnsure --> PluginResolve[ResolvePlugin]
     PluginResolve --> PluginFacts[检查目标及旧版本的精确 Agent 事实]
     PluginFacts -->|Codex / Claude| PreviousLookup[Artifact MarketplaceFor；旧版本仅 Lookup，验证本地 marketplace/source 与逻辑 selector]
-    PreviousLookup --> MarketplaceTx[plugin transaction：首装 register marketplace → add Plugin → manifest；切换 remove old Plugin → unregister old marketplace → register new marketplace → add Plugin → manifest]
+    PreviousLookup --> MarketplaceState{Codex / Claude manifest 与 marketplace 状态}
+    MarketplaceState -->|no manifest + marketplace absent| MarketplaceFirst[首装 register source → add Plugin → manifest]
+    MarketplaceState -->|no manifest + exact retained source| MarketplaceReinstall[重装 reuse source → add Plugin → manifest]
+    MarketplaceState -->|previous manifest| MarketplaceSwitch[切换 remove old Plugin → unregister old source → register new source → add Plugin → manifest]
+    MarketplaceReinstall -. commit / rollback / recovery .-> RetainedRecovery[不 unregister/register；仅方向已固定为 rolling-back 且 source 缺失时离线恢复]
     PluginFacts -->|Hermes / Bibit| FilesystemStage[事实完成后 Plugin Resource StageFilesystem] --> FilesystemPluginTx[逻辑名目录 filesystem Plugin transaction；Hermes CLI 激活，Bibit 无 Plugin CLI]
-    MarketplaceTx --> PluginJournal[schema v1 driver=plugin；每次 Agent 写操作前持久 phase]
+    MarketplaceFirst --> PluginJournal[schema v1 driver=plugin；每次 Agent 写操作前持久 phase]
+    MarketplaceReinstall --> PluginJournal
+    MarketplaceSwitch --> PluginJournal
     FilesystemPluginTx --> PluginJournal
     PluginFacts -->|部分、损坏或身份不符| PluginFail[fail closed；保留 manifest/artifact]
 
