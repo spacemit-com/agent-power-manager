@@ -3,6 +3,10 @@ package adapter
 import (
 	"context"
 	"errors"
+	"reflect"
+	"testing"
+
+	"apm/internal/domain"
 )
 
 type recordedMCPCommand struct {
@@ -50,4 +54,27 @@ func truncatedMCPResponse(stdout string) queuedMCPResponse {
 	response := successfulMCPResponse(stdout)
 	response.result.StdoutTruncated = true
 	return response
+}
+
+func mcpRef(name string) domain.PowerRef {
+	return domain.PowerRef{Name: name, Type: domain.PowerTypeMCP, Version: "v1.0.0"}
+}
+
+func stdioServer(command string, args ...string) domain.MCPServer {
+	return domain.MCPServer{Transport: domain.MCPTransportStdio, Command: command, Args: args}
+}
+
+func httpServer(url string) domain.MCPServer {
+	return domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: url}
+}
+
+func assertMCPCommands(t *testing.T, runner *recordingMCPRunner, executable string, args [][]string) {
+	t.Helper()
+	want := make([]recordedMCPCommand, len(args))
+	for index, commandArgs := range args {
+		want[index] = recordedMCPCommand{executable: executable, args: commandArgs}
+	}
+	if !reflect.DeepEqual(runner.commands, want) {
+		t.Fatalf("commands = %#v, want %#v", runner.commands, want)
+	}
 }
