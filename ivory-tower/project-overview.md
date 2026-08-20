@@ -58,7 +58,7 @@ Install 与 Uninstall 分别以独立 factory 和生命周期端口接线，不�
 
 Registry 仅以 profile 根存在且为目录判断 Agent 已安装；`--agent=all` 按 Agent ID 字典序使用当前快照。Bibit 的接口与路径约束见 [Feature 018](features/018-bibit-agent/spec.md) 和 [ADR-014](adr/ADR-014-share-multi-agent-plugin-artifacts.md)。
 
-Agent Power 仅 Bibit 支持（[Feature 019](features/019-agent-power/spec.md) 与 [ADR-015](adr/ADR-015-agent-power-bibit.md)）：Cloud 为 `agents/<name>/<version>/agent.yaml`，缓存为 `cache/agents/<name>/<version>/agent.yaml`，安装到 `<bibit根>/agents/<agent.id>/agent.yaml`（单文件、原样字节，本地不版本化）；`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`，`list --installed` 需显式 `--agent bibit`，`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`；显式 `--agent bibit` 允许，其它值（含 `all`）报错。
+Agent Power 仅 Bibit 支持（[Feature 019](features/019-agent-power/spec.md) 与 [ADR-015](adr/ADR-015-agent-power-bibit.md)）：Cloud 为 `agents/<name>/<version>/agent.yaml`，缓存为 `cache/agents/<name>/<version>/agent.yaml`，安装到 `<bibit根>/agents/<agent.id>/agent.yaml`（单文件、原样字节，本地不版本化）；`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`，`list --installed` 省略 `--agent` 时默认 `bibit`，`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`；显式 `--agent bibit` 允许，其它值（含 `all`）报错。
 
 ### Plugin 当前安装与卸载边界
 

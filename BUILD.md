@@ -164,7 +164,7 @@ MCP 支持 Bibit、Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互�
 
 Bibit profile 根优先使用 `BIANBU_AGENT_HOME`，未设置时为 `<有效 HOME>/.bianbu-agent`；根目录存在且为目录才进入本次命令的已安装 Agent 快照。完整契约见 [Feature 018](ivory-tower/features/018-bibit-agent/spec.md) 和 [ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md)。
 
-Agent Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-power/spec.md) 与 [ADR-015](ivory-tower/adr/ADR-015-agent-power-bibit.md)）：Cloud 资源布局与 skill 对齐，为 `agents/<name>/<version>/agent.yaml`，下载单元是单个 `agent.yaml`，走版本化缓存 `cache/agents/<name>/<version>/agent.yaml` + staging；本地安装到 `<bibit根>/agents/<agent.id>/agent.yaml`（单文件、原样字节，本地不版本化，版本仅记 manifest）。`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`；`list --installed` 需显式 `--agent bibit`；`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`。显式 `--agent bibit` 允许，其它值（含 `all`）报错。例如 `./apm install bianbu-agent-default=v1.0.0 --type agent`。
+Agent Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-power/spec.md) 与 [ADR-015](ivory-tower/adr/ADR-015-agent-power-bibit.md)）：Cloud 资源布局与 skill 对齐，为 `agents/<name>/<version>/agent.yaml`，下载单元是单个 `agent.yaml`，走版本化缓存 `cache/agents/<name>/<version>/agent.yaml` + staging；本地安装到 `<bibit根>/agents/<agent.id>/agent.yaml`（单文件、原样字节，本地不版本化，版本仅记 manifest）。`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`；`list --installed` 省略 `--agent` 时默认 `bibit`；`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`。显式 `--agent bibit` 允许，其它值（含 `all`）报错。例如 `./apm install bianbu-agent-default=v1.0.0 --type agent`。
 
 ### Plugin 共享 artifact 与操作顺序
 

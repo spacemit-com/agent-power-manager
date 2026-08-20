@@ -15,7 +15,13 @@ type agentPowerGroups struct {
 }
 
 func installedListAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.AgentID, error) {
+	if flags.Type == string(domain.PowerTypeAgent) && flags.Agent != "" && domain.AgentID(flags.Agent) != domain.AgentBibit {
+		return nil, fmt.Errorf("list installed power type %q only supports agent %q", domain.PowerTypeAgent, domain.AgentBibit)
+	}
 	target := domain.AgentID(flags.Agent)
+	if flags.Type == string(domain.PowerTypeAgent) && flags.Agent == "" {
+		target = domain.AgentBibit
+	}
 	if target == domain.AllAgents {
 		return snapshot.Ordered(), nil
 	}
