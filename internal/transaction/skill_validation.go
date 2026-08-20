@@ -46,9 +46,14 @@ func validateSkillUninstallRequest(request SkillUninstallRequest) error {
 	return nil
 }
 
+// isFilesystemPowerType 报告该类型是否由 filesystem driver 恢复。
+func isFilesystemPowerType(powerType domain.PowerType) bool {
+	return powerType == domain.PowerTypeSkill || powerType == domain.PowerTypeAgent
+}
+
 // validateFilesystemJournal 校验 Skill driver 的路径、阶段与产物归属。
 func validateFilesystemJournal(journal Journal, payload FilesystemJournalPayload) error {
-	if journal.Power.Type != domain.PowerTypeSkill {
+	if !isFilesystemPowerType(journal.Power.Type) {
 		return fmt.Errorf("filesystem power type %q: %w", journal.Power.Type, ErrInvalidJournal)
 	}
 	for name, path := range map[string]string{

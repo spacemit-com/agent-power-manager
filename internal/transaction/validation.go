@@ -36,7 +36,7 @@ func validatePower(power domain.PowerRef, sentinel error) error {
 		return fmt.Errorf("invalid power %+v: %w", power, sentinel)
 	}
 	switch power.Type {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP, domain.PowerTypeAgent:
 		return nil
 	default:
 		return fmt.Errorf("unknown power type %q: %w", power.Type, sentinel)

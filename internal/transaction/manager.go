@@ -16,6 +16,8 @@ type Manager interface {
 	Recoverer
 	InstallSkill(context.Context, SkillInstallRequest) error
 	UninstallSkill(context.Context, SkillUninstallRequest) (UninstallResult, error)
+	InstallAgent(context.Context, AgentInstallRequest) error
+	UninstallAgent(context.Context, AgentUninstallRequest) (UninstallResult, error)
 	InstallMCP(context.Context, MCPInstallRequest) error
 	UninstallMCP(context.Context, MCPUninstallRequest) (UninstallResult, error)
 	InstallPlugin(context.Context, PluginInstallRequest) error
@@ -52,6 +54,22 @@ type SkillUninstallRequest struct {
 	Agent   domain.AgentID
 	Power   domain.PowerRef
 	Adapter adapter.SkillAdapter
+}
+
+// AgentInstallRequest 描述单个 Agent 的已解析文件型 Agent 安装事务输入。
+type AgentInstallRequest struct {
+	Agent       domain.AgentID
+	Power       domain.PowerRef
+	Previous    *domain.PowerRef
+	StagingRoot string
+	Adapter     adapter.AgentAdapter
+}
+
+// AgentUninstallRequest 描述单个 Agent 的已解析文件型 Agent 卸载事务输入。
+type AgentUninstallRequest struct {
+	Agent   domain.AgentID
+	Power   domain.PowerRef
+	Adapter adapter.AgentAdapter
 }
 
 // MCPInstallRequest 描述单个 Agent 的 MCP 安装或版本切换输入；定义允许为空以支持无副作用的冲突和漂移复查。
