@@ -72,7 +72,7 @@ func (s *UninstallService) uninstallMarketplacePlugin(
 	}
 
 	// Uninstall 必须离线 Lookup manifest 精确版本；缺失或损坏时保留 manifest 并 fail closed。
-	artifact, err := s.plugins.Lookup(agent, ref)
+	artifact, err := s.plugins.Lookup(ref)
 	if err != nil {
 		return transaction.UninstallResult{}, fmt.Errorf("lookup installed Plugin artifact %+v for agent %q: %w", ref, agent, err)
 	}

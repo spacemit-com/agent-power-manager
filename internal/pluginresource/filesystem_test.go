@@ -18,7 +18,7 @@ func TestLookupRejectsSymlinkedArtifactRootWithoutChangingOutsideSentinel(t *tes
 	outside := filepath.Join(t.TempDir(), "outside-artifact")
 	writeValidTestArtifact(t, outside)
 	sentinel := writeOutsideSentinel(t, outside)
-	root := testArtifactRoot(roots.cache, domain.AgentCodex, ref)
+	root := testArtifactRoot(roots.cache, ref)
 	if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestLookupRejectsSymlinkedArtifactRootWithoutChangingOutsideSentinel(t *tes
 		t.Fatal(err)
 	}
 
-	if _, err := service.Lookup(domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 	}
 	assertOutsideSentinel(t, sentinel)
@@ -37,7 +37,7 @@ func TestLookupRejectsSymlinkedPluginLeafWithoutChangingOutsideSentinel(t *testi
 	roots := newTestRoots(t)
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
 	ref := testPluginRef()
-	root := testArtifactRoot(roots.cache, domain.AgentCodex, ref)
+	root := testArtifactRoot(roots.cache, ref)
 	if err := os.MkdirAll(filepath.Join(root, "plugins"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -52,11 +52,11 @@ func TestLookupRejectsSymlinkedPluginLeafWithoutChangingOutsideSentinel(t *testi
 		t.Fatal(err)
 	}
 	sentinel := writeOutsideSentinel(t, outside)
-	if err := os.Symlink(outside, filepath.Join(root, "plugins", "demo-v0.1.0")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(root, "plugins", "demo")); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := service.Lookup(domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 	}
 	assertOutsideSentinel(t, sentinel)
@@ -67,7 +67,7 @@ func TestLookupRejectsSymlinkedArtifactAncestorWithoutChangingTargetSentinel(t *
 	roots := newTestRoots(t)
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
 	ref := testPluginRef()
-	ancestor := filepath.Join(roots.cache, "plugins", "codex", "demo")
+	ancestor := filepath.Join(roots.cache, "plugins", "demo")
 	if err := os.MkdirAll(filepath.Dir(ancestor), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestLookupRejectsSymlinkedArtifactAncestorWithoutChangingTargetSentinel(t *
 		t.Fatal(err)
 	}
 
-	if _, err := service.Lookup(domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 	}
 	assertOutsideSentinel(t, sentinel)
@@ -89,7 +89,7 @@ func TestLookupRejectsRegularFileArtifactRootWithoutChangingOutsideSentinel(t *t
 	roots := newTestRoots(t)
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
 	ref := testPluginRef()
-	root := testArtifactRoot(roots.cache, domain.AgentCodex, ref)
+	root := testArtifactRoot(roots.cache, ref)
 	if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -98,16 +98,15 @@ func TestLookupRejectsRegularFileArtifactRootWithoutChangingOutsideSentinel(t *t
 	}
 	sentinel := writeOutsideSentinel(t, t.TempDir())
 
-	if _, err := service.Lookup(domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 	}
 	assertOutsideSentinel(t, sentinel)
 }
 
-func TestEnsureRejectsUnsafeAgentBeforeConstructingCachePath(t *testing.T) {
-	// 捕获错误变更：仅凭注入 builder 接受带路径分隔符的未知 Agent，导致缓存路径逃逸。
+func TestEnsureRejectsUnsafePluginNameBeforeConstructingCachePath(t *testing.T) {
+	// 捕获错误变更：在身份校验前把 Plugin 名称拼接到共享缓存路径，导致路径逃逸。
 	roots := newTestRoots(t)
-	unsafeAgent := domain.AgentID("../../outside")
 	service := newService(
 		roots.cache,
 		roots.cacheTemp,
@@ -122,11 +121,13 @@ func TestEnsureRejectsUnsafeAgentBeforeConstructingCachePath(t *testing.T) {
 	}
 	sentinel := writeOutsideSentinel(t, outsideRoot)
 
-	if _, err := service.Ensure(context.Background(), unsafeAgent, testPluginRef()); !errors.Is(err, ErrUnsupportedAgent) {
-		t.Fatalf("Ensure() error = %v, want ErrUnsupportedAgent", err)
+	unsafeRef := testPluginRef()
+	unsafeRef.Name = "../../outside"
+	if _, err := service.Ensure(context.Background(), unsafeRef); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 	}
 	assertOutsideSentinel(t, sentinel)
-	if _, err := os.Stat(filepath.Join(outsideRoot, "demo", "v0.1.0")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(outsideRoot, "v0.1.0")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("escaped artifact path stat error = %v, want not exist", err)
 	}
 }
@@ -148,17 +149,16 @@ func TestValidatePhysicalTreeRejectsSymlinkWithoutTrustingDirectoryType(t *testi
 	}
 }
 
-func testArtifactRoot(cacheRoot string, agent domain.AgentID, ref domain.PowerRef) string {
-	_ = agent
+func testArtifactRoot(cacheRoot string, ref domain.PowerRef) string {
 	return filepath.Join(cacheRoot, "plugins", ref.Name, ref.Version)
 }
 
 func writeValidTestArtifact(t *testing.T, root string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, "plugins", "demo-v0.1.0"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "plugins", "demo"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "plugins", "demo-v0.1.0", "payload.txt"), []byte("payload"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "plugins", "demo", "payload.txt"), []byte("payload"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "builder.txt"), []byte("built"), 0o600); err != nil {

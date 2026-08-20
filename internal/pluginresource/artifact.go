@@ -14,11 +14,11 @@ type Downloader interface {
 	DownloadPlugin(context.Context, domain.PowerRef, string) error
 }
 
-// Manager 管理本地共享 Plugin artifact；Agent 参数与 Hermes 命名将在共享缓存任务中移除。
+// Manager 管理本地共享 Plugin artifact；同一 Plugin 版本对所有 Agent 只有一份不可变制品。
 type Manager interface {
-	Ensure(context.Context, domain.AgentID, domain.PowerRef) (Artifact, error)
-	Lookup(domain.AgentID, domain.PowerRef) (Artifact, error)
-	StageHermes(domain.PowerRef) (string, error)
+	Ensure(context.Context, domain.PowerRef) (Artifact, error)
+	Lookup(domain.PowerRef) (Artifact, error)
+	StageFilesystem(domain.PowerRef) (string, error)
 }
 
 // Marketplace 是 Plugin Resource 返回的 Agent marketplace 注册信息。

@@ -67,8 +67,8 @@ func newService(
 }
 
 // Ensure 下载并原子发布尚未缓存的 artifact；已存在版本只复验，绝不替换。
-func (service *Service) Ensure(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (artifact Artifact, resultErr error) {
-	artifact, err := service.Lookup(agent, ref)
+func (service *Service) Ensure(ctx context.Context, ref domain.PowerRef) (artifact Artifact, resultErr error) {
+	artifact, err := service.Lookup(ref)
 	if err == nil {
 		return artifact, nil
 	}
@@ -76,27 +76,26 @@ func (service *Service) Ensure(ctx context.Context, agent domain.AgentID, ref do
 		return Artifact{}, err
 	}
 
-	artifact, err = service.artifactFor(agent, ref)
+	artifact, err = service.artifactFor(ref)
 	if err != nil {
 		return Artifact{}, err
 	}
-	publishLock := service.pathLock("artifact:" + artifact.Root)
+	publishLock := service.pathLock(artifact.Root)
 	publishLock.Lock()
 	defer publishLock.Unlock()
 
 	// 等待中的发布者必须重新查询，避免同一版本重复下载或覆盖。
-	artifact, err = service.Lookup(agent, ref)
+	artifact, err = service.Lookup(ref)
 	if err == nil {
 		return artifact, nil
 	}
 	if !errors.Is(err, ErrMiss) {
 		return Artifact{}, err
 	}
-	builder, err := service.builderFor(agent)
-	if err != nil {
-		return Artifact{}, err
+	if isNilDependency(service.builder) {
+		return Artifact{}, fmt.Errorf("plugin artifact builder: %w", ErrInvalidArtifact)
 	}
-	artifact, err = service.artifactFor(agent, ref)
+	artifact, err = service.artifactFor(ref)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -129,22 +128,22 @@ func (service *Service) Ensure(ctx context.Context, agent domain.AgentID, ref do
 	if err := downloader.DownloadPlugin(ctx, ref, temporaryPluginPath); err != nil {
 		return Artifact{}, fmt.Errorf("download plugin artifact: %w", err)
 	}
-	// Agent builder 读取 manifest 或写 marketplace 前，必须先拒绝下载树中的 symlink。
+	// 共享 builder 读取 manifest 或写 marketplace 前，必须先拒绝下载树中的 symlink。
 	if err := validatePhysicalTree(temporaryRoot); err != nil {
 		return Artifact{}, err
 	}
-	// Cloud raw package 在任何 Agent builder 读取 manifest 前统一拒绝 marketplace。
+	// Cloud raw package 在共享 builder 读取 manifest 前统一拒绝 marketplace。
 	if err := pluginartifact.ValidateRawPackage(temporaryPluginPath); err != nil {
 		return Artifact{}, errors.Join(ErrInvalidArtifact, err)
 	}
-	if err := builder.Build(ref, temporaryRoot, temporaryPluginPath); err != nil {
+	if err := service.builder.Build(ref, temporaryRoot, temporaryPluginPath); err != nil {
 		return Artifact{}, fmt.Errorf("build plugin artifact: %w", err)
 	}
 	// 构建后再次复验，覆盖 APM 新生成的 marketplace 目录和文件。
 	if err := validatePhysicalTree(temporaryRoot); err != nil {
 		return Artifact{}, err
 	}
-	if err := builder.Validate(ref, temporaryRoot); err != nil {
+	if err := service.builder.Validate(ref, temporaryRoot); err != nil {
 		return Artifact{}, err
 	}
 
@@ -152,14 +151,14 @@ func (service *Service) Ensure(ctx context.Context, agent domain.AgentID, ref do
 		return Artifact{}, fmt.Errorf("create plugin artifact parent %q: %w", filepath.Dir(artifact.Root), err)
 	}
 	if _, err := service.files.lstat(artifact.Root); err == nil {
-		return service.Lookup(agent, ref)
+		return service.Lookup(ref)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Artifact{}, fmt.Errorf("inspect plugin artifact root %q: %w", artifact.Root, err)
 	}
 	if err := service.files.rename(temporaryRoot, artifact.Root); err != nil {
 		// 另一个发布者可能已在检查后完成；只复验其最终目录，绝不覆盖。
 		if _, inspectErr := service.files.lstat(artifact.Root); inspectErr == nil {
-			existing, lookupErr := service.Lookup(agent, ref)
+			existing, lookupErr := service.Lookup(ref)
 			if lookupErr == nil {
 				return existing, nil
 			}
@@ -177,12 +176,11 @@ func (service *Service) Ensure(ctx context.Context, agent domain.AgentID, ref do
 }
 
 // Lookup 仅查询并复验已有 artifact，不会触发下载或修复。
-func (service *Service) Lookup(agent domain.AgentID, ref domain.PowerRef) (Artifact, error) {
-	builder, err := service.builderFor(agent)
-	if err != nil {
-		return Artifact{}, err
+func (service *Service) Lookup(ref domain.PowerRef) (Artifact, error) {
+	if isNilDependency(service.builder) {
+		return Artifact{}, fmt.Errorf("plugin artifact builder: %w", ErrInvalidArtifact)
 	}
-	artifact, err := service.artifactFor(agent, ref)
+	artifact, err := service.artifactFor(ref)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -197,77 +195,65 @@ func (service *Service) Lookup(agent domain.AgentID, ref domain.PowerRef) (Artif
 	if err := validatePhysicalTree(artifact.Root); err != nil {
 		return Artifact{}, err
 	}
-	if err := builder.Validate(ref, artifact.Root); err != nil {
+	if err := service.builder.Validate(ref, artifact.Root); err != nil {
 		return Artifact{}, err
 	}
 	return artifact, nil
 }
 
-// StageHermes 将 Hermes artifact 物化为无版本 staging 目录。
-func (service *Service) StageHermes(ref domain.PowerRef) (staging string, resultErr error) {
-	artifact, err := service.Lookup(domain.AgentHermes, ref)
+// StageFilesystem 将共享 Plugin 叶子原子物化为 filesystem Agent 共用的无版本 staging 目录。
+func (service *Service) StageFilesystem(ref domain.PowerRef) (staging string, resultErr error) {
+	artifact, err := service.Lookup(ref)
 	if err != nil {
 		return "", err
 	}
 
-	artifactLock := service.pathLock("artifact:" + artifact.Root)
+	artifactLock := service.pathLock(artifact.Root)
 	artifactLock.Lock()
-	artifact, err = service.Lookup(domain.AgentHermes, ref)
+	artifact, err = service.Lookup(ref)
 	artifactLock.Unlock()
 	if err != nil {
 		return "", err
 	}
-	stageLock := service.pathLock("staging:" + service.stagingRoot)
+	stageLock := service.pathLock(service.stagingRoot)
 	stageLock.Lock()
 	defer stageLock.Unlock()
 
 	// 配置根由 lifecycle 全局锁协作保护；这里仅清理明确注入的 staging 临时根。
 	if err := service.files.removeAll(service.stagingTempRoot); err != nil {
-		return "", fmt.Errorf("remove Hermes staging temporary root %q: %w", service.stagingTempRoot, err)
+		return "", fmt.Errorf("remove filesystem staging temporary root %q: %w", service.stagingTempRoot, err)
 	}
 	if err := service.files.mkdirAll(filepath.Dir(service.stagingTempRoot), 0o700); err != nil {
-		return "", fmt.Errorf("create Hermes staging temporary parent %q: %w", filepath.Dir(service.stagingTempRoot), err)
+		return "", fmt.Errorf("create filesystem staging temporary parent %q: %w", filepath.Dir(service.stagingTempRoot), err)
 	}
 	temporaryRoot, err := service.files.mkdirTemp(filepath.Dir(service.stagingTempRoot), filepath.Base(service.stagingTempRoot)+"-")
 	if err != nil {
-		return "", fmt.Errorf("create Hermes staging temporary root: %w", err)
+		return "", fmt.Errorf("create filesystem staging temporary root: %w", err)
 	}
 	defer func() {
 		if temporaryRoot != "" {
 			if err := service.files.removeAll(temporaryRoot); err != nil {
-				resultErr = errors.Join(resultErr, fmt.Errorf("cleanup Hermes staging temporary root %q: %w", temporaryRoot, err))
+				resultErr = errors.Join(resultErr, fmt.Errorf("cleanup filesystem staging temporary root %q: %w", temporaryRoot, err))
 			}
 		}
 	}()
 
 	target := filepath.Join(temporaryRoot, "plugins", ref.Name)
 	if err := service.files.copyDir(artifact.PluginPath, target); err != nil {
-		return "", fmt.Errorf("copy Hermes plugin artifact to staging: %w", err)
+		return "", fmt.Errorf("copy filesystem plugin artifact to staging: %w", err)
 	}
 	if err := service.files.mkdirAll(filepath.Dir(service.stagingRoot), 0o700); err != nil {
-		return "", fmt.Errorf("create Hermes staging parent %q: %w", filepath.Dir(service.stagingRoot), err)
+		return "", fmt.Errorf("create filesystem staging parent %q: %w", filepath.Dir(service.stagingRoot), err)
 	}
 	// 成功构建前保留旧 staging，避免复制失败时暴露半成品或删除完整版本。
 	if err := service.files.removeAll(service.stagingRoot); err != nil {
-		return "", fmt.Errorf("remove Hermes staging root %q: %w", service.stagingRoot, err)
+		return "", fmt.Errorf("remove filesystem staging root %q: %w", service.stagingRoot, err)
 	}
 	if err := service.files.rename(temporaryRoot, service.stagingRoot); err != nil {
-		return "", fmt.Errorf("publish Hermes staging %q: %w", service.stagingRoot, err)
+		return "", fmt.Errorf("publish filesystem staging %q: %w", service.stagingRoot, err)
 	}
 	temporaryRoot = ""
 	return service.stagingRoot, nil
-}
-
-func (service *Service) builderFor(agent domain.AgentID) (artifactBuilder, error) {
-	switch agent {
-	case domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes, domain.AgentBibit:
-	default:
-		return nil, fmt.Errorf("plugin artifact agent %q: %w", agent, ErrUnsupportedAgent)
-	}
-	if isNilDependency(service.builder) {
-		return nil, fmt.Errorf("plugin artifact agent %q: %w", agent, ErrUnsupportedAgent)
-	}
-	return service.builder, nil
 }
 
 func (service *Service) downloaderFor() (Downloader, error) {
@@ -301,13 +287,10 @@ func (service *Service) pathLock(key string) *sync.Mutex {
 	return lock
 }
 
-func (service *Service) artifactFor(agent domain.AgentID, ref domain.PowerRef) (Artifact, error) {
-	if _, err := service.builderFor(agent); err != nil {
-		return Artifact{}, err
-	}
+func (service *Service) artifactFor(ref domain.PowerRef) (Artifact, error) {
 	logicalName, err := domain.PluginRuntimeName(ref)
 	if err != nil {
-		return Artifact{}, fmt.Errorf("plugin artifact reference %+v: %w", ref, err)
+		return Artifact{}, fmt.Errorf("plugin artifact reference %+v: %w", ref, errors.Join(ErrInvalidArtifact, err))
 	}
 	root := filepath.Join(service.cacheRoot, "plugins", ref.Name, ref.Version)
 	marketplaceSource, err := filepath.Abs(root)

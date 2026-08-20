@@ -70,58 +70,54 @@ type fakePluginResources struct {
 
 type installFakePluginResources = fakePluginResources
 
-func pluginArtifactKey(agent domain.AgentID, ref domain.PowerRef) string {
-	return string(agent) + ":" + ref.Name + ":" + ref.Version
+func pluginArtifactKey(ref domain.PowerRef) string {
+	return ref.Name + ":" + ref.Version
 }
 
-func fakePluginArtifact(agent domain.AgentID, ref domain.PowerRef) pluginresource.Artifact {
-	actualName, _ := domain.ActualPluginName(ref)
+func fakePluginArtifact(ref domain.PowerRef) pluginresource.Artifact {
+	logicalName, _ := domain.PluginRuntimeName(ref)
+	root := "/cache/plugins/" + ref.Name + "/" + ref.Version
 	artifact := pluginresource.Artifact{
-		Agent: agent, Power: ref, ActualName: actualName,
-		Root: "/cache/plugins/" + string(agent) + "/" + ref.Name + "/" + ref.Version,
-	}
-	artifact.PluginPath = artifact.Root + "/plugins/" + actualName
-	if agent != domain.AgentHermes {
-		artifact.MarketplaceName, _ = domain.PluginMarketplaceName(ref)
-		artifact.MarketplaceSource = artifact.Root
+		Power: ref, Root: root, PluginPath: root + "/plugins/" + logicalName,
+		CodexMarketplaceSource: root, ClaudeMarketplaceSource: root,
 	}
 	return artifact
 }
 
-func (resources *fakePluginResources) Ensure(_ context.Context, agent domain.AgentID, ref domain.PowerRef) (pluginresource.Artifact, error) {
+func (resources *fakePluginResources) Ensure(_ context.Context, ref domain.PowerRef) (pluginresource.Artifact, error) {
 	resources.ensureCalls++
 	if resources.calls != nil {
-		*resources.calls = append(*resources.calls, "resource:ensure:"+string(agent)+":"+ref.Version)
+		*resources.calls = append(*resources.calls, "resource:ensure:"+ref.Version)
 	}
-	key := pluginArtifactKey(agent, ref)
+	key := pluginArtifactKey(ref)
 	if err := resources.ensureErr[key]; err != nil {
 		return pluginresource.Artifact{}, err
 	}
 	if artifact, ok := resources.artifacts[key]; ok {
 		return artifact, nil
 	}
-	return fakePluginArtifact(agent, ref), nil
+	return fakePluginArtifact(ref), nil
 }
 
-func (resources *fakePluginResources) Lookup(agent domain.AgentID, ref domain.PowerRef) (pluginresource.Artifact, error) {
+func (resources *fakePluginResources) Lookup(ref domain.PowerRef) (pluginresource.Artifact, error) {
 	resources.lookupCalls++
 	if resources.calls != nil {
-		*resources.calls = append(*resources.calls, "resource:lookup:"+string(agent)+":"+ref.Version)
+		*resources.calls = append(*resources.calls, "resource:lookup:"+ref.Version)
 	}
-	key := pluginArtifactKey(agent, ref)
+	key := pluginArtifactKey(ref)
 	if err := resources.lookupErr[key]; err != nil {
 		return pluginresource.Artifact{}, err
 	}
 	if artifact, ok := resources.artifacts[key]; ok {
 		return artifact, nil
 	}
-	return fakePluginArtifact(agent, ref), nil
+	return fakePluginArtifact(ref), nil
 }
 
-func (resources *fakePluginResources) StageHermes(ref domain.PowerRef) (string, error) {
+func (resources *fakePluginResources) StageFilesystem(ref domain.PowerRef) (string, error) {
 	resources.stageCalls++
 	if resources.calls != nil {
-		*resources.calls = append(*resources.calls, "resource:stage-hermes:"+ref.Version)
+		*resources.calls = append(*resources.calls, "resource:stage-filesystem:"+ref.Version)
 	}
 	if resources.stageErr != nil {
 		return "", resources.stageErr

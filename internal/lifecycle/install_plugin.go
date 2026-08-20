@@ -25,7 +25,7 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 	}
 
 	// 目标版本允许 Ensure 下载；旧版本恢复材料只能由后续 Lookup 离线读取。
-	targetArtifact, err := s.plugins.Ensure(ctx, agent, ref)
+	targetArtifact, err := s.plugins.Ensure(ctx, ref)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("ensure target Plugin artifact %+v for agent %q: %w", ref, agent, err)
 	}
@@ -98,7 +98,7 @@ func (s *InstallService) installMarketplacePlugin(
 	}
 
 	// 旧版本只允许 Lookup；缺失或损坏时不得回源 Cloud，也不得改动 manifest。
-	previousArtifact, err := s.plugins.Lookup(agent, previous)
+	previousArtifact, err := s.plugins.Lookup(previous)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("lookup previous Plugin artifact %+v for agent %q: %w", previous, agent, err)
 	}
@@ -220,8 +220,8 @@ func (s *InstallService) installHermesPlugin(
 		}
 	}
 
-	// StageHermes 仅在所有事实校验完成、即将进入发布事务时调用。
-	staging, err := s.plugins.StageHermes(ref)
+	// 通用 filesystem staging 仅在所有事实校验完成、即将进入发布事务时调用。
+	staging, err := s.plugins.StageFilesystem(ref)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("stage Hermes Plugin artifact %+v: %w", ref, err)
 	}

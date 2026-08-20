@@ -99,7 +99,7 @@ func TestUninstallPluginMarketplaceFailsClosedOnAnomalies(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var calls []string
-			resources := &fakePluginResources{lookupErr: map[string]error{pluginArtifactKey(domain.AgentCodex, ref): test.lookupErr}}
+			resources := &fakePluginResources{lookupErr: map[string]error{pluginArtifactKey(ref): test.lookupErr}}
 			service := newUninstallService(t, &calls, uninstallFixture{
 				pluginMode:       domain.PluginDeploymentMarketplace,
 				marketplaceFacts: map[string]adapter.MarketplaceFact{"apm-demo": test.marketplaceFact},

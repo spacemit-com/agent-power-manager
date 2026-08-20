@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -15,8 +16,8 @@ import (
 	"apm/internal/utils/filesystem"
 )
 
-func TestLocalCloudSharedPluginPackagesBuildAgentArtifactsWithoutLegacyMarketplace(t *testing.T) {
-	// 捕获错误变更：Plugin Resource 桥接回退调用旧 marketplace 索引 API。
+func TestEnsureBuildsOneCompleteSharedArtifactFromLocalCloud(t *testing.T) {
+	// 捕获错误变更：共享发布遗漏完整 Plugin 树或任一 marketplace。
 	resourcesSource, err := filepath.Abs(filepath.Join("..", "cloud", "resources"))
 	if err != nil {
 		t.Fatal(err)
@@ -37,49 +38,32 @@ func TestLocalCloudSharedPluginPackagesBuildAgentArtifactsWithoutLegacyMarketpla
 	}
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
 
-	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes} {
-		t.Run(string(agent), func(t *testing.T) {
-			artifact, err := service.Ensure(context.Background(), agent, ref)
-			if err != nil {
-				t.Fatalf("Ensure() error = %v", err)
-			}
-			if artifact.Power != ref || filepath.Base(artifact.PluginPath) != "demo-plugin" {
-				t.Fatalf("Artifact identity = %#v, want shared demo-plugin", artifact)
-			}
-			if err := artifact.Validate(); err != nil {
-				t.Fatalf("Artifact.Validate() error = %v", err)
-			}
-			if _, err := os.Stat(filepath.Join(artifact.PluginPath, "skills", "demo-plugin", "SKILL.md")); err != nil {
-				t.Fatalf("stat Plugin skill: %v", err)
-			}
-			for _, required := range []string{
-				filepath.Join(".codex-plugin", "plugin.json"),
-				filepath.Join(".claude-plugin", "plugin.json"),
-				filepath.Join(".hermes-plugin", "__init__.py"),
-				filepath.Join(".hermes-plugin", "plugin.yaml"),
-			} {
-				if _, err := os.Stat(filepath.Join(artifact.PluginPath, required)); err != nil {
-					t.Fatalf("stat shared Plugin entry %q: %v", required, err)
-				}
-			}
-
-			switch agent {
-			case domain.AgentCodex:
-				assertGeneratedCodexMarketplace(t, filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"))
-			case domain.AgentClaudeCode:
-				assertGeneratedClaudeMarketplace(t, filepath.Join(artifact.Root, ".claude-plugin", "marketplace.json"))
-			case domain.AgentHermes:
-				for _, marketplace := range []string{
-					filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"),
-					filepath.Join(artifact.Root, ".claude-plugin", "marketplace.json"),
-				} {
-					if _, err := os.Lstat(marketplace); !errors.Is(err, os.ErrNotExist) {
-						t.Fatalf("Hermes artifact marketplace %q stat error = %v, want not exist", marketplace, err)
-					}
-				}
-			}
-		})
+	artifact, err := service.Ensure(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Ensure() error = %v", err)
 	}
+	wantRoot := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "apm", "plugins", "demo-plugin", "v0.1.0")
+	if artifact.Root != wantRoot || artifact.PluginPath != filepath.Join(wantRoot, "plugins", "demo-plugin") {
+		t.Fatalf("Artifact paths = %q / %q, want %q / plugins/demo-plugin", artifact.Root, artifact.PluginPath, wantRoot)
+	}
+	if err := artifact.Validate(); err != nil {
+		t.Fatalf("Artifact.Validate() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(artifact.PluginPath, "skills", "demo-plugin", "SKILL.md")); err != nil {
+		t.Fatalf("stat Plugin skill: %v", err)
+	}
+	for _, required := range []string{
+		filepath.Join(".codex-plugin", "plugin.json"),
+		filepath.Join(".claude-plugin", "plugin.json"),
+		filepath.Join(".hermes-plugin", "__init__.py"),
+		filepath.Join(".hermes-plugin", "plugin.yaml"),
+	} {
+		if _, err := os.Stat(filepath.Join(artifact.PluginPath, required)); err != nil {
+			t.Fatalf("stat shared Plugin entry %q: %v", required, err)
+		}
+	}
+	assertGeneratedCodexMarketplace(t, filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"))
+	assertGeneratedClaudeMarketplace(t, filepath.Join(artifact.Root, ".claude-plugin", "marketplace.json"))
 }
 
 func assertGeneratedCodexMarketplace(t *testing.T, path string) {
@@ -105,8 +89,8 @@ func assertGeneratedCodexMarketplace(t *testing.T, path string) {
 		t.Fatalf("Codex marketplace identity/count = %q/%d, want apm-demo-plugin/1", document.Name, len(document.Plugins))
 	}
 	plugin := document.Plugins[0]
-	if plugin.Name != "demo-plugin-v0.1.0" || plugin.Source.Kind != "local" || plugin.Source.Path != "./plugins/demo-plugin-v0.1.0" {
-		t.Fatalf("Codex marketplace plugin = %#v, want local demo-plugin-v0.1.0", plugin)
+	if plugin.Name != "demo-plugin" || plugin.Source.Kind != "local" || plugin.Source.Path != "./plugins/demo-plugin" {
+		t.Fatalf("Codex marketplace plugin = %#v, want local demo-plugin", plugin)
 	}
 }
 
@@ -130,8 +114,8 @@ func assertGeneratedClaudeMarketplace(t *testing.T, path string) {
 		t.Fatalf("Claude marketplace identity/count = %q/%d, want apm-demo-plugin/1", document.Name, len(document.Plugins))
 	}
 	plugin := document.Plugins[0]
-	if plugin.Name != "demo-plugin-v0.1.0" || plugin.Source != "./plugins/demo-plugin-v0.1.0" {
-		t.Fatalf("Claude marketplace plugin = %#v, want local demo-plugin-v0.1.0", plugin)
+	if plugin.Name != "demo-plugin" || plugin.Source != "./plugins/demo-plugin" {
+		t.Fatalf("Claude marketplace plugin = %#v, want local demo-plugin", plugin)
 	}
 }
 
@@ -142,15 +126,15 @@ func TestEnsurePersistsValidatedArtifactAndReusesImmutableVersion(t *testing.T) 
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, downloader, testBuilders())
 	ref := testPluginRef()
 
-	artifact, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
+	artifact, err := service.Ensure(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("Ensure() error = %v", err)
 	}
-	wantRoot := filepath.Join(roots.cache, "plugins", "codex", "demo", "v0.1.0")
+	wantRoot := filepath.Join(roots.cache, "plugins", "demo", "v0.1.0")
 	if artifact.Root != wantRoot {
 		t.Fatalf("Artifact.Root = %q, want %q", artifact.Root, wantRoot)
 	}
-	wantPluginPath := filepath.Join(wantRoot, "plugins", "demo-v0.1.0")
+	wantPluginPath := filepath.Join(wantRoot, "plugins", "demo")
 	if artifact.PluginPath != wantPluginPath {
 		t.Fatalf("Artifact.PluginPath = %q, want %q", artifact.PluginPath, wantPluginPath)
 	}
@@ -158,7 +142,7 @@ func TestEnsurePersistsValidatedArtifactAndReusesImmutableVersion(t *testing.T) 
 		t.Fatalf("DownloadPlugin calls = %d, want 1", downloader.calls)
 	}
 
-	again, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
+	again, err := service.Ensure(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("second Ensure() error = %v", err)
 	}
@@ -176,18 +160,18 @@ func TestEnsureAndLookupRejectDamagedImmutableVersionWithoutDownloading(t *testi
 	downloader := &testDownloader{}
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, downloader, testBuilders())
 	ref := testPluginRef()
-	damagedRoot := filepath.Join(roots.cache, "plugins", "codex", "demo", "v0.1.0")
-	if err := os.MkdirAll(filepath.Join(damagedRoot, "plugins", "demo-v0.1.0"), 0o700); err != nil {
+	damagedRoot := filepath.Join(roots.cache, "plugins", "demo", "v0.1.0")
+	if err := os.MkdirAll(filepath.Join(damagedRoot, "plugins", "demo"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 	}
 	if downloader.calls != 0 {
 		t.Fatalf("DownloadPlugin calls after damaged cache = %d, want 0", downloader.calls)
 	}
-	if _, err := service.Lookup(domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 	}
 	if downloader.calls != 0 {
@@ -195,8 +179,8 @@ func TestEnsureAndLookupRejectDamagedImmutableVersionWithoutDownloading(t *testi
 	}
 }
 
-func TestStageHermesReturnsCacheMissWithoutRemovingExistingStaging(t *testing.T) {
-	// 捕获错误变更：Hermes 缓存缺失时仍先清理当前 staging。
+func TestStageFilesystemReturnsCacheMissWithoutRemovingExistingStaging(t *testing.T) {
+	// 捕获错误变更：共享缓存缺失时仍先清理当前 staging。
 	roots := newTestRoots(t)
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
 	oldStaging := filepath.Join(roots.staging, "old-staging.txt")
@@ -207,8 +191,8 @@ func TestStageHermesReturnsCacheMissWithoutRemovingExistingStaging(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if _, err := service.StageHermes(testPluginRef()); !errors.Is(err, ErrMiss) {
-		t.Fatalf("StageHermes() error = %v, want ErrMiss", err)
+	if _, err := service.StageFilesystem(testPluginRef()); !errors.Is(err, ErrMiss) {
+		t.Fatalf("StageFilesystem() error = %v, want ErrMiss", err)
 	}
 	content, err := os.ReadFile(oldStaging)
 	if err != nil {
@@ -219,13 +203,14 @@ func TestStageHermesReturnsCacheMissWithoutRemovingExistingStaging(t *testing.T)
 	}
 }
 
-func TestStageHermesAtomicallyRebuildsStagingFromImmutablePluginLeaf(t *testing.T) {
+func TestStageFilesystemAtomicallyRebuildsLogicalPluginLeaf(t *testing.T) {
 	// 捕获错误变更：复制整个版本根、保留旧 staging，或未使用 staging 临时根原子发布。
 	roots := newTestRoots(t)
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
 	ref := testPluginRef()
-	hermesRoot := testArtifactRoot(roots.cache, domain.AgentHermes, ref)
-	writeValidTestArtifact(t, hermesRoot)
+	cacheRoot := testArtifactRoot(roots.cache, ref)
+	writeValidTestArtifact(t, cacheRoot)
+	cacheBefore := snapshotTestTree(t, cacheRoot)
 	if err := os.MkdirAll(roots.staging, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -239,12 +224,12 @@ func TestStageHermesAtomicallyRebuildsStagingFromImmutablePluginLeaf(t *testing.
 		t.Fatal(err)
 	}
 
-	staging, err := service.StageHermes(ref)
+	staging, err := service.StageFilesystem(ref)
 	if err != nil {
-		t.Fatalf("StageHermes() error = %v", err)
+		t.Fatalf("StageFilesystem() error = %v", err)
 	}
 	if staging != roots.staging {
-		t.Fatalf("StageHermes() = %q, want %q", staging, roots.staging)
+		t.Fatalf("StageFilesystem() = %q, want %q", staging, roots.staging)
 	}
 	payload, err := os.ReadFile(filepath.Join(roots.staging, "plugins", "demo", "payload.txt"))
 	if err != nil {
@@ -259,38 +244,12 @@ func TestStageHermesAtomicallyRebuildsStagingFromImmutablePluginLeaf(t *testing.
 	if _, err := os.Stat(roots.stagingTemp); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("staging temp stat error = %v, want not exist", err)
 	}
-}
-
-func TestStageHermesDoesNotChangeCodexOrClaudeArtifactRoots(t *testing.T) {
-	// 捕获错误变更：重建 Hermes staging 时误清理或移动其他 Agent 的缓存。
-	roots := newTestRoots(t)
-	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
-	ref := testPluginRef()
-	writeValidTestArtifact(t, testArtifactRoot(roots.cache, domain.AgentHermes, ref))
-	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
-		root := testArtifactRoot(roots.cache, agent, ref)
-		writeValidTestArtifact(t, root)
-		if err := os.WriteFile(filepath.Join(root, "agent-sentinel.txt"), []byte(string(agent)), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if _, err := service.StageHermes(ref); err != nil {
-		t.Fatalf("StageHermes() error = %v", err)
-	}
-	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
-		path := filepath.Join(testArtifactRoot(roots.cache, agent, ref), "agent-sentinel.txt")
-		content, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("ReadFile(%q) error = %v", path, err)
-		}
-		if got, want := string(content), string(agent); got != want {
-			t.Fatalf("artifact sentinel for %s = %q, want %q", agent, got, want)
-		}
+	if cacheAfter := snapshotTestTree(t, cacheRoot); cacheAfter != cacheBefore {
+		t.Fatalf("immutable cache changed during staging\nbefore:\n%s\nafter:\n%s", cacheBefore, cacheAfter)
 	}
 }
 
-func TestEnsureConcurrentPublishersReturnTheValidatedImmutableArtifact(t *testing.T) {
+func TestEnsurePublishesOneSharedArtifactForConcurrentCallers(t *testing.T) {
 	// 捕获错误变更：同一 Service 并发发布同版本，在第一个版本发布前启动第二次下载。
 	previous := runtime.GOMAXPROCS(1)
 	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
@@ -305,52 +264,113 @@ func TestEnsureConcurrentPublishersReturnTheValidatedImmutableArtifact(t *testin
 		testBuilder{},
 	)
 	ref := testPluginRef()
-	results := make(chan error, 2)
+	results := make(chan Artifact, 4)
+	errs := make(chan error, 4)
+	var group sync.WaitGroup
+	group.Add(1)
 	go func() {
-		_, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
-		results <- err
+		defer group.Done()
+		artifact, err := service.Ensure(context.Background(), ref)
+		results <- artifact
+		errs <- err
 	}()
 	<-downloader.firstStarted
-	go func() {
-		_, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
-		results <- err
-	}()
+	for range 3 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			artifact, err := service.Ensure(context.Background(), ref)
+			results <- artifact
+			errs <- err
+		}()
+	}
 	runtime.Gosched()
 	if downloader.started.Load() != 1 {
 		t.Fatal("second download started before the first artifact was published")
 	}
 	close(downloader.release)
-	for range 2 {
-		if err := <-results; err != nil {
+	group.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
 			t.Fatalf("concurrent Ensure() error = %v", err)
 		}
 	}
 	if got := downloader.started.Load(); got != 1 {
 		t.Fatalf("concurrent DownloadPlugin calls = %d, want 1", got)
 	}
-	if _, err := service.Lookup(domain.AgentCodex, ref); err != nil {
+	var root string
+	for artifact := range results {
+		if root == "" {
+			root = artifact.Root
+		}
+		if artifact.Root != root {
+			t.Fatalf("concurrent roots differ: %q and %q", root, artifact.Root)
+		}
+	}
+	if _, err := service.Lookup(ref); err != nil {
 		t.Fatalf("Lookup() after concurrent Ensure = %v", err)
 	}
 }
 
-func TestStageHermesSerializesSameStagingPath(t *testing.T) {
+func TestEnsurePublishRaceConvergesThroughLookupWithoutOverwritingPublishedVersion(t *testing.T) {
+	// 捕获错误变更：rename 竞态出现已发布版本时返回失败、覆盖它，或遗留本次唯一临时根。
+	roots := newTestRoots(t)
+	downloader := &testDownloader{}
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, downloader, testBuilders())
+	ref := testPluginRef()
+	renameErr := errors.New("simulated concurrent publisher")
+	var temporaryRoot string
+	service.files.rename = func(source, destination string) error {
+		temporaryRoot = source
+		if destination == "" {
+			return errors.New("empty publish destination")
+		}
+		writeValidTestArtifact(t, destination)
+		if err := os.WriteFile(filepath.Join(destination, "winner.txt"), []byte("keep winner"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return renameErr
+	}
+
+	artifact, err := service.Ensure(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Ensure() publish race error = %v", err)
+	}
+	if artifact.Root != testArtifactRoot(roots.cache, ref) {
+		t.Fatalf("Artifact.Root = %q, want shared published root", artifact.Root)
+	}
+	content, err := os.ReadFile(filepath.Join(artifact.Root, "winner.txt"))
+	if err != nil || string(content) != "keep winner" {
+		t.Fatalf("published winner = %q, %v, want unchanged", content, err)
+	}
+	if _, err := os.Lstat(temporaryRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unique temporary root stat error = %v, want absent", err)
+	}
+	if downloader.calls != 1 {
+		t.Fatalf("DownloadPlugin calls = %d, want 1", downloader.calls)
+	}
+}
+
+func TestStageFilesystemSerializesSameStagingPath(t *testing.T) {
 	// 捕获错误变更：同一路径的并发 staging 复制互相删除临时树或交叉发布。
 	previous := runtime.GOMAXPROCS(1)
 	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
 	roots := newTestRoots(t)
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
 	ref := testPluginRef()
-	writeValidTestArtifact(t, testArtifactRoot(roots.cache, domain.AgentHermes, ref))
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
 	copier := newBlockingCopier()
 	service.files.copyDir = copier.copy
 	results := make(chan error, 2)
 	go func() {
-		_, err := service.StageHermes(ref)
+		_, err := service.StageFilesystem(ref)
 		results <- err
 	}()
 	<-copier.firstStarted
 	go func() {
-		_, err := service.StageHermes(ref)
+		_, err := service.StageFilesystem(ref)
 		results <- err
 	}()
 	runtime.Gosched()
@@ -360,7 +380,7 @@ func TestStageHermesSerializesSameStagingPath(t *testing.T) {
 	close(copier.release)
 	for range 2 {
 		if err := <-results; err != nil {
-			t.Fatalf("concurrent StageHermes() error = %v", err)
+			t.Fatalf("concurrent StageFilesystem() error = %v", err)
 		}
 	}
 	if got := copier.started.Load(); got != 2 {
@@ -368,12 +388,12 @@ func TestStageHermesSerializesSameStagingPath(t *testing.T) {
 	}
 }
 
-func TestStageHermesCopyFailureKeepsCompleteStagingAndCleansUniqueTemporary(t *testing.T) {
+func TestStageFilesystemCopyFailureKeepsCompleteStagingAndCleansUniqueTemporary(t *testing.T) {
 	// 捕获错误变更：复制失败时将半成品发布为 staging，或遗留/清理非本次临时目录。
 	roots := newTestRoots(t)
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
 	ref := testPluginRef()
-	writeValidTestArtifact(t, testArtifactRoot(roots.cache, domain.AgentHermes, ref))
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
 	if err := os.MkdirAll(roots.staging, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -394,8 +414,8 @@ func TestStageHermesCopyFailureKeepsCompleteStagingAndCleansUniqueTemporary(t *t
 		return copyErr
 	}
 
-	if _, err := service.StageHermes(ref); !errors.Is(err, copyErr) {
-		t.Fatalf("StageHermes() error = %v, want injected copy error", err)
+	if _, err := service.StageFilesystem(ref); !errors.Is(err, copyErr) {
+		t.Fatalf("StageFilesystem() error = %v, want injected copy error", err)
 	}
 	content, err := os.ReadFile(old)
 	if err != nil {
@@ -418,13 +438,13 @@ func TestEnsureRejectsTypedNilDependencies(t *testing.T) {
 	ref := testPluginRef()
 	var downloader *typedNilDownloader
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, downloader, testBuilders())
-	if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Ensure() typed-nil downloader error = %v, want ErrInvalidArtifact", err)
 	}
 	var builder *typedNilBuilder
 	service = newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, builder)
-	if _, err := service.Ensure(context.Background(), domain.AgentCodex, ref); !errors.Is(err, ErrUnsupportedAgent) {
-		t.Fatalf("Ensure() typed-nil builder error = %v, want ErrUnsupportedAgent", err)
+	if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("Ensure() typed-nil builder error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
@@ -438,13 +458,13 @@ func TestEnsureJoinsRenameAndInspectErrors(t *testing.T) {
 	service.files.rename = func(string, string) error { return renameErr }
 	var rootChecks atomic.Int32
 	service.files.lstat = func(path string) (os.FileInfo, error) {
-		if path == testArtifactRoot(roots.cache, domain.AgentCodex, ref) && rootChecks.Add(1) >= 4 {
+		if path == testArtifactRoot(roots.cache, ref) && rootChecks.Add(1) >= 4 {
 			return nil, inspectErr
 		}
 		return os.Lstat(path)
 	}
 
-	_, err := service.Ensure(context.Background(), domain.AgentCodex, ref)
+	_, err := service.Ensure(context.Background(), ref)
 	if !errors.Is(err, renameErr) || !errors.Is(err, inspectErr) {
 		t.Fatalf("Ensure() error = %v, want rename and inspect errors", err)
 	}
@@ -458,19 +478,19 @@ func TestEnsureJoinsDownloadAndUniqueTemporaryCleanupErrors(t *testing.T) {
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, failingDownloader{err: downloadErr}, testBuilders())
 	service.files.removeAll = func(string) error { return cleanupErr }
 
-	_, err := service.Ensure(context.Background(), domain.AgentCodex, testPluginRef())
+	_, err := service.Ensure(context.Background(), testPluginRef())
 	if !errors.Is(err, downloadErr) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("Ensure() error = %v, want download and cleanup errors", err)
 	}
 }
 
-func TestStageHermesJoinsCopyAndUniqueTemporaryCleanupErrors(t *testing.T) {
+func TestStageFilesystemJoinsCopyAndUniqueTemporaryCleanupErrors(t *testing.T) {
 	// 捕获错误变更：staging 复制失败时丢失唯一临时目录的清理错误。
 	roots := newTestRoots(t)
 	copyErr := errors.New("staging copy failed")
 	cleanupErr := errors.New("staging temporary cleanup failed")
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
-	writeValidTestArtifact(t, testArtifactRoot(roots.cache, domain.AgentHermes, testPluginRef()))
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, testPluginRef()))
 	service.files.copyDir = func(string, string) error { return copyErr }
 	service.files.removeAll = func(path string) error {
 		if filepath.Base(path) != filepath.Base(roots.stagingTemp) {
@@ -479,9 +499,9 @@ func TestStageHermesJoinsCopyAndUniqueTemporaryCleanupErrors(t *testing.T) {
 		return os.RemoveAll(path)
 	}
 
-	_, err := service.StageHermes(testPluginRef())
+	_, err := service.StageFilesystem(testPluginRef())
 	if !errors.Is(err, copyErr) || !errors.Is(err, cleanupErr) {
-		t.Fatalf("StageHermes() error = %v, want copy and cleanup errors", err)
+		t.Fatalf("StageFilesystem() error = %v, want copy and cleanup errors", err)
 	}
 }
 

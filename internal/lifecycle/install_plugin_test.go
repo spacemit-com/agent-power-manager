@@ -252,7 +252,7 @@ func TestInstallPluginMarketplaceFailsClosedOnManagedAnomalies(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var calls []string
-			resources := &fakePluginResources{lookupErr: map[string]error{pluginArtifactKey(domain.AgentCodex, previous): test.lookupErr}}
+			resources := &fakePluginResources{lookupErr: map[string]error{pluginArtifactKey(previous): test.lookupErr}}
 			service := newInstallService(t, &calls, installFixture{
 				installed: map[domain.AgentID]domain.PowerRef{domain.AgentCodex: previous}, pluginMode: domain.PluginDeploymentMarketplace,
 				marketplaceFacts: map[string]adapter.MarketplaceFact{"apm-demo": test.marketplaceFact},
@@ -306,7 +306,7 @@ func TestInstallPluginPreviousLookupNeverDownloadsOldVersion(t *testing.T) {
 	previous := pluginRef("v1.0.0")
 	target := pluginRef("v2.0.0")
 	oldMiss := errors.New("offline old cache miss")
-	resources := &fakePluginResources{lookupErr: map[string]error{pluginArtifactKey(domain.AgentCodex, previous): oldMiss}}
+	resources := &fakePluginResources{lookupErr: map[string]error{pluginArtifactKey(previous): oldMiss}}
 	var calls []string
 	service := newInstallService(t, &calls, installFixture{
 		installed: map[domain.AgentID]domain.PowerRef{domain.AgentCodex: previous}, pluginMode: domain.PluginDeploymentMarketplace,
