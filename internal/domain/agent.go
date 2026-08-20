@@ -13,6 +13,8 @@ const (
 	AgentClaudeCode AgentID = "claude-code"
 	// AgentHermes 表示 Hermes 智能体。
 	AgentHermes AgentID = "hermes-agent"
+	// AgentBibit 表示 Bibit 智能体。
+	AgentBibit AgentID = "bibit"
 )
 
 // AgentSnapshot 表示某一时刻可用的智能体集合。

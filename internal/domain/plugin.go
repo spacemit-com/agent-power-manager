@@ -34,6 +34,17 @@ func ActualPluginName(ref PowerRef) (string, error) {
 	return ref.Name + "-" + version, nil
 }
 
+// PluginRuntimeName 返回目标 Agent 使用的逻辑 Plugin 名称；版本只用于身份校验。
+func PluginRuntimeName(ref PowerRef) (string, error) {
+	if ref.Type != PowerTypePlugin || !isSafePluginSegment(ref.Name) {
+		return "", fmt.Errorf("plugin reference %+v: %w", ref, ErrInvalidPluginIdentity)
+	}
+	if _, err := canonicalAPMPluginVersion(ref.Version); err != nil {
+		return "", err
+	}
+	return ref.Name, nil
+}
+
 // PluginMarketplaceName 返回逻辑 Plugin 对应的固定 marketplace 名称。
 func PluginMarketplaceName(ref PowerRef) (string, error) {
 	if ref.Type != PowerTypePlugin || !isSafePluginSegment(ref.Name) {

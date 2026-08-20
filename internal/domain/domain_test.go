@@ -7,8 +7,8 @@ import (
 )
 
 func TestAgentIDsAreStable(t *testing.T) {
-	if domain.AgentCodex != "codex" || domain.AgentClaudeCode != "claude-code" || domain.AgentHermes != "hermes-agent" {
-		t.Fatalf("agent IDs = %q, %q, %q", domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes)
+	if domain.AgentCodex != "codex" || domain.AgentClaudeCode != "claude-code" || domain.AgentHermes != "hermes-agent" || domain.AgentBibit != "bibit" {
+		t.Fatalf("agent IDs = %q, %q, %q, %q", domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes, domain.AgentBibit)
 	}
 }
 
