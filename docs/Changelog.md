@@ -2,6 +2,40 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-20
+
+分类：新增功能
+
+用户需求：新增 Bibit 的 Skill/MCP/Plugin 适配，并把 Plugin Cloud/缓存迁移为共享多 Agent 制品。
+
+相关提交：
+- `f1b9c33 docs(bibit): design shared multi-agent plugins`
+- `603a9e0 docs(bibit): plan shared plugin implementation`
+- `c68d95e feat(domain): define bibit and logical plugin names`
+- `3e8b8ad feat(adapter): add dedicated bibit mcp support`
+- `537c406 feat(adapter): add bibit filesystem plugins`
+- `247baea refactor(cloud): share plugin packages across agents`
+- `f0082e3 refactor(plugin): define shared multi-agent artifacts`
+- `77fa64b feat(plugin): publish shared immutable artifacts`
+- `6d36813 fix(plugin): preserve staging during publication`
+- `e6fc45a feat(transaction): recover shared plugin artifacts`
+- `a55d655 fix(transaction): remove dead validation parameter`
+- `dc46a99 refactor(plugin): use logical targets across agents`
+- `dc14b77 fix(plugin): harden filesystem recovery boundaries`
+- `4c0f613 fix(plugin): preserve removing-old recovery phase`
+- `bfb2c43 feat(agent): register bibit power adapters`
+- `4989fb4 test(agent): isolate bibit MCP harness`
+- `6e6315e test(plugin): cover shared bibit lifecycle recovery`
+- `8f24d11 fix(plugin): preserve retained marketplace recovery`
+- `6f1e5bb docs(bibit): align shared plugin architecture`
+- `7b0d6e8 docs(bibit): clarify retained marketplace flows`
+- `890bd2a fix(plugin): validate filesystem recovery targets`
+- `19c2d0b fix(plugin): reject unsafe uninstall recovery targets`
+
+解决方案或完成结果：引入 logical selector 与共享不可变 cache，使用单份多 Agent Plugin 原包；APM 生成 Codex/Claude 双 marketplace，并支持 Hermes/Bibit 通过 `plugins/<name>` filesystem 部署；新增 Bibit 独立 MCP Adapter；filesystem/marketplace offline journal recovery 采用 fail-closed physical safety，并支持 retained exact marketplace 重装复用。
+
+验证结果或限制：fresh gates 全部通过（gofmt、full/race/vet/build、Bibit/Plugin/Fix lifecycle）。验证仅使用 fake-bin-only PATH、临时 HOME/APM/cache/Agent roots，未使用真实 `bianbu-agent`；Cloud package completeness is trusted；不自动迁移旧 cache/journal；损坏或歧义状态 fail closed。
+
 ## 2026-08-17
 
 分类：功能变更
