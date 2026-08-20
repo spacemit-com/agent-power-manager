@@ -6,6 +6,7 @@ import "apm/internal/domain"
 type manifestDocument struct {
 	Agent   domain.AgentID `json:"agent"`
 	Skills  []powerEntry   `json:"skills"`
+	Agents  []powerEntry   `json:"agents"`
 	Plugins []powerEntry   `json:"plugins"`
 	MCPs    []powerEntry   `json:"mcps"`
 }
@@ -18,6 +19,7 @@ type powerEntry struct {
 func emptyPowerGroups() domain.PowerGroups {
 	return domain.PowerGroups{
 		domain.PowerTypeSkill:  make([]domain.PowerRef, 0),
+		domain.PowerTypeAgent:  make([]domain.PowerRef, 0),
 		domain.PowerTypePlugin: make([]domain.PowerRef, 0),
 		domain.PowerTypeMCP:    make([]domain.PowerRef, 0),
 	}
@@ -26,6 +28,7 @@ func emptyPowerGroups() domain.PowerGroups {
 func manifestToPowerGroups(document manifestDocument) domain.PowerGroups {
 	groups := emptyPowerGroups()
 	groups[domain.PowerTypeSkill] = entriesToPowerRefs(document.Skills, domain.PowerTypeSkill)
+	groups[domain.PowerTypeAgent] = entriesToPowerRefs(document.Agents, domain.PowerTypeAgent)
 	groups[domain.PowerTypePlugin] = entriesToPowerRefs(document.Plugins, domain.PowerTypePlugin)
 	groups[domain.PowerTypeMCP] = entriesToPowerRefs(document.MCPs, domain.PowerTypeMCP)
 	return groups
@@ -35,6 +38,7 @@ func powerGroupsToManifest(agent domain.AgentID, groups domain.PowerGroups) mani
 	return manifestDocument{
 		Agent:   agent,
 		Skills:  powerRefsToEntries(groups[domain.PowerTypeSkill]),
+		Agents:  powerRefsToEntries(groups[domain.PowerTypeAgent]),
 		Plugins: powerRefsToEntries(groups[domain.PowerTypePlugin]),
 		MCPs:    powerRefsToEntries(groups[domain.PowerTypeMCP]),
 	}
@@ -64,6 +68,7 @@ func clonePowerGroups(groups domain.PowerGroups) domain.PowerGroups {
 	cloned := emptyPowerGroups()
 	for _, powerType := range []domain.PowerType{
 		domain.PowerTypeSkill,
+		domain.PowerTypeAgent,
 		domain.PowerTypePlugin,
 		domain.PowerTypeMCP,
 	} {

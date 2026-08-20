@@ -351,6 +351,7 @@ func TestJSONRepositorySetCreatesManifestWithFixedSchema(t *testing.T) {
       "version": "v0.0.1"
     }
   ],
+  "agents": [],
   "plugins": [],
   "mcps": []
 }
@@ -397,6 +398,7 @@ func TestJSONRepositorySetAppendsNewNameAndPreservesOrder(t *testing.T) {
       "version": "v4.0.0"
     }
   ],
+  "agents": [],
   "plugins": [
     {
       "name": "plugin-a",
@@ -459,6 +461,7 @@ func TestJSONRepositorySetReplacesFirstMatchAndRemovesDuplicates(t *testing.T) {
       "version": "v4.0.0"
     }
   ],
+  "agents": [],
   "plugins": [
     {
       "name": "plugin-a",
@@ -579,6 +582,7 @@ func TestJSONRepositoryRemoveDeletesAllMatchesAndPreservesOrder(t *testing.T) {
       "version": "v4.0.0"
     }
   ],
+  "agents": [],
   "plugins": [
     {
       "name": "plugin-a",
@@ -848,5 +852,25 @@ func TestJSONRepositoryIsStatelessAcrossAgents(t *testing.T) {
 	}
 	if got := claude[domain.PowerTypeSkill]; len(got) != 0 {
 		t.Fatalf("claude skills = %#v, want empty", got)
+	}
+}
+
+func TestManifestAgentsGroupRoundTrip(t *testing.T) {
+	repository := config.NewJSONRepository()
+	agent := domain.AgentBibit
+	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	if err := repository.Set(agent, ref); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := repository.Find(agent, domain.PowerTypeAgent, "bianbu-agent-default")
+	if err != nil || !found || got != ref {
+		t.Fatalf("Find() = %#v, %t, %v", got, found, err)
+	}
+	groups, err := repository.List(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups[domain.PowerTypeAgent]) != 1 || groups[domain.PowerTypeAgent][0] != ref {
+		t.Fatalf("List() agent group = %#v", groups[domain.PowerTypeAgent])
 	}
 }

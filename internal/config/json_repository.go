@@ -166,7 +166,7 @@ func validateCanonicalVersion(version string) error {
 }
 
 func validatePowerGroups(operation string, agent domain.AgentID, groups domain.PowerGroups) error {
-	for _, powerType := range []domain.PowerType{domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP} {
+	for _, powerType := range []domain.PowerType{domain.PowerTypeSkill, domain.PowerTypeAgent, domain.PowerTypePlugin, domain.PowerTypeMCP} {
 		for index, power := range groups[powerType] {
 			if err := validateCanonicalVersion(power.Version); err != nil {
 				return fmt.Errorf("%s agent %q type %q entry %d power %q version %q: %w",
@@ -296,7 +296,7 @@ func (r *JSONRepository) write(agent domain.AgentID, groups domain.PowerGroups) 
 
 func validPowerType(powerType domain.PowerType) bool {
 	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP:
+	case domain.PowerTypeSkill, domain.PowerTypeAgent, domain.PowerTypePlugin, domain.PowerTypeMCP:
 		return true
 	default:
 		return false
