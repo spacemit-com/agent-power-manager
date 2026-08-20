@@ -1,0 +1,21 @@
+schema_version: 1
+agent:
+  id: bianbu-agent-default
+  version: v1.0.0
+  name: Bianbu Agent
+  description: Project-local Bianbu agent
+  instructions: Help the user complete practical work safely. Use installed Tools
+    and Skills only when they are relevant.
+  model:
+    provider: custom:chat
+    name: deepseek-v4-flash
+  tools:
+  - '*'
+  skills:
+  - '*'
+  mcps:
+  - '*'
+  hooks: []
+  metadata:
+    avatar: 🤖
+    is_default: true
