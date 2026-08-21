@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"apm/internal/cloud"
+	"apm/internal/domain"
 )
 
 var _ cloud.Client = (*Client)(nil)
@@ -152,6 +153,73 @@ func TestNewCopiesInjectedClient(t *testing.T) {
 	}
 	if client.baseURL.Path != "" {
 		t.Fatalf("normalized base path = %q, want empty", client.baseURL.Path)
+	}
+}
+
+func TestCatalogSuccessRequiresApplicationJSONContentType(t *testing.T) {
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}
+	operations := []struct {
+		name string
+		body string
+		run  func(context.Context, *Client) error
+	}{
+		{
+			name: "List",
+			body: `{"snapshot_updated_at":"2026-08-01T00:00:00Z","items":[],"next_cursor":""}`,
+			run: func(ctx context.Context, client *Client) error {
+				_, err := client.List(ctx)
+				return err
+			},
+		},
+		{
+			name: "latest",
+			body: `{"type":"skill","name":"demo","version":"v1.0.0"}`,
+			run: func(ctx context.Context, client *Client) error {
+				_, err := client.Resolve(ctx, domain.PowerRef{Type: ref.Type, Name: ref.Name})
+				return err
+			},
+		},
+		{
+			name: "exact",
+			body: `{"type":"skill","name":"demo","version":"v1.0.0","description":"demo","change_summary":"initial","content_type":"application/gzip","content_size":0,"content_md5":"d41d8cd98f00b204e9800998ecf8427e","published_at":"2026-08-01T00:00:00Z","status":"published","yanked_at":"","yank_reason":""}`,
+			run: func(ctx context.Context, client *Client) error {
+				_, err := client.Resolve(ctx, ref)
+				return err
+			},
+		},
+	}
+	for _, operation := range operations {
+		for _, contentType := range []string{"", "text/plain", "application/json; charset"} {
+			t.Run(operation.name+"/"+contentType, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+					if contentType != "" {
+						writer.Header().Set("Content-Type", contentType)
+					}
+					writer.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(writer, operation.body)
+				}))
+				defer server.Close()
+				err := operation.run(context.Background(), newRemoteTestClient(t, server.URL))
+				if !errors.Is(err, cloud.ErrInvalidResponse) {
+					t.Fatalf("operation error = %v, want ErrInvalidResponse", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCatalogSuccessAcceptsApplicationJSONParameters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = io.WriteString(writer, `{"snapshot_updated_at":"2026-08-01T00:00:00Z","items":[],"next_cursor":""}`)
+	}))
+	defer server.Close()
+	refs, err := newRemoteTestClient(t, server.URL).List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("List() = %#v, want empty", refs)
 	}
 }
 

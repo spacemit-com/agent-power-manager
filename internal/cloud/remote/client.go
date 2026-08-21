@@ -145,6 +145,7 @@ func (c *Client) endpoint(segments ...string) *url.URL {
 	return &endpoint
 }
 
+// getJSON 读取 APC 成功响应；2xx body 必须显式声明可解析的 application/json 媒体类型。
 func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
@@ -177,6 +178,10 @@ func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any
 			return fmt.Errorf("remote catalog returned HTTP %d: %w", response.StatusCode, cloud.ErrInvalidResponse)
 		}
 		return fmt.Errorf("remote catalog returned HTTP %d %s: %w", response.StatusCode, problemContext, cloud.ErrInvalidResponse)
+	}
+	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return fmt.Errorf("remote JSON response has content type %q: %w", response.Header.Get("Content-Type"), cloud.ErrInvalidResponse)
 	}
 	if response.ContentLength > maxJSONResponse {
 		return fmt.Errorf("remote JSON response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
