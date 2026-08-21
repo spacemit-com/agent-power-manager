@@ -46,7 +46,7 @@ func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destina
 	if err := validateFileDestination(destination); err != nil {
 		return err
 	}
-	contents, sourceMode, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen)
+	contents, sourceMode, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
 		return err
 	}

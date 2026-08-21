@@ -19,7 +19,7 @@ func TestHandleSnapshotBackendCapturesValidTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snapshot, err := capturePhysicalTree(context.Background(), root, source, nil, nil)
+	snapshot, err := capturePhysicalTree(context.Background(), root, source, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("capturePhysicalTree() error = %v", err)
 	}

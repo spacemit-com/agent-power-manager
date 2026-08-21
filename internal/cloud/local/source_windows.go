@@ -18,11 +18,12 @@ import (
 type treeCaptureState struct {
 	ctx            context.Context
 	beforeFileOpen func(string)
+	afterDataOpen  func(string)
 	nodes          []treeNodeSnapshot
 	totalSize      int64
 }
 
-func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string)) (*treeSnapshot, error) {
+func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (*treeSnapshot, error) {
 	root, relative, err := openResourcesRootHandle(resourcesRoot, source)
 	if err != nil {
 		return nil, err
@@ -43,14 +44,14 @@ func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, befo
 	if err != nil || !info.IsDir() {
 		return nil, unsafeContent("source tree %q is not a physical directory", source)
 	}
-	state := &treeCaptureState{ctx: ctx, beforeFileOpen: beforeFileOpen}
+	state := &treeCaptureState{ctx: ctx, beforeFileOpen: beforeFileOpen, afterDataOpen: afterDataOpen}
 	if err := state.captureDirectory(sourceDirectory, ""); err != nil {
 		return nil, err
 	}
 	return &treeSnapshot{nodes: state.nodes}, nil
 }
 
-func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, sizeLimit int64, beforeFileOpen func(string)) ([]byte, fs.FileMode, error) {
+func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, sizeLimit int64, beforeFileOpen func(string), afterDataOpen func(string)) ([]byte, fs.FileMode, error) {
 	root, relative, err := openResourcesRootHandle(resourcesRoot, source)
 	if err != nil {
 		return nil, 0, err
@@ -76,6 +77,9 @@ func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, size
 		return nil, 0, unsafeContent("open verified source file %q: %v", source, err)
 	}
 	defer dataFile.Close()
+	if afterDataOpen != nil {
+		afterDataOpen(relative)
+	}
 	dataInfo, err := dataFile.Stat()
 	if err != nil || !dataInfo.Mode().IsRegular() || !os.SameFile(pathInfo, dataInfo) {
 		return nil, 0, unsafeContent("source file %q changed while opening", source)
@@ -259,6 +263,9 @@ func (state *treeCaptureState) captureDirectory(directory *os.File, parent strin
 			if openErr != nil {
 				_ = pathFile.Close()
 				return unsafeContent("open verified source file %q: %v", relative, openErr)
+			}
+			if state.afterDataOpen != nil {
+				state.afterDataOpen(relative)
 			}
 			dataInfo, infoErr := dataFile.Stat()
 			if infoErr != nil || !dataInfo.Mode().IsRegular() || !os.SameFile(pathInfo, dataInfo) {

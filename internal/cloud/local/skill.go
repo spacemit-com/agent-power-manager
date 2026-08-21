@@ -59,7 +59,7 @@ func (c *Client) validateSkillSource(ctx context.Context, source string) (*treeS
 	if !marker.Mode().IsRegular() || marker.Mode()&os.ModeSymlink != 0 {
 		return nil, unsafeContent("source Skill marker %q is not a physical regular file", filepath.Join(source, "SKILL.md"))
 	}
-	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen)
+	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
 		return nil, err
 	}

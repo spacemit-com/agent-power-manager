@@ -33,7 +33,7 @@ func (c *Client) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destin
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return unsafeContent("raw Plugin package %q is not a physical directory", source)
 	}
-	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen)
+	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
 		return err
 	}

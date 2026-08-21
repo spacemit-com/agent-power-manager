@@ -22,6 +22,7 @@ type Client struct {
 	beforeAgentPublish     func()
 	beforeTreeSnapshot     func()
 	beforeSnapshotFileOpen func(string)
+	afterSnapshotDataOpen  func(string)
 	beforeTreePublish      func()
 	afterMCPDecode         func()
 	afterMCPClone          func()

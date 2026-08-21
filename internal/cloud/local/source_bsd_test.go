@@ -1,4 +1,4 @@
-//go:build darwin || freebsd
+//go:build freebsd
 
 package local
 
@@ -19,7 +19,7 @@ func TestOpenatSnapshotBackendCapturesValidTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snapshot, err := capturePhysicalTreeOpenat(context.Background(), root, source, nil, nil)
+	snapshot, err := capturePhysicalTreeOpenat(context.Background(), root, source, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("capturePhysicalTreeOpenat() error = %v", err)
 	}

@@ -34,7 +34,7 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPSer
 	if marker.Mode()&os.ModeSymlink != 0 || !marker.Mode().IsRegular() {
 		return domain.MCPServer{}, unsafeContent("MCP marker %q is not a physical regular file", markerPath)
 	}
-	contents, _, err := capturePhysicalFile(ctx, c.resourcesRoot, markerPath, maxSingleSize, c.beforeSnapshotFileOpen)
+	contents, _, err := capturePhysicalFile(ctx, c.resourcesRoot, markerPath, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
 		return domain.MCPServer{}, err
 	}

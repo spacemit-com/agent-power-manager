@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"apm/internal/domain"
+	"golang.org/x/sys/unix"
 )
 
 func TestDownloadSkillRejectsSourceRootSwapBeforeDescriptorSnapshot(t *testing.T) {
@@ -42,7 +43,7 @@ func TestOpenatSnapshotBackendDownloadsValidSkillWithoutOpenat2(t *testing.T) {
 	writeTestFile(t, filepath.Join(source, "SKILL.md"), "skill")
 	writeTestFile(t, filepath.Join(source, "payload.md"), "payload")
 
-	snapshot, err := capturePhysicalTreeOpenat(context.Background(), root, source, nil, nil)
+	snapshot, err := capturePhysicalTreeOpenat(context.Background(), root, source, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("capturePhysicalTreeOpenat() error = %v", err)
 	}
@@ -98,6 +99,86 @@ func TestDownloadSkillRejectsFileSwapBetweenMetadataAndDescriptorRead(t *testing
 	err = client.DownloadSkill(context.Background(), testSkillRef, destination)
 
 	assertUnsafeNoDownloadResidue(t, err, destination)
+}
+
+func TestDownloadSkillRejectsSpecialNodeSwapBeforeAnyDataOpen(t *testing.T) {
+	for _, replacement := range []string{"fifo", "device"} {
+		t.Run(replacement, func(t *testing.T) {
+			root := t.TempDir()
+			source := filepath.Join(root, "skills", testSkillRef.Name, testSkillRef.Version)
+			writeTestFile(t, filepath.Join(source, "SKILL.md"), "skill")
+			payload := filepath.Join(source, "payload.md")
+			writeTestFile(t, payload, "validated")
+			client, err := New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dataOpened := false
+			client.afterSnapshotDataOpen = func(relative string) {
+				if relative == "payload.md" {
+					dataOpened = true
+				}
+			}
+			client.beforeSnapshotFileOpen = func(relative string) {
+				if relative != "payload.md" {
+					return
+				}
+				if err := os.Remove(payload); err != nil {
+					t.Fatal(err)
+				}
+				switch replacement {
+				case "fifo":
+					if err := unix.Mkfifo(payload, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				case "device":
+					if err := unix.Mknod(payload, unix.S_IFCHR|0o600, int(unix.Mkdev(1, 3))); err != nil {
+						if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
+							t.Skipf("mknod unavailable: %v", err)
+						}
+						t.Fatal(err)
+					}
+				}
+			}
+			destination := filepath.Join(t.TempDir(), "download")
+
+			err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+
+			assertUnsafeNoDownloadResidue(t, err, destination)
+			if dataOpened {
+				t.Fatal("swapped special node was opened for data access")
+			}
+		})
+	}
+}
+
+func TestDownloadAgentRejectsFIFOSwapBeforeAnyDataOpen(t *testing.T) {
+	root := t.TempDir()
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	source := filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml")
+	writeTestFile(t, source, "agent: safe")
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataOpened := false
+	client.afterSnapshotDataOpen = func(string) { dataOpened = true }
+	client.beforeSnapshotFileOpen = func(string) {
+		if err := os.Remove(source); err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.Mkfifo(source, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	destination := filepath.Join(t.TempDir(), "agent.yaml")
+
+	err = client.DownloadAgent(context.Background(), ref, destination)
+
+	assertUnsafeNoDownloadResidue(t, err, destination)
+	if dataOpened {
+		t.Fatal("swapped FIFO was opened for data access")
+	}
 }
 
 func TestDownloadSkillPublishesValidatedSnapshotWhenSourceChangesAfterRead(t *testing.T) {

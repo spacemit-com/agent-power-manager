@@ -1,4 +1,4 @@
-//go:build linux || darwin || freebsd
+//go:build linux || freebsd
 
 package local
 
@@ -18,15 +18,16 @@ import (
 type treeCaptureState struct {
 	ctx            context.Context
 	beforeFileOpen func(string)
+	afterDataOpen  func(string)
 	nodes          []treeNodeSnapshot
 	totalSize      int64
 }
 
-func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string)) (*treeSnapshot, error) {
-	return capturePhysicalTreeOpenat(ctx, resourcesRoot, source, beforeSnapshot, beforeFileOpen)
+func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (*treeSnapshot, error) {
+	return capturePhysicalTreeOpenat(ctx, resourcesRoot, source, beforeSnapshot, beforeFileOpen, afterDataOpen)
 }
 
-func capturePhysicalTreeOpenat(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string)) (*treeSnapshot, error) {
+func capturePhysicalTreeOpenat(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (*treeSnapshot, error) {
 	root, relative, err := openResourcesRootOpenat(resourcesRoot, source)
 	if err != nil {
 		return nil, err
@@ -47,14 +48,14 @@ func capturePhysicalTreeOpenat(ctx context.Context, resourcesRoot, source string
 	if err != nil || !info.IsDir() {
 		return nil, unsafeContent("stat physical source tree %q: %v", source, err)
 	}
-	state := &treeCaptureState{ctx: ctx, beforeFileOpen: beforeFileOpen}
+	state := &treeCaptureState{ctx: ctx, beforeFileOpen: beforeFileOpen, afterDataOpen: afterDataOpen}
 	if err := state.captureDirectory(sourceDirectory, ""); err != nil {
 		return nil, err
 	}
 	return &treeSnapshot{nodes: state.nodes}, nil
 }
 
-func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, sizeLimit int64, beforeFileOpen func(string)) ([]byte, fs.FileMode, error) {
+func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, sizeLimit int64, beforeFileOpen func(string), afterDataOpen func(string)) ([]byte, fs.FileMode, error) {
 	root, relative, err := openResourcesRootOpenat(resourcesRoot, source)
 	if err != nil {
 		return nil, 0, err
@@ -80,14 +81,23 @@ func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, size
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
-	dataFile, err := openRegularAt(parent, name)
+	if err := verifyNodeIdentity(parent, name, pathInfo); err != nil {
+		return nil, 0, unsafeContent("source file %q changed before data open: %v", source, err)
+	}
+	dataFile, err := openInspectedRegular(pathFile)
 	if err != nil {
 		return nil, 0, unsafeContent("open verified source file %q: %v", source, err)
 	}
 	defer dataFile.Close()
+	if afterDataOpen != nil {
+		afterDataOpen(relative)
+	}
 	dataInfo, err := dataFile.Stat()
 	if err != nil || !dataInfo.Mode().IsRegular() || !os.SameFile(pathInfo, dataInfo) {
 		return nil, 0, unsafeContent("source file %q changed while opening", source)
+	}
+	if err := verifyNodeIdentity(parent, name, dataInfo); err != nil {
+		return nil, 0, unsafeContent("source file %q changed after data open: %v", source, err)
 	}
 	if err := rejectMultipleLinks(dataInfo, source); err != nil {
 		return nil, 0, err
@@ -191,27 +201,46 @@ func splitRelative(path string) []string {
 }
 
 func openDirectoryAt(directory *os.File, name string) (*os.File, error) {
-	fd, err := unix.Openat(int(directory.Fd()), name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	inspection, err := openNodeAt(directory, name)
 	if err != nil {
 		return nil, err
 	}
-	return os.NewFile(uintptr(fd), name), nil
+	defer inspection.Close()
+	info, err := inspection.Stat()
+	if err != nil || !info.IsDir() {
+		return nil, fs.ErrInvalid
+	}
+	opened, err := openInspectedDirectory(inspection)
+	if err != nil {
+		return nil, err
+	}
+	openedInfo, err := opened.Stat()
+	if err != nil || !openedInfo.IsDir() || !os.SameFile(info, openedInfo) {
+		_ = opened.Close()
+		return nil, fs.ErrInvalid
+	}
+	if err := verifyNodeIdentity(directory, name, openedInfo); err != nil {
+		_ = opened.Close()
+		return nil, err
+	}
+	return opened, nil
 }
 
 func openNodeAt(directory *os.File, name string) (*os.File, error) {
-	fd, err := unix.Openat(int(directory.Fd()), name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, err
-	}
-	return os.NewFile(uintptr(fd), name), nil
+	return openInspectionAt(directory, name)
 }
 
-func openRegularAt(directory *os.File, name string) (*os.File, error) {
-	fd, err := unix.Openat(int(directory.Fd()), name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+func verifyNodeIdentity(directory *os.File, name string, expected fs.FileInfo) error {
+	current, err := openNodeAt(directory, name)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return os.NewFile(uintptr(fd), name), nil
+	defer current.Close()
+	currentInfo, err := current.Stat()
+	if err != nil || !os.SameFile(expected, currentInfo) {
+		return fs.ErrInvalid
+	}
+	return nil
 }
 
 func (state *treeCaptureState) captureDirectory(directory *os.File, parent string) error {
@@ -245,9 +274,26 @@ func (state *treeCaptureState) captureDirectory(directory *os.File, parent strin
 		}
 		switch {
 		case pathInfo.IsDir():
-			state.nodes = append(state.nodes, treeNodeSnapshot{relative: relative, mode: pathInfo.Mode().Perm(), directory: true})
-			captureErr := state.captureDirectory(pathFile, relative)
-			closeErr := pathFile.Close()
+			child, openErr := openInspectedDirectory(pathFile)
+			if openErr != nil {
+				_ = pathFile.Close()
+				return unsafeContent("open verified source directory %q: %v", relative, openErr)
+			}
+			childInfo, infoErr := child.Stat()
+			if infoErr != nil || !childInfo.IsDir() || !os.SameFile(pathInfo, childInfo) {
+				_ = child.Close()
+				_ = pathFile.Close()
+				return unsafeContent("source directory %q changed while opening", relative)
+			}
+			if identityErr := verifyNodeIdentity(directory, entry.Name(), childInfo); identityErr != nil {
+				_ = child.Close()
+				_ = pathFile.Close()
+				return unsafeContent("source directory %q changed after data open: %v", relative, identityErr)
+			}
+			state.nodes = append(state.nodes, treeNodeSnapshot{relative: relative, mode: childInfo.Mode().Perm(), directory: true})
+			captureErr := state.captureDirectory(child, relative)
+			closeErr := child.Close()
+			_ = pathFile.Close()
 			if captureErr != nil || closeErr != nil {
 				return errors.Join(captureErr, closeErr)
 			}
@@ -255,16 +301,28 @@ func (state *treeCaptureState) captureDirectory(directory *os.File, parent strin
 			if state.beforeFileOpen != nil {
 				state.beforeFileOpen(relative)
 			}
-			dataFile, openErr := openRegularAt(directory, entry.Name())
+			if identityErr := verifyNodeIdentity(directory, entry.Name(), pathInfo); identityErr != nil {
+				_ = pathFile.Close()
+				return unsafeContent("source file %q changed before data open: %v", relative, identityErr)
+			}
+			dataFile, openErr := openInspectedRegular(pathFile)
 			if openErr != nil {
 				_ = pathFile.Close()
 				return unsafeContent("open verified source file %q: %v", relative, openErr)
+			}
+			if state.afterDataOpen != nil {
+				state.afterDataOpen(relative)
 			}
 			dataInfo, infoErr := dataFile.Stat()
 			if infoErr != nil || !dataInfo.Mode().IsRegular() || !os.SameFile(pathInfo, dataInfo) {
 				_ = dataFile.Close()
 				_ = pathFile.Close()
 				return unsafeContent("source file %q changed while opening", relative)
+			}
+			if identityErr := verifyNodeIdentity(directory, entry.Name(), dataInfo); identityErr != nil {
+				_ = dataFile.Close()
+				_ = pathFile.Close()
+				return unsafeContent("source file %q changed after data open: %v", relative, identityErr)
 			}
 			if linkErr := rejectMultipleLinks(dataInfo, relative); linkErr != nil {
 				_ = dataFile.Close()
