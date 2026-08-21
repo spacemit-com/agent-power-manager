@@ -32,6 +32,9 @@ func newCloudClient() (cloud.Client, error) {
 		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
 			return nil, fmt.Errorf("configure Local from %s=%q: clean absolute resource root is required: %w", localRootEnv, root, cloud.ErrProviderConfig)
 		}
+		if err := validatePhysicalLocalRoot(root); err != nil {
+			return nil, fmt.Errorf("configure Local Cloud provider from %s: %w", localRootEnv, errors.Join(cloud.ErrProviderConfig, err))
+		}
 		client, err := local.New(root)
 		if err != nil {
 			return nil, fmt.Errorf("create Local Cloud client from %s=%q: %w", localRootEnv, root, errors.Join(cloud.ErrProviderConfig, err))
@@ -47,7 +50,7 @@ func newCloudClient() (cloud.Client, error) {
 		}
 		client, err := remote.New(baseURL, newRemoteHTTPClient())
 		if err != nil {
-			return nil, fmt.Errorf("create Remote Cloud client from %s=%q: %w", apcBaseURLEnv, baseURL, err)
+			return nil, fmt.Errorf("configure Remote Cloud provider from %s: invalid value: %w", apcBaseURLEnv, cloud.ErrProviderConfig)
 		}
 		return client, nil
 	}); err != nil {
@@ -65,6 +68,31 @@ func newCloudClient() (cloud.Client, error) {
 	return client, nil
 }
 
+// validatePhysicalLocalRoot 从文件系统根向下检查每个路径组件，禁止跟随祖先或终端符号链接。
+func validatePhysicalLocalRoot(root string) error {
+	components := make([]string, 0, 8)
+	for current := root; ; current = filepath.Dir(current) {
+		components = append(components, current)
+		if parent := filepath.Dir(current); parent == current {
+			break
+		}
+	}
+	for index := len(components) - 1; index >= 0; index-- {
+		component := components[index]
+		info, err := os.Lstat(component)
+		if err != nil {
+			return fmt.Errorf("inspect Local resource root component %q: %w", component, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("Local resource root component %q is a symbolic link", component)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("Local resource root component %q is not a directory", component)
+		}
+	}
+	return nil
+}
+
 func newRemoteHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout:       2 * time.Minute,
@@ -74,7 +102,8 @@ func newRemoteHTTPClient() *http.Client {
 
 // sameOriginOnly 是 composition root 的跨源重定向纵深防线；Remote Client 仍负责最终的 base origin 校验和错误分类。
 func sameOriginOnly(request *http.Request, via []*http.Request) error {
-	if request == nil || request.URL == nil || len(via) == 0 || via[0] == nil || via[0].URL == nil {
+	if request == nil || request.URL == nil || request.URL.User != nil ||
+		len(via) == 0 || via[0] == nil || via[0].URL == nil || via[0].URL.User != nil {
 		return errors.New("reject Remote redirect without an original origin")
 	}
 	if !sameHTTPOrigin(via[0].URL, request.URL) {

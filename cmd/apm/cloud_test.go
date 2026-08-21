@@ -177,6 +177,51 @@ func TestNewCloudClientDoesNotFallbackAfterRemoteConfigurationFailure(t *testing
 	}
 }
 
+func TestNewCloudClientRedactsInvalidRemoteBaseURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		baseURL   string
+		forbidden []string
+	}{
+		{
+			name:      "userinfo secret",
+			baseURL:   "https://operator:password-secret@apc.example.com",
+			forbidden: []string{"operator", "password-secret"},
+		},
+		{
+			name:      "query token",
+			baseURL:   "https://apc.example.com?token=query-secret",
+			forbidden: []string{"token", "query-secret"},
+		},
+		{
+			name:      "malformed input secret",
+			baseURL:   "https://apc.example.com/%zz-malformed-secret",
+			forbidden: []string{"zz-malformed-secret"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearCloudEnvironment(t)
+			t.Setenv("APM_CLOUD_PROVIDER", "remote")
+			t.Setenv("APC_BASE_URL", tt.baseURL)
+
+			client, err := newCloudClient()
+			if client != nil || !errors.Is(err, cloud.ErrProviderConfig) {
+				t.Fatalf("newCloudClient() = (%T, %v), want nil/ErrProviderConfig", client, err)
+			}
+			message := err.Error()
+			if !strings.Contains(message, "APC_BASE_URL") || !strings.Contains(message, cloud.ErrProviderConfig.Error()) {
+				t.Fatalf("newCloudClient() error = %q, want environment and provider sentinel context", message)
+			}
+			for _, secret := range append(tt.forbidden, tt.baseURL) {
+				if strings.Contains(message, secret) {
+					t.Fatalf("newCloudClient() error = %q, leaked %q", message, secret)
+				}
+			}
+		})
+	}
+}
+
 func TestNewCloudClientDoesNotFallbackAfterRemoteRequestFailure(t *testing.T) {
 	clearCloudEnvironment(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -193,6 +238,75 @@ func TestNewCloudClientDoesNotFallbackAfterRemoteRequestFailure(t *testing.T) {
 	}
 	if _, err := client.List(context.Background()); !errors.Is(err, cloud.ErrInvalidResponse) {
 		t.Fatalf("List() error = %v, want Remote ErrInvalidResponse without Local fallback", err)
+	}
+}
+
+func TestNewCloudClientRejectsNonPhysicalLocalRoot(t *testing.T) {
+	parent := t.TempDir()
+	missing := filepath.Join(parent, "missing")
+	regularFile := filepath.Join(parent, "regular-file")
+	if err := os.WriteFile(regularFile, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	physicalFinal := filepath.Join(parent, "physical-final")
+	if err := os.Mkdir(physicalFinal, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	finalLink := filepath.Join(parent, "final-link")
+	if err := os.Symlink(physicalFinal, finalLink); err != nil {
+		t.Fatal(err)
+	}
+	physicalAncestor := filepath.Join(parent, "physical-ancestor")
+	ancestorRoot := filepath.Join(physicalAncestor, "resources")
+	if err := os.MkdirAll(ancestorRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ancestorLink := filepath.Join(parent, "ancestor-link")
+	if err := os.Symlink(physicalAncestor, ancestorLink); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		root string
+	}{
+		{name: "missing", root: missing},
+		{name: "regular file", root: regularFile},
+		{name: "terminal symlink", root: finalLink},
+		{name: "ancestor symlink", root: filepath.Join(ancestorLink, "resources")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearCloudEnvironment(t)
+			t.Setenv("APM_CLOUD_PROVIDER", "local")
+			t.Setenv("APM_CLOUD_LOCAL_ROOT", tt.root)
+
+			client, err := newCloudClient()
+			if client != nil || !errors.Is(err, cloud.ErrProviderConfig) {
+				t.Fatalf("newCloudClient() = (%T, %v), want nil/ErrProviderConfig", client, err)
+			}
+			if !strings.Contains(err.Error(), "APM_CLOUD_LOCAL_ROOT") {
+				t.Fatalf("newCloudClient() error = %q, want Local environment context", err)
+			}
+		})
+	}
+}
+
+func TestNewCloudClientAcceptsPhysicalLocalRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nested", "resources")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	clearCloudEnvironment(t)
+	t.Setenv("APM_CLOUD_PROVIDER", "local")
+	t.Setenv("APM_CLOUD_LOCAL_ROOT", root)
+
+	client, err := newCloudClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := client.(*local.Client); !ok {
+		t.Fatalf("client = %T, want Local", client)
 	}
 }
 
@@ -224,5 +338,61 @@ func TestNewRemoteHTTPClientIsFreshBoundedAndSameOriginOnly(t *testing.T) {
 	}
 	if err := first.CheckRedirect(&http.Request{URL: crossOriginURL}, via); err == nil {
 		t.Fatal("cross-origin redirect error = nil")
+	}
+}
+
+func TestSameOriginOnlyRejectsNilAndCredentialedRedirects(t *testing.T) {
+	safeURL := &url.URL{Scheme: "https", Host: "apc.example.com", Path: "/next"}
+	credentialedURL := &url.URL{
+		Scheme: "https",
+		Host:   "apc.example.com",
+		Path:   "/next",
+		User:   url.UserPassword("operator", "redirect-secret"),
+	}
+	tests := []struct {
+		name    string
+		request *http.Request
+		via     []*http.Request
+	}{
+		{name: "nil request", via: []*http.Request{{URL: safeURL}}},
+		{name: "nil request URL", request: &http.Request{}, via: []*http.Request{{URL: safeURL}}},
+		{name: "request userinfo", request: &http.Request{URL: credentialedURL}, via: []*http.Request{{URL: safeURL}}},
+		{name: "missing original", request: &http.Request{URL: safeURL}},
+		{name: "nil original", request: &http.Request{URL: safeURL}, via: []*http.Request{nil}},
+		{name: "nil original URL", request: &http.Request{URL: safeURL}, via: []*http.Request{{}}},
+		{name: "original userinfo", request: &http.Request{URL: safeURL}, via: []*http.Request{{URL: credentialedURL}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := sameOriginOnly(tt.request, tt.via); err == nil {
+				t.Fatal("sameOriginOnly() error = nil")
+			}
+		})
+	}
+}
+
+func TestSameOriginOnlyTreatsDefaultPortsAsEquivalent(t *testing.T) {
+	tests := []struct {
+		name     string
+		original string
+		target   string
+	}{
+		{name: "implicit HTTP to explicit", original: "http://apc.example.com/start", target: "http://APC.EXAMPLE.COM:80/next"},
+		{name: "explicit HTTPS to implicit", original: "https://apc.example.com:443/start", target: "https://APC.EXAMPLE.COM/next"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original, err := url.Parse(tt.original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, err := url.Parse(tt.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sameOriginOnly(&http.Request{URL: target}, []*http.Request{{URL: original}}); err != nil {
+				t.Fatalf("sameOriginOnly() error = %v", err)
+			}
+		})
 	}
 }
