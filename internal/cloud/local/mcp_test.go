@@ -67,8 +67,10 @@ func TestLocalClientGetMCPRejectsInvalidResourceDefinitions(t *testing.T) {
 		body string
 	}{
 		{name: "unknown field", body: `{"transport":"stdio","command":"npx","secret":"x"}`},
+		{name: "duplicate root field", body: `{"transport":"stdio","command":"first","command":"second"}`},
 		{name: "trailing value", body: `{"transport":"stdio","command":"npx"} {}`},
 		{name: "invalid union", body: `{"transport":"http","url":"https://example.com","command":"npx"}`},
+		{name: "plain HTTP endpoint", body: `{"transport":"http","url":"http://example.com/mcp"}`},
 		{name: "wrong type", body: `{"transport":"stdio","command":42}`},
 	}
 	for _, tt := range tests {

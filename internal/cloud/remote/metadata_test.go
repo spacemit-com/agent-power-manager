@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -11,6 +12,38 @@ import (
 	"apm/internal/cloud"
 	"apm/internal/domain"
 )
+
+func TestResolveRejectsDuplicateKeysInLatestAndExactResponseDTOs(t *testing.T) {
+	tests := []struct {
+		name  string
+		query domain.PowerRef
+		body  string
+	}{
+		{
+			name:  "latest",
+			query: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo"},
+			body:  `{"type":"skill","name":"demo","name":"shadow","version":"v1.0.0"}`,
+		},
+		{
+			name:  "exact",
+			query: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+			body:  `{"type":"skill","name":"demo","version":"v1.0.0","description":"Description","change_summary":"Change summary","content_type":"application/gzip","content_size":42,"content_md5":"8c7dd922ad47494fc02c388e12c00eac","published_at":"2026-08-18T09:30:12Z","status":"published","status":"yanked"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer server.Close()
+			client := newRemoteTestClient(t, server.URL)
+			if _, err := client.Resolve(context.Background(), tt.query); !errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("Resolve() error = %v, want duplicate-key ErrInvalidResponse", err)
+			}
+		})
+	}
+}
 
 func TestResolveLatestReturnsExactIdentity(t *testing.T) {
 	t.Parallel()

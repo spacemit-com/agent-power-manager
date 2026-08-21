@@ -2,9 +2,7 @@
 package remote
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +13,7 @@ import (
 	"strings"
 
 	"apm/internal/cloud"
+	"apm/internal/utils/jsonstrict"
 )
 
 const (
@@ -31,8 +30,9 @@ type problemDTO struct {
 
 // Client 通过已验证的 APC base URL 查询远端目录；HTTP Client 必须设置整体超时。
 type Client struct {
-	baseURL *url.URL
-	http    *http.Client
+	baseURL       *url.URL
+	http          *http.Client
+	mcpTempParent string
 }
 
 var _ cloud.Catalog = (*Client)(nil)
@@ -187,16 +187,8 @@ func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any
 	if len(payload) > maxJSONResponse {
 		return fmt.Errorf("remote JSON response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	if err := decoder.Decode(destination); err != nil {
+	if err := jsonstrict.Decode(payload, destination, false); err != nil {
 		return fmt.Errorf("decode remote JSON response: %w", errors.Join(cloud.ErrInvalidResponse, err))
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("decode remote JSON response with trailing value: %w", cloud.ErrInvalidResponse)
-		}
-		return fmt.Errorf("decode remote JSON response trailing data: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	return nil
 }
@@ -222,12 +214,7 @@ func safeProblemContext(response *http.Response, body []byte) string {
 	}
 
 	var problem problemDTO
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := decoder.Decode(&problem); err != nil {
-		return ""
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
+	if err := jsonstrict.Decode(body, &problem, false); err != nil {
 		return ""
 	}
 	if problem.Status == nil || *problem.Status != response.StatusCode || !isStableProblemCode(problem.Code) || !isStableProblemTraceID(problem.TraceID) {

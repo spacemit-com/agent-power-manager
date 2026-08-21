@@ -276,6 +276,22 @@ func TestListRejectsTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestListRejectsDuplicateKeysInResponseDTO(t *testing.T) {
+	t.Parallel()
+
+	const body = `{"snapshot_updated_at":"2026-08-18T09:30:12.123456Z","items":[{"type":"skill","name":"demo","name":"shadow","version":"v1.0.0","description":"Description","change_summary":"Change summary","content_type":"application/gzip","content_size":42,"content_md5":"8c7dd922ad47494fc02c388e12c00eac","published_at":"2026-08-18T09:30:12Z"}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+	client := newRemoteTestClient(t, server.URL)
+
+	if _, err := client.List(context.Background()); !errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("List() error = %v, want duplicate-key ErrInvalidResponse", err)
+	}
+}
+
 func TestListRejectsResponseOverHardLimit(t *testing.T) {
 	t.Parallel()
 

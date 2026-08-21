@@ -40,7 +40,7 @@ func (server MCPServer) Validate() error {
 			return fmt.Errorf("http forbids command and args: %w", ErrInvalidMCPServer)
 		}
 		parsed, err := url.Parse(server.URL)
-		if err != nil || parsed.IsAbs() == false || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		if err != nil || !parsed.IsAbs() || parsed.Host == "" || parsed.Scheme != "https" || parsed.User != nil {
 			return fmt.Errorf("http URL %q: %w", server.URL, ErrInvalidMCPServer)
 		}
 	default:

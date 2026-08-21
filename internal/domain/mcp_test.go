@@ -21,6 +21,8 @@ func TestMCPServerValidateAcceptsOnlyStdioOrHTTP(t *testing.T) {
 		{name: "http args", server: domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://example.com", Args: []string{"x"}}, wantErr: true},
 		{name: "relative url", server: domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "/mcp"}, wantErr: true},
 		{name: "missing host", server: domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https:///mcp"}, wantErr: true},
+		{name: "plain HTTP", server: domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "http://example.com/mcp"}, wantErr: true},
+		{name: "userinfo", server: domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://user:secret@example.com/mcp"}, wantErr: true},
 		{name: "unsupported scheme", server: domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "ftp://example.com/mcp"}, wantErr: true},
 		{name: "unknown transport", server: domain.MCPServer{Transport: "sse", URL: "https://example.com"}, wantErr: true},
 	}

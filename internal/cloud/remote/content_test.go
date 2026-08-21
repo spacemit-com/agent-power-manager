@@ -1,0 +1,291 @@
+package remote
+
+import (
+	"bytes"
+	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"apm/internal/cloud"
+	"apm/internal/domain"
+)
+
+var (
+	remoteAgentRef = domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.2.3"}
+	remoteMCPRef   = domain.PowerRef{Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v1.2.3"}
+)
+
+func TestDownloadVerifiedContentStagesExactBytesWithPrivateMode(t *testing.T) {
+	contents := []byte("schema_version: 1\nopaque:  value\n")
+	var requests []string
+	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		serveValidContent(t, w, r, remoteAgentRef, contents)
+	})
+	temporary, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(temporary) })
+
+	got, err := os.ReadFile(temporary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, contents) {
+		t.Fatalf("temporary contents = %q, want exact %q", got, contents)
+	}
+	info, err := os.Stat(temporary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("temporary mode = %o, want 600", mode)
+	}
+	wantRequests := []string{
+		"/api/v1/resources/agent/demo-agent/versions/v1.2.3",
+		"/api/v1/resources/agent/demo-agent/versions/v1.2.3/content",
+	}
+	if fmt.Sprint(requests) != fmt.Sprint(wantRequests) {
+		t.Fatalf("requests = %v, want metadata first %v", requests, wantRequests)
+	}
+}
+
+func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t *testing.T) {
+	contents := []byte("verified bytes")
+	tests := []struct {
+		name  string
+		serve func(*testing.T, http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "Content-Length differs from metadata",
+			serve: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/content") {
+					w.Header().Set("Content-Type", "application/yaml")
+					w.Header().Set("Content-Length", "99")
+					return
+				}
+				writeExactMetadata(t, w, remoteAgentRef, contents, nil)
+			},
+		},
+		{
+			name: "actual bytes shorter than metadata",
+			serve: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/content") {
+					w.Header().Set("Content-Type", "application/yaml")
+					w.Header().Set("Content-Length", fmt.Sprint(len(contents)))
+					_, _ = w.Write(contents[:4])
+					return
+				}
+				writeExactMetadata(t, w, remoteAgentRef, contents, nil)
+			},
+		},
+		{
+			name: "actual bytes longer than metadata",
+			serve: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/content") {
+					w.Header().Set("Content-Type", "application/yaml")
+					w.(http.Flusher).Flush()
+					_, _ = w.Write(append(append([]byte(nil), contents...), '!'))
+					return
+				}
+				writeExactMetadata(t, w, remoteAgentRef, contents, nil)
+			},
+		},
+		{
+			name: "MD5 differs from metadata",
+			serve: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/content") {
+					w.Header().Set("Content-Type", "application/yaml")
+					_, _ = w.Write([]byte("tampered bytes"))
+					return
+				}
+				writeExactMetadata(t, w, remoteAgentRef, []byte("tampered bytes"), map[string]any{
+					"content_size": len("tampered bytes"),
+					"content_md5":  md5Hex(contents),
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parent := t.TempDir()
+			client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+				tt.serve(t, w, r)
+			})
+			_, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", parent)
+			if !errors.Is(err, cloud.ErrIntegrity) {
+				t.Fatalf("downloadVerifiedContent() error = %v, want ErrIntegrity", err)
+			}
+			assertDirectoryEmpty(t, parent)
+		})
+	}
+}
+
+func TestDownloadVerifiedContentRejectsInvalidMetadataAndProtocol(t *testing.T) {
+	contents := []byte("verified bytes")
+	tests := []struct {
+		name     string
+		override map[string]any
+		content  func(http.ResponseWriter)
+		wantHits int32
+		want     error
+	}{
+		{name: "uppercase MD5", override: map[string]any{"content_md5": strings.ToUpper(md5Hex(contents))}, want: cloud.ErrInvalidResponse},
+		{name: "invalid MD5", override: map[string]any{"content_md5": "not-an-md5"}, want: cloud.ErrInvalidResponse},
+		{name: "over 20 MiB metadata", override: map[string]any{"content_size": (20 << 20) + 1}, want: cloud.ErrUnsafeContent},
+		{
+			name: "wrong response media type",
+			content: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Type", "text/plain")
+				_, _ = w.Write(contents)
+			},
+			wantHits: 1,
+			want:     cloud.ErrInvalidResponse,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var contentHits atomic.Int32
+			parent := t.TempDir()
+			client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/content") {
+					contentHits.Add(1)
+					tt.content(w)
+					return
+				}
+				writeExactMetadata(t, w, remoteAgentRef, contents, tt.override)
+			})
+			_, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", parent)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("downloadVerifiedContent() error = %v, want %v", err, tt.want)
+			}
+			if got := contentHits.Load(); got != tt.wantHits {
+				t.Fatalf("content requests = %d, want %d", got, tt.wantHits)
+			}
+			assertDirectoryEmpty(t, parent)
+		})
+	}
+}
+
+func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testing.T) {
+	t.Run("cancelled before request", func(t *testing.T) {
+		client := newRemoteTestClient(t, "http://127.0.0.1:1")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := client.downloadVerifiedContent(ctx, remoteAgentRef, "application/yaml", t.TempDir())
+		if !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
+			t.Fatalf("downloadVerifiedContent() error = %v, want only context.Canceled classification", err)
+		}
+	})
+
+	t.Run("cancelled while streaming", func(t *testing.T) {
+		started := make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasSuffix(r.URL.Path, "/content") {
+				writeExactMetadata(t, w, remoteAgentRef, []byte("0123456789"), nil)
+				return
+			}
+			w.Header().Set("Content-Type", "application/yaml")
+			w.Header().Set("Content-Length", "10")
+			_, _ = w.Write([]byte("0"))
+			w.(http.Flusher).Flush()
+			close(started)
+			<-r.Context().Done()
+		}))
+		defer server.Close()
+		client := newRemoteTestClient(t, server.URL)
+		parent := t.TempDir()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, err := client.downloadVerifiedContent(ctx, remoteAgentRef, "application/yaml", parent)
+			done <- err
+		}()
+		<-started
+		cancel()
+		err := <-done
+		if !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
+			t.Fatalf("downloadVerifiedContent() error = %v, want only context.Canceled classification", err)
+		}
+		assertDirectoryEmpty(t, parent)
+	})
+
+	t.Run("content transport", func(t *testing.T) {
+		transportErr := errors.New("content transport failed")
+		metadata := fmt.Sprintf(`{"type":"agent","name":"demo-agent","version":"v1.2.3","description":"","change_summary":"","content_type":"application/yaml","content_size":1,"content_md5":"%s","published_at":"%s","status":"published"}`, md5Hex([]byte("x")), testPublished)
+		client, err := New("https://apc.example.com", &http.Client{
+			Timeout: time.Second,
+			Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if strings.HasSuffix(request.URL.Path, "/content") {
+					return nil, transportErr
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(metadata)), ContentLength: int64(len(metadata)), Request: request}, nil
+			}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", t.TempDir())
+		if !errors.Is(err, transportErr) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
+			t.Fatalf("downloadVerifiedContent() error = %v, want only transport identity", err)
+		}
+	})
+}
+
+func newContentClient(t *testing.T, _ domain.PowerRef, _ []byte, handler http.HandlerFunc) *Client {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return newRemoteTestClient(t, server.URL)
+}
+
+func serveValidContent(t *testing.T, w http.ResponseWriter, r *http.Request, ref domain.PowerRef, contents []byte) {
+	t.Helper()
+	if strings.HasSuffix(r.URL.Path, "/content") {
+		w.Header().Set("Content-Type", expectedContentType(ref.Type))
+		_, _ = w.Write(contents)
+		return
+	}
+	writeExactMetadata(t, w, ref, contents, nil)
+}
+
+func writeExactMetadata(t *testing.T, w http.ResponseWriter, ref domain.PowerRef, contents []byte, overrides map[string]any) {
+	t.Helper()
+	metadata := validMetadata(string(ref.Type), ref.Name, ref.Version)
+	metadata["content_size"] = len(contents)
+	metadata["content_md5"] = md5Hex(contents)
+	metadata["status"] = "published"
+	for key, value := range overrides {
+		metadata[key] = value
+	}
+	writeJSON(t, w, metadata)
+}
+
+func md5Hex(contents []byte) string {
+	digest := md5.Sum(contents)
+	return hex.EncodeToString(digest[:])
+}
+
+func assertDirectoryEmpty(t *testing.T, directory string) {
+	t.Helper()
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("directory %q contains temporary residue: %v", directory, entries)
+	}
+}

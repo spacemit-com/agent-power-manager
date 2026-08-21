@@ -53,27 +53,41 @@ func (c *Client) resolveLatest(ctx context.Context, query domain.PowerRef) (doma
 }
 
 func (c *Client) resolveExact(ctx context.Context, query domain.PowerRef) (domain.PowerRef, error) {
+	metadata, err := c.getExactMetadata(ctx, query)
+	if err != nil {
+		return domain.PowerRef{}, err
+	}
+	return domain.PowerRef{Type: metadata.Type, Name: metadata.Name, Version: metadata.Version}, nil
+}
+
+func (c *Client) getExactMetadata(ctx context.Context, query domain.PowerRef) (exactMetadataDTO, error) {
+	if err := ctx.Err(); err != nil {
+		return exactMetadataDTO{}, fmt.Errorf("resolve exact remote resource: %w", err)
+	}
+	if !validResolveQuery(query) || query.Version == "" {
+		return exactMetadataDTO{}, fmt.Errorf("resolve invalid exact remote resource identity: %w", cloud.ErrNotFound)
+	}
 	endpoint := c.endpoint("api", "v1", "resources", string(query.Type), query.Name, "versions", query.Version)
 	var metadata exactMetadataDTO
 	if err := c.getJSON(ctx, endpoint, &metadata); err != nil {
-		return domain.PowerRef{}, fmt.Errorf("resolve exact remote resource %s/%s/%s: %w", query.Type, query.Name, query.Version, err)
+		return exactMetadataDTO{}, fmt.Errorf("resolve exact remote resource %s/%s/%s: %w", query.Type, query.Name, query.Version, err)
 	}
 	resolved, _, err := validateResourceMetadata(metadata.resourceMetadataDTO)
 	if err != nil {
-		return domain.PowerRef{}, fmt.Errorf("resolve exact remote resource metadata: %w", err)
+		return exactMetadataDTO{}, fmt.Errorf("resolve exact remote resource metadata: %w", err)
 	}
 	if resolved != query {
-		return domain.PowerRef{}, fmt.Errorf("exact remote resource identity does not match request: %w", cloud.ErrInvalidResponse)
+		return exactMetadataDTO{}, fmt.Errorf("exact remote resource identity does not match request: %w", cloud.ErrInvalidResponse)
 	}
 	switch metadata.Status {
 	case "published":
-		return resolved, nil
+		return metadata, nil
 	case "yanked":
 		if validateAPCTimestamp(metadata.YankedAt) != nil || strings.TrimSpace(metadata.YankReason) == "" {
-			return domain.PowerRef{}, fmt.Errorf("exact remote resource has invalid yanked metadata: %w", cloud.ErrInvalidResponse)
+			return exactMetadataDTO{}, fmt.Errorf("exact remote resource has invalid yanked metadata: %w", cloud.ErrInvalidResponse)
 		}
-		return domain.PowerRef{}, fmt.Errorf("exact remote resource is yanked: %w", cloud.ErrYanked)
+		return exactMetadataDTO{}, fmt.Errorf("exact remote resource is yanked: %w", cloud.ErrYanked)
 	default:
-		return domain.PowerRef{}, fmt.Errorf("exact remote resource has invalid status %q: %w", metadata.Status, cloud.ErrInvalidResponse)
+		return exactMetadataDTO{}, fmt.Errorf("exact remote resource has invalid status %q: %w", metadata.Status, cloud.ErrInvalidResponse)
 	}
 }

@@ -1,18 +1,16 @@
 package local
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 
 	"apm/internal/cloud"
 	"apm/internal/domain"
+	"apm/internal/utils/jsonstrict"
 )
 
 // GetMCP 直接读取精确版本的 MCP 定义，不写入 Cache 或 staging，读取前必须响应取消。
@@ -56,17 +54,9 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPSer
 }
 
 func decodeMCPServer(contents []byte) (domain.MCPServer, error) {
-	decoder := json.NewDecoder(bytes.NewReader(contents))
-	decoder.DisallowUnknownFields()
 	var server domain.MCPServer
-	if err := decoder.Decode(&server); err != nil {
+	if err := jsonstrict.Decode(contents, &server, true); err != nil {
 		return domain.MCPServer{}, err
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("unexpected second JSON value")
-		}
-		return domain.MCPServer{}, fmt.Errorf("decode trailing JSON: %w", err)
 	}
 	if err := server.Validate(); err != nil {
 		return domain.MCPServer{}, err
