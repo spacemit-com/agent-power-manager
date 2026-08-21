@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1096,10 +1098,22 @@ type lifecycleRemoteResource struct {
 }
 
 type lifecycleRemoteServer struct {
-	server   *httptest.Server
-	resource map[domain.PowerRef]lifecycleRemoteResource
-	mu       sync.Mutex
-	requests map[string]int
+	server             *httptest.Server
+	resource           map[domain.PowerRef]lifecycleRemoteResource
+	transport          *lifecycleAttemptTransport
+	mu                 sync.Mutex
+	requests           map[string]int
+	protocolViolations []string
+}
+
+type lifecycleAttemptTransport struct {
+	base     http.RoundTripper
+	attempts atomic.Int64
+}
+
+func (transport *lifecycleAttemptTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	transport.attempts.Add(1)
+	return transport.base.RoundTrip(request)
 }
 
 func newLifecycleRemoteServer(t *testing.T) *lifecycleRemoteServer {
@@ -1110,6 +1124,7 @@ func newLifecycleRemoteServer(t *testing.T) *lifecycleRemoteServer {
 	}
 	server := &lifecycleRemoteServer{
 		resource: make(map[domain.PowerRef]lifecycleRemoteResource), requests: make(map[string]int),
+		transport: &lifecycleAttemptTransport{base: http.DefaultTransport},
 	}
 	for _, ref := range []domain.PowerRef{
 		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
@@ -1121,7 +1136,12 @@ func newLifecycleRemoteServer(t *testing.T) *lifecycleRemoteServer {
 		server.resource[ref] = lifecycleRemoteResource{ref: ref, contentType: contentType, content: content}
 	}
 	server.server = httptest.NewServer(http.HandlerFunc(server.serveHTTP))
-	t.Cleanup(server.server.Close)
+	t.Cleanup(func() {
+		server.server.Close()
+		if violations := server.violations(); len(violations) != 0 {
+			t.Errorf("lifecycle Remote server protocol violations: %v", violations)
+		}
+	})
 	return server
 }
 
@@ -1186,10 +1206,10 @@ func lifecycleDeterministicArchive(t *testing.T, root string) []byte {
 		}
 		switch {
 		case info.IsDir():
-			header.Typeflag, header.Mode = tar.TypeDir, 0o755
+			header.Typeflag, header.Mode = tar.TypeDir, int64(info.Mode().Perm())
 		case info.Mode().IsRegular():
 			header.Typeflag = tar.TypeReg
-			header.Mode = int64(0o644 | info.Mode().Perm()&0o111)
+			header.Mode = int64(info.Mode().Perm())
 			header.Size = info.Size()
 		default:
 			t.Fatalf("lifecycle fixture path %q is not physical", path)
@@ -1223,11 +1243,27 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 	server.requests[request.URL.Path]++
 	server.mu.Unlock()
 	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
-	if request.Method != http.MethodGet || len(segments) < 7 || segments[0] != "api" || segments[1] != "v1" || segments[2] != "resources" || segments[5] != "versions" {
-		http.NotFound(writer, request)
+	if request.Method != http.MethodGet {
+		server.rejectProtocol(writer, request, "method = %q, want GET", request.Method)
+		return
+	}
+	if len(segments) < 7 || segments[0] != "api" || segments[1] != "v1" || segments[2] != "resources" || segments[5] != "versions" {
+		server.rejectProtocol(writer, request, "unknown endpoint")
 		return
 	}
 	ref := domain.PowerRef{Type: domain.PowerType(segments[3]), Name: segments[4], Version: segments[6]}
+	expectedSegments := []string{"api", "v1", "resources", segments[3], segments[4], "versions", segments[6]}
+	wantAccept := "application/json"
+	if len(segments) == 8 && segments[7] == "content" {
+		expectedSegments = append(expectedSegments, "content")
+		wantAccept = lifecycleExpectedContentType(ref.Type)
+	} else if len(segments) != 7 {
+		server.rejectProtocol(writer, request, "unknown endpoint shape")
+		return
+	}
+	if !server.requireRequest(writer, request, expectedSegments, wantAccept) {
+		return
+	}
 	resource, found := server.resource[ref]
 	if !found {
 		http.NotFound(writer, request)
@@ -1254,6 +1290,59 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 	http.NotFound(writer, request)
 }
 
+func (server *lifecycleRemoteServer) requireRequest(writer http.ResponseWriter, request *http.Request, segments []string, accept string) bool {
+	wantPath := lifecycleEscapedPath(segments...)
+	if request.URL.EscapedPath() != wantPath {
+		server.rejectProtocol(writer, request, "escaped path = %q, want %q", request.URL.EscapedPath(), wantPath)
+		return false
+	}
+	acceptValues := request.Header.Values("Accept")
+	if len(acceptValues) != 1 || acceptValues[0] != accept {
+		server.rejectProtocol(writer, request, "Accept = %q, want exactly %q", acceptValues, accept)
+		return false
+	}
+	if request.URL.RawQuery != "" || request.URL.ForceQuery {
+		server.rejectProtocol(writer, request, "endpoint query = %q, want none", request.URL.RawQuery)
+		return false
+	}
+	return true
+}
+
+func lifecycleEscapedPath(segments ...string) string {
+	escaped := make([]string, len(segments))
+	for index, segment := range segments {
+		escaped[index] = url.PathEscape(segment)
+	}
+	return "/" + strings.Join(escaped, "/")
+}
+
+func lifecycleExpectedContentType(powerType domain.PowerType) string {
+	switch powerType {
+	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+		return "application/gzip"
+	case domain.PowerTypeMCP:
+		return "application/json"
+	case domain.PowerTypeAgent:
+		return "application/yaml"
+	default:
+		return ""
+	}
+}
+
+func (server *lifecycleRemoteServer) rejectProtocol(writer http.ResponseWriter, request *http.Request, format string, arguments ...any) {
+	message := fmt.Sprintf(format, arguments...)
+	server.mu.Lock()
+	server.protocolViolations = append(server.protocolViolations, fmt.Sprintf("%s %s: %s", request.Method, request.URL.RequestURI(), message))
+	server.mu.Unlock()
+	http.Error(writer, "protocol violation", http.StatusBadRequest)
+}
+
+func (server *lifecycleRemoteServer) violations() []string {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	return append([]string(nil), server.protocolViolations...)
+}
+
 func writeLifecycleJSON(writer http.ResponseWriter, value any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(http.StatusOK)
@@ -1262,11 +1351,19 @@ func writeLifecycleJSON(writer http.ResponseWriter, value any) {
 
 func (server *lifecycleRemoteServer) client(t *testing.T) cloud.Client {
 	t.Helper()
-	client, err := remote.New(server.server.URL, &http.Client{Timeout: 5 * time.Second})
+	client, err := remote.New(server.server.URL, &http.Client{Timeout: 5 * time.Second, Transport: server.transport})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return client
+}
+
+func (server *lifecycleRemoteServer) resetTransportAttempts() {
+	server.transport.attempts.Store(0)
+}
+
+func (server *lifecycleRemoteServer) transportAttempts() int64 {
+	return server.transport.attempts.Load()
 }
 
 func (server *lifecycleRemoteServer) resetRequests() {
@@ -1419,9 +1516,6 @@ func captureLifecycleTree(t *testing.T, label, root string) []lifecycleStateNode
 		if walkErr != nil {
 			return walkErr
 		}
-		if path == root {
-			return nil
-		}
 		relative, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
@@ -1430,11 +1524,9 @@ func captureLifecycleTree(t *testing.T, label, root string) []lifecycleStateNode
 		if err != nil {
 			return err
 		}
-		node := lifecycleStateNode{Path: label + "/" + filepath.ToSlash(relative)}
+		node := lifecycleStateNode{Path: label + "/" + filepath.ToSlash(relative), Mode: info.Mode().Perm()}
 		if entry.IsDir() {
-			node.Mode = 0o755
 		} else {
-			node.Mode = 0o644 | info.Mode().Perm()&0o111
 			contents, err := os.ReadFile(path)
 			if err != nil {
 				return err
@@ -1470,6 +1562,33 @@ func TestRemoteProviderLifecycleMatchesLocal(t *testing.T) {
 	})
 	if !reflect.DeepEqual(localState, remoteState) {
 		t.Fatalf("lifecycle provider state differs:\nlocal:  %#v\nremote: %#v", localState, remoteState)
+	}
+}
+
+func TestRemoteLifecycleServerRejectsProtocolMutations(t *testing.T) {
+	for _, test := range []struct {
+		name, method, target, accept string
+	}{
+		{name: "method", method: http.MethodPost, target: "/api/v1/resources/agent/bianbu-agent-default/versions/v1.0.0", accept: "application/json"},
+		{name: "metadata_query", method: http.MethodGet, target: "/api/v1/resources/agent/bianbu-agent-default/versions/v1.0.0?limit=100", accept: "application/json"},
+		{name: "content_accept", method: http.MethodGet, target: "/api/v1/resources/agent/bianbu-agent-default/versions/v1.0.0/content", accept: "application/json"},
+		{name: "noncanonical_escape", method: http.MethodGet, target: "/api/v1/resources/%61gent/bianbu-agent-default/versions/v1.0.0", accept: "application/json"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := &lifecycleRemoteServer{
+				resource: make(map[domain.PowerRef]lifecycleRemoteResource), requests: make(map[string]int),
+			}
+			request := httptest.NewRequest(test.method, test.target, nil)
+			request.Header.Set("Accept", test.accept)
+			response := httptest.NewRecorder()
+			server.serveHTTP(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+			}
+			if violations := server.violations(); len(violations) != 1 {
+				t.Fatalf("protocol violations = %v, want exactly one", violations)
+			}
+		})
 	}
 }
 
@@ -1517,20 +1636,50 @@ func TestRemotePluginUninstallRemainsOfflineAfterServerClose(t *testing.T) {
 	configureLifecycleTrustedTemp(t)
 	server := newLifecycleRemoteServer(t)
 	harness := newProviderLifecycleHarness(t, server.client(t))
+	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
 	if _, err := harness.install.Install(context.Background(), cli.Flags{
 		Agent: "bibit", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	requestsBeforeClose := server.requestCount()
+	pluginAdapter, err := harness.registry.ResolvePlugin(domain.AgentBibit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := pluginAdapter.TargetPath(ref.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("installed Plugin target %q = %v, %v; want directory", target, info, err)
+	}
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got != ref {
+		t.Fatalf("installed Plugin manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
+	}
+	journalPath, err := paths.JournalPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJournalAbsent(t, journalPath)
+	if got := server.transportAttempts(); got == 0 {
+		t.Fatal("Remote install made no HTTP transport attempts; offline counter was not exercised")
+	}
 	server.server.Close()
+	server.resetTransportAttempts()
 	removed, err := harness.uninstall.Uninstall(context.Background(), cli.Flags{Agent: "bibit", Type: "plugin", Name: "demo-plugin"})
 	if err != nil || len(removed.Items) != 1 || removed.Items[0].Outcome != cli.UninstallOutcomeCompleted {
 		t.Fatalf("offline Plugin Uninstall() = %+v, %v", removed, err)
 	}
-	if got := server.requestCount(); got != requestsBeforeClose {
-		t.Fatalf("offline Plugin Uninstall made %d requests, want unchanged %d", got, requestsBeforeClose)
+	if got := server.transportAttempts(); got != 0 {
+		t.Fatalf("offline Plugin Uninstall made %d HTTP transport attempts, want 0", got)
 	}
+	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Plugin target %q remains after uninstall: %v", target, err)
+	}
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || found || got != (domain.PowerRef{}) {
+		t.Fatalf("Plugin manifest after uninstall = %+v, found=%v err=%v; want exact entry absent", got, found, err)
+	}
+	assertJournalAbsent(t, journalPath)
 	assertMCPHarnessEnvironment(t, harness.fakeBin, filepath.Join(harness.root, "user-home"))
 	if _, err := os.Lstat(harness.calls); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("filesystem Plugin lifecycle unexpectedly invoked an Agent CLI: %v", err)

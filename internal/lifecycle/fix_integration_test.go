@@ -223,8 +223,11 @@ func TestRemoteFixRecoversFilesystemJournalAfterServerClose(t *testing.T) {
 		},
 	}
 	journalPath := writeIntegrationJournal(t, journal)
-	requestsBeforeClose := server.requestCount()
+	if got := server.transportAttempts(); got == 0 {
+		t.Fatal("Remote install made no HTTP transport attempts; offline counter was not exercised")
+	}
 	server.server.Close()
+	server.resetTransportAttempts()
 
 	recoverer := &countingRecoverer{Recoverer: harnessTransactions(t, harness)}
 	if err := newIntegrationFixer(t, recoverer).Fix(context.Background()); err != nil {
@@ -233,8 +236,8 @@ func TestRemoteFixRecoversFilesystemJournalAfterServerClose(t *testing.T) {
 	if recoverer.calls != 1 {
 		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
 	}
-	if got := server.requestCount(); got != requestsBeforeClose {
-		t.Fatalf("offline Fix made %d requests, want unchanged %d", got, requestsBeforeClose)
+	if got := server.transportAttempts(); got != 0 {
+		t.Fatalf("offline Fix made %d HTTP transport attempts, want 0", got)
 	}
 	assertJournalAbsent(t, journalPath)
 	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got != ref {
