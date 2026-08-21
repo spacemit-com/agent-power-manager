@@ -1,6 +1,6 @@
 # Share Multi-Agent Plugin Artifacts
 
-- Status：Accepted
+- Status：Superseded by [ADR-017](ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)
 - Date：2026-08-20
 - Decision Makers：APM maintainers
 
