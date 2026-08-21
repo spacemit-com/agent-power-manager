@@ -258,3 +258,47 @@ func TestCLIRepeatedExecutionDoesNotLeakFlagsOrLogging(t *testing.T) {
 		t.Fatalf("third Execute output = stdout %q, stderr %q; want no leaked verbose state", stdout.String(), stderr.String())
 	}
 }
+
+func TestCLIFixConstructsOnlyFixLifecycle(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	original := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(original) })
+	unexpectedFactory := func(name string) {
+		t.Fatalf("Fix constructed %s lifecycle", name)
+	}
+	fixCalls := 0
+	entry := cli.New(
+		&stdout,
+		&stderr,
+		func(verbose bool) {
+			slog.SetDefault(logging.NewLogger(&stdout, &stderr, verbose))
+		},
+		func() (cli.SearchLifecycle, error) {
+			unexpectedFactory("Search")
+			return nil, nil
+		},
+		func() (cli.ListLifecycle, error) {
+			unexpectedFactory("List")
+			return nil, nil
+		},
+		func() (cli.InstallLifecycle, error) {
+			unexpectedFactory("Install")
+			return nil, nil
+		},
+		func() (cli.UninstallLifecycle, error) {
+			unexpectedFactory("Uninstall")
+			return nil, nil
+		},
+		func() (cli.FixLifecycle, error) {
+			fixCalls++
+			return emptyFixLifecycle{}, nil
+		},
+	)
+
+	if err := entry.Execute([]string{"fix"}); err != nil {
+		t.Fatalf("Execute(fix) error = %v", err)
+	}
+	if fixCalls != 1 {
+		t.Fatalf("Fix factory calls = %d, want 1", fixCalls)
+	}
+}

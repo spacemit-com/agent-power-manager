@@ -3,14 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 
 	"apm/internal/adapter"
 	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/cloud"
-	"apm/internal/cloud/local"
 	"apm/internal/config"
 	"apm/internal/lifecycle"
 	"apm/internal/lock"
@@ -44,7 +42,7 @@ func newSearchLifecycle() (cli.SearchLifecycle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
-	cloudClient, err := newLocalCloudClient()
+	cloudClient, err := newCloudClient()
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +57,7 @@ func newListLifecycle() (cli.ListLifecycle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
-	cloudClient, err := newLocalCloudClient()
+	cloudClient, err := newCloudClient()
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +66,29 @@ func newListLifecycle() (cli.ListLifecycle, error) {
 
 // newInstallLifecycle 创建 Install 命令所需的默认依赖，并共享清单读写 Repository。
 func newInstallLifecycle() (cli.InstallLifecycle, error) {
+	return newInstallLifecycleWithCloudFactory(newCloudClient)
+}
+
+// cloudClientFactory 是命令级 composition 边界：每次 lifecycle 构造只能调用一次，返回的同一 Client 必须共享给全部 Cloud 消费者。
+type cloudClientFactory func() (cloud.Client, error)
+
+func newInstallLifecycleWithCloudFactory(openCloud cloudClientFactory) (cli.InstallLifecycle, error) {
+	return newInstallLifecycleWithCloudFactories(
+		openCloud,
+		func(source cache.Source) (cache.PowerCache, error) { return cache.NewFilesystem(source) },
+		newPluginResources,
+	)
+}
+
+// newInstallLifecycleWithCloudFactories 只暴露无状态构造 seam，用于复验同一 Client 被注入 Cache 与 Plugin Resource。
+func newInstallLifecycleWithCloudFactories(
+	openCloud cloudClientFactory,
+	newCache func(cache.Source) (cache.PowerCache, error),
+	newPlugins func(pluginresource.Downloader) (pluginresource.Manager, error),
+) (cli.InstallLifecycle, error) {
+	if openCloud == nil || newCache == nil || newPlugins == nil {
+		return nil, fmt.Errorf("create install lifecycle with nil composition factory: %w", cloud.ErrProviderConfig)
+	}
 	locker, err := lock.NewDefault()
 	if err != nil {
 		return nil, fmt.Errorf("create default lock: %w", err)
@@ -78,15 +99,15 @@ func newInstallLifecycle() (cli.InstallLifecycle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
-	cloudClient, err := newLocalCloudClient()
+	cloudClient, err := openCloud()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create install Cloud client: %w", err)
 	}
-	powerCache, err := cache.NewFilesystem(cloudClient)
+	powerCache, err := newCache(cloudClient)
 	if err != nil {
 		return nil, fmt.Errorf("create power cache: %w", err)
 	}
-	pluginResources, err := newPluginResources(cloudClient)
+	pluginResources, err := newPlugins(cloudClient)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +125,13 @@ func newInstallLifecycle() (cli.InstallLifecycle, error) {
 
 // newUninstallLifecycle 创建 Uninstall 命令所需的默认依赖，并共享清单读写 Repository。
 func newUninstallLifecycle() (cli.UninstallLifecycle, error) {
+	return newUninstallLifecycleWithCloudFactory(newCloudClient)
+}
+
+func newUninstallLifecycleWithCloudFactory(openCloud cloudClientFactory) (cli.UninstallLifecycle, error) {
+	if openCloud == nil {
+		return nil, fmt.Errorf("create uninstall lifecycle with nil Cloud factory: %w", cloud.ErrProviderConfig)
+	}
 	locker, err := lock.NewDefault()
 	if err != nil {
 		return nil, fmt.Errorf("create default lock: %w", err)
@@ -114,9 +142,9 @@ func newUninstallLifecycle() (cli.UninstallLifecycle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
-	cloudClient, err := newLocalCloudClient()
+	cloudClient, err := openCloud()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create uninstall Cloud client: %w", err)
 	}
 	pluginResources, err := newPluginResources(cloudClient)
 	if err != nil {
@@ -138,19 +166,6 @@ func newFixLifecycle() (cli.FixLifecycle, error) {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
 	return lifecycle.NewFix(locker, transactions)
-}
-
-// newLocalCloudClient 仅构造本地提供方，并向生产消费者暴露 cloud.Client 接口。
-func newLocalCloudClient() (cloud.Client, error) {
-	resourcesRoot, err := filepath.Abs(filepath.Join("internal", "cloud", "resources"))
-	if err != nil {
-		return nil, fmt.Errorf("resolve local Cloud resources: %w", err)
-	}
-	cloudClient, err := local.New(resourcesRoot)
-	if err != nil {
-		return nil, fmt.Errorf("create local Cloud client: %w", err)
-	}
-	return cloudClient, nil
 }
 
 // newPluginResources 将 Cloud 原始包下载边界直接注入 Plugin Resource；后者独占缓存和 marketplace 管理。

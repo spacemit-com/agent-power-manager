@@ -10,23 +10,24 @@ import (
 	"strings"
 	"testing"
 
+	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/logging"
+	"apm/internal/pluginresource"
 )
 
-func TestNewLocalCloudClientReturnsCloudClient(t *testing.T) {
-	changeToRepositoryRoot(t)
-	client, err := newLocalCloudClient()
+func useBundledLocalCloud(t *testing.T) {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "internal", "cloud", "resources"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var want cloud.Client = client
-	if want == nil {
-		t.Fatal("newLocalCloudClient() returned nil cloud.Client")
-	}
+	t.Setenv("APM_CLOUD_PROVIDER", "local")
+	t.Setenv("APM_CLOUD_LOCAL_ROOT", root)
+	t.Setenv("APC_BASE_URL", "")
 }
 
 type recordingPluginPackageDownloader struct {
@@ -83,6 +84,98 @@ func TestNewPluginResourcesCreatesDistinctManagerPerFactoryCall(t *testing.T) {
 	}
 }
 
+func TestLifecycleCompositionOpensOneCloudClientPerInvocation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	client := &recordingCloudClient{}
+
+	tests := []struct {
+		name    string
+		compose func(cloudClientFactory) (any, error)
+	}{
+		{
+			name: "install",
+			compose: func(factory cloudClientFactory) (any, error) {
+				return newInstallLifecycleWithCloudFactory(factory)
+			},
+		},
+		{
+			name: "uninstall",
+			compose: func(factory cloudClientFactory) (any, error) {
+				return newUninstallLifecycleWithCloudFactory(factory)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			service, err := tt.compose(func() (cloud.Client, error) {
+				calls++
+				return client, nil
+			})
+			if err != nil {
+				t.Fatalf("compose lifecycle: %v", err)
+			}
+			if service == nil {
+				t.Fatal("composed lifecycle = nil")
+			}
+			if calls != 1 {
+				t.Fatalf("Cloud factory calls = %d, want 1", calls)
+			}
+		})
+	}
+}
+
+func TestInstallCompositionSharesSelectedClientWithCacheAndPluginResource(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	client := &recordingCloudClient{}
+	var cacheSource cache.Source
+	var pluginSource pluginresource.Downloader
+
+	service, err := newInstallLifecycleWithCloudFactories(
+		func() (cloud.Client, error) { return client, nil },
+		func(source cache.Source) (cache.PowerCache, error) {
+			cacheSource = source
+			return cache.NewFilesystem(source)
+		},
+		func(source pluginresource.Downloader) (pluginresource.Manager, error) {
+			pluginSource = source
+			return newPluginResources(source)
+		},
+	)
+	if err != nil {
+		t.Fatalf("compose install lifecycle: %v", err)
+	}
+	if service == nil {
+		t.Fatal("composed install lifecycle = nil")
+	}
+	if cacheSource != client || pluginSource != client {
+		t.Fatalf("downstream sources = (%T %p, %T %p), want selected Client %p twice", cacheSource, cacheSource, pluginSource, pluginSource, client)
+	}
+}
+
+type recordingCloudClient struct{}
+
+func (*recordingCloudClient) List(context.Context) ([]domain.PowerRef, error) { return nil, nil }
+func (*recordingCloudClient) Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error) {
+	return domain.PowerRef{}, nil
+}
+func (*recordingCloudClient) DownloadSkill(context.Context, domain.PowerRef, string) error {
+	return nil
+}
+func (*recordingCloudClient) DownloadPlugin(context.Context, domain.PowerRef, string) error {
+	return nil
+}
+func (*recordingCloudClient) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
+	return domain.MCPServer{}, nil
+}
+func (*recordingCloudClient) DownloadAgent(context.Context, domain.PowerRef, string) error {
+	return nil
+}
+
 func pluginRefForMainTest() domain.PowerRef {
 	return domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 }
@@ -90,6 +183,7 @@ func pluginRefForMainTest() domain.PowerRef {
 func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
 	t.Setenv("APM_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	useBundledLocalCloud(t)
 	changeToRepositoryRoot(t)
 
 	service, err := newSearchLifecycle()
@@ -117,6 +211,7 @@ func TestNewSearchLifecycleSearchesWithoutLockPath(t *testing.T) {
 	}
 	t.Setenv("APM_HOME", lockPathBlocker)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	useBundledLocalCloud(t)
 	changeToRepositoryRoot(t)
 
 	service, err := newSearchLifecycle()
@@ -140,6 +235,7 @@ func TestDefaultLifecycleFactoriesConstructWithMCPRecoveryResolver(t *testing.T)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
 	changeToRepositoryRoot(t)
+	clearCloudEnvironment(t)
 
 	factories := []func() (any, error){
 		func() (any, error) { return newSearchLifecycle() },
@@ -163,6 +259,9 @@ func TestNewFixLifecycleSucceedsWithoutActiveJournal(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
 	changeToRepositoryRoot(t)
+	t.Setenv("APM_CLOUD_PROVIDER", "unknown")
+	t.Setenv("APC_BASE_URL", "://invalid")
+	t.Setenv("APM_CLOUD_LOCAL_ROOT", "relative/resources")
 
 	service, err := newFixLifecycle()
 	if err != nil {
@@ -176,6 +275,7 @@ func TestNewFixLifecycleSucceedsWithoutActiveJournal(t *testing.T) {
 func TestNewListLifecycleListsBundledCloud(t *testing.T) {
 	t.Setenv("APM_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	useBundledLocalCloud(t)
 	changeToRepositoryRoot(t)
 
 	service, err := newListLifecycle()
@@ -206,6 +306,7 @@ func TestNewListLifecycleListsInstalledManifest(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
 	changeToRepositoryRoot(t)
+	clearCloudEnvironment(t)
 
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatalf("create Codex root: %v", err)
@@ -235,6 +336,7 @@ func TestNewInstallLifecycleInstallsBundledSkillAndThenReturnsUnchanged(t *testi
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
+	useBundledLocalCloud(t)
 	changeToRepositoryRoot(t)
 
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
@@ -299,6 +401,7 @@ func TestNewInstallLifecycleRejectsAllWhenNoAgentsAreInstalled(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
 	changeToRepositoryRoot(t)
+	clearCloudEnvironment(t)
 
 	service, err := newInstallLifecycle()
 	if err != nil {
@@ -326,6 +429,7 @@ func TestNewUninstallLifecycleRemovesBundledSkillAndThenReportsNotInstalled(t *t
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
+	useBundledLocalCloud(t)
 	changeToRepositoryRoot(t)
 
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
@@ -384,6 +488,8 @@ func TestNewUninstallLifecycleRemovesManifestWhenInstalledTargetIsMissing(t *tes
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
 	changeToRepositoryRoot(t)
+	clearCloudEnvironment(t)
+	t.Setenv("APC_BASE_URL", "http://127.0.0.1:1")
 
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatalf("create Codex root: %v", err)
@@ -430,6 +536,8 @@ func TestNewUninstallLifecycleUsesFirstDuplicateManifestEntryAndRemovesAllMatche
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
 	changeToRepositoryRoot(t)
+	clearCloudEnvironment(t)
+	t.Setenv("APC_BASE_URL", "http://127.0.0.1:1")
 
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatalf("create Codex root: %v", err)
