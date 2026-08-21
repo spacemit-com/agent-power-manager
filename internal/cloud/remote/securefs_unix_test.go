@@ -187,6 +187,11 @@ func TestVerifyDirectoryTrustRequiresCurrentOwnerBelowRootStickyDirectory(t *tes
 	if err != nil || sticky {
 		t.Fatalf("verifyDirectoryTrust(current-euid child) = %t, %v, want false, nil", sticky, err)
 	}
+	writableOwnedChild := ownedChild
+	writableOwnedChild.Mode = unix.S_IFDIR | 0o770
+	if _, err := verifyDirectoryTrust(writableOwnedChild, policy, true); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("verifyDirectoryTrust(group-writable current-euid child) error = %v, want ErrUnsafeContent", err)
+	}
 
 	foreignChild := ownedChild
 	foreignChild.Uid++

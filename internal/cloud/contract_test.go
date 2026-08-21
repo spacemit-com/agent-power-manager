@@ -72,6 +72,7 @@ func TestProviderFactoriesUseTestingTempRoot(t *testing.T) {
 	t.Run("create", func(t *testing.T) {
 		t.Setenv("XDG_RUNTIME_DIR", "")
 		t.Setenv("HOME", missingHome)
+		t.Setenv("GOTMPDIR", fakeRoot)
 		t.Setenv("TMPDIR", fakeRoot)
 		_, root = providerFactories(t)
 		assertCloudPathWithinTestRoot(t, fakeRoot, root)
