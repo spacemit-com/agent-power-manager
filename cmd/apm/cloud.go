@@ -68,31 +68,6 @@ func newCloudClient() (cloud.Client, error) {
 	return client, nil
 }
 
-// validatePhysicalLocalRoot 从文件系统根向下检查每个路径组件，禁止跟随祖先或终端符号链接。
-func validatePhysicalLocalRoot(root string) error {
-	components := make([]string, 0, 8)
-	for current := root; ; current = filepath.Dir(current) {
-		components = append(components, current)
-		if parent := filepath.Dir(current); parent == current {
-			break
-		}
-	}
-	for index := len(components) - 1; index >= 0; index-- {
-		component := components[index]
-		info, err := os.Lstat(component)
-		if err != nil {
-			return fmt.Errorf("inspect Local resource root component %q: %w", component, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("Local resource root component %q is a symbolic link", component)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("Local resource root component %q is not a directory", component)
-		}
-	}
-	return nil
-}
-
 func newRemoteHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout:       2 * time.Minute,

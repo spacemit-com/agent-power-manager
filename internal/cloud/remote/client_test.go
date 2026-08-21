@@ -63,6 +63,77 @@ func TestNewValidatesBaseURLAndHTTPClient(t *testing.T) {
 	}
 }
 
+func TestNewRedactsInvalidBaseURLInput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		baseURL   string
+		forbidden []string
+	}{
+		{
+			name:      "malformed escape",
+			baseURL:   "https://apc.example.com/%zz-malformed-secret",
+			forbidden: []string{"%zz", "malformed-secret"},
+		},
+		{
+			name:      "non-root path",
+			baseURL:   "https://apc.example.com/path-secret",
+			forbidden: []string{"path-secret"},
+		},
+		{
+			name:      "userinfo",
+			baseURL:   "https://user-secret:password-secret@apc.example.com",
+			forbidden: []string{"user-secret", "password-secret"},
+		},
+		{
+			name:      "query",
+			baseURL:   "https://apc.example.com?token=query-secret",
+			forbidden: []string{"token", "query-secret"},
+		},
+		{
+			name:      "fragment",
+			baseURL:   "https://apc.example.com#fragment-secret",
+			forbidden: []string{"fragment-secret"},
+		},
+		{
+			name:      "unsupported scheme",
+			baseURL:   "scheme-secret://apc.example.com",
+			forbidden: []string{"scheme-secret"},
+		},
+		{
+			name:      "non-loopback HTTP host",
+			baseURL:   "http://host-secret.example.com",
+			forbidden: []string{"host-secret"},
+		},
+		{
+			name:      "malformed host",
+			baseURL:   "https://[host-secret.example.com",
+			forbidden: []string{"host-secret"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, err := New(tt.baseURL, &http.Client{Timeout: time.Second})
+			if client != nil || !errors.Is(err, cloud.ErrProviderConfig) {
+				t.Fatalf("New() = (%T, %v), want nil/ErrProviderConfig", client, err)
+			}
+			message := err.Error()
+			if !strings.Contains(message, "remote base URL") {
+				t.Fatalf("New() error = %q, want safe base URL context", message)
+			}
+			for _, secret := range append(tt.forbidden, tt.baseURL) {
+				if strings.Contains(message, secret) {
+					t.Fatalf("New() error = %q, leaked %q", message, secret)
+				}
+			}
+		})
+	}
+}
+
 func TestNewCopiesInjectedClient(t *testing.T) {
 	t.Parallel()
 

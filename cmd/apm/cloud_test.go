@@ -253,18 +253,14 @@ func TestNewCloudClientRejectsNonPhysicalLocalRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	finalLink := filepath.Join(parent, "final-link")
-	if err := os.Symlink(physicalFinal, finalLink); err != nil {
-		t.Fatal(err)
-	}
+	createTestSymlink(t, physicalFinal, finalLink)
 	physicalAncestor := filepath.Join(parent, "physical-ancestor")
 	ancestorRoot := filepath.Join(physicalAncestor, "resources")
 	if err := os.MkdirAll(ancestorRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	ancestorLink := filepath.Join(parent, "ancestor-link")
-	if err := os.Symlink(physicalAncestor, ancestorLink); err != nil {
-		t.Fatal(err)
-	}
+	createTestSymlink(t, physicalAncestor, ancestorLink)
 
 	tests := []struct {
 		name string

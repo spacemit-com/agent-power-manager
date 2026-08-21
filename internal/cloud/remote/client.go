@@ -47,7 +47,7 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse remote base URL: %w", errors.Join(cloud.ErrProviderConfig, err))
+		return nil, fmt.Errorf("parse remote base URL: invalid syntax: %w", cloud.ErrProviderConfig)
 	}
 	if err := validateBaseURL(parsed); err != nil {
 		return nil, err
@@ -90,16 +90,16 @@ func validateBaseURL(baseURL *url.URL) error {
 		return fmt.Errorf("remote base URL must be absolute and hierarchical: %w", cloud.ErrProviderConfig)
 	}
 	if baseURL.Scheme != "http" && baseURL.Scheme != "https" {
-		return fmt.Errorf("remote base URL scheme %q is unsupported: %w", baseURL.Scheme, cloud.ErrProviderConfig)
+		return fmt.Errorf("remote base URL uses an unsupported scheme: %w", cloud.ErrProviderConfig)
 	}
 	if baseURL.User != nil || baseURL.RawQuery != "" || baseURL.ForceQuery || baseURL.Fragment != "" || baseURL.RawFragment != "" {
 		return fmt.Errorf("remote base URL must not contain credentials, query, or fragment: %w", cloud.ErrProviderConfig)
 	}
 	if baseURL.Path != "" && baseURL.Path != "/" {
-		return fmt.Errorf("remote base URL path %q is not root: %w", baseURL.Path, cloud.ErrProviderConfig)
+		return fmt.Errorf("remote base URL path is not root: %w", cloud.ErrProviderConfig)
 	}
 	if baseURL.Scheme == "http" && !isLoopbackHost(baseURL.Hostname()) {
-		return fmt.Errorf("remote HTTP base URL host %q is not loopback: %w", baseURL.Hostname(), cloud.ErrProviderConfig)
+		return fmt.Errorf("remote base URL requires a loopback host for HTTP: %w", cloud.ErrProviderConfig)
 	}
 	return nil
 }
