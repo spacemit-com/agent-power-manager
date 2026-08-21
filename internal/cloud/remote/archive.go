@@ -561,15 +561,16 @@ func (reader *archiveDecompressedReader) Read(buffer []byte) (int, error) {
 	return 0, io.ErrNoProgress
 }
 
-// archiveDecompressedBudget 同时约束 gzip 解压总量和压缩比，预算包含 tar 元数据及填充。
+// archiveDecompressedBudget 仅约束整个 gzip 解压流的压缩倍率，预算包含 tar 元数据、填充和结束块；
+// regular-file 实际输出总量由归档 visitor 独立约束。
 func archiveDecompressedBudget(compressedSize int64) int64 {
 	if compressedSize <= 0 {
 		return 0
 	}
-	if compressedSize <= maxArchiveTreeSize/maxArchiveRatio {
-		return compressedSize * maxArchiveRatio
+	if compressedSize > math.MaxInt64/maxArchiveRatio {
+		return math.MaxInt64
 	}
-	return maxArchiveTreeSize
+	return compressedSize * maxArchiveRatio
 }
 
 func classifyArchiveError(ctx context.Context, operation string, err error) error {

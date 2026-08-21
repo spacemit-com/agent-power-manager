@@ -227,8 +227,14 @@ func TestExtractArchiveRejectsResourceLimits(t *testing.T) {
 			entries = append(entries, mixedEntropyEntry(fmt.Sprintf("file-%02d.md", index), maxArchiveFileSize, uint64(index+1)))
 		}
 		entries = append(entries, testTarEntry{name: "overflow.md", body: []byte("x")})
+		archive := stageTarGz(t, entries...)
+		assertArchiveFixtureRatio(t, archive, maxArchiveTreeSize+1)
 		destination := filepath.Join(trustedTestDir(t), "resource")
-		assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), stageTarGz(t, entries...), destination), destination)
+		err := new(Client).extractArchive(context.Background(), archive, destination)
+		assertUnsafeWithoutDestination(t, err, destination)
+		if errors.Is(err, errArchiveDecompressedLimit) || !strings.Contains(err.Error(), "remote archive exceeds 104857600 extracted bytes") {
+			t.Fatalf("extractArchive() error = %v, want extracted-tree limit rather than tar-stream framing limit", err)
+		}
 	})
 
 	t.Run("more than 1000 nodes", func(t *testing.T) {
@@ -263,6 +269,84 @@ func TestExtractArchiveRejectsResourceLimits(t *testing.T) {
 			},
 		})
 		assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), archive, destination), destination)
+	})
+}
+
+func TestExtractArchiveAcceptsExactResourceLimits(t *testing.T) {
+	t.Run("file exactly 10 MiB", func(t *testing.T) {
+		archive := stageTarGz(t, mixedEntropyEntry("large.md", maxArchiveFileSize, 1))
+		assertArchiveFixtureRatio(t, archive, maxArchiveFileSize)
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		if err := new(Client).extractArchive(context.Background(), archive, destination); err != nil {
+			t.Fatalf("extractArchive() error = %v, want exact 10 MiB file accepted", err)
+		}
+		if info, err := os.Stat(filepath.Join(destination, "large.md")); err != nil || info.Size() != maxArchiveFileSize {
+			t.Fatalf("large.md = %v, %v, want exact %d-byte regular file", info, err, maxArchiveFileSize)
+		}
+	})
+
+	t.Run("tree exactly 100 MiB", func(t *testing.T) {
+		entries := make([]testTarEntry, 0, 10)
+		for index := range 10 {
+			entries = append(entries, mixedEntropyEntry(fmt.Sprintf("file-%02d.md", index), maxArchiveFileSize, uint64(index+1)))
+		}
+		archive := stageTarGz(t, entries...)
+		compressedSize := stagedContentSize(t, archive)
+		if compressedSize < 1<<20 || compressedSize > 20<<20 {
+			t.Fatalf("compressed fixture size = %d, want 1..20 MiB", compressedSize)
+		}
+		assertArchiveFixtureRatio(t, archive, maxArchiveTreeSize)
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		if err := new(Client).extractArchive(context.Background(), archive, destination); err != nil {
+			t.Fatalf("extractArchive() error = %v, want exact 100 MiB output accepted", err)
+		}
+		var extractedSize int64
+		for index := range 10 {
+			info, err := os.Stat(filepath.Join(destination, fmt.Sprintf("file-%02d.md", index)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			extractedSize += info.Size()
+		}
+		if extractedSize != maxArchiveTreeSize {
+			t.Fatalf("extracted size = %d, want %d", extractedSize, maxArchiveTreeSize)
+		}
+	})
+
+	t.Run("exactly 1000 nodes", func(t *testing.T) {
+		entries := make([]testTarEntry, maxArchiveNodes)
+		for index := range entries {
+			entries[index] = testTarEntry{name: fmt.Sprintf("node-%04d.md", index)}
+		}
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		if err := new(Client).extractArchive(context.Background(), stageTarGz(t, entries...), destination); err != nil {
+			t.Fatalf("extractArchive() error = %v, want exact 1000-node archive accepted", err)
+		}
+		if nodes, err := os.ReadDir(destination); err != nil || len(nodes) != maxArchiveNodes {
+			t.Fatalf("output nodes = %d, %v, want %d", len(nodes), err, maxArchiveNodes)
+		}
+	})
+
+	t.Run("depth exactly 16", func(t *testing.T) {
+		name := strings.Repeat("d/", maxArchiveDepth-1) + "file.md"
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		if err := new(Client).extractArchive(context.Background(), stageTarGz(t, testTarEntry{name: name, body: []byte("safe")}), destination); err != nil {
+			t.Fatalf("extractArchive() error = %v, want exact depth-16 path accepted", err)
+		}
+		if _, err := os.Stat(filepath.Join(destination, filepath.FromSlash(name))); err != nil {
+			t.Fatalf("depth-16 file: %v", err)
+		}
+	})
+
+	t.Run("path exactly 255 bytes", func(t *testing.T) {
+		name := strings.Repeat("a", maxArchivePathSize-3) + ".md"
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		if err := new(Client).extractArchive(context.Background(), stageTarGz(t, testTarEntry{name: name, body: []byte("safe")}), destination); err != nil {
+			t.Fatalf("extractArchive() error = %v, want exact 255-byte path accepted", err)
+		}
+		if _, err := os.Stat(filepath.Join(destination, name)); err != nil {
+			t.Fatalf("255-byte path: %v", err)
+		}
 	})
 }
 
@@ -394,15 +478,17 @@ func TestArchiveDecompressedReaderReportsOverflowWithoutOverreading(t *testing.T
 		})
 	}
 
-	if got := archiveDecompressedBudget(maxRemoteContentSize); got != maxArchiveTreeSize {
-		t.Fatalf("archiveDecompressedBudget(max compressed size) = %d, want %d", got, maxArchiveTreeSize)
+	wantMaximumBudget := maxRemoteContentSize * maxArchiveRatio
+	if got := archiveDecompressedBudget(maxRemoteContentSize); got != wantMaximumBudget {
+		t.Fatalf("archiveDecompressedBudget(max compressed size) = %d, want %d", got, wantMaximumBudget)
 	}
-	if got := archiveDecompressedBudget(math.MaxInt64); got != maxArchiveTreeSize {
-		t.Fatalf("archiveDecompressedBudget(MaxInt64) = %d, want overflow-safe cap %d", got, maxArchiveTreeSize)
+	if got := archiveDecompressedBudget(math.MaxInt64); got != math.MaxInt64 {
+		t.Fatalf("archiveDecompressedBudget(MaxInt64) = %d, want overflow-safe saturation %d", got, int64(math.MaxInt64))
 	}
-	count, err := io.Copy(io.Discard, newArchiveDecompressedReader(io.LimitReader(zeroReader{}, maxArchiveTreeSize), maxRemoteContentSize))
-	if err != nil || count != maxArchiveTreeSize {
-		t.Fatalf("copy at maximum decompressed budget = %d, %v, want exact %d-byte acceptance", count, err, maxArchiveTreeSize)
+	wantStreamSize := maxArchiveTreeSize + 1
+	count, err := io.Copy(io.Discard, newArchiveDecompressedReader(io.LimitReader(zeroReader{}, wantStreamSize), maxRemoteContentSize))
+	if err != nil || count != wantStreamSize {
+		t.Fatalf("copy beyond extracted-tree limit = %d, %v, want exact %d-byte tar stream accepted", count, err, wantStreamSize)
 	}
 }
 
@@ -698,6 +784,27 @@ func stageSizedContent(t *testing.T, size int64) *stagedContent {
 		t.Fatal(err)
 	}
 	return staged
+}
+
+func stagedContentSize(t *testing.T, staged *stagedContent) int64 {
+	t.Helper()
+	file, err := staged.openRead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, statErr := file.Stat()
+	if err := errors.Join(statErr, file.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return info.Size()
+}
+
+func assertArchiveFixtureRatio(t *testing.T, staged *stagedContent, extractedSize int64) {
+	t.Helper()
+	compressedSize := stagedContentSize(t, staged)
+	if extractedSize > compressedSize*maxArchiveRatio {
+		t.Fatalf("fixture ratio = %d/%d, want no more than %dx", extractedSize, compressedSize, maxArchiveRatio)
+	}
 }
 
 func stageTarGzWithEmptyName(t *testing.T) *stagedContent {
