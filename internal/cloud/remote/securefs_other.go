@@ -31,10 +31,6 @@ func openPinnedDirectory(path string) (*pinnedDirectory, error) {
 	return nil, unsafeRemoteFilesystem("descriptor-relative Remote content staging is unsupported on %s for %q", runtime.GOOS, path)
 }
 
-func openSystemTemporaryDirectory(path string) (*pinnedDirectory, error) {
-	return nil, unsafeRemoteFilesystem("descriptor-relative Remote system temporary staging is unsupported on %s for %q", runtime.GOOS, path)
-}
-
 func (directory *pinnedDirectory) close() error { return nil }
 
 func (directory *pinnedDirectory) requireAbsent(string) error {

@@ -41,6 +41,27 @@ func TestDownloadAgentPreservesRawBytesAndPublishesMode(t *testing.T) {
 	}
 }
 
+func TestDownloadAgentPublishesBelowTestingTempDirWithMissingHome(t *testing.T) {
+	contents := []byte("schema_version: 1\n")
+	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteAgentRef, contents)
+	})
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(root, "missing-home"))
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	destination := filepath.Join(root, "agent.yaml")
+
+	if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); err != nil {
+		t.Fatalf("DownloadAgent() below t.TempDir with nonexistent HOME error = %v", err)
+	}
+	if got, err := os.ReadFile(destination); err != nil || !bytes.Equal(got, contents) {
+		t.Fatalf("published Agent = %q, %v, want %q", got, err, contents)
+	}
+}
+
 func TestDownloadAgentRejectsSymlinkedAncestorWithoutRequest(t *testing.T) {
 	contents := []byte("schema_version: 1\n")
 	var requests atomic.Int32

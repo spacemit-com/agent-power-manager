@@ -94,18 +94,14 @@ func defaultOwnedDirectoryNamedCreateOps() ownedDirectoryNamedCreateOps {
 }
 
 type directoryTrustPolicy struct {
-	allowRootSticky bool
+	allowRootOwnedSticky bool
 }
 
 // openPinnedDirectory 从文件系统根开始逐级固定现有物理目录，每一级都拒绝符号链接。
+// root-owned sticky 目录仅信任当前 euid 拥有的直接子目录；若其为终点，后续名称型
+// 创建和发布仍须使用 O_EXCL 或 no-replace 语义。
 func openPinnedDirectory(path string) (*pinnedDirectory, error) {
-	return openPinnedDirectoryWithPolicy(path, directoryTrustPolicy{})
-}
-
-// openSystemTemporaryDirectory 只供已规范化的生产系统临时根使用；root sticky 目录
-// 仅可承载当前 euid 直接拥有的安全条目，注入路径不得使用这一例外。
-func openSystemTemporaryDirectory(path string) (*pinnedDirectory, error) {
-	return openPinnedDirectoryWithPolicy(path, directoryTrustPolicy{allowRootSticky: true})
+	return openPinnedDirectoryWithPolicy(path, directoryTrustPolicy{allowRootOwnedSticky: true})
 }
 
 func openPinnedDirectoryWithPolicy(path string, policy directoryTrustPolicy) (*pinnedDirectory, error) {
@@ -169,8 +165,8 @@ func openPinnedDirectoryWithPolicy(path string, policy directoryTrustPolicy) (*p
 }
 
 // verifyDirectoryTrust 建立所有名称型 *at 操作的父目录信任不变量：OS/root 与当前
-// 进程受信，目录必须由 root 或当前 euid 拥有且不可被其他主体写入。生产系统临时根
-// 可使用 root-owned sticky 语义保护当前 euid 的直接条目；同一 euid 主动篡改不在
+// 进程受信，目录必须由 root 或当前 euid 拥有且不可被其他主体写入。任何 root-owned
+// sticky 目录都可保护当前 euid 的直接条目；同一 euid 主动篡改不在
 // 本隔离边界内，后续 device/inode 复验仅用于发现损坏，不能替代该信任不变量。
 func verifyDirectoryTrust(stat unix.Stat_t, policy directoryTrustPolicy, requireCurrentOwner bool) (bool, error) {
 	euid := uint32(os.Geteuid())
@@ -186,7 +182,7 @@ func verifyDirectoryTrust(stat unix.Stat_t, policy directoryTrustPolicy, require
 	if permissions&0o022 == 0 {
 		return false, nil
 	}
-	rootSticky := policy.allowRootSticky && owner == 0 && uint32(stat.Mode)&uint32(unix.S_ISVTX) != 0
+	rootSticky := policy.allowRootOwnedSticky && owner == 0 && uint32(stat.Mode)&uint32(unix.S_ISVTX) != 0
 	if !rootSticky {
 		return false, unsafeRemoteFilesystem("remote directory mode %04o permits untrusted entry mutation", permissions)
 	}

@@ -49,7 +49,7 @@ var canonicalPowerOracle = []domain.PowerRef{
 }
 
 func TestProviderContract(t *testing.T) {
-	factories := providerFactories(t)
+	factories, _ := providerFactories(t)
 	for _, factory := range factories {
 		t.Run(factory.name, func(t *testing.T) {
 			runProviderContract(t, factory.open(t))
@@ -62,25 +62,19 @@ func TestProviderContract(t *testing.T) {
 	t.Run("wire_mutations", testCanonicalRemoteServerProtocolMutations)
 }
 
-func TestProviderFactoriesUseCleanupOwnedPackageRoot(t *testing.T) {
-	physicalCWD, err := filepath.EvalSymlinks(mustCloudTestGetwd(t))
-	if err != nil {
+func TestProviderFactoriesUseTestingTempRoot(t *testing.T) {
+	fakeRoot := t.TempDir()
+	if err := os.Chmod(fakeRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	missingHome := filepath.Join(t.TempDir(), "missing-home")
+	missingHome := filepath.Join(fakeRoot, "missing-home")
 	var root string
 	t.Run("create", func(t *testing.T) {
 		t.Setenv("XDG_RUNTIME_DIR", "")
 		t.Setenv("HOME", missingHome)
-		_ = providerFactories(t)
-		root = os.Getenv("TMPDIR")
-		assertCloudPrivatePackageTestRoot(t, physicalCWD, root, ".provider-contract-")
-		if got := os.Getenv("XDG_RUNTIME_DIR"); got != root {
-			t.Fatalf("XDG_RUNTIME_DIR = %q, want cleanup-owned root %q", got, root)
-		}
-		if got := os.Getenv("HOME"); got != root {
-			t.Fatalf("HOME = %q, want cleanup-owned root %q", got, root)
-		}
+		t.Setenv("TMPDIR", fakeRoot)
+		_, root = providerFactories(t)
+		assertCloudPathWithinTestRoot(t, fakeRoot, root)
 	})
 	if root == "" {
 		return
@@ -90,55 +84,27 @@ func TestProviderFactoriesUseCleanupOwnedPackageRoot(t *testing.T) {
 	}
 }
 
-func mustCloudTestGetwd(t *testing.T) string {
+func assertCloudPathWithinTestRoot(t *testing.T, root, path string) {
 	t.Helper()
-	directory, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return directory
-}
-
-func assertCloudPrivatePackageTestRoot(t *testing.T, physicalCWD, root, prefix string) {
-	t.Helper()
-	relative, err := filepath.Rel(physicalCWD, root)
+	relative, err := filepath.Rel(root, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		t.Fatalf("provider-contract root %q is outside physical package directory %q", root, physicalCWD)
+		t.Fatalf("provider-contract path %q is outside fake root %q", path, root)
 	}
-	if !strings.HasPrefix(filepath.Base(root), prefix) {
-		t.Fatalf("provider-contract root base = %q, want prefix %q", filepath.Base(root), prefix)
-	}
-	info, err := os.Stat(root)
+	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if permissions := info.Mode().Perm(); permissions != 0o700 {
-		t.Fatalf("provider-contract root permissions = %04o, want 0700", permissions)
+		t.Fatalf("provider-contract path permissions = %04o, want 0700", permissions)
 	}
 }
 
-func providerFactories(t *testing.T) []clientFactory {
+func providerFactories(t *testing.T) ([]clientFactory, string) {
 	t.Helper()
-	trustedParent := os.Getenv("XDG_RUNTIME_DIR")
-	if trustedParent == "" {
-		trustedParent = mustCloudTestGetwd(t)
-	}
-	physicalParent, err := filepath.EvalSymlinks(filepath.Clean(trustedParent))
-	if err != nil {
-		t.Fatal(err)
-	}
-	trustedTemp, err := os.MkdirTemp(physicalParent, ".provider-contract-")
-	if err != nil {
-		t.Fatalf("create provider-contract test root below %q: %v", physicalParent, err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(trustedTemp); err != nil {
-			t.Errorf("remove trusted provider-contract temp: %v", err)
-		}
-	})
+	trustedTemp := t.TempDir()
 	if err := os.Chmod(trustedTemp, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +131,7 @@ func providerFactories(t *testing.T) []clientFactory {
 			}
 			return client
 		}},
-	}
+	}, trustedTemp
 }
 
 func runProviderContract(t *testing.T, client cloud.Client) {
@@ -565,17 +531,9 @@ func normalizedFile(t *testing.T, path, logicalPath string) normalizedNode {
 
 func privateTestDir(t *testing.T) string {
 	t.Helper()
-	directory, err := os.MkdirTemp(os.TempDir(), "provider-contract-case-")
-	if err != nil {
-		t.Fatal(err)
-	}
+	directory := t.TempDir()
 	if err := os.Chmod(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(directory); err != nil {
-			t.Errorf("remove provider contract case directory: %v", err)
-		}
-	})
 	return directory
 }

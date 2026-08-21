@@ -64,7 +64,6 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (server domain
 
 func (c *Client) createMCPTemporaryDirectory() (*pinnedDirectory, *ownedDirectory, error) {
 	temporaryParentPath := c.mcpTempParent
-	productionSystemTemp := temporaryParentPath == ""
 	if temporaryParentPath == "" {
 		resolved, err := filepath.EvalSymlinks(filepath.Clean(os.TempDir()))
 		if err != nil {
@@ -72,13 +71,7 @@ func (c *Client) createMCPTemporaryDirectory() (*pinnedDirectory, *ownedDirector
 		}
 		temporaryParentPath = resolved
 	}
-	var temporaryParent *pinnedDirectory
-	var err error
-	if productionSystemTemp {
-		temporaryParent, err = openSystemTemporaryDirectory(temporaryParentPath)
-	} else {
-		temporaryParent, err = openPinnedDirectory(temporaryParentPath)
-	}
+	temporaryParent, err := openPinnedDirectory(temporaryParentPath)
 	if err != nil {
 		return nil, nil, err
 	}

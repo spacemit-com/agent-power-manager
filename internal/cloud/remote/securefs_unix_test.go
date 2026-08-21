@@ -159,3 +159,45 @@ func TestVerifyDirectoryTrustRejectsForeignOwner(t *testing.T) {
 		t.Fatalf("verifyDirectoryTrust() error = %v, want foreign parent owner ErrUnsafeContent", err)
 	}
 }
+
+func TestOpenPinnedDirectoryAcceptsTestingTempDirBelowRootStickyAncestor(t *testing.T) {
+	path := t.TempDir()
+	if err := os.Chmod(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	directory, err := openPinnedDirectory(path)
+	if err != nil {
+		t.Fatalf("openPinnedDirectory(t.TempDir()) error = %v, want current-euid child below root-owned sticky ancestor accepted", err)
+	}
+	if err := directory.close(); err != nil {
+		t.Fatalf("close pinned testing temp directory: %v", err)
+	}
+}
+
+func TestVerifyDirectoryTrustRequiresCurrentOwnerBelowRootStickyDirectory(t *testing.T) {
+	policy := directoryTrustPolicy{allowRootOwnedSticky: true}
+	stickyRoot := unix.Stat_t{Mode: unix.S_IFDIR | unix.S_ISVTX | 0o777, Uid: 0}
+	sticky, err := verifyDirectoryTrust(stickyRoot, policy, false)
+	if err != nil || !sticky {
+		t.Fatalf("verifyDirectoryTrust(root sticky) = %t, %v, want true, nil", sticky, err)
+	}
+
+	ownedChild := unix.Stat_t{Mode: unix.S_IFDIR | 0o700, Uid: uint32(os.Geteuid())}
+	sticky, err = verifyDirectoryTrust(ownedChild, policy, true)
+	if err != nil || sticky {
+		t.Fatalf("verifyDirectoryTrust(current-euid child) = %t, %v, want false, nil", sticky, err)
+	}
+
+	foreignChild := ownedChild
+	foreignChild.Uid++
+	if _, err := verifyDirectoryTrust(foreignChild, policy, true); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("verifyDirectoryTrust(foreign child) error = %v, want ErrUnsafeContent", err)
+	}
+}
+
+func TestVerifyDirectoryTrustRejectsNonStickyWritableDirectory(t *testing.T) {
+	stat := unix.Stat_t{Mode: unix.S_IFDIR | 0o777, Uid: 0}
+	if _, err := verifyDirectoryTrust(stat, directoryTrustPolicy{allowRootOwnedSticky: true}, false); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("verifyDirectoryTrust(non-sticky writable root) error = %v, want ErrUnsafeContent", err)
+	}
+}

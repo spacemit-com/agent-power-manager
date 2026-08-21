@@ -105,7 +105,7 @@ APM 支持仅供测试使用的 `APM_HOME` 环境变量，使测试能在临时�
 | 项目 | 要求或约束 |
 | --- | --- |
 | 性能与可靠性 | 命令执行中失败由 CLI 统一记录。Search、默认 List 和 installed List 全程无锁，只提供 best-effort 观察，可能出现漏警告、过期警告、跨 Agent 混合 manifest 与 target/manifest 暂时不匹配；全局一致读取需要锁或 MVCC，当前不承诺。Fix、Install 与 Uninstall 的恢复由全局锁串行化，后两者从 Recover 到每个串行 Transaction 持有各自单次锁并在成功 Release 后渲染（[ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)）。 |
-| 安全与合规 | MCP CLI 不经 shell，动态解析 PATH，单次调用固定 30 秒超时且 stdout/stderr 有界；状态输出不匹配时 fail closed 并保留 journal。MCP 定义不包含密钥字段，HTTP endpoint 只允许 HTTPS。Remote 验证精确 metadata、Content-Type、size、MD5、归档限制与已知归档/可执行签名；Linux/macOS 支持完整 archive publication，FreeBSD 的 Skill/Plugin 目录发布以 `ENOTSUP` fail closed，Windows/其它平台 content 操作 fail closed。受信目录链要求 owner 为 root/当前 euid 且 `(mode & 0022) == 0`；仅生产系统临时根允许 root-owned sticky 例外，其直接条目必须由当前 euid 拥有。同一 euid 主动篡改不在隔离边界内。 |
+| 安全与合规 | MCP CLI 不经 shell，动态解析 PATH，单次调用固定 30 秒超时且 stdout/stderr 有界；状态输出不匹配时 fail closed 并保留 journal。MCP 定义不包含密钥字段，HTTP endpoint 只允许 HTTPS。Remote 验证精确 metadata、Content-Type、size、MD5、归档限制与已知归档/可执行签名；Linux/macOS 支持完整 archive publication，FreeBSD 的 Skill/Plugin 目录发布以 `ENOTSUP` fail closed，Windows/其它平台 content 操作 fail closed。受信目录链的普通目录要求 owner 为 root/当前 euid 且 `(mode & 0022) == 0`；root-owned sticky 目录允许当前 euid 拥有且不可被 group/other 写入的直接子目录，后续目录继续遵守 owner/mode 约束。sticky 目录终点的条目创建/发布使用独占与 no-replace 语义。同一 euid 主动篡改不在隔离边界内。 |
 | 技术与交付 | APM 仅在相关命令中通过 Agent 根目录是否存在来感知安装状态，不承担目标 Agent 的安装、卸载、实时监控或运行时职责。 |
 
 ## Risks and Decisions

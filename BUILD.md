@@ -56,7 +56,7 @@ provider 配置、Remote 网络/协议或内容错误都不会自动回退另一
 
 Remote 的 metadata/JSON 与 content 都受 20 MiB 客户端上限约束；Skill/Plugin 解包还限制为总大小 100 MiB、单文件 10 MiB、最多 1,000 个节点、深度 16、路径 255 字节和 100 倍解压倍率，并拒绝路径逃逸、链接、特殊节点、嵌套归档扩展名以及已知归档/可执行文件签名。Linux 与 macOS 支持完整的 descriptor-relative Skill/Plugin 目录发布、Agent 文件发布和 MCP 临时 staging；FreeBSD 支持 descriptor-relative staging、Agent 文件发布和 MCP，但 Skill/Plugin 的目录发布以 `ENOTSUP` fail closed。Windows 及其它未实现平台的 Remote content 操作 fail closed；目录 List/Resolve 不因此被描述为已发布内容可用。
 
-Remote descriptor-relative 操作要求 destination/MCP 临时目录链上的每个物理目录都由 root 或当前 euid 拥有，且 `(mode & 0022) == 0`。唯一例外是生产系统临时根可为 root-owned sticky 目录；该目录的直接子条目必须由当前 euid 拥有。该边界不隔离能够以同一 euid 主动篡改目录的进程，device/inode 复验只用于发现变化，不能提升为跨同一用户进程的安全隔离保证。
+Remote descriptor-relative 操作要求 destination/MCP 临时目录链上的普通物理目录都由 root 或当前 euid 拥有，且 `(mode & 0022) == 0`。root-owned sticky 目录可出现在受信链中；继续遍历时，其直接子目录必须由当前 euid 拥有且仍不可被 group/other 写入，后续目录继续遵守 owner/mode 约束。root-owned sticky 目录本身是终点时，直接条目创建使用独占语义，发布使用 no-replace 语义。该边界不隔离能够以同一 euid 主动篡改目录的进程，device/inode 复验只用于发现变化，不能提升为跨同一用户进程的安全隔离保证。
 
 ## 开发验证
 

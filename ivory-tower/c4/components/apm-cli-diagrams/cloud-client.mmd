@@ -72,4 +72,4 @@ classDiagram
     MCPSource --> MCPServer : strict value, no file cache
 
     note for LocalClient "显式绝对 fixture 根；物理复制 skills/plugins/agents，严格解码 MCP；拒绝链接、特殊节点、路径逃逸、重叠与非空目标"
-    note for RemoteClient "APC HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、受限 archive、同源 redirect；无 retry/fallback。Linux/macOS 完整发布；FreeBSD 支持 staging、Agent、MCP，但 Skill/Plugin 目录发布返回 ENOTSUP；Windows/其它 content fail closed"
+    note for RemoteClient "APC HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、受限 archive、同源 redirect；无 retry/fallback。受信普通目录为 root/current-euid owner 且 mode&0022==0；root-owned sticky 目录只接受 current-euid 私有直接子目录，终点创建/发布使用 exclusive/no-replace。Linux/macOS 完整发布；FreeBSD 支持 staging、Agent、MCP，但 Skill/Plugin 目录发布返回 ENOTSUP；Windows/其它 content fail closed"

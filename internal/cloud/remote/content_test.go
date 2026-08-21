@@ -386,21 +386,19 @@ func openTestPinnedDirectory(t *testing.T, path string) *pinnedDirectory {
 	return directory
 }
 
-func TestTrustedTestDirUsesCleanupOwnedPackageRoot(t *testing.T) {
-	physicalCWD, err := filepath.EvalSymlinks(mustGetwd(t))
-	if err != nil {
+func TestTrustedTestDirUsesTestingTempRoot(t *testing.T) {
+	fakeRoot := t.TempDir()
+	if err := os.Chmod(fakeRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	missingHome := filepath.Join(t.TempDir(), "missing-home")
+	missingHome := filepath.Join(fakeRoot, "missing-home")
 	var root string
 	t.Run("create", func(t *testing.T) {
 		t.Setenv("XDG_RUNTIME_DIR", "")
 		t.Setenv("HOME", missingHome)
+		t.Setenv("TMPDIR", fakeRoot)
 		root = trustedTestDir(t)
-		assertPrivatePackageTestRoot(t, physicalCWD, root, ".apm-remote-secure-test-")
-		if got := os.Getenv("HOME"); got != root {
-			t.Fatalf("HOME = %q, want cleanup-owned root %q", got, root)
-		}
+		assertPathWithinTestRoot(t, fakeRoot, root)
 	})
 	if root == "" {
 		return
@@ -410,58 +408,32 @@ func TestTrustedTestDirUsesCleanupOwnedPackageRoot(t *testing.T) {
 	}
 }
 
-func mustGetwd(t *testing.T) string {
+func assertPathWithinTestRoot(t *testing.T, root, path string) {
 	t.Helper()
-	directory, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return directory
-}
-
-func assertPrivatePackageTestRoot(t *testing.T, physicalCWD, root, prefix string) {
-	t.Helper()
-	relative, err := filepath.Rel(physicalCWD, root)
+	relative, err := filepath.Rel(root, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		t.Fatalf("trusted test root %q is outside physical package directory %q", root, physicalCWD)
+		t.Fatalf("test path %q is outside fake root %q", path, root)
 	}
-	if !strings.HasPrefix(filepath.Base(root), prefix) {
-		t.Fatalf("trusted test root base = %q, want prefix %q", filepath.Base(root), prefix)
-	}
-	info, err := os.Stat(root)
+	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if permissions := info.Mode().Perm(); permissions != 0o700 {
-		t.Fatalf("trusted test root permissions = %04o, want 0700", permissions)
+		t.Fatalf("test path permissions = %04o, want 0700", permissions)
 	}
 }
 
 func trustedTestDir(t *testing.T) string {
 	t.Helper()
-	parent := os.Getenv("XDG_RUNTIME_DIR")
-	if parent == "" {
-		parent = mustGetwd(t)
-	}
-	physicalParent, err := filepath.EvalSymlinks(filepath.Clean(parent))
-	if err != nil {
-		t.Fatal(err)
-	}
-	directory, err := os.MkdirTemp(physicalParent, ".apm-remote-secure-test-")
-	if err != nil {
-		t.Fatalf("create trusted Remote test root below %q: %v", physicalParent, err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(directory); err != nil {
-			t.Errorf("remove trusted test directory %q: %v", directory, err)
-		}
-	})
+	directory := t.TempDir()
 	if err := os.Chmod(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", directory)
+	t.Setenv("XDG_RUNTIME_DIR", directory)
+	t.Setenv("TMPDIR", directory)
 	return directory
 }
