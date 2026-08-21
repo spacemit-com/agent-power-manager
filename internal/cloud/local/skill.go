@@ -21,10 +21,11 @@ func (c *Client) DownloadSkill(ctx context.Context, ref domain.PowerRef, destina
 		return cloud.ErrNotFound
 	}
 	source := filepath.Join(c.resourcesRoot, "skills", ref.Name, ref.Version)
-	if err := validateSkillSource(ctx, c.resourcesRoot, source); err != nil {
+	snapshot, err := c.validateSkillSource(ctx, source)
+	if err != nil {
 		return err
 	}
-	destination, err := absoluteDestination(destination)
+	destination, err = absoluteDestination(destination)
 	if err != nil {
 		return err
 	}
@@ -34,31 +35,31 @@ func (c *Client) DownloadSkill(ctx context.Context, ref domain.PowerRef, destina
 	if err := validateCopyBoundary(source, destination); err != nil {
 		return err
 	}
-	return copyTreeAtomically(ctx, source, destination, "Skill")
+	return copyTreeAtomically(ctx, snapshot, destination, "Skill", c.beforeTreePublish)
 }
 
-func validateSkillSource(ctx context.Context, resourcesRoot, source string) error {
+func (c *Client) validateSkillSource(ctx context.Context, source string) (*treeSnapshot, error) {
 	info, err := os.Lstat(source)
 	if errors.Is(err, fs.ErrNotExist) {
-		return cloud.ErrNotFound
+		return nil, cloud.ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("stat source Skill %q: %w", source, err)
+		return nil, fmt.Errorf("stat source Skill %q: %w", source, err)
 	}
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return unsafeContent("source Skill %q is not a physical directory", source)
+		return nil, unsafeContent("source Skill %q is not a physical directory", source)
 	}
 	marker, err := os.Lstat(filepath.Join(source, "SKILL.md"))
 	if errors.Is(err, fs.ErrNotExist) {
-		return cloud.ErrNotFound
+		return nil, cloud.ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("stat source Skill marker %q: %w", source, err)
+		return nil, fmt.Errorf("stat source Skill marker %q: %w", source, err)
 	}
 	if !marker.Mode().IsRegular() || marker.Mode()&os.ModeSymlink != 0 {
-		return unsafeContent("source Skill marker %q is not a physical regular file", filepath.Join(source, "SKILL.md"))
+		return nil, unsafeContent("source Skill marker %q is not a physical regular file", filepath.Join(source, "SKILL.md"))
 	}
-	return validatePhysicalTree(ctx, resourcesRoot, source)
+	return capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen)
 }
 
 func isCanonicalVersion(version string) bool {

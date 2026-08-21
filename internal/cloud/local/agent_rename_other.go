@@ -16,8 +16,5 @@ func renameAgentNoReplace(source, destination string) error {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("check destination %q: %w", destination, err)
 	}
-	if err := os.Link(source, destination); err != nil {
-		return err
-	}
-	return os.Remove(source)
+	return linkAgentNoReplace(source, destination, os.Link, os.Remove)
 }

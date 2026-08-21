@@ -18,8 +18,12 @@ import (
 
 // Client 从绝对本地目录读取能力资源，不拥有缓存、staging 或用户目录。
 type Client struct {
-	resourcesRoot      string
-	beforeAgentPublish func()
+	resourcesRoot          string
+	beforeAgentPublish     func()
+	beforeTreeSnapshot     func()
+	beforeSnapshotFileOpen func(string)
+	beforeTreePublish      func()
+	afterMCPDecode         func()
 }
 
 var _ cloud.Client = (*Client)(nil)

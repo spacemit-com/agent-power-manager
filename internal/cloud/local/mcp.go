@@ -34,13 +34,19 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPSer
 	if marker.Mode()&os.ModeSymlink != 0 || !marker.Mode().IsRegular() {
 		return domain.MCPServer{}, unsafeContent("MCP marker %q is not a physical regular file", markerPath)
 	}
-	contents, _, err := readPhysicalFile(ctx, c.resourcesRoot, markerPath, maxSingleSize)
+	contents, _, err := capturePhysicalFile(ctx, c.resourcesRoot, markerPath, maxSingleSize, c.beforeSnapshotFileOpen)
 	if err != nil {
 		return domain.MCPServer{}, err
 	}
 	server, err := decodeMCPServer(contents)
 	if err != nil {
 		return domain.MCPServer{}, fmt.Errorf("decode MCP definition %q: %w", markerPath, err)
+	}
+	if c.afterMCPDecode != nil {
+		c.afterMCPDecode()
+	}
+	if err := ctx.Err(); err != nil {
+		return domain.MCPServer{}, err
 	}
 	return server.Clone(), nil
 }

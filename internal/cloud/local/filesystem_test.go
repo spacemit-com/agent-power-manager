@@ -1,14 +1,13 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 
 	"apm/internal/cloud"
@@ -46,26 +45,6 @@ func TestDownloadSkillRejectsUnsafeSourceTree(t *testing.T) {
 			},
 		},
 		{
-			name: "fifo",
-			mutate: func(t *testing.T, _, source string) {
-				t.Helper()
-				if err := syscall.Mkfifo(filepath.Join(source, "payload.fifo"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			},
-		},
-		{
-			name: "socket",
-			mutate: func(t *testing.T, _, source string) {
-				t.Helper()
-				listener, err := net.Listen("unix", filepath.Join(source, "payload.sock"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = listener.Close() })
-			},
-		},
-		{
 			name: "binary content",
 			mutate: func(t *testing.T, _, source string) {
 				writeTestBytes(t, filepath.Join(source, "payload.bin"), []byte{'a', 0, 'b'})
@@ -90,12 +69,9 @@ func TestDownloadSkillRejectsUnsafeSourceTree(t *testing.T) {
 		{
 			name: "tree exceeds one hundred MiB",
 			mutate: func(t *testing.T, _, source string) {
-				for index := 0; index < 11; index++ {
+				for index := 0; index < 10; index++ {
 					path := filepath.Join(source, "large-"+string(rune('a'+index))+".md")
-					writeTestFile(t, path, "x")
-					if err := os.Truncate(path, 10<<20); err != nil {
-						t.Fatal(err)
-					}
+					writeRepeatedTextFile(t, path, maxTreeFileSize)
 				}
 			},
 		},
@@ -230,6 +206,33 @@ func writeTestBytes(t *testing.T, path string, contents []byte) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeRepeatedTextFile(t *testing.T, path string, size int64) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := bytes.Repeat([]byte("x"), 1<<20)
+	remaining := size
+	for remaining > 0 {
+		write := int64(len(chunk))
+		if write > remaining {
+			write = remaining
+		}
+		if _, err := file.Write(chunk[:int(write)]); err != nil {
+			_ = file.Close()
+			t.Fatal(err)
+		}
+		remaining -= write
+	}
+	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
 }

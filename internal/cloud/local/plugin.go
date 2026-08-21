@@ -33,7 +33,8 @@ func (c *Client) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destin
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return unsafeContent("raw Plugin package %q is not a physical directory", source)
 	}
-	if err := validatePhysicalTree(ctx, c.resourcesRoot, source); err != nil {
+	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen)
+	if err != nil {
 		return err
 	}
 	resolvedDestination, err := absoluteDestination(destination)
@@ -46,7 +47,7 @@ func (c *Client) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destin
 	if err := validateCopyBoundary(source, resolvedDestination); err != nil {
 		return err
 	}
-	return copyTreeAtomically(ctx, source, resolvedDestination, "Plugin")
+	return copyTreeAtomically(ctx, snapshot, resolvedDestination, "Plugin", c.beforeTreePublish)
 }
 
 // listPlugins 根据 `<logical>/<version>` 共享原始包目录发现逻辑 Plugin，不审计各 Agent 入口完整性。
