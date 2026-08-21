@@ -55,6 +55,8 @@ pluginArtifactCache = component "Plugin Artifact Cache Roots" "cache/plugins/<lo
 }
 rawPluginDestination = component "Canonical Plugin Destination" "Plugin Resource 创建的空私有临时 plugins/<name> 目录；Cloud 只写 apc-plugin.json + skills。" "filesystem" {
 }
+nativeManifestGenerator = component "Native Manifest Generator" "internal/pluginresource.writeAgentManifests 从已复验的 canonical manifest 顺序生成 Codex、Claude、Hermes 原生 manifest。" "Go" {
+}
 codexMarketplaceBuilder = component "Codex Marketplace Builder" "从 Codex 原生 Plugin manifest 构建并复验单条目本地 marketplace。" "Go" {
 }
 claudeMarketplaceBuilder = component "Claude Marketplace Builder" "从 Claude 原生 Plugin manifest 构建并复验单条目本地 marketplace。" "Go" {
@@ -89,8 +91,9 @@ pluginResource -> rawPluginDestination "创建并控制空的 canonical destinat
 cloudClient -> rawPluginDestination "只写 apc-plugin.json + skills，不生成 Agent 配置/marketplace"
 pluginResource -> pluginArtifactCache "保留 canonical 并一次发布共享 immutable artifact"
 pluginResource -> pluginArtifactValidator "严格解析 canonical，构建后与 cache hit 完整只读复验"
-pluginResource -> codexMarketplaceBuilder "从 canonical model 构建 Codex 原生 manifest 与单条目 marketplace"
-pluginResource -> claudeMarketplaceBuilder "从 canonical model 构建 Claude 原生 manifest 与单条目 marketplace"
+pluginResource -> nativeManifestGenerator "先从复验后的 canonical manifest 生成 Codex、Claude、Hermes 原生 manifest"
+pluginResource -> codexMarketplaceBuilder "随后读取并校验已生成的 Codex 原生 manifest，仅构建 Codex 单条目 marketplace"
+pluginResource -> claudeMarketplaceBuilder "再读取并校验已生成的 Claude 原生 manifest，仅构建 Claude 单条目 marketplace"
 transactionManager -> adapterRegistry "Plugin marketplace/Plugin 与 filesystem 变更"
 transactionManager -> journalStore "create/update/delete schema v1 journal"
 transactionManager -> configModel "commit/rollback manifest Set/Remove"

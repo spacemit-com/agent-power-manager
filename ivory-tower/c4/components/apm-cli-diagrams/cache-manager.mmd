@@ -7,13 +7,13 @@ classDiagram
     }
     class PowerCache {
         <<interface: internal/cache.PowerCache>>
-        +PrepareSkill(Context, PowerRef) stagingRoot
-        +PrepareAgent(Context, PowerRef) stagingRoot
+        +PrepareSkill(Context, PowerRef) (stagingRoot string, error)
+        +PrepareAgent(Context, PowerRef) (stagingRoot string, error)
     }
     class FilesystemCache {
         <<internal/cache.FilesystemCache>>
-        +PrepareSkill(Context, PowerRef) stagingRoot
-        +PrepareAgent(Context, PowerRef) stagingRoot
+        +PrepareSkill(Context, PowerRef) (stagingRoot string, error)
+        +PrepareAgent(Context, PowerRef) (stagingRoot string, error)
     }
     class CloudClient {
         <<internal/cloud.Client>>
@@ -33,9 +33,9 @@ classDiagram
 
     class PluginResource {
         <<internal/pluginresource>>
-        +Ensure(Context, PowerRef) Artifact
-        +Lookup(PowerRef) Artifact
-        +StageFilesystem(PowerRef) stagingRoot
+        +Ensure(Context, PowerRef) (Artifact, error)
+        +Lookup(PowerRef) (Artifact, error)
+        +StageFilesystem(PowerRef) (stagingRoot string, error)
     }
     class PluginArtifactValidator {
         <<internal/pluginartifact>>

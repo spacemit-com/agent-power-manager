@@ -38,7 +38,7 @@ classDiagram
     }
     class CompositionRoot {
         <<cmd/apm.newCloudClient>>
-        +newCloudClient() CloudClient
+        +newCloudClient() (CloudClient, error)
     }
     class LocalClient {
         <<internal/cloud/local.Client>>
