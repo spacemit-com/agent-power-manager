@@ -1,5 +1,5 @@
 classDiagram
-    note for SearchLifecycle "Search：无锁 Inspect journal，Warn/Debug 后继续 Cloud；返回结构化结果"
+    note for SearchLifecycle "Search factory 先构造并校验 provider；Search 无锁 Inspect journal，Warn/Debug 后调用 Cloud List 并返回结构化结果"
     class SearchLifecycle {
         <<interface>>
         +Search(Context, Flags) (SearchResult, error)
@@ -11,7 +11,7 @@ classDiagram
         +Search(...)
     }
 
-    note for ListLifecycle "默认/installed 都无锁 Inspect；installed 的 Refresh 与 Config reads 是 best-effort 观察"
+    note for ListLifecycle "默认/installed 共用先构造并校验 provider 的 factory，且都无锁 Inspect；installed 进入查询后不访问 Cloud，只做 Refresh 与 best-effort Config reads"
     class ListLifecycle {
         <<interface>>
         +List(Context, Flags) (ListResult, error)

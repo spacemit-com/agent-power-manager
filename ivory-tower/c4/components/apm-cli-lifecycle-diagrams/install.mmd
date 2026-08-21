@@ -14,6 +14,13 @@ flowchart TD
     Cache --> FSTx[filesystem Install transaction]
     FSTx --> FSJournal[schema v1 driver=filesystem]
 
+    Type -->|Agent| AgentResolve[ResolveAgent + Config Find]
+    AgentResolve --> AgentSame{same manifest version?}
+    AgentSame -->|yes| Unchanged
+    AgentSame -->|no| AgentCache[Cache PrepareAgent；hit 复验，miss 时私有 agent.yaml DownloadAgent 后原子发布 cache/staging]
+    AgentCache --> AgentTx[filesystem InstallAgent transaction]
+    AgentTx --> FSJournal
+
     Type -->|MCP| MCPResolve[ResolveMCP + Config Find]
     MCPResolve --> MCPInspect[Agent CLI Inspect]
     MCPInspect --> MCPState{manifest / presence / version}
@@ -29,21 +36,36 @@ flowchart TD
 
     Type -->|Plugin| PluginManifest[Config Find target exact version]
     PluginManifest -->|same version| Unchanged
-    PluginManifest -->|missing or different| PluginEnsure[Plugin Resource Ensure 共享 artifact；仅 miss 时 Cloud 下载 apc-plugin.json + skills，再派生 Agent 配置与双 marketplace]
-    PluginEnsure --> PluginResolve[ResolvePlugin]
-    PluginResolve --> PluginFacts[检查目标及旧版本的精确 Agent 事实]
-    PluginFacts -->|Codex / Claude| PreviousLookup[Artifact MarketplaceFor；旧版本仅 Lookup，验证本地 marketplace/source 与逻辑 selector]
-    PreviousLookup --> MarketplaceState{Codex / Claude manifest 与 marketplace 状态}
-    MarketplaceState -->|no manifest + marketplace absent| MarketplaceFirst[首装 register source → add Plugin → manifest]
-    MarketplaceState -->|no manifest + exact retained source| MarketplaceReinstall[重装 reuse source → add Plugin → manifest]
-    MarketplaceState -->|previous manifest| MarketplaceSwitch[切换 remove old Plugin → unregister old source → register new source → add Plugin → manifest]
+    PluginManifest -->|missing or different| PluginResolve[derive logical target + ResolvePlugin]
+    PluginResolve --> PluginMode{DeploymentMode}
+
+    PluginMode -->|marketplace| MarketplaceEnsure[Ensure target artifact；miss 才下载 canonical package，先生成原生 manifest，再由它们生成双 marketplace]
+    MarketplaceEnsure --> MarketplaceTarget[validate artifact + marketplace adapter + MarketplaceFor target]
+    MarketplaceTarget --> MarketplaceManifest{previous manifest?}
+    MarketplaceManifest -->|no| MarketplaceTargetFacts[Inspect target marketplace，再 Inspect target Plugin]
+    MarketplaceManifest -->|yes| MarketplacePreviousFacts[Inspect previous marketplace，再 Inspect previous Plugin]
+    MarketplacePreviousFacts -->|both absent| MarketplaceStale[Remove stale manifest] --> MarketplaceTargetFacts
+    MarketplacePreviousFacts -->|partial| PluginFail[fail closed；保留 manifest/artifact]
+    MarketplacePreviousFacts -->|both present| PreviousLookup[Lookup previous only now；validate artifact/MarketplaceFor/source/selector]
+    PreviousLookup --> MarketplaceSwitch[切换 remove old Plugin → unregister old source → register new source → add Plugin → manifest]
+    MarketplaceTargetFacts -->|marketplace absent + Plugin absent| MarketplaceFirst[首装 register source → add Plugin → manifest]
+    MarketplaceTargetFacts -->|exact retained source + Plugin absent| MarketplaceReinstall[重装 reuse source → add Plugin → manifest]
+    MarketplaceTargetFacts -->|other| PluginFail
     MarketplaceReinstall -. commit / rollback / recovery .-> RetainedRecovery[不 unregister/register；仅方向已固定为 rolling-back 且 source 缺失时离线恢复]
-    PluginFacts -->|Hermes / Bibit| FilesystemStage[事实完成后 Plugin Resource StageFilesystem] --> FilesystemPluginTx[逻辑名目录 filesystem Plugin transaction；Hermes CLI 激活，Bibit 无 Plugin CLI]
+
+    PluginMode -->|filesystem| FilesystemManifest{previous manifest?}
+    FilesystemManifest -->|yes| FilesystemPreviousFact[Inspect previous logical Plugin]
+    FilesystemPreviousFact -->|exact present| FilesystemEnsure
+    FilesystemPreviousFact -->|absent| FilesystemAbsent[TargetPath + validate physical absence + Remove stale manifest] --> FilesystemTargetFact
+    FilesystemPreviousFact -->|other| PluginFail
+    FilesystemManifest -->|no| FilesystemTargetFact[Inspect target logical Plugin]
+    FilesystemTargetFact -->|exact absent| FilesystemEnsure[Ensure target artifact after facts]
+    FilesystemTargetFact -->|present or other| PluginFail
+    FilesystemEnsure --> FilesystemStage[validate artifact + StageFilesystem] --> FilesystemPluginTx[InstallPlugin filesystem transaction；Hermes CLI 激活，Bibit 无 Plugin CLI]
     MarketplaceFirst --> PluginJournal[schema v1 driver=plugin；每次 Agent 写操作前持久 phase]
     MarketplaceReinstall --> PluginJournal
     MarketplaceSwitch --> PluginJournal
     FilesystemPluginTx --> PluginJournal
-    PluginFacts -->|部分、损坏或身份不符| PluginFail[fail closed；保留 manifest/artifact]
 
     FSJournal --> Outcome[installed/upgraded/downgraded]
     Phases --> Outcome

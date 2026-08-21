@@ -38,16 +38,16 @@ cacheManager = component "Cache Manager" "internal/cache 通过 Source 注入同
         "classDiagram" "apm-cli-diagrams/cache-manager.mmd"
     }
 }
-cloudComposition = component "Cloud Composition" "cmd/apm.newCloudClient 每次创建 registry，显式注册 local|remote factory，按环境只打开一个 provider；默认 remote，禁止 fallback（ADR-016）。" "cmd/apm/cloud.go (Go)"
-providerRegistry = component "Provider Registry" "internal/cloud.ProviderRegistry 为实例级显式注册表；拒绝空、重复、未知 provider 及 nil/typed-nil Client。" "internal/cloud (Go)"
-cloudClient = component "Cloud Client Ports" "internal/cloud.Client 组合 Catalog、SkillSource、PluginSource、MCPSource、AgentSource；List/Resolve 与所有来源访问都可取消，provider 不拥有 APM cache/staging。" "internal/cloud (Go)" {
+cloudComposition = component "Cloud Composition" "cmd/apm.newCloudClient 直接 import local|remote，每次把两者的 factory closure 注册到 registry，按环境只打开一个 provider；默认 remote，禁止 fallback（ADR-016）。" "cmd/apm/cloud.go (Go)"
+providerRegistry = component "Provider Registry" "internal/cloud.ProviderRegistry 为中立的实例级显式注册表；只保存 factory、按 ID 选择并返回 Client，拒绝空、重复、未知 provider 及 nil/typed-nil Client。" "internal/cloud (Go)"
+cloudClient = component "Cloud Client Ports" "internal/cloud.Client 组合 Catalog、SkillSource、PluginSource、MCPSource、AgentSource；目录 destination 必须不存在或为空物理目录，Agent 文件必须不存在；provider 不拥有 APM cache/staging。" "internal/cloud (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cloud-client.mmd"
     }
 }
 localProvider = component "Local Provider" "internal/cloud/local.Client 从显式绝对 canonical fixture 根读取四类 Power；复制物理目录/文件或严格解码 MCP。" "internal/cloud/local (Go)"
-remoteProvider = component "Remote Provider" "internal/cloud/remote.Client 读取 APC HTTP 目录/latest/exact/content，校验协议、size/MD5 与安全归档；不 retry/fallback。" "internal/cloud/remote (Go)"
-pluginResource = component "Plugin Resource" "internal/pluginresource 下载 canonical apc-plugin.json + skills，严格解析闭集并派生 Codex/Claude/Hermes 原生配置与双 marketplace，一次发布共享不可变 artifact（ADR-017）。" "internal/pluginresource (Go)" {
+remoteProvider = component "Remote Provider" "internal/cloud/remote.Client 读取 APC HTTP 目录/latest/exact/content；Linux/macOS 完整发布，FreeBSD 的 Skill/Plugin 目录发布返回 ENOTSUP，Windows/其它 content fail closed。" "internal/cloud/remote (Go)"
+pluginResource = component "Plugin Resource" "internal/pluginresource 下载 canonical apc-plugin.json + skills，先派生 Codex/Claude/Hermes 原生 manifest，再由 Codex/Claude builder 读取 manifest 生成双 marketplace，一次发布共享不可变 artifact（ADR-017）。" "internal/pluginresource (Go)" {
 }
 pluginArtifactValidator = component "Plugin Artifact Validator" "internal/pluginartifact 中立只读校验：复验 canonical apc-plugin 身份/Skill 闭集、派生 manifest/marketplace 与物理树；不下载、不生成、不修改 artifact。" "internal/pluginartifact (Go)" {
 }
@@ -67,10 +67,12 @@ journalStore = component "Journal Store" "唯一 transactions/active.json，sche
 cliEntry -> lifecycle "通过五个独立 factory 调用 Search/List/Install/Uninstall/Fix 生命周期用例"
 cliEntry -> cloudComposition "Search/List/Install/Uninstall factory 创建 Cloud；Fix 不调用"
 cloudComposition -> providerRegistry "每次注册 local|remote 并 Open 选中 ID"
-providerRegistry -> localProvider "local factory"
-providerRegistry -> remoteProvider "remote factory"
+cloudComposition -> localProvider "import local 并注册构造 closure"
+cloudComposition -> remoteProvider "import remote 并注册构造 closure"
+providerRegistry -> cloudClient "Open 选择 factory 并返回 Client 或 error"
 localProvider -> cloudClient "implements internal/cloud.Client"
 remoteProvider -> cloudClient "implements internal/cloud.Client"
+remoteProvider -> apc "读取 Published Catalog、metadata 与精确版本 content" "HTTPS/loopback HTTP + JSON/YAML/gzip"
 cloudComposition -> lifecycle "注入选中 Client；Fix 例外"
 cloudComposition -> cacheManager "Install 将同一选中 Client 作为 Source 注入"
 cloudComposition -> pluginResource "Install/Uninstall 将同一选中 Client 作为 Downloader 注入"

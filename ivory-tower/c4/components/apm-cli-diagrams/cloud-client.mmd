@@ -2,8 +2,8 @@ classDiagram
     note for CloudClient "internal/cloud.Client 组合五个能力端口；List/Resolve 与所有来源访问都接收 Context。provider 只写调用方私有目标，不拥有 Cache、staging、manifest 或 journal（ADR-016）"
     class Catalog {
         <<interface>>
-        +List(Context) PowerRefs
-        +Resolve(Context, PowerRef) PowerRef
+        +List(Context) (PowerRefs, error)
+        +Resolve(Context, PowerRef) (PowerRef, error)
     }
     class SkillSource {
         <<interface>>
@@ -15,7 +15,7 @@ classDiagram
     }
     class MCPSource {
         <<interface>>
-        +GetMCP(Context, PowerRef) MCPServer
+        +GetMCP(Context, PowerRef) (MCPServer, error)
     }
     class AgentSource {
         <<interface>>
@@ -34,7 +34,7 @@ classDiagram
     class ProviderRegistry {
         <<internal/cloud.ProviderRegistry>>
         +Register(ProviderID, Factory) error
-        +Open(ProviderID) CloudClient
+        +Open(ProviderID) (CloudClient, error)
     }
     class CompositionRoot {
         <<cmd/apm.newCloudClient>>
@@ -54,15 +54,16 @@ classDiagram
         +Validate() error
     }
     class CallerPrivateDirectory {
-        <<Skill or canonical Plugin destination>>
+        <<absent or empty physical Skill/Plugin destination>>
     }
     class CallerPrivateAgentFile {
-        <<agent.yaml destination>>
+        <<absent agent.yaml destination>>
     }
 
-    CompositionRoot --> ProviderRegistry : register local and remote, then Open selected
-    ProviderRegistry --> LocalClient : local factory
-    ProviderRegistry --> RemoteClient : remote factory
+    CompositionRoot --> ProviderRegistry : Register closures, then Open selected ID
+    CompositionRoot --> LocalClient : imports local and registers factory closure
+    CompositionRoot --> RemoteClient : imports remote and registers factory closure
+    ProviderRegistry --> CloudClient : selects factory and returns Client or error
     LocalClient ..|> CloudClient
     RemoteClient ..|> CloudClient
     SkillSource --> CallerPrivateDirectory : writes verified tree
@@ -71,4 +72,4 @@ classDiagram
     MCPSource --> MCPServer : strict value, no file cache
 
     note for LocalClient "显式绝对 fixture 根；物理复制 skills/plugins/agents，严格解码 MCP；拒绝链接、特殊节点、路径逃逸、重叠与非空目标"
-    note for RemoteClient "APC HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、受限 archive、同源 redirect；无 retry/fallback。descriptor-relative content 仅 Linux/macOS/FreeBSD，其它平台 fail closed"
+    note for RemoteClient "APC HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、受限 archive、同源 redirect；无 retry/fallback。Linux/macOS 完整发布；FreeBSD 支持 staging、Agent、MCP，但 Skill/Plugin 目录发布返回 ENOTSUP；Windows/其它 content fail closed"

@@ -1,5 +1,7 @@
 # Bibit Agent 与共享多 Agent Plugin 设计规格
 
+> 状态与取代说明：本文主体保留为 Feature 018 的历史设计记录；其中 Cloud provider 契约已由 [Feature 020](../020-cloud-client-providers/spec.md) 与 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 取代，Plugin canonical/派生契约已由 Feature 020 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 取代。
+>
 > 状态：已于 2026-08-20 按 [ADR-014](../../adr/ADR-014-share-multi-agent-plugin-artifacts.md) 实现。
 
 ## 背景

@@ -47,4 +47,4 @@ classDiagram
     PluginResource --> CloudClient : DownloadPlugin canonical package
     PluginResource --> PluginArtifactValidator : parse apc-plugin and validate derived files
     PluginResource --> PluginArtifactCache : publish shared immutable artifact
-    note for PluginArtifactCache "Plugin cache 不属于 PowerCache；Plugin Resource 保留 apc-plugin.json + skills，并派生 Codex/Claude/Hermes 配置与双 marketplace（ADR-017）"
+    note for PluginArtifactCache "Plugin cache 不属于 PowerCache；Plugin Resource 保留 apc-plugin.json + skills，先生成 Codex/Claude/Hermes 原生 manifest，再由 marketplace builder 读取对应 manifest 生成双 marketplace（ADR-017）"

@@ -45,18 +45,18 @@ APM_CLOUD_LOCAL_ROOT="$(pwd)/internal/cloud/resources" \
 | `APC_BASE_URL` | 默认 `http://127.0.0.1:8080`；必须是无凭据、query、fragment 和非根路径的绝对 URL。非 loopback 地址只允许 HTTPS，HTTP 仅允许 loopback。 |
 | `APM_CLOUD_LOCAL_ROOT` | 选择 `local` 时必填，必须是 clean absolute path，且从文件系统根到 fixture 根不能经过 symlink/reparse point。 |
 
-provider 配置、Remote 网络/协议或内容错误都不会自动回退另一 provider。composition root 为 Remote 构造具有两分钟整体 timeout 和同源 redirect 策略的 `http.Client`；调用方更短的 context deadline 优先。Search、Cloud List、Install 和 Uninstall 会在创建 lifecycle 时选择 provider；Fix 只构造锁与 Transaction recovery，不创建 Cloud Client。
+provider 配置、Remote 网络/协议或内容错误都不会自动回退另一 provider。composition root 为 Remote 构造具有两分钟整体 timeout 和同源 redirect 策略的 `http.Client`；调用方更短的 context deadline 优先。Search、默认 Cloud List、installed List、Install 和 Uninstall 都在创建 lifecycle 时构造并校验所选 provider；installed List 进入查询后只刷新 Agent 和读取本地 manifest，不发起 Cloud 网络请求。Fix 只构造锁与 Transaction recovery，不创建 Cloud Client。
 
 四类 Power 通过同一 `cloud.Client` 获取，但保留各自的内容边界：
 
 - Skill：Local 复制 canonical fixture 目录；Remote 获取 `application/gzip`，先验证精确 metadata、size 与 32 位小写 MD5，再安全解包到调用方私有目录。版本化 cache 的命中、下载临时目标、原子发布和公共 staging 全部由 Cache 的 `PrepareSkill` 管理。
 - Agent：Local/Remote 都把单个 `agent.yaml` 原始字节写到调用方私有文件；Remote content type 为 `application/yaml`。版本化 cache 与 staging 由 `PrepareAgent` 管理，安装前仍由 Bibit Agent Adapter 校验 YAML 身份和最小 schema。
 - MCP：Local/Remote 都严格解码 `application/json` 并返回克隆的 `MCPServer` 领域对象，不建立文件 cache；公共 HTTP endpoint 只允许无 userinfo 的绝对 HTTPS URL。
-- Plugin：Local fixture 与 Remote 解包结果只包含 `apc-plugin.json + skills/...`。`apc-plugin.json` 是唯一权威索引；Plugin Resource 严格复验 canonical 闭集，并确定性派生 Codex、Claude、Hermes 原生配置以及 Codex/Claude marketplace，再一次原子发布共享 artifact。当前权威决策是 [ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)；[ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅保留为被取代的历史背景。
+- Plugin：Local fixture 与 Remote 解包结果只包含 `apc-plugin.json + skills/...`。`apc-plugin.json` 是唯一权威索引；Plugin Resource 严格复验 canonical 闭集，先确定性生成 Codex、Claude、Hermes 原生配置，再由 Codex/Claude marketplace builder 读取并复验对应原生 manifest 后生成 marketplace，最后一次原子发布共享 artifact。当前权威决策是 [ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)；[ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅保留为被取代的历史背景。
 
-Remote 的 metadata/JSON 与 content 都受 20 MiB 客户端上限约束；Skill/Plugin 解包还限制为总大小 100 MiB、单文件 10 MiB、最多 1,000 个节点、深度 16、路径 255 字节和 100 倍解压倍率，并拒绝路径逃逸、链接、特殊节点、嵌套归档及二进制。Remote content 发布当前只在 Linux、macOS 和 FreeBSD 使用 descriptor-relative 安全实现；Windows 及其它未实现平台在 content staging/publication 时 fail closed，目录 List/Resolve 不因此被描述为已发布内容可用。
+Remote 的 metadata/JSON 与 content 都受 20 MiB 客户端上限约束；Skill/Plugin 解包还限制为总大小 100 MiB、单文件 10 MiB、最多 1,000 个节点、深度 16、路径 255 字节和 100 倍解压倍率，并拒绝路径逃逸、链接、特殊节点、嵌套归档扩展名以及已知归档/可执行文件签名。Linux 与 macOS 支持完整的 descriptor-relative Skill/Plugin 目录发布、Agent 文件发布和 MCP 临时 staging；FreeBSD 支持 descriptor-relative staging、Agent 文件发布和 MCP，但 Skill/Plugin 的目录发布以 `ENOTSUP` fail closed。Windows 及其它未实现平台的 Remote content 操作 fail closed；目录 List/Resolve 不因此被描述为已发布内容可用。
 
-Remote descriptor-relative 操作要求 destination/MCP 临时目录的物理祖先由 root 或当前 euid 拥有且不可被其他主体写入；生产系统临时根仅允许 root-owned sticky 例外，并要求其直接条目由当前 euid 拥有。该边界不隔离能够以同一 euid 主动篡改目录的进程，device/inode 复验只用于发现变化，不能提升为跨同一用户进程的安全隔离保证。
+Remote descriptor-relative 操作要求 destination/MCP 临时目录链上的每个物理目录都由 root 或当前 euid 拥有，且 `(mode & 0022) == 0`。唯一例外是生产系统临时根可为 root-owned sticky 目录；该目录的直接子条目必须由当前 euid 拥有。该边界不隔离能够以同一 euid 主动篡改目录的进程，device/inode 复验只用于发现变化，不能提升为跨同一用户进程的安全隔离保证。
 
 ## 开发验证
 
@@ -218,7 +218,7 @@ cache/plugins/<logical-name>/<version>/
 
 所有 Agent 的 Plugin 运行时名称和 `PluginTarget` selector 都是逻辑 `<name>`，Plugin 叶子固定为 `plugins/<name>`；版本只由 `PowerRef`、APM manifest、缓存版本目录和原生 manifest 表达。`Artifact.MarketplaceFor(agent)` 为 Codex/Claude 返回同一共享根上的 Agent 原生 marketplace；Hermes/Bibit 通过 `StageFilesystem(ref)` 物化同一 Plugin 叶子。
 
-Install 在锁内恢复和 Agent 选择后先处理显式规范 Plugin ref：每个所选 Agent 的 manifest 都精确命中时直接返回 `unchanged`，不会调用 Cloud、Plugin Resource、Adapter 或 Transaction；任一不匹配则回到既有 Cloud 解析路径。普通路径先 `Ensure(ctx, ref)` 目标共享 artifact（cache miss 才下载 canonical package 并生成当前全部正式适配 Agent 所需的派生内容：Codex/Claude/Hermes 原生配置与双 marketplace），再解析 Plugin Adapter 并检查目标及旧版本事实。Codex/Claude 的旧版本只允许离线 `Lookup(ref)`；marketplace absent 的首次安装会注册目标 source、添加逻辑名 Plugin并写 manifest。正常卸载会保留 marketplace，因此 exact name/source retained 且 Plugin absent 的重装直接复用 source，只添加 Plugin并写 manifest；其正常提交、回滚与恢复不做多余的 unregister/register，仅在恢复方向已固定为 `rolling-back` 且 retained source 缺失时离线复验缓存并恢复 source。版本切换仍删除旧 Plugin、切换同名 marketplace source、重新添加逻辑名 Plugin并写 manifest。Hermes/Bibit 在事实检查后调用 `StageFilesystem(ref)`，再以同一个 `plugins/<name>` 目标执行可恢复 filesystem transaction；Hermes 保留 enable/disable，Bibit 不执行 Plugin CLI。
+Install 在锁内恢复和 Agent 选择后先处理显式规范 Plugin ref：每个所选 Agent 的 manifest 都精确命中时直接返回 `unchanged`，不会调用 Cloud、Plugin Resource、Adapter 或 Transaction；任一不匹配则回到既有 Cloud 解析路径。普通 Plugin 路径对每个 Agent 先读取 manifest，再统一调用 `ResolvePlugin(agent)`，随后按 `DeploymentMode` 分支。marketplace 分支在检查 Agent 事实前 `Ensure(ctx, ref)` 目标 artifact、校验 artifact、取得 `MarketplaceFor(agent)`：无 manifest 时只检查目标 marketplace/Plugin，绝不 `Lookup` 旧版本；有 manifest 时先检查旧 marketplace、再检查旧 Plugin，二者都 absent 才移除 stale manifest 并转入目标事实检查，部分存在则 fail closed，二者都 present 才离线 `Lookup(previous)` 并核对旧 source/selector。filesystem 分支则先完成旧目标或新目标的本地事实与物理缺失校验，之后才 `Ensure(ctx, ref)` 和 `StageFilesystem(ref)`，再进入 transaction。marketplace 首装会注册目标 source、添加逻辑名 Plugin 并写 manifest；正常卸载会保留 marketplace，因此 exact name/source retained 且 Plugin absent 的重装直接复用 source，只添加 Plugin 并写 manifest；其正常提交、回滚与恢复不做多余的 unregister/register，仅在恢复方向已固定为 `rolling-back` 且 retained source 缺失时离线复验缓存并恢复 source。版本切换仍删除旧 Plugin、切换同名 marketplace source、重新添加逻辑名 Plugin 并写 manifest。Hermes/Bibit 使用同一个 `plugins/<name>` 目标执行可恢复 filesystem transaction；Hermes 保留 enable/disable，Bibit 不执行 Plugin CLI。
 
 Uninstall 先从 manifest 取得精确版本；没有记录时直接返回未执行，不检查 Agent。Codex/Claude 先检查该 marketplace 与 Plugin，再离线 `Lookup` 并验证共享 artifact/source/selector，最后在 transaction 中移除 Plugin 和 manifest，正常路径保留 marketplace 与 artifact；Hermes/Bibit 只处理逻辑名目录与 manifest。部分存在、source 或 selector 不匹配、artifact 缺失或损坏、Agent 事实不可读以及非法 journal 都会保留 manifest、artifact 和 journal 并 fail closed。Plugin Resource 与 recovery 共用中立只读 Validator，拒绝 symlink/特殊文件，并按消费路径复验原生 manifest 与已生成 marketplace；`fix`/recovery 只读取 journal、Adapter、manifest 和既有共享 artifact，绝不连接 Cloud、调用 Plugin Resource 或重建缓存，因此支持离线恢复。
 
