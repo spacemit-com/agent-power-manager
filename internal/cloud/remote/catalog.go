@@ -126,7 +126,7 @@ func validateAPCTimestamp(value string) error {
 		return err
 	}
 	_, offset := parsed.Zone()
-	if offset != 0 || !strings.HasSuffix(value, "Z") {
+	if offset != 0 || (!strings.HasSuffix(value, "Z") && !strings.HasSuffix(value, "+00:00")) {
 		return errors.New("timestamp is not RFC3339 UTC")
 	}
 	return nil

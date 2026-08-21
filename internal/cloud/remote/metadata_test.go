@@ -220,8 +220,10 @@ func TestResolveValidatesYankedMetadata(t *testing.T) {
 		want       error
 	}{
 		{name: "valid", yankedAt: "2026-08-19T01:02:03Z", yankReason: "Security issue", want: cloud.ErrYanked},
+		{name: "valid zero offset", yankedAt: "2026-08-19T01:02:03+00:00", yankReason: "Security issue", want: cloud.ErrYanked},
 		{name: "missing yanked time", yankReason: "Security issue", want: cloud.ErrInvalidResponse},
 		{name: "non-UTC yanked time", yankedAt: "2026-08-19T09:02:03+08:00", yankReason: "Security issue", want: cloud.ErrInvalidResponse},
+		{name: "unknown-offset yanked time", yankedAt: "2026-08-19T01:02:03-00:00", yankReason: "Security issue", want: cloud.ErrInvalidResponse},
 		{name: "missing public reason", yankedAt: "2026-08-19T01:02:03Z", want: cloud.ErrInvalidResponse},
 		{name: "blank public reason", yankedAt: "2026-08-19T01:02:03Z", yankReason: " \t\n", want: cloud.ErrInvalidResponse},
 	}

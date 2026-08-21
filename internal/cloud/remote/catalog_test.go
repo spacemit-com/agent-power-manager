@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -186,6 +187,8 @@ func TestListRejectsNonUTCTimestamps(t *testing.T) {
 	}{
 		{name: "snapshot offset", snapshot: "2026-08-18T17:30:12.123456+08:00", published: testPublished},
 		{name: "published offset", snapshot: testSnapshot, published: "2026-08-18T17:30:12+08:00"},
+		{name: "snapshot unknown offset", snapshot: "2026-08-18T09:30:12.123456-00:00", published: testPublished},
+		{name: "published unknown offset", snapshot: testSnapshot, published: "2026-08-18T09:30:12-00:00"},
 	}
 
 	for _, tt := range tests {
@@ -199,6 +202,39 @@ func TestListRejectsNonUTCTimestamps(t *testing.T) {
 
 			if _, err := client.List(context.Background()); !errors.Is(err, cloud.ErrInvalidResponse) {
 				t.Fatalf("List() error = %v, want non-UTC ErrInvalidResponse", err)
+			}
+		})
+	}
+}
+
+func TestListAcceptsZeroOffsetUTCTimestamps(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		snapshot  string
+		published string
+	}{
+		{name: "snapshot", snapshot: "2026-08-18T09:30:12.123456+00:00", published: testPublished},
+		{name: "published", snapshot: testSnapshot, published: "2026-08-18T09:30:12+00:00"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			item := validMetadata("skill", "demo", "v1.0.0")
+			item["published_at"] = tt.published
+			server := newCatalogServer(t, map[string]any{"": validCatalogPage(tt.snapshot, []any{item}, "")})
+			defer server.Close()
+			client := newRemoteTestClient(t, server.URL)
+
+			got, err := client.List(context.Background())
+			if err != nil {
+				t.Fatalf("List() error = %v, want zero-offset UTC accepted", err)
+			}
+			want := []domain.PowerRef{{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("List() = %#v, want %#v", got, want)
 			}
 		})
 	}
@@ -245,9 +281,9 @@ func TestListRejectsResponseOverHardLimit(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"padding":"`))
-		_, _ = w.Write([]byte(strings.Repeat("x", (20<<20)+1)))
-		_, _ = w.Write([]byte(`"}`))
+		_, _ = io.WriteString(w, `{"snapshot_updated_at":"`+testSnapshot+`","items":[],"future_padding":"`)
+		_, _ = io.CopyN(w, repeatedByteReader('x'), maxJSONResponse)
+		_, _ = io.WriteString(w, `"}`)
 	}))
 	defer server.Close()
 	client := newRemoteTestClient(t, server.URL)
@@ -335,4 +371,13 @@ func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		t.Errorf("encode response: %v", err)
 	}
+}
+
+type repeatedByteReader byte
+
+func (reader repeatedByteReader) Read(buffer []byte) (int, error) {
+	for index := range buffer {
+		buffer[index] = byte(reader)
+	}
+	return len(buffer), nil
 }

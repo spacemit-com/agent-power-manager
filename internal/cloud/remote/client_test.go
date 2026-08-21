@@ -3,6 +3,8 @@ package remote
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -157,6 +159,48 @@ func TestClientRejectsCallerRedirectMutationToCrossOrigin(t *testing.T) {
 	}
 }
 
+func TestClientRejectsCallerRedirectMutationToNilURLWithoutPanic(t *testing.T) {
+	t.Parallel()
+
+	var redirectedRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirected" {
+			redirectedRequests.Add(1)
+			writeJSON(t, w, validCatalogPage(testSnapshot, nil, ""))
+			return
+		}
+		http.Redirect(w, r, "/redirected", http.StatusFound)
+	}))
+	defer server.Close()
+	client, err := New(server.URL, &http.Client{
+		Timeout: time.Second,
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			req.URL = nil
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var recovered any
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+		_, err = client.List(context.Background())
+	}()
+	if recovered != nil {
+		t.Fatalf("List() panicked after caller cleared redirect URL: %v", recovered)
+	}
+	if !errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("List() error = %v, want nil-URL ErrInvalidResponse", err)
+	}
+	if got := redirectedRequests.Load(); got != 0 {
+		t.Fatalf("redirected requests = %d, want 0", got)
+	}
+}
+
 func TestClientDelegatesSameOriginRedirectToCopiedCallerPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -225,15 +269,13 @@ func TestListMapsStatusAndBoundsProblemBody(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		status     int
-		body       string
-		want       error
-		forbidText string
+		name   string
+		status int
+		body   string
+		want   error
 	}{
 		{name: "not found", status: http.StatusNotFound, body: `{"code":"NOT_FOUND"}`, want: cloud.ErrNotFound},
 		{name: "yanked", status: http.StatusGone, body: `{"code":"YANKED"}`, want: cloud.ErrYanked},
-		{name: "bounded server problem", status: http.StatusInternalServerError, body: strings.Repeat("a", 8<<10) + "SECRET_TAIL", want: cloud.ErrInvalidResponse, forbidText: "SECRET_TAIL"},
 	}
 
 	for _, tt := range tests {
@@ -250,11 +292,38 @@ func TestListMapsStatusAndBoundsProblemBody(t *testing.T) {
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("List() error = %v, want %v", err, tt.want)
 			}
-			if tt.forbidText != "" && strings.Contains(err.Error(), tt.forbidText) {
-				t.Fatalf("List() error leaked response tail: %v", err)
-			}
 		})
 	}
+
+	t.Run("bounded server problem", func(t *testing.T) {
+		responseBody := &countingReadCloser{reader: strings.NewReader(strings.Repeat("a", maxProblemBody) + "SECRET_TAIL")}
+		client, err := New("https://apc.example.com", &http.Client{
+			Timeout: time.Second,
+			Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode:    http.StatusInternalServerError,
+					Header:        make(http.Header),
+					Body:          responseBody,
+					ContentLength: -1,
+					Request:       request,
+				}, nil
+			}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = client.List(context.Background())
+		if !errors.Is(err, cloud.ErrInvalidResponse) {
+			t.Fatalf("List() error = %v, want ErrInvalidResponse", err)
+		}
+		if strings.Contains(err.Error(), "SECRET_TAIL") {
+			t.Fatalf("List() error leaked response tail: %v", err)
+		}
+		if responseBody.bytesRead != maxProblemBody {
+			t.Fatalf("problem response bytes read = %d, want bounded %d", responseBody.bytesRead, maxProblemBody)
+		}
+	})
 }
 
 func TestListExposesOnlySafeProblemFields(t *testing.T) {
@@ -392,4 +461,74 @@ func TestListPrefersContextCancellationDuringResponseBodyRead(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestListPreservesHTTPClientTimeoutDuringResponseBodyRead(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		contentType string
+		partialBody string
+	}{
+		{name: "success body", status: http.StatusOK, contentType: "application/json", partialBody: `{"snapshot_updated_at":"`},
+		{name: "problem body", status: http.StatusInternalServerError, contentType: "application/problem+json", partialBody: `{"status":500,"code":"SERVER_`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			started := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.partialBody))
+				w.(http.Flusher).Flush()
+				close(started)
+				<-r.Context().Done()
+			}))
+			defer server.Close()
+			client, err := New(server.URL, &http.Client{Timeout: 100 * time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			done := make(chan error, 1)
+			go func() {
+				_, listErr := client.List(context.Background())
+				done <- listErr
+			}()
+			<-started
+			err = <-done
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("List() error = %v, want context.DeadlineExceeded identity", err)
+			}
+			var timeout net.Error
+			if !errors.As(err, &timeout) || !timeout.Timeout() {
+				t.Fatalf("List() error = %v, want net.Error timeout identity", err)
+			}
+			if errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("List() error = %v, HTTP client timeout must not join ErrInvalidResponse", err)
+			}
+		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+type countingReadCloser struct {
+	reader    io.Reader
+	bytesRead int
+}
+
+func (body *countingReadCloser) Read(buffer []byte) (int, error) {
+	count, err := body.reader.Read(buffer)
+	body.bytesRead += count
+	return count, err
+}
+
+func (*countingReadCloser) Close() error {
+	return nil
 }

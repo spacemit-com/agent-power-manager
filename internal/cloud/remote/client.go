@@ -58,14 +58,14 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 	clientCopy := *httpClient
 	callerRedirect := httpClient.CheckRedirect
 	clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if req.URL.User != nil || !sameOrigin(&normalized, req.URL) {
+		if !validRedirectRequest(&normalized, req) {
 			return fmt.Errorf("remote redirect crosses configured origin: %w", cloud.ErrInvalidResponse)
 		}
 		if callerRedirect != nil {
 			if err := callerRedirect(req, via); err != nil {
 				return err
 			}
-			if req.URL.User != nil || !sameOrigin(&normalized, req.URL) {
+			if !validRedirectRequest(&normalized, req) {
 				return fmt.Errorf("remote redirect policy changed configured origin: %w", cloud.ErrInvalidResponse)
 			}
 			return nil
@@ -77,6 +77,10 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 	}
 
 	return &Client{baseURL: &normalized, http: &clientCopy}, nil
+}
+
+func validRedirectRequest(baseURL *url.URL, request *http.Request) bool {
+	return request != nil && request.URL != nil && request.URL.User == nil && sameOrigin(baseURL, request.URL)
 }
 
 func validateBaseURL(baseURL *url.URL) error {
@@ -164,10 +168,7 @@ func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		problem, readErr := io.ReadAll(io.LimitReader(response.Body, maxProblemBody))
 		if readErr != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return fmt.Errorf("read remote HTTP %d problem: %w", response.StatusCode, ctxErr)
-			}
-			return fmt.Errorf("read remote HTTP %d problem: %w", response.StatusCode, errors.Join(cloud.ErrInvalidResponse, readErr))
+			return fmt.Errorf("read remote HTTP %d problem: %w", response.StatusCode, classifyResponseReadError(ctx, readErr))
 		}
 		problemContext := safeProblemContext(response, problem)
 		if problemContext == "" {
@@ -181,10 +182,7 @@ func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any
 
 	payload, err := io.ReadAll(io.LimitReader(response.Body, maxJSONResponse+1))
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return fmt.Errorf("read remote JSON response: %w", ctxErr)
-		}
-		return fmt.Errorf("read remote JSON response: %w", errors.Join(cloud.ErrInvalidResponse, err))
+		return fmt.Errorf("read remote JSON response: %w", classifyResponseReadError(ctx, err))
 	}
 	if len(payload) > maxJSONResponse {
 		return fmt.Errorf("remote JSON response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
@@ -201,6 +199,20 @@ func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any
 		return fmt.Errorf("decode remote JSON response trailing data: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	return nil
+}
+
+func classifyResponseReadError(ctx context.Context, readErr error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(readErr, context.Canceled) || errors.Is(readErr, context.DeadlineExceeded) {
+		return readErr
+	}
+	var timeout net.Error
+	if errors.As(readErr, &timeout) && timeout.Timeout() {
+		return readErr
+	}
+	return errors.Join(cloud.ErrInvalidResponse, readErr)
 }
 
 func safeProblemContext(response *http.Response, body []byte) string {
