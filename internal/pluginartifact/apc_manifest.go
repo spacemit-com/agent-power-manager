@@ -35,10 +35,7 @@ func LoadAPCPluginManifest(ref domain.PowerRef, pluginPath string) (APCPluginMan
 	}
 
 	manifestPath := filepath.Join(pluginPath, apcPluginManifestPath)
-	if err := requirePhysicalRegularFile(manifestPath); err != nil {
-		return APCPluginManifest{}, err
-	}
-	contents, err := os.ReadFile(manifestPath)
+	contents, err := readExactRequiredFile(pluginPath, apcPluginManifestPath)
 	if err != nil {
 		return APCPluginManifest{}, fmt.Errorf("read APC Plugin manifest %q: %w", manifestPath, errors.Join(ErrInvalid, err))
 	}
@@ -87,20 +84,16 @@ func canonicalAPCSkillName(skillPath string) (string, bool) {
 		return "", false
 	}
 	name := parts[1]
-	if name == "" || name == "." || name == ".." || strings.TrimSpace(name) != name {
+	if !domain.IsCanonicalPowerName(name) {
 		return "", false
 	}
 	return name, true
 }
 
 func validateDeclaredSkillWorld(pluginPath string, declared map[string]struct{}) error {
-	skillsRoot := filepath.Join(pluginPath, "skills")
-	info, err := os.Lstat(skillsRoot)
+	skillsRoot, err := requireExactPhysicalDirectory(pluginPath, "skills")
 	if err != nil {
-		return fmt.Errorf("lstat APC Plugin skills root %q: %w", skillsRoot, errors.Join(ErrInvalid, err))
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("APC Plugin skills root %q is not a physical directory: %w", skillsRoot, ErrInvalid)
+		return fmt.Errorf("validate APC Plugin skills root: %w", err)
 	}
 	entries, err := os.ReadDir(skillsRoot)
 	if err != nil {
@@ -113,16 +106,12 @@ func validateDeclaredSkillWorld(pluginPath string, declared map[string]struct{})
 		if _, ok := declared[entry.Name()]; !ok {
 			return fmt.Errorf("APC Plugin skills root contains undeclared entry %q: %w", entry.Name(), ErrInvalid)
 		}
-		skillRoot := filepath.Join(skillsRoot, entry.Name())
-		entryInfo, err := os.Lstat(skillRoot)
-		if err != nil {
-			return fmt.Errorf("lstat APC Plugin skill root %q: %w", skillRoot, errors.Join(ErrInvalid, err))
-		}
-		if entryInfo.Mode()&os.ModeSymlink != 0 || !entryInfo.IsDir() {
-			return fmt.Errorf("APC Plugin skill root %q is not a physical directory: %w", skillRoot, ErrInvalid)
+		skillRelative := path.Join("skills", entry.Name())
+		if _, err := requireExactPhysicalDirectory(pluginPath, skillRelative); err != nil {
+			return fmt.Errorf("validate APC Plugin skill root %q: %w", filepath.Join(pluginPath, filepath.FromSlash(skillRelative)), err)
 		}
 		for _, marker := range []string{"SKILL.md", "skill-card.md"} {
-			if err := requirePhysicalRegularFile(filepath.Join(skillRoot, marker)); err != nil {
+			if _, err := requireExactPhysicalRegularFile(pluginPath, path.Join(skillRelative, marker)); err != nil {
 				return err
 			}
 		}

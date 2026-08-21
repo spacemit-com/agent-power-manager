@@ -493,7 +493,7 @@ func TestBundledPluginResourcesAreCompleteSharedPackagesForEveryVersion(t *testi
 	}
 }
 
-func TestBundledPluginResourceGuardRejectsRecursiveLegacyLayout(t *testing.T) {
+func TestBundledPluginResourceGuardRejectsCapabilityOutsideDeclaredSkill(t *testing.T) {
 	source, err := filepath.Abs(filepath.Join("..", "resources", "plugins"))
 	if err != nil {
 		t.Fatal(err)
@@ -502,12 +502,15 @@ func TestBundledPluginResourceGuardRejectsRecursiveLegacyLayout(t *testing.T) {
 	if err := filesystem.CopyDir(source, root); err != nil {
 		t.Fatal(err)
 	}
-	legacy := filepath.Join(root, "demo-plugin", "v0.0.1", "skills", "demo-plugin", "nested", "codex")
-	if err := os.MkdirAll(legacy, 0o700); err != nil {
+	capability := filepath.Join(root, "demo-plugin", "v0.0.1", "commands", "demo.md")
+	if err := os.MkdirAll(filepath.Dir(capability), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(capability, []byte("command\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateBundledPluginFixtures(root); err == nil {
-		t.Fatal("fixture validation accepted recursively nested legacy Agent layout")
+		t.Fatal("fixture validation accepted capability outside declared Skill")
 	}
 }
 
@@ -544,36 +547,47 @@ func validateBundledPluginFixtures(root string) error {
 					return fmt.Errorf("Plugin fixture %s@%s missing regular %q: %w", plugin.Name(), version.Name(), required, err)
 				}
 			}
-			legacyNames := map[string]bool{"codex": true, "claude-code": true, "hermes-agent": true}
-			generatedNames := map[string]bool{".codex-plugin": true, ".claude-plugin": true, ".hermes-plugin": true}
-			if err := filepath.WalkDir(versionRoot, func(path string, entry os.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				relative, err := filepath.Rel(versionRoot, path)
-				if err != nil {
-					return err
-				}
-				if entry.IsDir() {
-					for _, component := range strings.Split(relative, string(filepath.Separator)) {
-						if legacyNames[component] {
-							return fmt.Errorf("Plugin fixture %s@%s contains recursive legacy Agent layout %q", plugin.Name(), version.Name(), relative)
-						}
-						if generatedNames[component] {
-							return fmt.Errorf("Plugin fixture %s@%s contains generated Agent layout %q", plugin.Name(), version.Name(), relative)
-						}
-					}
-					return nil
-				}
-				normalized := filepath.ToSlash(relative)
-				if strings.HasSuffix(normalized, "/.agents/plugins/marketplace.json") || normalized == ".agents/plugins/marketplace.json" ||
-					strings.HasSuffix(normalized, "/.claude-plugin/marketplace.json") || normalized == ".claude-plugin/marketplace.json" {
-					return fmt.Errorf("Plugin fixture %s@%s contains marketplace %q", plugin.Name(), version.Name(), relative)
-				}
-				return nil
-			}); err != nil {
-				return err
+			cardPath := filepath.Join(versionRoot, "skills", plugin.Name(), "skill-card.md")
+			if err := validateFixtureSkillCard(cardPath); err != nil {
+				return fmt.Errorf("Plugin fixture %s@%s has incomplete skill-card.md: %w", plugin.Name(), version.Name(), err)
 			}
+		}
+	}
+	return nil
+}
+
+func validateFixtureSkillCard(path string) error {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	sections := make(map[string][]string)
+	current := ""
+	for _, line := range strings.Split(string(contents), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			current = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			continue
+		}
+		if current != "" && strings.TrimSpace(line) != "" {
+			sections[current] = append(sections[current], strings.TrimSpace(line))
+		}
+	}
+	for _, required := range []string{"Capability", "Use Cases", "Inputs and Outputs", "Dependencies", "Limitations", "Maintainer"} {
+		if len(sections[required]) == 0 {
+			return fmt.Errorf("section %q is missing or empty", required)
+		}
+	}
+	for _, field := range []string{"Owner", "Support"} {
+		prefix := "- " + field + ":"
+		value := ""
+		for _, line := range sections["Maintainer"] {
+			if strings.HasPrefix(line, prefix) {
+				value = strings.TrimSpace(strings.TrimPrefix(line, prefix))
+				break
+			}
+		}
+		if value == "" {
+			return fmt.Errorf("Maintainer %s is missing or empty", field)
 		}
 	}
 	return nil

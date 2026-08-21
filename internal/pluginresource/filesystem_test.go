@@ -155,10 +155,11 @@ func testArtifactRoot(cacheRoot string, ref domain.PowerRef) string {
 
 func writeValidTestArtifact(t *testing.T, root string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, "plugins", "demo"), 0o700); err != nil {
+	skillRoot := filepath.Join(root, "plugins", "demo", "skills", "demo")
+	if err := os.MkdirAll(skillRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "plugins", "demo", "payload.txt"), []byte("payload"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(skillRoot, "payload.txt"), []byte("payload"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "builder.txt"), []byte("built"), 0o600); err != nil {

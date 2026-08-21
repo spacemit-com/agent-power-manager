@@ -133,7 +133,7 @@ func validateAPCTimestamp(value string) error {
 }
 
 func validatePowerIdentity(powerType domain.PowerType, name, version string) (domain.PowerRef, *semver.Version, error) {
-	if !isKnownPowerType(powerType) || !isCanonicalName(name) {
+	if !isKnownPowerType(powerType) || !domain.IsCanonicalPowerName(name) {
 		return domain.PowerRef{}, nil, fmt.Errorf("invalid resource identity %q/%q: %w", powerType, name, cloud.ErrInvalidResponse)
 	}
 	parsed, valid := canonicalVersion(version)
@@ -144,7 +144,7 @@ func validatePowerIdentity(powerType domain.PowerType, name, version string) (do
 }
 
 func validResolveQuery(ref domain.PowerRef) bool {
-	if !isKnownPowerType(ref.Type) || !isCanonicalName(ref.Name) {
+	if !isKnownPowerType(ref.Type) || !domain.IsCanonicalPowerName(ref.Name) {
 		return false
 	}
 	if ref.Version == "" {
@@ -161,19 +161,6 @@ func isKnownPowerType(powerType domain.PowerType) bool {
 	default:
 		return false
 	}
-}
-
-func isCanonicalName(name string) bool {
-	if len(name) < 1 || len(name) > 64 || name[0] == '-' || name[len(name)-1] == '-' || strings.Contains(name, "--") {
-		return false
-	}
-	for _, character := range []byte(name) {
-		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 func canonicalVersion(version string) (*semver.Version, bool) {

@@ -133,31 +133,16 @@ func ValidatePhysicalTree(root string) error {
 	return nil
 }
 
-// ValidateRawPackage 复验 canonical 权威索引，并拒绝 Cloud 原始包中的任意 Agent 派生路径。
+// ValidateRawPackage 复验 canonical 权威索引，并仅允许根 marker 与已声明 Skill 子树。
 func ValidateRawPackage(ref domain.PowerRef, pluginPath string) error {
-	if _, err := LoadAPCPluginManifest(ref, pluginPath); err != nil {
+	manifest, err := LoadAPCPluginManifest(ref, pluginPath)
+	if err != nil {
 		return err
 	}
-	return filepath.WalkDir(pluginPath, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		relative, err := filepath.Rel(pluginPath, path)
-		if err != nil {
-			return err
-		}
-		if relative == "." {
-			return nil
-		}
-		portable := filepath.ToSlash(relative)
-		if isNativeAgentPath(portable) || isMarketplacePath(portable) {
-			return fmt.Errorf("raw Plugin package contains generated Agent path %q: %w", relative, ErrInvalid)
-		}
-		return nil
-	})
+	return validateRawClosedWorld(pluginPath, manifest)
 }
 
-// ValidateShared 复验 canonical 索引、四份 Agent 派生文件及双 marketplace 的完整语义。
+// ValidateShared 复验 canonical 子树、四份 Agent 派生文件及双 marketplace 的精确路径与完整语义。
 func ValidateShared(ref domain.PowerRef, root string) error {
 	if err := ValidatePhysicalTree(root); err != nil {
 		return err
@@ -166,12 +151,19 @@ func ValidateShared(ref domain.PowerRef, root string) error {
 	if err != nil {
 		return errors.Join(ErrInvalid, err)
 	}
-	pluginPath := filepath.Join(root, "plugins", logicalName)
+	if _, err := requireExactPhysicalDirectory(root, "plugins"); err != nil {
+		return err
+	}
+	pluginRelative := filepath.ToSlash(filepath.Join("plugins", logicalName))
+	pluginPath, err := requireExactPhysicalDirectory(root, pluginRelative)
+	if err != nil {
+		return err
+	}
 	manifest, err := LoadAPCPluginManifest(ref, pluginPath)
 	if err != nil {
 		return err
 	}
-	if err := validateMarketplaceClosedWorld(root, codexMarketplacePath, claudeMarketplacePath); err != nil {
+	if err := validateSharedClosedWorld(root, logicalName, manifest); err != nil {
 		return err
 	}
 	if err := validateCodex(ref, root, pluginPath, manifest); err != nil {
@@ -209,7 +201,7 @@ func ValidateMarketplace(agent domain.AgentID, ref domain.PowerRef, root string)
 
 func validateCodex(ref domain.PowerRef, root, pluginPath string, canonical APCPluginManifest) error {
 	var gotManifest CodexPluginManifest
-	if err := decodeRequiredJSON(filepath.Join(pluginPath, codexManifestPath), &gotManifest); err != nil {
+	if err := decodeExactRequiredJSON(pluginPath, codexManifestPath, &gotManifest); err != nil {
 		return fmt.Errorf("decode Codex Plugin manifest: %w", err)
 	}
 	wantManifest := expectedCodexManifest(canonical)
@@ -221,7 +213,7 @@ func validateCodex(ref domain.PowerRef, root, pluginPath string, canonical APCPl
 		return err
 	}
 	var gotMarketplace codexMarketplaceDocument
-	if err := decodeRequiredJSON(filepath.Join(root, codexMarketplacePath), &gotMarketplace); err != nil {
+	if err := decodeExactRequiredJSON(root, codexMarketplacePath, &gotMarketplace); err != nil {
 		return fmt.Errorf("decode Codex marketplace: %w", err)
 	}
 	if !reflect.DeepEqual(gotMarketplace, wantMarketplace) {
@@ -232,7 +224,7 @@ func validateCodex(ref domain.PowerRef, root, pluginPath string, canonical APCPl
 
 func validateClaude(ref domain.PowerRef, root, pluginPath string, canonical APCPluginManifest) error {
 	var gotManifest ClaudePluginManifest
-	if err := decodeRequiredJSON(filepath.Join(pluginPath, claudeManifestPath), &gotManifest); err != nil {
+	if err := decodeExactRequiredJSON(pluginPath, claudeManifestPath, &gotManifest); err != nil {
 		return fmt.Errorf("decode Claude Plugin manifest: %w", err)
 	}
 	wantManifest := expectedClaudeManifest(canonical)
@@ -244,7 +236,7 @@ func validateClaude(ref domain.PowerRef, root, pluginPath string, canonical APCP
 		return err
 	}
 	var gotMarketplace claudeMarketplaceDocument
-	if err := decodeRequiredJSON(filepath.Join(root, claudeMarketplacePath), &gotMarketplace); err != nil {
+	if err := decodeExactRequiredJSON(root, claudeMarketplacePath, &gotMarketplace); err != nil {
 		return fmt.Errorf("decode Claude marketplace: %w", err)
 	}
 	if !reflect.DeepEqual(gotMarketplace, wantMarketplace) {
@@ -255,13 +247,13 @@ func validateClaude(ref domain.PowerRef, root, pluginPath string, canonical APCP
 
 func validateHermes(pluginPath string, canonical APCPluginManifest) error {
 	var got HermesPluginManifest
-	if err := decodeRequiredYAML(filepath.Join(pluginPath, hermesManifestPath), &got); err != nil {
+	if err := decodeExactRequiredYAML(pluginPath, hermesManifestPath, &got); err != nil {
 		return fmt.Errorf("decode Hermes Plugin manifest: %w", err)
 	}
 	if want := expectedHermesManifest(canonical); !reflect.DeepEqual(got, want) {
 		return fmt.Errorf("Hermes Plugin manifest does not match canonical index: %w", ErrInvalid)
 	}
-	initContents, err := readRequiredFile(filepath.Join(pluginPath, hermesInitPath))
+	initContents, err := readExactRequiredFile(pluginPath, hermesInitPath)
 	if err != nil {
 		return fmt.Errorf("read Hermes Plugin initializer: %w", err)
 	}
@@ -289,11 +281,63 @@ func expectedHermesManifest(canonical APCPluginManifest) HermesPluginManifest {
 	}
 }
 
-func validateMarketplaceClosedWorld(root string, allowed ...string) error {
-	allowedPaths := make(map[string]struct{}, len(allowed))
-	for _, allowedPath := range allowed {
-		allowedPaths[filepath.ToSlash(allowedPath)] = struct{}{}
+func validateRawClosedWorld(root string, manifest APCPluginManifest) error {
+	declaredSkills := append([]string(nil), manifest.Skills...)
+	return validateRelativeClosedWorld(root, func(relative string, entry fs.DirEntry) bool {
+		switch relative {
+		case apcPluginManifestPath:
+			return !entry.IsDir()
+		case "skills":
+			return entry.IsDir()
+		}
+		for _, skillPath := range declaredSkills {
+			if relative == skillPath || strings.HasPrefix(relative, skillPath+"/") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func validateSharedClosedWorld(root, logicalName string, manifest APCPluginManifest) error {
+	pluginPrefix := "plugins/" + logicalName
+	allowedDirectories := map[string]struct{}{
+		".agents": {}, ".agents/plugins": {}, ".claude-plugin": {}, "plugins": {}, pluginPrefix: {},
+		pluginPrefix + "/skills": {}, pluginPrefix + "/.codex-plugin": {},
+		pluginPrefix + "/.claude-plugin": {}, pluginPrefix + "/.hermes-plugin": {},
 	}
+	allowedFiles := map[string]struct{}{
+		filepath.ToSlash(codexMarketplacePath):                    {},
+		filepath.ToSlash(claudeMarketplacePath):                   {},
+		pluginPrefix + "/" + apcPluginManifestPath:                {},
+		pluginPrefix + "/" + filepath.ToSlash(codexManifestPath):  {},
+		pluginPrefix + "/" + filepath.ToSlash(claudeManifestPath): {},
+		pluginPrefix + "/" + filepath.ToSlash(hermesManifestPath): {},
+		pluginPrefix + "/" + filepath.ToSlash(hermesInitPath):     {},
+	}
+	declaredSkillPrefixes := make([]string, len(manifest.Skills))
+	for index, skillPath := range manifest.Skills {
+		declaredSkillPrefixes[index] = pluginPrefix + "/" + skillPath
+		allowedDirectories[declaredSkillPrefixes[index]] = struct{}{}
+	}
+	return validateRelativeClosedWorld(root, func(relative string, entry fs.DirEntry) bool {
+		if entry.IsDir() {
+			if _, allowed := allowedDirectories[relative]; allowed {
+				return true
+			}
+		} else if _, allowed := allowedFiles[relative]; allowed {
+			return true
+		}
+		for _, skillPrefix := range declaredSkillPrefixes {
+			if strings.HasPrefix(relative, skillPrefix+"/") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func validateRelativeClosedWorld(root string, allowed func(string, fs.DirEntry) bool) error {
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -302,43 +346,76 @@ func validateMarketplaceClosedWorld(root string, allowed ...string) error {
 		if err != nil {
 			return err
 		}
-		portable := filepath.ToSlash(relative)
-		_, permitted := allowedPaths[portable]
-		if !isMarketplacePath(portable) || permitted {
+		if relative == "." {
 			return nil
 		}
-		return fmt.Errorf("Plugin artifact contains disallowed marketplace %q: %w", relative, ErrInvalid)
+		if allowed(filepath.ToSlash(relative), entry) {
+			return nil
+		}
+		return fmt.Errorf("Plugin artifact contains path outside canonical schema %q: %w", relative, ErrInvalid)
 	})
 }
 
-func isNativeAgentPath(relative string) bool {
-	for _, component := range strings.Split(relative, "/") {
-		switch component {
-		case ".codex-plugin", ".claude-plugin", ".hermes-plugin":
-			return true
-		}
-	}
-	return false
+func requireExactPhysicalDirectory(root, relative string) (string, error) {
+	return requireExactPhysicalEntry(root, relative, true)
 }
 
-func isMarketplacePath(relative string) bool {
-	for _, candidate := range []string{filepath.ToSlash(codexMarketplacePath), filepath.ToSlash(claudeMarketplacePath)} {
-		if relative == candidate || strings.HasSuffix(relative, "/"+candidate) {
-			return true
-		}
-	}
-	return false
+func requireExactPhysicalRegularFile(root, relative string) (string, error) {
+	return requireExactPhysicalEntry(root, relative, false)
 }
 
-func requirePhysicalRegularFile(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("lstat required file %q: %w", path, errors.Join(ErrInvalid, err))
+func requireExactPhysicalEntry(root, relative string, directory bool) (string, error) {
+	portable := filepath.ToSlash(relative)
+	if portable == "" || portable == "." || strings.Contains(portable, `\`) || strings.HasPrefix(portable, "/") ||
+		filepath.ToSlash(filepath.Clean(filepath.FromSlash(portable))) != portable {
+		return "", fmt.Errorf("required canonical path %q is invalid: %w", relative, ErrInvalid)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return fmt.Errorf("required file %q is not a physical regular file: %w", path, ErrInvalid)
+	current := root
+	components := strings.Split(portable, "/")
+	for index, component := range components {
+		entries, err := os.ReadDir(current)
+		if err != nil {
+			return "", fmt.Errorf("read canonical parent %q: %w", current, errors.Join(ErrInvalid, err))
+		}
+		exact := false
+		for _, entry := range entries {
+			if entry.Name() == component {
+				exact = true
+				break
+			}
+		}
+		if !exact {
+			return "", fmt.Errorf("canonical parent %q has no exact entry %q: %w", current, component, ErrInvalid)
+		}
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return "", fmt.Errorf("lstat canonical entry %q: %w", current, errors.Join(ErrInvalid, err))
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("canonical entry %q is a symlink: %w", current, ErrInvalid)
+		}
+		last := index == len(components)-1
+		if !last && !info.IsDir() {
+			return "", fmt.Errorf("canonical parent entry %q is not a directory: %w", current, ErrInvalid)
+		}
+		if last && directory && !info.IsDir() {
+			return "", fmt.Errorf("canonical directory %q is not a physical directory: %w", current, ErrInvalid)
+		}
+		if last && !directory && !info.Mode().IsRegular() {
+			return "", fmt.Errorf("canonical file %q is not a physical regular file: %w", current, ErrInvalid)
+		}
 	}
-	return requireUniqueLink(info, path)
+	if !directory {
+		info, err := os.Lstat(current)
+		if err != nil {
+			return "", fmt.Errorf("lstat canonical file %q: %w", current, errors.Join(ErrInvalid, err))
+		}
+		if err := requireUniqueLink(info, current); err != nil {
+			return "", err
+		}
+	}
+	return current, nil
 }
 
 func requireUniqueLink(info fs.FileInfo, path string) error {
@@ -352,8 +429,9 @@ func requireUniqueLink(info fs.FileInfo, path string) error {
 	return nil
 }
 
-func readRequiredFile(path string) ([]byte, error) {
-	if err := requirePhysicalRegularFile(path); err != nil {
+func readExactRequiredFile(root, relative string) ([]byte, error) {
+	path, err := requireExactPhysicalRegularFile(root, relative)
+	if err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(path)
@@ -363,33 +441,33 @@ func readRequiredFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-func decodeRequiredJSON(path string, target any) error {
-	data, err := readRequiredFile(path)
+func decodeExactRequiredJSON(root, relative string, target any) error {
+	data, err := readExactRequiredFile(root, relative)
 	if err != nil {
 		return err
 	}
 	if err := jsonstrict.Decode(data, target, true); err != nil {
-		return fmt.Errorf("decode required JSON %q: %w", path, errors.Join(ErrInvalid, err))
+		return fmt.Errorf("decode required JSON %q: %w", filepath.Join(root, filepath.FromSlash(relative)), errors.Join(ErrInvalid, err))
 	}
 	return nil
 }
 
-func decodeRequiredYAML(path string, target any) error {
-	data, err := readRequiredFile(path)
+func decodeExactRequiredYAML(root, relative string, target any) error {
+	data, err := readExactRequiredFile(root, relative)
 	if err != nil {
 		return err
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(target); err != nil {
-		return fmt.Errorf("decode required YAML %q: %w", path, errors.Join(ErrInvalid, err))
+		return fmt.Errorf("decode required YAML %q: %w", filepath.Join(root, filepath.FromSlash(relative)), errors.Join(ErrInvalid, err))
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
 			err = errors.New("multiple YAML documents")
 		}
-		return fmt.Errorf("decode trailing YAML %q: %w", path, errors.Join(ErrInvalid, err))
+		return fmt.Errorf("decode trailing YAML %q: %w", filepath.Join(root, filepath.FromSlash(relative)), errors.Join(ErrInvalid, err))
 	}
 	return nil
 }

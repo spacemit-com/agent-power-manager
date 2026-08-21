@@ -233,7 +233,7 @@ func TestStageFilesystemAtomicallyRebuildsLogicalPluginLeaf(t *testing.T) {
 	if staging != roots.staging {
 		t.Fatalf("StageFilesystem() = %q, want %q", staging, roots.staging)
 	}
-	payload, err := os.ReadFile(filepath.Join(roots.staging, "plugins", "demo", "payload.txt"))
+	payload, err := os.ReadFile(filepath.Join(roots.staging, "plugins", "demo", "skills", "demo", "payload.txt"))
 	if err != nil {
 		t.Fatalf("ReadFile(staged payload) error = %v", err)
 	}
@@ -285,7 +285,7 @@ func TestStageFilesystemPublishFailureRestoresOldCompleteStaging(t *testing.T) {
 	if err != nil || string(content) != "complete old staging" {
 		t.Fatalf("restored old staging = %q, %v, want complete old staging", content, err)
 	}
-	if _, err := os.Lstat(filepath.Join(roots.staging, "plugins", "demo", "payload.txt")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(filepath.Join(roots.staging, "plugins", "demo", "skills", "demo", "payload.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("new staging payload stat error = %v, want absent", err)
 	}
 	if backupRoot == "" {
@@ -372,7 +372,7 @@ func TestStageFilesystemBackupCleanupFailureReturnsErrorAndPreservesBackup(t *te
 	if staging != "" || !errors.Is(err, cleanupErr) {
 		t.Fatalf("StageFilesystem() = %q, %v, want empty result and cleanup error", staging, err)
 	}
-	if _, err := os.Stat(filepath.Join(roots.staging, "plugins", "demo", "payload.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(roots.staging, "plugins", "demo", "skills", "demo", "payload.txt")); err != nil {
 		t.Fatalf("published new staging payload: %v", err)
 	}
 	content, readErr := os.ReadFile(filepath.Join(backupRoot, "complete-old-staging.txt"))
@@ -817,7 +817,7 @@ func (downloader *testDownloader) DownloadPlugin(_ context.Context, ref domain.P
 	if err := writeSharedTestPluginManifests(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(destination, "payload.txt"), []byte("payload"), 0o600)
+	return os.WriteFile(filepath.Join(destination, "skills", ref.Name, "payload.txt"), []byte("payload"), 0o600)
 }
 
 type testBuilder struct{}
@@ -827,7 +827,7 @@ func (testBuilder) Build(_ domain.PowerRef, root, pluginPath string) error {
 }
 
 func (testBuilder) Validate(_ domain.PowerRef, root string) error {
-	if _, err := os.Stat(filepath.Join(root, "plugins", "demo", "payload.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "plugins", "demo", "skills", "demo", "payload.txt")); err != nil {
 		return errors.Join(ErrInvalidArtifact, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "builder.txt")); err != nil {
@@ -862,7 +862,7 @@ func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, ref doma
 	if err := writeSharedTestPluginManifests(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(destination, "payload.txt"), []byte("payload"), 0o600)
+	return os.WriteFile(filepath.Join(destination, "skills", ref.Name, "payload.txt"), []byte("payload"), 0o600)
 }
 
 type blockingCopier struct {

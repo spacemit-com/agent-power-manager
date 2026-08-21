@@ -3,7 +3,6 @@ package domain
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -63,12 +62,20 @@ func canonicalNativePluginVersion(version string) (string, error) {
 	return parsed.String(), nil
 }
 
+// IsCanonicalPowerName 校验 APC Power 的 1-64 字节小写 kebab 名称；连字符只能分隔非空字母数字段。
+func IsCanonicalPowerName(name string) bool {
+	if len(name) < 1 || len(name) > 64 || name[0] == '-' || name[len(name)-1] == '-' || strings.Contains(name, "--") {
+		return false
+	}
+	for _, character := range []byte(name) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func isSafePluginSegment(name string) bool {
-	if strings.TrimSpace(name) == "" || name == "." || name == ".." {
-		return false
-	}
-	if filepath.IsAbs(name) || strings.ContainsAny(name, `/\\`) {
-		return false
-	}
-	return filepath.Clean(name) == name
+	return IsCanonicalPowerName(name)
 }

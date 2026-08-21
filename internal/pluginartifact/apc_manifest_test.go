@@ -2,9 +2,11 @@ package pluginartifact_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"apm/internal/domain"
@@ -75,6 +77,37 @@ func TestAPCPluginManifestRejectsInvalidSchemaIdentityAndSkills(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root, _ := writeCanonicalPlugin(t, test.manifest)
 			if _, err := pluginartifact.LoadAPCPluginManifest(ref, root); !errors.Is(err, pluginartifact.ErrInvalid) {
+				t.Fatalf("LoadAPCPluginManifest() error = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}
+
+func TestAPCPluginManifestRejectsNonCanonicalPluginAndSkillNames(t *testing.T) {
+	// 捕获错误变更：APC Plugin 或声明 Skill 接受大小写、标点、双连字符及超长名称。
+	invalidNames := []string{"Demo", "a--b", "a:b", "-demo", "demo-", strings.Repeat("a", 65)}
+	for _, invalidName := range invalidNames {
+		t.Run("plugin/"+invalidName, func(t *testing.T) {
+			root := t.TempDir()
+			writeCanonicalSkill(t, filepath.Join(root, "skills", "valid-skill"))
+			manifest := fmt.Sprintf(`{"schema_version":1,"name":%q,"version":"v1.2.3","description":"Demo","skills":["skills/valid-skill"]}`, invalidName)
+			if err := os.WriteFile(filepath.Join(root, "apc-plugin.json"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ref := domain.PowerRef{Name: invalidName, Type: domain.PowerTypePlugin, Version: "v1.2.3"}
+			if _, err := pluginartifact.LoadAPCPluginManifest(ref, root); !errors.Is(err, pluginartifact.ErrInvalid) {
+				t.Fatalf("LoadAPCPluginManifest() error = %v, want ErrInvalid", err)
+			}
+		})
+
+		t.Run("skill/"+invalidName, func(t *testing.T) {
+			root := t.TempDir()
+			writeCanonicalSkill(t, filepath.Join(root, "skills", invalidName))
+			manifest := fmt.Sprintf(`{"schema_version":1,"name":"demo","version":"v1.2.3","description":"Demo","skills":[%q]}`, "skills/"+invalidName)
+			if err := os.WriteFile(filepath.Join(root, "apc-plugin.json"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pluginartifact.LoadAPCPluginManifest(canonicalPluginRef(), root); !errors.Is(err, pluginartifact.ErrInvalid) {
 				t.Fatalf("LoadAPCPluginManifest() error = %v, want ErrInvalid", err)
 			}
 		})
@@ -165,18 +198,25 @@ func TestAPCPluginManifestRejectsOpenOrNonPhysicalSkillWorld(t *testing.T) {
 	}
 }
 
-func TestAPCPluginRawPackageRejectsGeneratedAgentPaths(t *testing.T) {
-	// 捕获错误变更：Cloud raw package 夹带任一 Agent 原生配置或派生 marketplace。
+func TestAPCPluginRawPackageRejectsPathsOutsideDeclaredSkillWorld(t *testing.T) {
+	// 捕获错误变更：Cloud raw package 在根目录夹带未声明能力、任意 payload、原生配置或 marketplace alias。
 	tests := []struct {
 		name     string
 		relative string
 		dirOnly  bool
 	}{
+		{name: "arbitrary root file", relative: "payload.txt"},
+		{name: "commands capability", relative: "commands/demo.md"},
+		{name: "hooks capability", relative: "hooks/hooks.json"},
+		{name: "agents capability", relative: "agents/demo.yaml"},
+		{name: "MCP capability", relative: "MCP/server.json"},
+		{name: "agents metadata directory", relative: ".agents/config.json"},
 		{name: "Codex directory", relative: ".codex-plugin", dirOnly: true},
 		{name: "Claude manifest", relative: ".claude-plugin/plugin.json"},
 		{name: "Hermes manifest", relative: ".hermes-plugin/plugin.yaml"},
 		{name: "Codex marketplace", relative: ".agents/plugins/marketplace.json"},
-		{name: "nested native path", relative: "skills/demo/.codex-plugin/plugin.json"},
+		{name: "Claude marketplace alias", relative: "marketplaces/.claude-plugin/marketplace.json"},
+		{name: "wrong-case canonical marker alias", relative: "APC-PLUGIN.JSON"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -196,6 +236,52 @@ func TestAPCPluginRawPackageRejectsGeneratedAgentPaths(t *testing.T) {
 			}
 			if err := pluginartifact.ValidateRawPackage(ref, root); !errors.Is(err, pluginartifact.ErrInvalid) {
 				t.Fatalf("ValidateRawPackage() error = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}
+
+func TestAPCPluginRawPackageAllowsSupportingFilesBelowDeclaredSkills(t *testing.T) {
+	// 捕获错误变更：路径闭集错误限制声明 Skill 内部的合法支持文件或目录名称。
+	root, ref := writeCanonicalPlugin(t, validCanonicalManifest())
+	for relative, contents := range map[string]string{
+		"skills/demo/references/guide.md":                "guide\n",
+		"skills/demo/scripts/check.sh":                   "#!/bin/sh\n",
+		"skills/demo/.codex-plugin/plugin.json":          "supporting data\n",
+		"skills/demo/commands/hooks/agents/MCP/data.txt": "supporting data\n",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pluginartifact.ValidateRawPackage(ref, root); err != nil {
+		t.Fatalf("ValidateRawPackage() error = %v", err)
+	}
+}
+
+func TestAPCPluginManifestRejectsWrongCaseCanonicalEntries(t *testing.T) {
+	// 捕获错误变更：大小写不敏感文件系统把错误拼写的 canonical marker 当作精确路径。
+	tests := []struct {
+		name     string
+		relative string
+		wrong    string
+	}{
+		{name: "manifest", relative: "apc-plugin.json", wrong: "APC-PLUGIN.JSON"},
+		{name: "skills root", relative: "skills", wrong: "Skills"},
+		{name: "skill directory", relative: "skills/demo", wrong: "skills/Demo"},
+		{name: "SKILL marker", relative: "skills/demo/SKILL.md", wrong: "skills/demo/Skill.md"},
+		{name: "skill-card marker", relative: "skills/demo/skill-card.md", wrong: "skills/demo/SKILL-CARD.MD"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, ref := writeCanonicalPlugin(t, validCanonicalManifest())
+			renameEntryCase(t, root, test.relative, test.wrong)
+			if _, err := pluginartifact.LoadAPCPluginManifest(ref, root); !errors.Is(err, pluginartifact.ErrInvalid) {
+				t.Fatalf("LoadAPCPluginManifest() error = %v, want ErrInvalid", err)
 			}
 		})
 	}
@@ -229,4 +315,23 @@ func writeCanonicalSkill(t *testing.T, root string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func renameEntryCase(t *testing.T, root, relative, wrongRelative string) {
+	t.Helper()
+	source := filepath.Join(root, filepath.FromSlash(relative))
+	target := filepath.Join(root, filepath.FromSlash(wrongRelative))
+	if err := os.Rename(source, target); err != nil {
+		t.Skipf("filesystem cannot rename %q to wrong-case spelling %q: %v", relative, wrongRelative, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == filepath.Base(target) {
+			return
+		}
+	}
+	t.Skipf("filesystem did not preserve wrong-case spelling %q", wrongRelative)
 }

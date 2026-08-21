@@ -174,9 +174,57 @@ func TestEnsureRejectsInvalidSharedPackagesWithoutPublishingCache(t *testing.T) 
 			},
 		},
 		{
+			name: "raw package includes Codex native manifest",
+			write: func(_ *testing.T, destination string) error {
+				return writeTestPluginManifest(destination, codexManifestPath, `{}`)
+			},
+		},
+		{
+			name: "raw package includes Hermes native manifest",
+			write: func(_ *testing.T, destination string) error {
+				return writeTestPluginManifest(destination, hermesManifestPath, "name: demo\n")
+			},
+		},
+		{
 			name: "raw package includes Claude marketplace",
 			write: func(_ *testing.T, destination string) error {
 				return writeTestPluginManifest(destination, claudeMarketplacePath, `{}`)
+			},
+		},
+		{
+			name: "raw package includes arbitrary root payload",
+			write: func(_ *testing.T, destination string) error {
+				return writeTestPluginManifest(destination, "payload.txt", "payload")
+			},
+		},
+		{
+			name: "raw package includes commands capability",
+			write: func(_ *testing.T, destination string) error {
+				return writeTestPluginManifest(destination, "commands/demo.md", "command")
+			},
+		},
+		{
+			name: "raw package includes hooks capability",
+			write: func(_ *testing.T, destination string) error {
+				return writeTestPluginManifest(destination, "hooks/hooks.json", `{}`)
+			},
+		},
+		{
+			name: "raw package includes agents capability",
+			write: func(_ *testing.T, destination string) error {
+				return writeTestPluginManifest(destination, "agents/demo.yaml", "agent: demo")
+			},
+		},
+		{
+			name: "raw package includes MCP capability",
+			write: func(_ *testing.T, destination string) error {
+				return writeTestPluginManifest(destination, "MCP/server.json", `{}`)
+			},
+		},
+		{
+			name: "raw package includes agents metadata",
+			write: func(_ *testing.T, destination string) error {
+				return writeTestPluginManifest(destination, ".agents/config.json", `{}`)
 			},
 		},
 	}
@@ -265,6 +313,46 @@ func TestLookupRequiresBothGeneratedMarketplacesWithoutReplacingImmutableCache(t
 				t.Fatalf("initial Ensure() error = %v", err)
 			}
 			if err := os.Remove(filepath.Join(artifact.Root, test.relative)); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
+				t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
+			}
+			if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+				t.Fatalf("Ensure() error = %v, want immutable cache rejection", err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("DownloadPlugin calls = %d, want 1", calls.Load())
+			}
+		})
+	}
+}
+
+func TestLookupRejectsExtraCapabilityNativeAndMarketplaceFilesWithoutReplacingImmutableCache(t *testing.T) {
+	// 捕获错误变更：cache hit 把 closed-world 之外的能力目录或派生目录额外条目当作完整 artifact。
+	for _, relative := range []string{
+		"plugins/demo/commands/demo.md",
+		"plugins/demo/.codex-plugin/extra.json",
+		"plugins/demo/.claude-plugin/extra.json",
+		"plugins/demo/.hermes-plugin/debug.py",
+		".agents/plugins/extra.json",
+		".claude-plugin/extra.json",
+	} {
+		t.Run(relative, func(t *testing.T) {
+			roots := newTestRoots(t)
+			var calls atomic.Int32
+			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
+				calls.Add(1)
+				return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0"}`)
+			})
+			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
+			ref := testPluginRef()
+			artifact, err := service.Ensure(context.Background(), ref)
+			if err != nil {
+				t.Fatalf("initial Ensure() error = %v", err)
+			}
+			if err := writeTestPluginManifest(artifact.Root, relative, "extra\n"); err != nil {
 				t.Fatal(err)
 			}
 

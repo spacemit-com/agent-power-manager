@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 
 	"apm/internal/domain"
@@ -15,6 +16,32 @@ func TestPluginRuntimeNameUsesLogicalNameAndValidatesVersion(t *testing.T) {
 	}
 }
 
+func TestCanonicalPowerNameUsesAPCLowercaseKebabGrammar(t *testing.T) {
+	tests := []struct {
+		name  string
+		valid bool
+	}{
+		{name: "a", valid: true},
+		{name: "demo-plugin-2", valid: true},
+		{name: strings.Repeat("a", 64), valid: true},
+		{name: ""},
+		{name: strings.Repeat("a", 65)},
+		{name: "Demo"},
+		{name: "a--b"},
+		{name: "-demo"},
+		{name: "demo-"},
+		{name: "a:b"},
+		{name: "a_b"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := domain.IsCanonicalPowerName(test.name); got != test.valid {
+				t.Fatalf("IsCanonicalPowerName(%q) = %t, want %t", test.name, got, test.valid)
+			}
+		})
+	}
+}
+
 func TestPluginRuntimeNameRejectsInvalidIdentity(t *testing.T) {
 	tests := []struct {
 		name string
@@ -23,6 +50,10 @@ func TestPluginRuntimeNameRejectsInvalidIdentity(t *testing.T) {
 		{name: "empty", ref: domain.PowerRef{Name: "", Type: domain.PowerTypePlugin, Version: "v1.2.3"}},
 		{name: "parent", ref: domain.PowerRef{Name: "../demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}},
 		{name: "separator", ref: domain.PowerRef{Name: "group/demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}},
+		{name: "uppercase", ref: domain.PowerRef{Name: "Demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}},
+		{name: "double hyphen", ref: domain.PowerRef{Name: "a--b", Type: domain.PowerTypePlugin, Version: "v1.2.3"}},
+		{name: "colon", ref: domain.PowerRef{Name: "a:b", Type: domain.PowerTypePlugin, Version: "v1.2.3"}},
+		{name: "too long", ref: domain.PowerRef{Name: strings.Repeat("a", 65), Type: domain.PowerTypePlugin, Version: "v1.2.3"}},
 		{name: "wrong type", ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.2.3"}},
 		{name: "missing v", ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "1.2.3"}},
 		{name: "prerelease", ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3-rc.1"}},

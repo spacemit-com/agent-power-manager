@@ -1532,6 +1532,39 @@ func TestRecoverMarketplacePluginRejectsIncompleteRequiredTargetArtifactBeforeWr
 			},
 		},
 		{
+			name: "extra capability directory",
+			mutate: func(f *marketplaceRecoveryFixture) string {
+				path := filepath.Join(f.targetSource, "plugins", f.target.ActualName, "commands", "demo.md")
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					f.t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("command\n"), 0o600); err != nil {
+					f.t.Fatal(err)
+				}
+				return ""
+			},
+		},
+		{
+			name: "extra native file",
+			mutate: func(f *marketplaceRecoveryFixture) string {
+				path := filepath.Join(f.targetSource, "plugins", f.target.ActualName, ".hermes-plugin", "debug.py")
+				if err := os.WriteFile(path, []byte("debug\n"), 0o600); err != nil {
+					f.t.Fatal(err)
+				}
+				return ""
+			},
+		},
+		{
+			name: "extra marketplace file",
+			mutate: func(f *marketplaceRecoveryFixture) string {
+				path := filepath.Join(f.targetSource, ".agents", "plugins", "extra.json")
+				if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+					f.t.Fatal(err)
+				}
+				return ""
+			},
+		},
+		{
 			name: "nested symlink",
 			mutate: func(f *marketplaceRecoveryFixture) string {
 				sentinel := filepath.Join(f.t.TempDir(), "outside-sentinel")
