@@ -1,6 +1,6 @@
 # Cloud Client Provider 与 APC Agent 只读契约设计规格
 
-> 状态：设计已确认，实现计划待审核。重大决策见 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
+> 状态：设计与实现已完成，待最终审查并合入 main。重大决策见 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
 ## 背景
 
