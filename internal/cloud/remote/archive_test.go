@@ -1,0 +1,578 @@
+package remote
+
+import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"math/rand/v2"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"apm/internal/cloud"
+)
+
+type testTarEntry struct {
+	name     string
+	typeflag byte
+	mode     int64
+	size     int64
+	body     []byte
+	write    func(io.Writer) error
+}
+
+func TestExtractArchivePublishesValidatedTreeWithSanitizedModes(t *testing.T) {
+	archive := stageTarGz(t,
+		testTarEntry{name: "nested", typeflag: tar.TypeDir, mode: 0o777},
+		testTarEntry{name: "nested/readme.md", mode: 0o666, body: []byte("safe text\n")},
+		testTarEntry{name: "run.sh", mode: 0o6777, body: []byte("#!/bin/sh\nexit 0\n")},
+	)
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	if err := new(Client).extractArchive(context.Background(), archive, destination); err != nil {
+		t.Fatal(err)
+	}
+
+	assertFileContentsAndMode(t, filepath.Join(destination, "nested", "readme.md"), "safe text\n", 0o644)
+	assertFileContentsAndMode(t, filepath.Join(destination, "run.sh"), "#!/bin/sh\nexit 0\n", 0o755)
+	if info, err := os.Stat(filepath.Join(destination, "nested")); err != nil || !info.IsDir() || info.Mode().Perm() != 0o755 {
+		t.Fatalf("nested directory = %v, %v, want physical mode 0755", info, err)
+	}
+}
+
+func TestExtractArchiveAcceptsImplicitDirectories(t *testing.T) {
+	archive := stageTarGz(t, testTarEntry{name: "one/two/file.md", body: []byte("safe\n")})
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	if err := new(Client).extractArchive(context.Background(), archive, destination); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContentsAndMode(t, filepath.Join(destination, "one", "two", "file.md"), "safe\n", 0o644)
+}
+
+func TestExtractArchiveRejectsUnsafeNamesWithoutPublishingDestination(t *testing.T) {
+	tests := []struct {
+		name    string
+		archive func(*testing.T) *stagedContent
+	}{
+		{name: "absolute", archive: func(t *testing.T) *stagedContent {
+			return stageTarGz(t, testTarEntry{name: "/outside", body: []byte("bad")})
+		}},
+		{name: "parent", archive: func(t *testing.T) *stagedContent {
+			return stageTarGz(t, testTarEntry{name: "../outside", body: []byte("bad")})
+		}},
+		{name: "normalized parent", archive: func(t *testing.T) *stagedContent {
+			return stageTarGz(t, testTarEntry{name: "safe/../../outside", body: []byte("bad")})
+		}},
+		{name: "empty", archive: stageTarGzWithEmptyName},
+		{name: "dot", archive: func(t *testing.T) *stagedContent {
+			return stageTarGz(t, testTarEntry{name: ".", typeflag: tar.TypeDir})
+		}},
+		{name: "drive", archive: func(t *testing.T) *stagedContent {
+			return stageTarGz(t, testTarEntry{name: "C:/outside", body: []byte("bad")})
+		}},
+		{name: "backslash", archive: func(t *testing.T) *stagedContent {
+			return stageTarGz(t, testTarEntry{name: `safe\outside`, body: []byte("bad")})
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destination := filepath.Join(trustedTestDir(t), "resource")
+			err := new(Client).extractArchive(context.Background(), tt.archive(t), destination)
+			assertUnsafeWithoutDestination(t, err, destination)
+		})
+	}
+}
+
+func TestExtractArchiveRejectsDuplicatesAndParentTypeConflicts(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []testTarEntry
+	}{
+		{
+			name: "duplicate after normalization",
+			entries: []testTarEntry{
+				{name: "same.md", body: []byte("first")},
+				{name: "./same.md", body: []byte("second")},
+			},
+		},
+		{
+			name: "regular parent",
+			entries: []testTarEntry{
+				{name: "parent", body: []byte("file")},
+				{name: "parent/child", body: []byte("bad")},
+			},
+		},
+		{
+			name: "regular parent declared after child",
+			entries: []testTarEntry{
+				{name: "parent/child", body: []byte("bad")},
+				{name: "parent", body: []byte("file")},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destination := filepath.Join(trustedTestDir(t), "resource")
+			err := new(Client).extractArchive(context.Background(), stageTarGz(t, tt.entries...), destination)
+			assertUnsafeWithoutDestination(t, err, destination)
+		})
+	}
+}
+
+func TestExtractArchiveRejectsNonRegularNodes(t *testing.T) {
+	tests := []struct {
+		name     string
+		typeflag byte
+	}{
+		{name: "symlink", typeflag: tar.TypeSymlink},
+		{name: "hardlink", typeflag: tar.TypeLink},
+		{name: "character device", typeflag: tar.TypeChar},
+		{name: "block device", typeflag: tar.TypeBlock},
+		{name: "fifo", typeflag: tar.TypeFifo},
+		{name: "socket-like unsupported type", typeflag: tar.TypeGNUSparse},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destination := filepath.Join(trustedTestDir(t), "resource")
+			archive := stageTarGz(t, testTarEntry{name: "unsafe", typeflag: tt.typeflag})
+			assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), archive, destination), destination)
+		})
+	}
+}
+
+func TestExtractArchiveRejectsNestedArchivesAndExecutablesByContent(t *testing.T) {
+	tarPayload := make([]byte, 512)
+	copy(tarPayload[257:], []byte("ustar"))
+	pePayload := make([]byte, 256)
+	copy(pePayload, []byte("MZ"))
+	binary.LittleEndian.PutUint32(pePayload[0x3c:], 0x80)
+	copy(pePayload[0x80:], []byte{'P', 'E', 0, 0})
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{name: "gzip", body: []byte{0x1f, 0x8b, 0x08, 0x00}},
+		{name: "zip local", body: []byte{'P', 'K', 0x03, 0x04}},
+		{name: "zip empty", body: []byte{'P', 'K', 0x05, 0x06}},
+		{name: "tar", body: tarPayload},
+		{name: "ELF", body: []byte{0x7f, 'E', 'L', 'F'}},
+		{name: "PE", body: pePayload},
+		{name: "Mach-O 64 little endian", body: []byte{0xcf, 0xfa, 0xed, 0xfe}},
+		{name: "Mach-O fat", body: []byte{0xca, 0xfe, 0xba, 0xbe}},
+		{name: "Wasm", body: []byte{0x00, 'a', 's', 'm'}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destination := filepath.Join(trustedTestDir(t), "resource")
+			archive := stageTarGz(t, testTarEntry{name: "payload.md", body: tt.body})
+			assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), archive, destination), destination)
+		})
+	}
+}
+
+func TestExtractArchiveRejectsArchiveExtensionsCaseInsensitively(t *testing.T) {
+	for _, name := range []string{"nested.GZ", "nested.Tar.Gz", "nested.TGZ", "nested.ZIP", "nested.TAR", "nested.BZ2", "nested.XZ", "nested.7Z", "nested.RAR"} {
+		t.Run(name, func(t *testing.T) {
+			destination := filepath.Join(trustedTestDir(t), "resource")
+			archive := stageTarGz(t, testTarEntry{name: name, body: []byte("plain text")})
+			assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), archive, destination), destination)
+		})
+	}
+}
+
+func TestExtractArchiveRejectsCompressedSizeLimitBeforeGzipInspection(t *testing.T) {
+	archive := stageSizedContent(t, maxRemoteContentSize+1)
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	var inspected atomic.Bool
+	err := new(Client).extractArchiveWithHooks(context.Background(), archive, destination, archiveHooks{
+		beforeInspect: func() { inspected.Store(true) },
+	})
+	assertUnsafeWithoutDestination(t, err, destination)
+	if inspected.Load() {
+		t.Fatal("oversized compressed content was inspected as gzip")
+	}
+}
+
+func TestExtractArchiveRejectsResourceLimits(t *testing.T) {
+	t.Run("file over 10 MiB", func(t *testing.T) {
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		archive := stageTarGz(t, testTarEntry{
+			name: "large.md",
+			size: maxArchiveFileSize + 1,
+			write: func(output io.Writer) error {
+				_, err := io.CopyN(output, zeroReader{}, maxArchiveFileSize+1)
+				return err
+			},
+		})
+		assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), archive, destination), destination)
+	})
+
+	t.Run("tree over 100 MiB", func(t *testing.T) {
+		entries := make([]testTarEntry, 0, 11)
+		for index := range 10 {
+			entries = append(entries, mixedEntropyEntry(fmt.Sprintf("file-%02d.md", index), maxArchiveFileSize, uint64(index+1)))
+		}
+		entries = append(entries, testTarEntry{name: "overflow.md", body: []byte("x")})
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), stageTarGz(t, entries...), destination), destination)
+	})
+
+	t.Run("more than 1000 nodes", func(t *testing.T) {
+		entries := make([]testTarEntry, maxArchiveNodes+1)
+		for index := range entries {
+			entries[index] = testTarEntry{name: fmt.Sprintf("node-%04d.md", index)}
+		}
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), stageTarGz(t, entries...), destination), destination)
+	})
+
+	t.Run("depth over 16", func(t *testing.T) {
+		name := strings.Repeat("d/", maxArchiveDepth) + "file.md"
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), stageTarGz(t, testTarEntry{name: name}), destination), destination)
+	})
+
+	t.Run("path over 255 bytes", func(t *testing.T) {
+		name := strings.Repeat("a", maxArchivePathSize-2) + ".md"
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), stageTarGz(t, testTarEntry{name: name}), destination), destination)
+	})
+
+	t.Run("ratio over 100", func(t *testing.T) {
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		archive := stageTarGz(t, testTarEntry{
+			name: "compressible.md",
+			size: 1 << 20,
+			write: func(output io.Writer) error {
+				_, err := io.CopyN(output, zeroReader{}, 1<<20)
+				return err
+			},
+		})
+		assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), archive, destination), destination)
+	})
+}
+
+func TestExtractArchiveRejectsShortEntryAndTrailingTarContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		archive func(*testing.T) *stagedContent
+	}{
+		{name: "short regular entry", archive: stageShortTarGz},
+		{name: "content after tar terminator", archive: stageTarGzWithTrailingContent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destination := filepath.Join(trustedTestDir(t), "resource")
+			assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), tt.archive(t), destination), destination)
+		})
+	}
+}
+
+func TestExtractArchiveCleansPrivateOutputAfterExtractedFileCloseError(t *testing.T) {
+	archive := stageTarGz(t, testTarEntry{name: "payload.md", body: []byte("safe")})
+	parent := trustedTestDir(t)
+	destination := filepath.Join(parent, "resource")
+	injected := errors.New("injected extracted file close failure")
+	err := new(Client).extractArchiveWithHooks(context.Background(), archive, destination, archiveHooks{
+		closeFile: func(file *os.File) error {
+			return errors.Join(file.Close(), injected)
+		},
+	})
+	if !errors.Is(err, injected) || !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("extractArchive() error = %v, want injected close failure classified unsafe", err)
+	}
+	assertDirectoryEmpty(t, parent)
+}
+
+func TestExtractArchivePublishesIntoExistingEmptyPhysicalDirectory(t *testing.T) {
+	archive := stageTarGz(t, testTarEntry{name: "payload.md", body: []byte("safe")})
+	parent := trustedTestDir(t)
+	destination := filepath.Join(parent, "resource")
+	if err := os.Mkdir(destination, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := new(Client).extractArchive(context.Background(), archive, destination); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContentsAndMode(t, filepath.Join(destination, "payload.md"), "safe", 0o644)
+}
+
+func TestExtractArchiveNoReplacePublicationPreservesConcurrentDestination(t *testing.T) {
+	archive := stageTarGz(t, testTarEntry{name: "payload.md", body: []byte("safe")})
+	parent := trustedTestDir(t)
+	destination := filepath.Join(parent, "resource")
+	err := new(Client).extractArchiveWithHooks(context.Background(), archive, destination, archiveHooks{
+		afterDestinationRemove: func() {
+			if err := os.Mkdir(destination, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(destination, "competitor"), []byte("keep"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	})
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("extractArchive() error = %v, want concurrent destination ErrUnsafeContent", err)
+	}
+	assertFileContentsAndMode(t, filepath.Join(destination, "competitor"), "keep", 0o600)
+	assertOnlyEntry(t, parent, "resource")
+}
+
+func TestExtractArchiveRefusesSubstitutedExistingDirectoryWithoutDeletingIt(t *testing.T) {
+	archive := stageTarGz(t, testTarEntry{name: "payload.md", body: []byte("safe")})
+	parent := trustedTestDir(t)
+	destination := filepath.Join(parent, "resource")
+	moved := filepath.Join(parent, "original-empty")
+	competitor := filepath.Join(parent, "competitor")
+	if err := os.Mkdir(destination, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(competitor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(competitor, "keep"), []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := new(Client).extractArchiveWithHooks(context.Background(), archive, destination, archiveHooks{
+		beforePublish: func() {
+			if err := os.Rename(destination, moved); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(competitor, destination); err != nil {
+				t.Fatal(err)
+			}
+		},
+	})
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("extractArchive() error = %v, want substituted destination ErrUnsafeContent", err)
+	}
+	if info, statErr := os.Lstat(destination); statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("substituted destination = %v, %v, want preserved symlink", info, statErr)
+	}
+	assertFileContentsAndMode(t, filepath.Join(competitor, "keep"), "preserve", 0o600)
+}
+
+func stageTarGz(t *testing.T, entries ...testTarEntry) *stagedContent {
+	t.Helper()
+	return stageCompressedTar(t, func(tarOutput io.Writer) error { return writeTestTar(tarOutput, entries) })
+}
+
+func testTarGzBytes(t *testing.T, entries ...testTarEntry) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	gzipWriter := gzip.NewWriter(&output)
+	if err := writeTestTar(gzipWriter, entries); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func writeTestTar(output io.Writer, entries []testTarEntry) error {
+	writer := tar.NewWriter(output)
+	for _, entry := range entries {
+		typeflag := entry.typeflag
+		if typeflag == 0 {
+			typeflag = tar.TypeReg
+		}
+		mode := entry.mode
+		if mode == 0 {
+			mode = 0o644
+		}
+		size := entry.size
+		if entry.write == nil {
+			size = int64(len(entry.body))
+		}
+		header := &tar.Header{Name: entry.name, Typeflag: typeflag, Mode: mode, Size: size}
+		if err := writer.WriteHeader(header); err != nil {
+			return err
+		}
+		if entry.write != nil {
+			if err := entry.write(writer); err != nil {
+				return err
+			}
+		} else if _, err := writer.Write(entry.body); err != nil {
+			return err
+		}
+	}
+	return writer.Close()
+}
+
+func stageCompressedTar(t *testing.T, writeTar func(io.Writer) error) *stagedContent {
+	t.Helper()
+	parent := openTestPinnedDirectory(t, trustedTestDir(t))
+	staged, file, err := parent.createStaged(".test-archive-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := staged.remove(); err != nil {
+			t.Errorf("remove staged test archive: %v", err)
+		}
+	})
+	gzipWriter := gzip.NewWriter(file)
+	writeErr := writeTar(gzipWriter)
+	gzipCloseErr := gzipWriter.Close()
+	prepareErr := staged.prepareForClose(file, 0o600)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, gzipCloseErr, prepareErr, closeErr); err != nil {
+		t.Fatal(err)
+	}
+	return staged
+}
+
+func stageSizedContent(t *testing.T, size int64) *stagedContent {
+	t.Helper()
+	parent := openTestPinnedDirectory(t, trustedTestDir(t))
+	staged, file, err := parent.createStaged(".test-archive-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = staged.remove() })
+	if err := file.Truncate(size); err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(staged.prepareForClose(file, 0o600), file.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return staged
+}
+
+func stageTarGzWithEmptyName(t *testing.T) *stagedContent {
+	t.Helper()
+	var plain bytes.Buffer
+	writer := tar.NewWriter(&plain)
+	if err := writer.WriteHeader(&tar.Header{Name: "x", Typeflag: tar.TypeReg, Mode: 0o644}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	header := plain.Bytes()[:512]
+	for index := range 100 {
+		header[index] = 0
+	}
+	rewriteTarChecksum(header)
+	return stageCompressedTar(t, func(output io.Writer) error {
+		_, err := output.Write(plain.Bytes())
+		return err
+	})
+}
+
+func stageShortTarGz(t *testing.T) *stagedContent {
+	t.Helper()
+	return stageCompressedTar(t, func(output io.Writer) error {
+		writer := tar.NewWriter(output)
+		if err := writer.WriteHeader(&tar.Header{Name: "short.md", Typeflag: tar.TypeReg, Mode: 0o644, Size: 10}); err != nil {
+			return err
+		}
+		_, _ = writer.Write([]byte("bad"))
+		return nil
+	})
+}
+
+func stageTarGzWithTrailingContent(t *testing.T) *stagedContent {
+	t.Helper()
+	var plain bytes.Buffer
+	writer := tar.NewWriter(&plain)
+	if err := writer.WriteHeader(&tar.Header{Name: "safe.md", Typeflag: tar.TypeReg, Mode: 0o644, Size: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write([]byte("safe")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	plain.Write(bytes.Repeat([]byte{'X'}, 512))
+	return stageCompressedTar(t, func(output io.Writer) error {
+		_, err := output.Write(plain.Bytes())
+		return err
+	})
+}
+
+func rewriteTarChecksum(header []byte) {
+	for index := 148; index < 156; index++ {
+		header[index] = ' '
+	}
+	var checksum int
+	for _, value := range header {
+		checksum += int(value)
+	}
+	copy(header[148:156], fmt.Sprintf("%06o\x00 ", checksum))
+}
+
+func mixedEntropyEntry(name string, size int64, seed uint64) testTarEntry {
+	return testTarEntry{
+		name: name,
+		size: size,
+		write: func(output io.Writer) error {
+			random := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
+			noise := make([]byte, 128<<10)
+			for index := range noise {
+				noise[index] = byte(random.Uint64())
+			}
+			if _, err := output.Write(noise); err != nil {
+				return err
+			}
+			_, err := io.CopyN(output, zeroReader{}, size-int64(len(noise)))
+			return err
+		},
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(buffer []byte) (int, error) {
+	clear(buffer)
+	return len(buffer), nil
+}
+
+func assertUnsafeWithoutDestination(t *testing.T, err error, destination string) {
+	t.Helper()
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("extractArchive() error = %v, want ErrUnsafeContent", err)
+	}
+	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination remains after unsafe archive: %v", statErr)
+	}
+	assertDirectoryEmpty(t, filepath.Dir(destination))
+}
+
+func assertFileContentsAndMode(t *testing.T, path, want string, mode os.FileMode) {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != want {
+		t.Fatalf("%s contents = %q, want %q", path, contents, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != mode {
+		t.Fatalf("%s mode = %o, want %o", path, info.Mode().Perm(), mode)
+	}
+}
+
+func assertOnlyEntry(t *testing.T, parent, name string) {
+	t.Helper()
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != name {
+		t.Fatalf("directory %q entries = %v, want only %q", parent, entries, name)
+	}
+}

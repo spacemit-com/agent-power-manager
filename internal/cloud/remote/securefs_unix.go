@@ -5,6 +5,7 @@ package remote
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -47,6 +48,13 @@ func defaultStagedContentCreateOps() stagedContentCreateOps {
 }
 
 type ownedDirectory struct {
+	parent    *pinnedDirectory
+	directory *pinnedDirectory
+	name      string
+	identity  fileIdentity
+}
+
+type pinnedEmptyDirectory struct {
 	parent    *pinnedDirectory
 	directory *pinnedDirectory
 	name      string
@@ -198,6 +206,35 @@ func (directory *pinnedDirectory) createStaged(prefix string) (*stagedContent, *
 	return directory.createStagedWithOps(prefix, defaultStagedContentCreateOps())
 }
 
+func (directory *pinnedDirectory) createNamedStaged(name string) (*stagedContent, *os.File, error) {
+	if directory == nil || directory.file == nil || !validSecureEntryName(name) {
+		return nil, nil, unsafeRemoteFilesystem("invalid staged remote content entry %q", name)
+	}
+	fd, err := unix.Openat(
+		int(directory.file.Fd()),
+		name,
+		unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY,
+		0o600,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create staged remote content entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	file := os.NewFile(uintptr(fd), filepath.Join(directory.path, name))
+	stat, statErr := statUnixFile(fd)
+	if statErr != nil || unixNodeType(stat) != unix.S_IFREG || uint64(stat.Nlink) != 1 {
+		closeErr := file.Close()
+		cleanupErr := unix.Unlinkat(int(directory.file.Fd()), name, 0)
+		if errors.Is(cleanupErr, unix.ENOENT) {
+			cleanupErr = nil
+		}
+		if statErr == nil {
+			statErr = fs.ErrInvalid
+		}
+		return nil, nil, fmt.Errorf("verify staged remote content entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, statErr, closeErr, cleanupErr))
+	}
+	return &stagedContent{directory: directory, name: name, identity: unixIdentity(stat)}, file, nil
+}
+
 func (directory *pinnedDirectory) createStagedWithOps(prefix string, ops stagedContentCreateOps) (*stagedContent, *os.File, error) {
 	for attempt := 0; attempt < secureNameAttempts; attempt++ {
 		name, err := randomSecureName(prefix)
@@ -237,6 +274,68 @@ func (directory *pinnedDirectory) createStagedWithOps(prefix string, ops stagedC
 
 func (directory *pinnedDirectory) createOwned(prefix string) (*ownedDirectory, error) {
 	return directory.createOwnedWithOps(prefix, defaultOwnedDirectoryCreateOps())
+}
+
+func (directory *pinnedDirectory) createOwnedNamed(name string, mode fs.FileMode) (*ownedDirectory, error) {
+	if directory == nil || directory.file == nil || !validSecureEntryName(name) {
+		return nil, unsafeRemoteFilesystem("invalid owned remote directory entry %q", name)
+	}
+	if err := unix.Mkdirat(int(directory.file.Fd()), name, 0o700); err != nil {
+		return nil, fmt.Errorf("create owned remote directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	var createdStat unix.Stat_t
+	if err := unix.Fstatat(int(directory.file.Fd()), name, &createdStat, unix.AT_SYMLINK_NOFOLLOW); err != nil || unixNodeType(createdStat) != unix.S_IFDIR {
+		if err == nil {
+			err = fs.ErrInvalid
+		}
+		return nil, fmt.Errorf("snapshot owned remote directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	fd, openErr := unix.Openat(
+		int(directory.file.Fd()),
+		name,
+		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY,
+		0,
+	)
+	if openErr != nil {
+		cleanupErr := removeDirectoryEntryIfIdentity(directory, name, unixIdentity(createdStat))
+		return nil, fmt.Errorf("open owned remote directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, openErr, cleanupErr))
+	}
+	file := os.NewFile(uintptr(fd), filepath.Join(directory.path, name))
+	chmodErr := unix.Fchmod(fd, uint32(mode.Perm()))
+	stat, statErr := statUnixFile(fd)
+	var entryStat unix.Stat_t
+	entryErr := unix.Fstatat(int(directory.file.Fd()), name, &entryStat, unix.AT_SYMLINK_NOFOLLOW)
+	valid := chmodErr == nil && statErr == nil && entryErr == nil &&
+		unixNodeType(stat) == unix.S_IFDIR && unixIdentity(stat) == unixIdentity(createdStat) &&
+		unixIdentity(stat) == unixIdentity(entryStat) && stat.Uid == uint32(os.Geteuid()) &&
+		fs.FileMode(stat.Mode&0o777) == mode.Perm()
+	if !valid {
+		closeErr := file.Close()
+		cleanupErr := removeDirectoryEntryIfIdentity(directory, name, unixIdentity(createdStat))
+		if chmodErr == nil && statErr == nil && entryErr == nil {
+			statErr = fs.ErrInvalid
+		}
+		return nil, fmt.Errorf("verify owned remote directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, chmodErr, statErr, entryErr, closeErr, cleanupErr))
+	}
+	child := &pinnedDirectory{file: file, path: filepath.Join(directory.path, name)}
+	return &ownedDirectory{parent: directory, directory: child, name: name, identity: unixIdentity(stat)}, nil
+}
+
+func removeDirectoryEntryIfIdentity(parent *pinnedDirectory, name string, identity fileIdentity) error {
+	stat, err := parent.statEntry(name)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil || unixNodeType(stat) != unix.S_IFDIR || unixIdentity(stat) != identity {
+		if err == nil {
+			err = fs.ErrInvalid
+		}
+		return unsafeRemoteFilesystem("refuse cleanup of substituted remote directory entry %q: %v", name, err)
+	}
+	if err := unix.Unlinkat(int(parent.file.Fd()), name, unix.AT_REMOVEDIR); err != nil && !errors.Is(err, unix.ENOENT) {
+		return err
+	}
+	return nil
 }
 
 func (directory *pinnedDirectory) createOwnedWithOps(prefix string, ops ownedDirectoryCreateOps) (*ownedDirectory, error) {
@@ -295,6 +394,91 @@ func (directory *pinnedDirectory) statEntry(name string) (unix.Stat_t, error) {
 	var stat unix.Stat_t
 	err := unix.Fstatat(int(directory.file.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
 	return stat, err
+}
+
+func (directory *pinnedDirectory) openOptionalEmpty(name string) (*pinnedEmptyDirectory, error) {
+	if directory == nil || directory.file == nil || !validSecureEntryName(name) {
+		return nil, unsafeRemoteFilesystem("invalid remote destination directory entry %q", name)
+	}
+	entryStat, err := directory.statEntry(name)
+	if errors.Is(err, unix.ENOENT) {
+		return nil, nil
+	}
+	if err != nil || unixNodeType(entryStat) != unix.S_IFDIR {
+		if err == nil {
+			err = fs.ErrInvalid
+		}
+		return nil, fmt.Errorf("inspect remote destination directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	fd, err := unix.Openat(
+		int(directory.file.Fd()),
+		name,
+		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY,
+		0,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("open physical remote destination directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	file := os.NewFile(uintptr(fd), filepath.Join(directory.path, name))
+	stat, statErr := statUnixFile(fd)
+	if statErr == nil && unixNodeType(stat) == unix.S_IFDIR && unixIdentity(stat) == unixIdentity(entryStat) {
+		_, statErr = verifyDirectoryTrust(stat, directoryTrustPolicy{}, false)
+	}
+	empty, emptyErr := pinnedDirectoryEmpty(file)
+	if statErr != nil || emptyErr != nil || !empty {
+		closeErr := file.Close()
+		if statErr == nil && emptyErr == nil {
+			emptyErr = fs.ErrInvalid
+		}
+		return nil, fmt.Errorf("verify empty physical remote destination directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, statErr, emptyErr, closeErr))
+	}
+	child := &pinnedDirectory{file: file, path: filepath.Join(directory.path, name)}
+	return &pinnedEmptyDirectory{parent: directory, directory: child, name: name, identity: unixIdentity(stat)}, nil
+}
+
+func pinnedDirectoryEmpty(file *os.File) (bool, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return false, err
+	}
+	_, err := file.Readdirnames(1)
+	if errors.Is(err, io.EOF) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func (directory *pinnedDirectory) requireRegular(name string) error {
+	if directory == nil || directory.file == nil || !validSecureEntryName(name) {
+		return unsafeRemoteFilesystem("invalid required remote marker entry %q", name)
+	}
+	entryStat, err := directory.statEntry(name)
+	if err != nil || unixNodeType(entryStat) != unix.S_IFREG {
+		if err == nil {
+			err = fs.ErrInvalid
+		}
+		return fmt.Errorf("required remote marker %q is not a physical regular file: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	fd, err := unix.Openat(
+		int(directory.file.Fd()),
+		name,
+		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("open required remote marker %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	stat, statErr := statUnixFile(fd)
+	closeErr := unix.Close(fd)
+	if statErr != nil || closeErr != nil || unixNodeType(stat) != unix.S_IFREG || unixIdentity(stat) != unixIdentity(entryStat) || uint64(stat.Nlink) != 1 {
+		if statErr == nil && closeErr == nil {
+			statErr = fs.ErrInvalid
+		}
+		return fmt.Errorf("verify required remote marker %q: %w", name, errors.Join(cloud.ErrUnsafeContent, statErr, closeErr))
+	}
+	return nil
 }
 
 func (staged *stagedContent) openRead() (*os.File, error) {
@@ -377,6 +561,95 @@ func (staged *stagedContent) publishNoReplace(destination string) error {
 	}
 	staged.name = ""
 	return nil
+}
+
+func (owned *ownedDirectory) prepareForPublish(mode fs.FileMode) error {
+	if owned == nil || owned.parent == nil || owned.parent.file == nil || owned.directory == nil || owned.directory.file == nil || owned.name == "" {
+		return unsafeRemoteFilesystem("owned remote directory descriptor is unavailable")
+	}
+	if err := owned.directory.file.Chmod(mode.Perm()); err != nil {
+		return fmt.Errorf("set owned remote directory mode: %w", err)
+	}
+	stat, statErr := statUnixFile(int(owned.directory.file.Fd()))
+	entryStat, entryErr := owned.parent.statEntry(owned.name)
+	if statErr != nil || entryErr != nil || unixNodeType(stat) != unix.S_IFDIR ||
+		unixIdentity(stat) != owned.identity || unixIdentity(entryStat) != owned.identity ||
+		stat.Uid != uint32(os.Geteuid()) || fs.FileMode(stat.Mode&0o777) != mode.Perm() {
+		if statErr == nil && entryErr == nil {
+			statErr = fs.ErrInvalid
+		}
+		return fmt.Errorf("verify owned remote directory before publication: %w", errors.Join(cloud.ErrUnsafeContent, statErr, entryErr))
+	}
+	return nil
+}
+
+func (owned *ownedDirectory) publishNoReplace(destination string) error {
+	if owned == nil || owned.parent == nil || owned.parent.file == nil || owned.directory == nil || owned.directory.file == nil || owned.name == "" || !validSecureEntryName(destination) {
+		return unsafeRemoteFilesystem("invalid owned remote directory publication entry %q", destination)
+	}
+	stat, statErr := statUnixFile(int(owned.directory.file.Fd()))
+	entryStat, entryErr := owned.parent.statEntry(owned.name)
+	if statErr != nil || entryErr != nil || unixNodeType(stat) != unix.S_IFDIR || unixIdentity(stat) != owned.identity || unixIdentity(entryStat) != owned.identity {
+		if statErr == nil && entryErr == nil {
+			statErr = fs.ErrInvalid
+		}
+		return fmt.Errorf("verify owned remote directory publication source: %w", errors.Join(cloud.ErrUnsafeContent, statErr, entryErr))
+	}
+	if err := publishDirectoryNoReplace(int(owned.parent.file.Fd()), owned.name, destination); err != nil {
+		if errors.Is(err, errSecureDestinationExists) {
+			return fmt.Errorf("remote archive destination %q already exists: %w", destination, errors.Join(cloud.ErrUnsafeContent, err))
+		}
+		return fmt.Errorf("publish owned remote directory as %q: %w", destination, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	owned.name = ""
+	return nil
+}
+
+func (owned *ownedDirectory) release() error {
+	if owned == nil {
+		return nil
+	}
+	owned.name = ""
+	if owned.directory == nil {
+		return nil
+	}
+	err := owned.directory.close()
+	owned.directory = nil
+	return err
+}
+
+func (existing *pinnedEmptyDirectory) removeIfStillEmpty() error {
+	if existing == nil {
+		return nil
+	}
+	if existing.parent == nil || existing.parent.file == nil || existing.directory == nil || existing.directory.file == nil || existing.name == "" {
+		return unsafeRemoteFilesystem("pinned remote destination directory is unavailable")
+	}
+	entryStat, entryErr := existing.parent.statEntry(existing.name)
+	stat, statErr := statUnixFile(int(existing.directory.file.Fd()))
+	empty, emptyErr := pinnedDirectoryEmpty(existing.directory.file)
+	if entryErr != nil || statErr != nil || emptyErr != nil || !empty ||
+		unixNodeType(entryStat) != unix.S_IFDIR || unixNodeType(stat) != unix.S_IFDIR ||
+		unixIdentity(entryStat) != existing.identity || unixIdentity(stat) != existing.identity {
+		if entryErr == nil && statErr == nil && emptyErr == nil {
+			emptyErr = fs.ErrInvalid
+		}
+		return fmt.Errorf("refuse removal of changed remote destination directory %q: %w", existing.name, errors.Join(cloud.ErrUnsafeContent, entryErr, statErr, emptyErr))
+	}
+	if err := unix.Unlinkat(int(existing.parent.file.Fd()), existing.name, unix.AT_REMOVEDIR); err != nil {
+		return fmt.Errorf("remove verified empty remote destination directory %q: %w", existing.name, errors.Join(cloud.ErrUnsafeContent, err))
+	}
+	existing.name = ""
+	return nil
+}
+
+func (existing *pinnedEmptyDirectory) close() error {
+	if existing == nil || existing.directory == nil {
+		return nil
+	}
+	err := existing.directory.close()
+	existing.directory = nil
+	return err
 }
 
 func (owned *ownedDirectory) close() error {

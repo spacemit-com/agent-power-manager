@@ -19,6 +19,10 @@ func publishEntryNoReplace(directoryFD int, source, destination string) error {
 	return publishEntryByLink(directoryFD, source, destination)
 }
 
+func publishDirectoryNoReplace(directoryFD int, source, destination string) error {
+	return unix.Renameat2(directoryFD, source, directoryFD, destination, unix.RENAME_NOREPLACE)
+}
+
 func publishEntryByLink(directoryFD int, source, destination string) error {
 	return linkThenUnlinkNoReplace(
 		source,

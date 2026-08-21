@@ -16,6 +16,8 @@ import (
 	"apm/internal/cloud"
 )
 
+var _ cloud.Client = (*Client)(nil)
+
 func TestNewValidatesBaseURLAndHTTPClient(t *testing.T) {
 	t.Parallel()
 
