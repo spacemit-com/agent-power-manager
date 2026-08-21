@@ -62,32 +62,88 @@ func TestProviderContract(t *testing.T) {
 	t.Run("wire_mutations", testCanonicalRemoteServerProtocolMutations)
 }
 
+func TestProviderFactoriesUseCleanupOwnedPackageRoot(t *testing.T) {
+	physicalCWD, err := filepath.EvalSymlinks(mustCloudTestGetwd(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingHome := filepath.Join(t.TempDir(), "missing-home")
+	var root string
+	t.Run("create", func(t *testing.T) {
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		t.Setenv("HOME", missingHome)
+		_ = providerFactories(t)
+		root = os.Getenv("TMPDIR")
+		assertCloudPrivatePackageTestRoot(t, physicalCWD, root, ".provider-contract-")
+		if got := os.Getenv("XDG_RUNTIME_DIR"); got != root {
+			t.Fatalf("XDG_RUNTIME_DIR = %q, want cleanup-owned root %q", got, root)
+		}
+		if got := os.Getenv("HOME"); got != root {
+			t.Fatalf("HOME = %q, want cleanup-owned root %q", got, root)
+		}
+	})
+	if root == "" {
+		return
+	}
+	if _, err := os.Lstat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("provider-contract root remains after cleanup: %v", err)
+	}
+}
+
+func mustCloudTestGetwd(t *testing.T) string {
+	t.Helper()
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
+func assertCloudPrivatePackageTestRoot(t *testing.T, physicalCWD, root, prefix string) {
+	t.Helper()
+	relative, err := filepath.Rel(physicalCWD, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		t.Fatalf("provider-contract root %q is outside physical package directory %q", root, physicalCWD)
+	}
+	if !strings.HasPrefix(filepath.Base(root), prefix) {
+		t.Fatalf("provider-contract root base = %q, want prefix %q", filepath.Base(root), prefix)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permissions := info.Mode().Perm(); permissions != 0o700 {
+		t.Fatalf("provider-contract root permissions = %04o, want 0700", permissions)
+	}
+}
+
 func providerFactories(t *testing.T) []clientFactory {
 	t.Helper()
 	trustedParent := os.Getenv("XDG_RUNTIME_DIR")
-	var err error
 	if trustedParent == "" {
-		trustedParent, err = os.UserHomeDir()
-		if err != nil {
-			t.Fatal(err)
-		}
+		trustedParent = mustCloudTestGetwd(t)
 	}
-	trustedTemp, err := os.MkdirTemp(trustedParent, ".provider-contract-")
+	physicalParent, err := filepath.EvalSymlinks(filepath.Clean(trustedParent))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(trustedTemp, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	trustedTemp, err = filepath.Abs(trustedTemp)
+	trustedTemp, err := os.MkdirTemp(physicalParent, ".provider-contract-")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("create provider-contract test root below %q: %v", physicalParent, err)
 	}
 	t.Cleanup(func() {
 		if err := os.RemoveAll(trustedTemp); err != nil {
 			t.Errorf("remove trusted provider-contract temp: %v", err)
 		}
 	})
+	if err := os.Chmod(trustedTemp, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", trustedTemp)
+	t.Setenv("XDG_RUNTIME_DIR", trustedTemp)
 	t.Setenv("TMPDIR", trustedTemp)
 	root, err := filepath.Abs("resources")
 	if err != nil {

@@ -1394,28 +1394,88 @@ func (server *lifecycleRemoteServer) requestCountSuffix(suffix string) int {
 	return total
 }
 
+func TestConfigureLifecycleTrustedTempUsesCleanupOwnedPackageRoot(t *testing.T) {
+	physicalCWD, err := filepath.EvalSymlinks(mustLifecycleGetwd(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingHome := filepath.Join(t.TempDir(), "missing-home")
+	var root string
+	t.Run("create", func(t *testing.T) {
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		t.Setenv("HOME", missingHome)
+		configureLifecycleTrustedTemp(t)
+		root = os.Getenv("TMPDIR")
+		assertLifecyclePrivatePackageTestRoot(t, physicalCWD, root, ".apm-lifecycle-remote-")
+		if got := os.Getenv("XDG_RUNTIME_DIR"); got != root {
+			t.Fatalf("XDG_RUNTIME_DIR = %q, want cleanup-owned root %q", got, root)
+		}
+		if got := os.Getenv("HOME"); got != root {
+			t.Fatalf("HOME = %q, want cleanup-owned root %q", got, root)
+		}
+	})
+	if root == "" {
+		return
+	}
+	if _, err := os.Lstat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lifecycle trusted root remains after cleanup: %v", err)
+	}
+}
+
+func mustLifecycleGetwd(t *testing.T) string {
+	t.Helper()
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
+func assertLifecyclePrivatePackageTestRoot(t *testing.T, physicalCWD, root, prefix string) {
+	t.Helper()
+	relative, err := filepath.Rel(physicalCWD, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		t.Fatalf("lifecycle trusted root %q is outside physical package directory %q", root, physicalCWD)
+	}
+	if !strings.HasPrefix(filepath.Base(root), prefix) {
+		t.Fatalf("lifecycle trusted root base = %q, want prefix %q", filepath.Base(root), prefix)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permissions := info.Mode().Perm(); permissions != 0o700 {
+		t.Fatalf("lifecycle trusted root permissions = %04o, want 0700", permissions)
+	}
+}
+
 func configureLifecycleTrustedTemp(t *testing.T) {
 	t.Helper()
 	parent := os.Getenv("XDG_RUNTIME_DIR")
 	if parent == "" {
-		var err error
-		parent, err = os.UserHomeDir()
-		if err != nil {
-			t.Fatal(err)
-		}
+		parent = mustLifecycleGetwd(t)
 	}
-	root, err := os.MkdirTemp(parent, ".apm-lifecycle-remote-")
+	physicalParent, err := filepath.EvalSymlinks(filepath.Clean(parent))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(root, 0o700); err != nil {
-		t.Fatal(err)
+	root, err := os.MkdirTemp(physicalParent, ".apm-lifecycle-remote-")
+	if err != nil {
+		t.Fatalf("create lifecycle trusted test root below %q: %v", physicalParent, err)
 	}
 	t.Cleanup(func() {
 		if err := os.RemoveAll(root); err != nil {
 			t.Errorf("remove lifecycle trusted temp: %v", err)
 		}
 	})
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_RUNTIME_DIR", root)
 	t.Setenv("TMPDIR", root)
 }
 
