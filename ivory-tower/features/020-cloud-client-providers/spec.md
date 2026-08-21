@@ -1,6 +1,6 @@
 # Cloud Client Provider 与 APC Agent 只读契约设计规格
 
-> 状态：设计已确认，待编写实现计划。重大决策见 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
+> 状态：设计已确认，实现计划待审核。重大决策见 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
 ## 背景
 
@@ -204,7 +204,7 @@ Lifecycle 的变化限于：
 - Skill/Agent 调用 `Prepare*`，不再执行“Cache → Cloud → Cache”；
 - MCP 继续调用 `GetMCP`；
 - Plugin 继续调用 `pluginresource.Ensure`；
-- Uninstall/Fix 保持离线，不因 Remote provider 引入网络依赖。
+- Plugin Uninstall 与 Fix 保持离线，不因 Remote provider 引入网络依赖；MCP 不增加本地定义缓存，目标注册仍存在时的可恢复卸载继续按 manifest 精确版本调用 `GetMCP`。
 
 Manifest-first unchanged、事务锁、journal phase、恢复顺序、Adapter CLI 和安装 outcome 均不改变。
 
@@ -275,7 +275,8 @@ Recovery 仍只读取 journal、Adapter、manifest 与现有 artifact，不连�
 - `internal/cloud/remote/client.go`、`catalog.go`、`metadata.go`、`content.go`、`archive.go`、四类 Power 文件与对应测试：Remote provider。
 - `cmd/apm/cloud.go` 与测试：provider 配置和 composition。
 - `internal/cache/prepare.go` 与测试：Skill/Agent cache prepare。
-- `internal/pluginresource/apc_manifest.go`、`agent_manifests.go` 与测试：canonical manifest 和派生配置。
+- `internal/pluginartifact/apc_manifest.go` 与测试：builder、cache hit、uninstall 和 recovery 共用的 canonical manifest schema 与严格解码。
+- `internal/pluginresource/agent_manifests.go` 与测试：根据中立 canonical model 生成派生配置。
 - `ivory-tower/adr/ADR-016-select-cloud-clients-with-explicit-providers.md`。
 - `ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md`。
 - `ivory-tower/features/020-cloud-client-providers/spec.md` 与后续 `plan.md`。
