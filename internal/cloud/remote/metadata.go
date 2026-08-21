@@ -81,6 +81,9 @@ func (c *Client) getExactMetadata(ctx context.Context, query domain.PowerRef) (e
 	}
 	switch metadata.Status {
 	case "published":
+		if metadata.YankedAt != "" || metadata.YankReason != "" {
+			return exactMetadataDTO{}, fmt.Errorf("published remote resource contains yank metadata: %w", cloud.ErrInvalidResponse)
+		}
 		return metadata, nil
 	case "yanked":
 		if validateAPCTimestamp(metadata.YankedAt) != nil || strings.TrimSpace(metadata.YankReason) == "" {

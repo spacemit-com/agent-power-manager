@@ -30,9 +30,11 @@ type problemDTO struct {
 
 // Client 通过已验证的 APC base URL 查询远端目录；HTTP Client 必须设置整体超时。
 type Client struct {
-	baseURL       *url.URL
-	http          *http.Client
-	mcpTempParent string
+	baseURL            *url.URL
+	http               *http.Client
+	mcpTempParent      string
+	beforeAgentPublish func(*stagedContent)
+	beforeMCPCleanup   func(*ownedDirectory)
 }
 
 var _ cloud.Catalog = (*Client)(nil)

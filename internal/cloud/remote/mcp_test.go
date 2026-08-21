@@ -43,14 +43,88 @@ func TestGetMCPReturnsStrictValidatedDefinitionAndCleansOwnedDirectory(t *testin
 	}
 }
 
-func TestGetMCPRejectsUnknownDuplicateTrailingAndPlainHTTP(t *testing.T) {
+func TestGetMCPAcceptsTemporaryParentThroughSymlinkedAncestor(t *testing.T) {
+	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteMCPRef, contents)
+	})
+	physicalRoot := t.TempDir()
+	physicalParent := filepath.Join(physicalRoot, "private", "tmp")
+	if err := os.MkdirAll(physicalParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "var")
+	if err := os.Symlink(filepath.Join(physicalRoot, "private"), aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+	client.mcpTempParent = filepath.Join(aliasRoot, "tmp")
+
+	if _, err := client.GetMCP(context.Background(), remoteMCPRef); err != nil {
+		t.Fatal(err)
+	}
+	assertDirectoryEmpty(t, physicalParent)
+}
+
+func TestGetMCPCanonicalizesSymlinkedSystemTempDirectory(t *testing.T) {
+	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteMCPRef, contents)
+	})
+	physicalParent := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "tmp-alias")
+	if err := os.Symlink(physicalParent, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", alias)
+
+	if _, err := client.GetMCP(context.Background(), remoteMCPRef); err != nil {
+		t.Fatal(err)
+	}
+	assertDirectoryEmpty(t, physicalParent)
+}
+
+func TestGetMCPCleanupDoesNotDeleteSubstitutedTemporaryChild(t *testing.T) {
+	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteMCPRef, contents)
+	})
+	root := t.TempDir()
+	client.mcpTempParent = root
+	var replacement string
+	client.beforeMCPCleanup = func(owned *ownedDirectory) {
+		replacement = filepath.Join(root, owned.name)
+		if err := os.Rename(replacement, replacement+".owned-moved"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(replacement, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(replacement, "preserve"), []byte("keep"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := client.GetMCP(context.Background(), remoteMCPRef)
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("GetMCP() error = %v, want cleanup substitution ErrUnsafeContent", err)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(replacement, "preserve")); readErr != nil || string(got) != "keep" {
+		t.Fatalf("substituted MCP child = %q, %v, want preserved", got, readErr)
+	}
+}
+
+func TestGetMCPRejectsStrictJSONInvalidUnionAndPlainHTTP(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
 	}{
 		{name: "unknown field", body: `{"transport":"stdio","command":"npx","secret":"value"}`},
 		{name: "duplicate field", body: `{"transport":"stdio","command":"first","command":"second"}`},
+		{name: "case-fold duplicate field", body: `{"transport":"stdio","command":"first","COMMAND":"second"}`},
 		{name: "trailing value", body: `{"transport":"stdio","command":"npx"} {}`},
+		{name: "stdio forbidden null URL", body: `{"transport":"stdio","command":"npx","url":null}`},
+		{name: "http forbidden empty command", body: `{"transport":"http","url":"https://mcp.example.com/mcp","command":""}`},
+		{name: "http forbidden empty args", body: `{"transport":"http","url":"https://mcp.example.com/mcp","args":[]}`},
 		{name: "plain HTTP", body: `{"transport":"http","url":"http://mcp.example.com/mcp"}`},
 	}
 	for _, tt := range tests {

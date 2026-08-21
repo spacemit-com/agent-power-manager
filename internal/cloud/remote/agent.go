@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 
 	"apm/internal/cloud"
@@ -22,48 +20,46 @@ func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destina
 	if ref.Type != domain.PowerTypeAgent || !validResolveQuery(ref) || ref.Version == "" {
 		return fmt.Errorf("download invalid remote Agent identity: %w", cloud.ErrNotFound)
 	}
-	if err := validateRemoteAgentDestination(destination); err != nil {
+	parentPath, destinationName, err := splitRemoteAgentDestination(destination)
+	if err != nil {
 		return err
 	}
-	temporary, err := c.downloadVerifiedContent(ctx, ref, "application/yaml", filepath.Dir(destination))
+	parent, err := openPinnedDirectory(parentPath)
+	if err != nil {
+		return fmt.Errorf("open remote Agent destination parent: %w", err)
+	}
+	defer func() {
+		resultErr = errors.Join(resultErr, parent.close())
+	}()
+	if err := parent.requireAbsent(destinationName); err != nil {
+		return err
+	}
+	temporary, err := c.downloadVerifiedContent(ctx, ref, "application/yaml", parent, 0o644)
 	if err != nil {
 		return fmt.Errorf("download remote Agent content: %w", err)
 	}
 	defer func() {
-		if err := os.Remove(temporary); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove remote Agent temporary file %q: %w", temporary, err))
-		}
+		resultErr = errors.Join(resultErr, temporary.remove())
 	}()
+	if c.beforeAgentPublish != nil {
+		c.beforeAgentPublish(temporary)
+	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("publish remote Agent: %w", err)
 	}
-	if err := validateRemoteAgentDestination(destination); err != nil {
-		return err
-	}
-	if err := os.Rename(temporary, destination); err != nil {
+	if err := temporary.publishNoReplace(destinationName); err != nil {
 		return fmt.Errorf("publish remote Agent destination %q: %w", destination, err)
-	}
-	if err := os.Chmod(destination, 0o644); err != nil {
-		removeErr := os.Remove(destination)
-		return errors.Join(
-			fmt.Errorf("set remote Agent destination mode %q: %w", destination, err),
-			removeErr,
-		)
 	}
 	return nil
 }
 
-func validateRemoteAgentDestination(destination string) error {
+func splitRemoteAgentDestination(destination string) (string, string, error) {
 	if destination == "" || !filepath.IsAbs(destination) || filepath.Clean(destination) != destination {
-		return fmt.Errorf("remote Agent destination %q must be an absolute clean path: %w", destination, cloud.ErrUnsafeContent)
+		return "", "", fmt.Errorf("remote Agent destination %q must be an absolute clean path: %w", destination, cloud.ErrUnsafeContent)
 	}
-	if err := validateRemotePhysicalDirectory(filepath.Dir(destination)); err != nil {
-		return fmt.Errorf("validate remote Agent destination parent: %w", err)
+	name := filepath.Base(destination)
+	if !validSecureEntryName(name) {
+		return "", "", fmt.Errorf("remote Agent destination %q has invalid base name: %w", destination, cloud.ErrUnsafeContent)
 	}
-	if _, err := os.Lstat(destination); errors.Is(err, fs.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("stat remote Agent destination %q: %w", destination, errors.Join(cloud.ErrUnsafeContent, err))
-	}
-	return fmt.Errorf("remote Agent destination %q must not exist: %w", destination, cloud.ErrUnsafeContent)
+	return filepath.Dir(destination), name, nil
 }

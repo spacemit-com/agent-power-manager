@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"reflect"
 	"testing"
 
 	"apm/internal/domain"
@@ -32,6 +33,47 @@ func TestMCPServerValidateAcceptsOnlyStdioOrHTTP(t *testing.T) {
 			err := tt.server.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDecodeMCPServerJSONPreservesForbiddenFieldPresence(t *testing.T) {
+	valid := []struct {
+		name string
+		body string
+		want domain.MCPServer
+	}{
+		{name: "stdio", body: `{"transport":"stdio","command":"npx","args":[]}`, want: domain.MCPServer{Transport: domain.MCPTransportStdio, Command: "npx", Args: []string{}}},
+		{name: "http", body: `{"transport":"http","url":"https://mcp.example.com/mcp"}`, want: domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://mcp.example.com/mcp"}},
+	}
+	for _, tt := range valid {
+		t.Run("valid/"+tt.name, func(t *testing.T) {
+			got, err := domain.DecodeMCPServerJSON([]byte(tt.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("DecodeMCPServerJSON() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name string
+		body string
+	}{
+		{name: "stdio URL null", body: `{"transport":"stdio","command":"npx","url":null}`},
+		{name: "stdio URL empty", body: `{"transport":"stdio","command":"npx","url":""}`},
+		{name: "http command null", body: `{"transport":"http","url":"https://mcp.example.com/mcp","command":null}`},
+		{name: "http command empty", body: `{"transport":"http","url":"https://mcp.example.com/mcp","command":""}`},
+		{name: "http args null", body: `{"transport":"http","url":"https://mcp.example.com/mcp","args":null}`},
+		{name: "http args empty", body: `{"transport":"http","url":"https://mcp.example.com/mcp","args":[]}`},
+	}
+	for _, tt := range invalid {
+		t.Run("invalid/"+tt.name, func(t *testing.T) {
+			if _, err := domain.DecodeMCPServerJSON([]byte(tt.body)); err == nil {
+				t.Fatal("DecodeMCPServerJSON() error = nil, want presence-strict union rejection")
 			}
 		})
 	}

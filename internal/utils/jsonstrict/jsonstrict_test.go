@@ -1,35 +1,60 @@
 package jsonstrict
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
 
 type decodeFixture struct {
 	Name   string `json:"name"`
+	Kelvin string `json:"K"`
 	Nested struct {
 		Value int `json:"value"`
 	} `json:"nested"`
 }
 
-func TestDecodeRejectsDuplicateKeysAtEveryObjectDepth(t *testing.T) {
+func TestDecodeRejectsEncodingJSONEquivalentKeysAtEveryObjectDepth(t *testing.T) {
 	tests := []struct {
 		name string
 		data string
 	}{
-		{name: "root", data: `{"name":"first","name":"second"}`},
+		{name: "exact root", data: `{"name":"first","name":"second"}`},
+		{name: "ASCII case folded root", data: `{"name":"trusted","NAME":"shadow"}`},
+		{name: "Unicode case folded root", data: `{"K":"trusted","\u212a":"shadow"}`},
 		{name: "nested object", data: `{"nested":{"value":1,"value":2}}`},
-		{name: "object in array", data: `[{"value":1,"value":2}]`},
+		{name: "case folded object in array", data: `[{"value":1,"VALUE":2}]`},
 		{name: "escaped equivalent", data: `{"name":"first","\u006eame":"second"}`},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var target any
-			if err := Decode([]byte(tt.data), &target, false); err == nil || !strings.Contains(err.Error(), "duplicate") {
-				t.Fatalf("Decode() error = %v, want duplicate-key error", err)
-			}
-		})
+		for _, disallowUnknown := range []bool{false, true} {
+			t.Run(tt.name+"/unknown="+map[bool]string{false: "allowed", true: "rejected"}[disallowUnknown], func(t *testing.T) {
+				var target any = new(any)
+				if disallowUnknown {
+					target = &decodeFixture{}
+				}
+				if err := Decode([]byte(tt.data), target, disallowUnknown); err == nil || !strings.Contains(err.Error(), "duplicate") {
+					t.Fatalf("Decode() error = %v, want semantic duplicate-key error", err)
+				}
+			})
+		}
+	}
+}
+
+func TestDecodeClosesEncodingJSONCaseFoldOverwrite(t *testing.T) {
+	data := []byte(`{"name":"trusted","NAME":"shadow"}`)
+	var ordinary decodeFixture
+	if err := json.Unmarshal(data, &ordinary); err != nil {
+		t.Fatal(err)
+	}
+	if ordinary.Name != "shadow" {
+		t.Fatalf("encoding/json Name = %q, want proof that the folded key overwrites trusted data", ordinary.Name)
+	}
+
+	var strict decodeFixture
+	if err := Decode(data, &strict, true); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("Decode() error = %v, want overwrite-preventing duplicate error", err)
 	}
 }
 

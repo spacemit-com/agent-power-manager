@@ -10,7 +10,6 @@ import (
 
 	"apm/internal/cloud"
 	"apm/internal/domain"
-	"apm/internal/utils/jsonstrict"
 )
 
 // GetMCP 直接读取精确版本的 MCP 定义，不写入 Cache 或 staging，读取前必须响应取消。
@@ -54,12 +53,5 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPSer
 }
 
 func decodeMCPServer(contents []byte) (domain.MCPServer, error) {
-	var server domain.MCPServer
-	if err := jsonstrict.Decode(contents, &server, true); err != nil {
-		return domain.MCPServer{}, err
-	}
-	if err := server.Validate(); err != nil {
-		return domain.MCPServer{}, err
-	}
-	return server, nil
+	return domain.DecodeMCPServerJSON(contents)
 }

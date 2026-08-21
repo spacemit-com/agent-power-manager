@@ -1,10 +1,13 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+
+	"apm/internal/utils/jsonstrict"
 )
 
 // MCPTransport 表示 MCP 服务的连接方式。
@@ -26,6 +29,53 @@ type MCPServer struct {
 	Command   string       `json:"command,omitempty"`
 	Args      []string     `json:"args,omitempty"`
 	URL       string       `json:"url,omitempty"`
+}
+
+type presentJSONValue[T any] struct {
+	value   T
+	present bool
+}
+
+func (value *presentJSONValue[T]) UnmarshalJSON(data []byte) error {
+	value.present = true
+	return json.Unmarshal(data, &value.value)
+}
+
+type mcpServerWire struct {
+	Transport MCPTransport               `json:"transport"`
+	Command   presentJSONValue[string]   `json:"command"`
+	Args      presentJSONValue[[]string] `json:"args"`
+	URL       presentJSONValue[string]   `json:"url"`
+}
+
+// DecodeMCPServerJSON 严格解码 Cloud MCP 定义，并按字段是否出现校验 stdio/http 判别联合。
+// 即使禁用字段的值为 null、空字符串或空数组，只要字段出现就拒绝。
+func DecodeMCPServerJSON(contents []byte) (MCPServer, error) {
+	var wire mcpServerWire
+	if err := jsonstrict.Decode(contents, &wire, true); err != nil {
+		return MCPServer{}, err
+	}
+
+	server := MCPServer{
+		Transport: wire.Transport,
+		Command:   wire.Command.value,
+		Args:      wire.Args.value,
+		URL:       wire.URL.value,
+	}
+	switch server.Transport {
+	case MCPTransportStdio:
+		if !wire.Command.present || wire.URL.present {
+			return MCPServer{}, fmt.Errorf("stdio requires command presence and forbids URL presence: %w", ErrInvalidMCPServer)
+		}
+	case MCPTransportHTTP:
+		if !wire.URL.present || wire.Command.present || wire.Args.present {
+			return MCPServer{}, fmt.Errorf("http requires URL presence and forbids command/args presence: %w", ErrInvalidMCPServer)
+		}
+	}
+	if err := server.Validate(); err != nil {
+		return MCPServer{}, err
+	}
+	return server, nil
 }
 
 // Validate 校验 MCP 启动定义的判别联合，不清洗或改写原始值。

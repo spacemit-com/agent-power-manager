@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Decode 解码唯一 JSON 值，并在正式解码前递归拒绝所有对象中的重复键。
@@ -62,10 +64,11 @@ func walkValue(decoder *json.Decoder) error {
 			if !ok {
 				return fmt.Errorf("object key has type %T", keyToken)
 			}
-			if _, duplicate := keys[key]; duplicate {
+			folded := foldName(key)
+			if _, duplicate := keys[folded]; duplicate {
 				return fmt.Errorf("duplicate object key %q", key)
 			}
-			keys[key] = struct{}{}
+			keys[folded] = struct{}{}
 			if err := walkValue(decoder); err != nil {
 				return err
 			}
@@ -80,6 +83,36 @@ func walkValue(decoder *json.Decoder) error {
 		return requireClosingDelimiter(decoder, ']')
 	default:
 		return fmt.Errorf("unexpected opening delimiter %q", delimiter)
+	}
+}
+
+// foldName 与 encoding/json 的结构体字段匹配使用相同的 Unicode SimpleFold
+// 等价类，避免大小写变体绕过重复键检查后覆盖已解码字段。
+func foldName(name string) string {
+	folded := make([]byte, 0, len(name))
+	for index := 0; index < len(name); {
+		if character := name[index]; character < utf8.RuneSelf {
+			if character >= 'a' && character <= 'z' {
+				character -= 'a' - 'A'
+			}
+			folded = append(folded, character)
+			index++
+			continue
+		}
+		character, width := utf8.DecodeRuneInString(name[index:])
+		folded = utf8.AppendRune(folded, smallestSimpleFoldRune(character))
+		index += width
+	}
+	return string(folded)
+}
+
+func smallestSimpleFoldRune(character rune) rune {
+	for {
+		next := unicode.SimpleFold(character)
+		if next <= character {
+			return next
+		}
+		character = next
 	}
 }
 

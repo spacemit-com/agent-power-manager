@@ -32,21 +32,31 @@ func TestDownloadVerifiedContentStagesExactBytesWithPrivateMode(t *testing.T) {
 		requests = append(requests, r.URL.Path)
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
-	temporary, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", t.TempDir())
+	directory := openTestPinnedDirectory(t, t.TempDir())
+	temporary, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", directory, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Remove(temporary) })
+	t.Cleanup(func() { _ = temporary.remove() })
 
-	got, err := os.ReadFile(temporary)
+	opened, err := temporary.openRead()
 	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(opened)
+	if err != nil {
+		_ = opened.Close()
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, contents) {
 		t.Fatalf("temporary contents = %q, want exact %q", got, contents)
 	}
-	info, err := os.Stat(temporary)
+	info, err := opened.Stat()
 	if err != nil {
+		_ = opened.Close()
+		t.Fatal(err)
+	}
+	if err := opened.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if mode := info.Mode().Perm(); mode != 0o600 {
@@ -121,10 +131,11 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parent := t.TempDir()
+			directory := openTestPinnedDirectory(t, parent)
 			client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
 				tt.serve(t, w, r)
 			})
-			_, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", parent)
+			_, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", directory, 0o600)
 			if !errors.Is(err, cloud.ErrIntegrity) {
 				t.Fatalf("downloadVerifiedContent() error = %v, want ErrIntegrity", err)
 			}
@@ -154,12 +165,22 @@ func TestDownloadVerifiedContentRejectsInvalidMetadataAndProtocol(t *testing.T) 
 			wantHits: 1,
 			want:     cloud.ErrInvalidResponse,
 		},
+		{
+			name: "response media type parameters",
+			content: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+				_, _ = w.Write(contents)
+			},
+			wantHits: 1,
+			want:     cloud.ErrInvalidResponse,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var contentHits atomic.Int32
 			parent := t.TempDir()
+			directory := openTestPinnedDirectory(t, parent)
 			client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/content") {
 					contentHits.Add(1)
@@ -168,7 +189,7 @@ func TestDownloadVerifiedContentRejectsInvalidMetadataAndProtocol(t *testing.T) 
 				}
 				writeExactMetadata(t, w, remoteAgentRef, contents, tt.override)
 			})
-			_, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", parent)
+			_, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", directory, 0o600)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("downloadVerifiedContent() error = %v, want %v", err, tt.want)
 			}
@@ -180,12 +201,70 @@ func TestDownloadVerifiedContentRejectsInvalidMetadataAndProtocol(t *testing.T) 
 	}
 }
 
+func TestDownloadVerifiedContentClassifiesContentLengthSentinels(t *testing.T) {
+	contents := []byte("verified bytes")
+	tests := []struct {
+		name          string
+		contentLength int64
+		want          error
+	}{
+		{name: "unknown minus one", contentLength: -1},
+		{name: "invalid negative", contentLength: -2, want: cloud.ErrInvalidResponse},
+		{name: "nonnegative mismatch", contentLength: int64(len(contents) + 1), want: cloud.ErrIntegrity},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metadata := fmt.Sprintf(`{"type":"agent","name":"demo-agent","version":"v1.2.3","description":"","change_summary":"","content_type":"application/yaml","content_size":%d,"content_md5":"%s","published_at":"%s","status":"published"}`, len(contents), md5Hex(contents), testPublished)
+			client, err := New("https://apc.example.com", &http.Client{
+				Timeout: time.Second,
+				Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+					body := metadata
+					contentType := "application/json"
+					contentLength := int64(len(metadata))
+					if strings.HasSuffix(request.URL.Path, "/content") {
+						body = string(contents)
+						contentType = "application/yaml"
+						contentLength = tt.contentLength
+					}
+					return &http.Response{
+						StatusCode:    http.StatusOK,
+						Header:        http.Header{"Content-Type": []string{contentType}},
+						Body:          io.NopCloser(strings.NewReader(body)),
+						ContentLength: contentLength,
+						Request:       request,
+					}, nil
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent := t.TempDir()
+			directory := openTestPinnedDirectory(t, parent)
+			temporary, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", directory, 0o600)
+			if tt.want == nil {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if removeErr := temporary.remove(); removeErr != nil {
+					t.Fatal(removeErr)
+				}
+				return
+			}
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("downloadVerifiedContent() error = %v, want %v", err, tt.want)
+			}
+			assertDirectoryEmpty(t, parent)
+		})
+	}
+}
+
 func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testing.T) {
 	t.Run("cancelled before request", func(t *testing.T) {
 		client := newRemoteTestClient(t, "http://127.0.0.1:1")
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := client.downloadVerifiedContent(ctx, remoteAgentRef, "application/yaml", t.TempDir())
+		directory := openTestPinnedDirectory(t, t.TempDir())
+		_, err := client.downloadVerifiedContent(ctx, remoteAgentRef, "application/yaml", directory, 0o600)
 		if !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
 			t.Fatalf("downloadVerifiedContent() error = %v, want only context.Canceled classification", err)
 		}
@@ -208,10 +287,11 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 		defer server.Close()
 		client := newRemoteTestClient(t, server.URL)
 		parent := t.TempDir()
+		directory := openTestPinnedDirectory(t, parent)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() {
-			_, err := client.downloadVerifiedContent(ctx, remoteAgentRef, "application/yaml", parent)
+			_, err := client.downloadVerifiedContent(ctx, remoteAgentRef, "application/yaml", directory, 0o600)
 			done <- err
 		}()
 		<-started
@@ -238,7 +318,8 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", t.TempDir())
+		directory := openTestPinnedDirectory(t, t.TempDir())
+		_, err = client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", directory, 0o600)
 		if !errors.Is(err, transportErr) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
 			t.Fatalf("downloadVerifiedContent() error = %v, want only transport identity", err)
 		}
@@ -288,4 +369,18 @@ func assertDirectoryEmpty(t *testing.T, directory string) {
 	if len(entries) != 0 {
 		t.Fatalf("directory %q contains temporary residue: %v", directory, entries)
 	}
+}
+
+func openTestPinnedDirectory(t *testing.T, path string) *pinnedDirectory {
+	t.Helper()
+	directory, err := openPinnedDirectory(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := directory.close(); err != nil {
+			t.Errorf("close pinned test directory: %v", err)
+		}
+	})
+	return directory
 }

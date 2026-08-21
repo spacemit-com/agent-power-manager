@@ -41,6 +41,159 @@ func TestDownloadAgentPreservesRawBytesAndPublishesMode(t *testing.T) {
 	}
 }
 
+func TestDownloadAgentAcceptsPhysicalParentThroughSymlinkedAncestor(t *testing.T) {
+	contents := []byte("schema_version: 1\n")
+	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteAgentRef, contents)
+	})
+	physicalRoot := t.TempDir()
+	physicalParent := filepath.Join(physicalRoot, "private", "tmp")
+	if err := os.MkdirAll(physicalParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "var")
+	if err := os.Symlink(filepath.Join(physicalRoot, "private"), aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(aliasRoot, "tmp", "agent.yaml")
+
+	if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(physicalParent, "agent.yaml")); err != nil || !bytes.Equal(got, contents) {
+		t.Fatalf("physical destination = %q, %v, want %q", got, err, contents)
+	}
+}
+
+func TestDownloadAgentPinsParentAcrossAncestorSubstitution(t *testing.T) {
+	contents := []byte("schema_version: 1\n")
+	contentStarted := make(chan struct{})
+	releaseContent := make(chan struct{})
+	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/content") {
+			close(contentStarted)
+			<-releaseContent
+		}
+		serveValidContent(t, w, r, remoteAgentRef, contents)
+	})
+	root := t.TempDir()
+	parent := filepath.Join(root, "destination")
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	originalParent := filepath.Join(root, "pinned-original")
+	attackerParent := filepath.Join(root, "attacker")
+	if err := os.Mkdir(attackerParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(parent, "agent.yaml")
+	done := make(chan error, 1)
+	go func() {
+		done <- client.DownloadAgent(context.Background(), remoteAgentRef, destination)
+	}()
+	<-contentStarted
+	if err := os.Rename(parent, originalParent); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(attackerParent, parent); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseContent)
+
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(originalParent, "agent.yaml")); err != nil || !bytes.Equal(got, contents) {
+		t.Fatalf("pinned destination = %q, %v, want %q", got, err, contents)
+	}
+	if entries, err := os.ReadDir(attackerParent); err != nil || len(entries) != 0 {
+		t.Fatalf("attacker directory changed: %v, %v", entries, err)
+	}
+}
+
+func TestDownloadAgentChmodsStagedDescriptorBeforeNoReplacePublication(t *testing.T) {
+	contents := []byte("schema_version: 1\n")
+	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteAgentRef, contents)
+	})
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "agent.yaml")
+	client.beforeAgentPublish = func(staged *stagedContent) {
+		opened, err := staged.openRead()
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := opened.Stat()
+		if closeErr := opened.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode := info.Mode().Perm(); mode != 0o644 {
+			t.Fatalf("staged Agent mode before publication = %o, want 644", mode)
+		}
+		if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("destination visible before no-replace publication: %v", err)
+		}
+		if err := os.WriteFile(destination, []byte("competitor"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := client.DownloadAgent(context.Background(), remoteAgentRef, destination)
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("DownloadAgent() error = %v, want no-replace ErrUnsafeContent", err)
+	}
+	if got, readErr := os.ReadFile(destination); readErr != nil || string(got) != "competitor" {
+		t.Fatalf("competitor destination = %q, %v, want preserved", got, readErr)
+	}
+	entries, readErr := os.ReadDir(parent)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 1 || entries[0].Name() != "agent.yaml" {
+		t.Fatalf("Agent failure cleanup left residue: %v", entries)
+	}
+}
+
+func TestDownloadAgentRejectsStagedEntrySubstitutionWithoutDeletingReplacement(t *testing.T) {
+	contents := []byte("schema_version: 1\n")
+	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteAgentRef, contents)
+	})
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "agent.yaml")
+	sentinel := filepath.Join(parent, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var replacement string
+	client.beforeAgentPublish = func(staged *stagedContent) {
+		replacement = filepath.Join(parent, staged.name)
+		if err := os.Rename(replacement, replacement+".owned-moved"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(sentinel, replacement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := client.DownloadAgent(context.Background(), remoteAgentRef, destination)
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("DownloadAgent() error = %v, want substituted-stage ErrUnsafeContent", err)
+	}
+	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination published from substituted entry: %v", statErr)
+	}
+	if info, statErr := os.Lstat(replacement); statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("replacement entry was deleted or changed: %v, %v", info, statErr)
+	}
+	if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "preserve" {
+		t.Fatalf("replacement target = %q, %v, want preserved", got, readErr)
+	}
+}
+
 func TestDownloadAgentRejectsMD5MismatchWithoutDestination(t *testing.T) {
 	contents := []byte("schema_version: 1\n")
 	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +212,7 @@ func TestDownloadAgentRejectsMD5MismatchWithoutDestination(t *testing.T) {
 	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("destination remains: %v", statErr)
 	}
-	assertNoSiblingTemporary(t, destination)
+	assertDirectoryEmpty(t, filepath.Dir(destination))
 }
 
 func TestDownloadAgentRejectsUnsafeOrExistingDestinationWithoutRequest(t *testing.T) {
@@ -135,18 +288,5 @@ func TestDownloadAgentRejectsWrongReferenceBeforeRequest(t *testing.T) {
 	}
 	if requests.Load() != 0 {
 		t.Fatalf("requests = %d, want 0", requests.Load())
-	}
-}
-
-func assertNoSiblingTemporary(t *testing.T, destination string) {
-	t.Helper()
-	entries, err := os.ReadDir(filepath.Dir(destination))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "."+filepath.Base(destination)+".tmp-") {
-			t.Fatalf("temporary residue remains beside destination: %s", entry.Name())
-		}
 	}
 }

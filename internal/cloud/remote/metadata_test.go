@@ -100,6 +100,45 @@ func TestResolveExactValidatesPublishedMetadata(t *testing.T) {
 	}
 }
 
+func TestResolvePublishedMetadataRejectsYankDetails(t *testing.T) {
+	tests := []struct {
+		name       string
+		yankedAt   any
+		yankReason any
+		wantErr    bool
+	}{
+		{name: "absent"},
+		{name: "empty", yankedAt: "", yankReason: ""},
+		{name: "yanked time", yankedAt: "2026-08-19T01:02:03Z", wantErr: true},
+		{name: "yank reason", yankReason: "Security issue", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				metadata := validMetadata("skill", "demo", "v1.0.0")
+				metadata["status"] = "published"
+				if tt.yankedAt != nil {
+					metadata["yanked_at"] = tt.yankedAt
+				}
+				if tt.yankReason != nil {
+					metadata["yank_reason"] = tt.yankReason
+				}
+				writeJSON(t, w, metadata)
+			}))
+			defer server.Close()
+			client := newRemoteTestClient(t, server.URL)
+
+			_, err := client.Resolve(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"})
+			if tt.wantErr && !errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("Resolve() error = %v, want ErrInvalidResponse", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Resolve() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestResolveRejectsInvalidQueryWithoutRequest(t *testing.T) {
 	t.Parallel()
 

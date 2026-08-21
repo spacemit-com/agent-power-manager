@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"apm/internal/cloud"
 	"apm/internal/domain"
-	"apm/internal/utils/jsonstrict"
 )
 
 var _ cloud.MCPSource = (*Client)(nil)
@@ -22,30 +22,38 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (server domain
 	if ref.Type != domain.PowerTypeMCP || !validResolveQuery(ref) || ref.Version == "" {
 		return domain.MCPServer{}, fmt.Errorf("get invalid remote MCP identity: %w", cloud.ErrNotFound)
 	}
-	temporaryDirectory, err := c.createMCPTemporaryDirectory()
+	temporaryParent, temporaryDirectory, err := c.createMCPTemporaryDirectory()
 	if err != nil {
 		return domain.MCPServer{}, err
 	}
+	var temporary *stagedContent
 	defer func() {
-		if err := os.RemoveAll(temporaryDirectory); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove owned remote MCP temporary directory %q: %w", temporaryDirectory, err))
+		if temporary != nil {
+			resultErr = errors.Join(resultErr, temporary.remove())
 		}
+		if c.beforeMCPCleanup != nil {
+			c.beforeMCPCleanup(temporaryDirectory)
+		}
+		resultErr = errors.Join(resultErr, temporaryDirectory.close(), temporaryParent.close())
 	}()
-	temporary, err := c.downloadVerifiedContent(ctx, ref, "application/json", temporaryDirectory)
+	temporary, err = c.downloadVerifiedContent(ctx, ref, "application/json", temporaryDirectory.directory, 0o600)
 	if err != nil {
 		return domain.MCPServer{}, fmt.Errorf("download remote MCP content: %w", err)
 	}
-	contents, err := os.ReadFile(temporary)
+	opened, err := temporary.openRead()
 	if err != nil {
-		return domain.MCPServer{}, fmt.Errorf("read verified remote MCP content %q: %w", temporary, err)
+		return domain.MCPServer{}, fmt.Errorf("open verified remote MCP content: %w", err)
+	}
+	contents, readErr := io.ReadAll(opened)
+	closeErr := opened.Close()
+	if readErr != nil || closeErr != nil {
+		return domain.MCPServer{}, fmt.Errorf("read verified remote MCP content: %w", errors.Join(readErr, closeErr))
 	}
 	if err := ctx.Err(); err != nil {
 		return domain.MCPServer{}, fmt.Errorf("decode remote MCP: %w", err)
 	}
-	if err := jsonstrict.Decode(contents, &server, true); err != nil {
-		return domain.MCPServer{}, fmt.Errorf("decode remote MCP definition: %w", errors.Join(cloud.ErrInvalidResponse, err))
-	}
-	if err := server.Validate(); err != nil {
+	server, err = domain.DecodeMCPServerJSON(contents)
+	if err != nil {
 		return domain.MCPServer{}, fmt.Errorf("validate remote MCP definition: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	if err := ctx.Err(); err != nil {
@@ -54,19 +62,22 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (server domain
 	return server.Clone(), nil
 }
 
-func (c *Client) createMCPTemporaryDirectory() (string, error) {
-	if c.mcpTempParent != "" {
-		if err := validateRemotePhysicalDirectory(c.mcpTempParent); err != nil {
-			return "", err
+func (c *Client) createMCPTemporaryDirectory() (*pinnedDirectory, *ownedDirectory, error) {
+	temporaryParentPath := c.mcpTempParent
+	if temporaryParentPath == "" {
+		resolved, err := filepath.EvalSymlinks(filepath.Clean(os.TempDir()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve system remote MCP temporary directory: %w", errors.Join(cloud.ErrUnsafeContent, err))
 		}
+		temporaryParentPath = resolved
 	}
-	temporaryDirectory, err := os.MkdirTemp(c.mcpTempParent, "apm-remote-mcp-")
+	temporaryParent, err := openPinnedDirectory(temporaryParentPath)
 	if err != nil {
-		return "", fmt.Errorf("create remote MCP temporary directory: %w", err)
+		return nil, nil, err
 	}
-	if err := validateRemotePhysicalDirectory(filepath.Clean(temporaryDirectory)); err != nil {
-		removeErr := os.RemoveAll(temporaryDirectory)
-		return "", errors.Join(err, removeErr)
+	temporaryDirectory, err := temporaryParent.createOwned("apm-remote-mcp-")
+	if err != nil {
+		return nil, nil, errors.Join(err, temporaryParent.close())
 	}
-	return temporaryDirectory, nil
+	return temporaryParent, temporaryDirectory, nil
 }
