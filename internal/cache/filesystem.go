@@ -25,6 +25,7 @@ type FilesystemCache struct {
 	stagingTempPath string
 	copyDir         func(string, string) error
 	readFile        func(string) ([]byte, error)
+	removeAll       func(string) error
 
 	locksMu   sync.Mutex
 	pathLocks map[string]*sync.Mutex
@@ -55,6 +56,7 @@ func NewFilesystem(source Source) (*FilesystemCache, error) {
 		stagingTempPath: stagingTempPath,
 		copyDir:         filesystem.CopyDir,
 		readFile:        os.ReadFile,
+		removeAll:       os.RemoveAll,
 		pathLocks:       make(map[string]*sync.Mutex),
 	}, nil
 }
@@ -254,12 +256,16 @@ func cachedAgent(root string) (bool, error) {
 	return true, nil
 }
 
-func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (string, error) {
+func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, resultErr error) {
 	candidate, err := c.newStagingCandidate()
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(candidate)
+	defer func() {
+		if err := c.removeAll(candidate); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("clean staging candidate %q: %w", candidate, err))
+		}
+	}()
 	source := filepath.Join(c.cacheRoot, "skills", ref.Name, ref.Version)
 	target := filepath.Join(candidate, "skills", ref.Name)
 	if err := c.copyDir(source, target); err != nil {
@@ -271,12 +277,16 @@ func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (string, error) {
 	return c.stagingPath, nil
 }
 
-func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (string, error) {
+func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (stagingRoot string, resultErr error) {
 	candidate, err := c.newStagingCandidate()
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(candidate)
+	defer func() {
+		if err := c.removeAll(candidate); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("clean staging candidate %q: %w", candidate, err))
+		}
+	}()
 	source := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version, "agent.yaml")
 	contents, err := c.readFile(source)
 	if err != nil {
