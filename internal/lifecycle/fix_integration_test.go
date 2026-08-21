@@ -181,6 +181,80 @@ func TestFixIntegrationDamagedJournalsStayReadOnlyUntilFixFailsClosed(t *testing
 	}
 }
 
+func TestRemoteFixRecoversFilesystemJournalAfterServerClose(t *testing.T) {
+	configureLifecycleTrustedTemp(t)
+	server := newLifecycleRemoteServer(t)
+	harness := newProviderLifecycleHarness(t, server.client(t))
+	ref := domain.PowerRef{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"}
+	if _, err := harness.install.Install(context.Background(), cli.Flags{
+		Agent: "bibit", Type: "skill", Name: ref.Name, Version: ref.Version,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	skill, err := harness.registry.ResolveSkill(domain.AgentBibit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := skill.TargetPath(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(target, "SKILL.md")
+	markerBeforeFix, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.repository.Remove(domain.AgentBibit, ref.Type, ref.Name); err != nil {
+		t.Fatal(err)
+	}
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "00112233445566778899aabbccddeeff"
+	txDir := filepath.Join(filepath.Dir(target), ".apm-transactions", id)
+	journal := transaction.Journal{
+		SchemaVersion: 1, TransactionID: id, Driver: transaction.DriverFilesystem,
+		Operation: transaction.OperationInstall, Phase: transaction.PhasePublishing,
+		Agent: domain.AgentBibit, Power: ref,
+		Filesystem: &transaction.FilesystemJournalPayload{
+			StagingRoot: staging, TargetPath: target, TransactionDir: txDir,
+			BackupPath: filepath.Join(txDir, "backup"),
+		},
+	}
+	journalPath := writeIntegrationJournal(t, journal)
+	requestsBeforeClose := server.requestCount()
+	server.server.Close()
+
+	recoverer := &countingRecoverer{Recoverer: harnessTransactions(t, harness)}
+	if err := newIntegrationFixer(t, recoverer).Fix(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if recoverer.calls != 1 {
+		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
+	}
+	if got := server.requestCount(); got != requestsBeforeClose {
+		t.Fatalf("offline Fix made %d requests, want unchanged %d", got, requestsBeforeClose)
+	}
+	assertJournalAbsent(t, journalPath)
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got != ref {
+		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
+	}
+	markerAfterFix, err := os.ReadFile(markerPath)
+	if err != nil || !bytes.Equal(markerAfterFix, markerBeforeFix) {
+		t.Fatalf("Fix marker = %q, %v; want %q", markerAfterFix, err, markerBeforeFix)
+	}
+	assertMCPHarnessEnvironment(t, harness.fakeBin, filepath.Join(harness.root, "user-home"))
+	if _, err := os.Lstat(harness.calls); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("filesystem Skill Fix unexpectedly invoked an Agent CLI: %v", err)
+	}
+	manifestPath, err := paths.ManifestPath(domain.AgentBibit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPathsWithinRoot(t, harness.root, journalPath, manifestPath, target, txDir)
+}
+
 func harnessTransactions(t *testing.T, harness *isolatedMCPHarness) *transaction.Service {
 	t.Helper()
 	transactions, err := transaction.NewManager(harness.repository, harness.registry)

@@ -1,21 +1,35 @@
 package lifecycle
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"apm/internal/adapter"
 	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/cloud/local"
+	"apm/internal/cloud/remote"
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
@@ -1072,5 +1086,453 @@ func (h *isolatedPluginHarness) assertOnlyFakeExecutables() {
 		os.Getenv("CODEX_HOME"), os.Getenv("CLAUDE_CONFIG_DIR"), os.Getenv("HERMES_HOME"), os.Getenv("BIANBU_AGENT_HOME"),
 	} {
 		assertPathsWithinRoot(h.t, h.root, path)
+	}
+}
+
+type lifecycleRemoteResource struct {
+	ref         domain.PowerRef
+	contentType string
+	content     []byte
+}
+
+type lifecycleRemoteServer struct {
+	server   *httptest.Server
+	resource map[domain.PowerRef]lifecycleRemoteResource
+	mu       sync.Mutex
+	requests map[string]int
+}
+
+func newLifecycleRemoteServer(t *testing.T) *lifecycleRemoteServer {
+	t.Helper()
+	resourcesRoot, err := filepath.Abs(filepath.Join("..", "cloud", "resources"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &lifecycleRemoteServer{
+		resource: make(map[domain.PowerRef]lifecycleRemoteResource), requests: make(map[string]int),
+	}
+	for _, ref := range []domain.PowerRef{
+		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
+		{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"},
+		{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"},
+	} {
+		contentType, content := lifecycleFixtureContent(t, resourcesRoot, ref)
+		server.resource[ref] = lifecycleRemoteResource{ref: ref, contentType: contentType, content: content}
+	}
+	server.server = httptest.NewServer(http.HandlerFunc(server.serveHTTP))
+	t.Cleanup(server.server.Close)
+	return server
+}
+
+func lifecycleFixtureContent(t *testing.T, root string, ref domain.PowerRef) (string, []byte) {
+	t.Helper()
+	switch ref.Type {
+	case domain.PowerTypeSkill:
+		return "application/gzip", lifecycleDeterministicArchive(t, filepath.Join(root, "skills", ref.Name, ref.Version))
+	case domain.PowerTypePlugin:
+		return "application/gzip", lifecycleDeterministicArchive(t, filepath.Join(root, "plugins", ref.Name, ref.Version))
+	case domain.PowerTypeMCP:
+		return "application/json", lifecycleReadFixture(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
+	case domain.PowerTypeAgent:
+		return "application/yaml", lifecycleReadFixture(t, filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml"))
+	default:
+		t.Fatalf("unsupported lifecycle fixture type %q", ref.Type)
+		return "", nil
+	}
+}
+
+func lifecycleReadFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
+}
+
+func lifecycleDeterministicArchive(t *testing.T, root string) []byte {
+	t.Helper()
+	var paths []string
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path != root {
+			paths = append(paths, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(paths)
+	var output bytes.Buffer
+	gzipWriter := gzip.NewWriter(&output)
+	gzipWriter.Header.ModTime = time.Unix(0, 0).UTC()
+	gzipWriter.Header.OS = 255
+	tarWriter := tar.NewWriter(gzipWriter)
+	for _, path := range paths {
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		header := &tar.Header{
+			Name: filepath.ToSlash(relative), Uid: 0, Gid: 0,
+			ModTime: time.Unix(0, 0).UTC(), Format: tar.FormatUSTAR,
+		}
+		switch {
+		case info.IsDir():
+			header.Typeflag, header.Mode = tar.TypeDir, 0o755
+		case info.Mode().IsRegular():
+			header.Typeflag = tar.TypeReg
+			header.Mode = int64(0o644 | info.Mode().Perm()&0o111)
+			header.Size = info.Size()
+		default:
+			t.Fatalf("lifecycle fixture path %q is not physical", path)
+		}
+		if err := tarWriter.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().IsRegular() {
+			file, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, copyErr := io.Copy(tarWriter, file)
+			closeErr := file.Close()
+			if err := errors.Join(copyErr, closeErr); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, request *http.Request) {
+	server.mu.Lock()
+	server.requests[request.URL.Path]++
+	server.mu.Unlock()
+	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	if request.Method != http.MethodGet || len(segments) < 7 || segments[0] != "api" || segments[1] != "v1" || segments[2] != "resources" || segments[5] != "versions" {
+		http.NotFound(writer, request)
+		return
+	}
+	ref := domain.PowerRef{Type: domain.PowerType(segments[3]), Name: segments[4], Version: segments[6]}
+	resource, found := server.resource[ref]
+	if !found {
+		http.NotFound(writer, request)
+		return
+	}
+	if len(segments) == 7 {
+		digest := md5.Sum(resource.content)
+		writeLifecycleJSON(writer, map[string]any{
+			"type": ref.Type, "name": ref.Name, "version": ref.Version,
+			"description": "lifecycle fixture", "change_summary": "fixture",
+			"content_type": resource.contentType, "content_size": len(resource.content),
+			"content_md5": fmt.Sprintf("%x", digest), "published_at": "2026-08-01T00:00:00Z",
+			"status": "published", "yanked_at": "", "yank_reason": "",
+		})
+		return
+	}
+	if len(segments) == 8 && segments[7] == "content" {
+		writer.Header().Set("Content-Type", resource.contentType)
+		writer.Header().Set("Content-Length", strconv.Itoa(len(resource.content)))
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write(resource.content)
+		return
+	}
+	http.NotFound(writer, request)
+}
+
+func writeLifecycleJSON(writer http.ResponseWriter, value any) {
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(writer).Encode(value)
+}
+
+func (server *lifecycleRemoteServer) client(t *testing.T) cloud.Client {
+	t.Helper()
+	client, err := remote.New(server.server.URL, &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func (server *lifecycleRemoteServer) resetRequests() {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.requests = make(map[string]int)
+}
+
+func (server *lifecycleRemoteServer) requestCount() int {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	total := 0
+	for _, count := range server.requests {
+		total += count
+	}
+	return total
+}
+
+func (server *lifecycleRemoteServer) requestCountSuffix(suffix string) int {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	total := 0
+	for path, count := range server.requests {
+		if strings.HasSuffix(path, suffix) {
+			total += count
+		}
+	}
+	return total
+}
+
+func configureLifecycleTrustedTemp(t *testing.T) {
+	t.Helper()
+	parent := os.Getenv("XDG_RUNTIME_DIR")
+	if parent == "" {
+		var err error
+		parent, err = os.UserHomeDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.MkdirTemp(parent, ".apm-lifecycle-remote-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Errorf("remove lifecycle trusted temp: %v", err)
+		}
+	})
+	t.Setenv("TMPDIR", root)
+}
+
+func newProviderLifecycleHarness(t *testing.T, client cloud.Client) *isolatedMCPHarness {
+	t.Helper()
+	harness := newIsolatedMCPHarness(t, domain.AgentBibit)
+	if err := os.WriteFile(filepath.Join(harness.fakeBin, "bibit"), []byte(fakeAgentCLIScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	assertProviderHarnessExecutables(t, harness.fakeBin, filepath.Join(harness.root, "user-home"))
+	for _, path := range []string{filepath.Dir(harness.root), harness.root} {
+		if err := os.Chmod(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	transactions, err := transaction.NewManager(harness.repository, harness.registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := lock.NewDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	powerCache, err := cache.NewFilesystem(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugins := newIntegrationPluginResources(t, client)
+	harness.install, err = NewInstall(locker, transactions, client, powerCache, plugins, harness.registry, harness.repository, version.NewSelector())
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness.uninstall, err = NewUninstall(locker, transactions, client, plugins, harness.registry, harness.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness.cloud = client
+	return harness
+}
+
+func assertProviderHarnessExecutables(t *testing.T, fakeBin, isolatedHome string) {
+	t.Helper()
+	assertMCPHarnessEnvironment(t, fakeBin, isolatedHome)
+	resolved, err := exec.LookPath("bibit")
+	want := filepath.Join(fakeBin, "bibit")
+	if err != nil || resolved != want {
+		t.Fatalf("LookPath(%q) = %q, %v; want exact fake executable %q", "bibit", resolved, err, want)
+	}
+}
+
+type lifecycleProviderState struct {
+	Manifest domain.PowerGroups
+	Nodes    []lifecycleStateNode
+}
+
+type lifecycleStateNode struct {
+	Path  string
+	Mode  fs.FileMode
+	Bytes string
+}
+
+func installLifecycleProviderState(t *testing.T, client cloud.Client) (*isolatedMCPHarness, lifecycleProviderState) {
+	t.Helper()
+	harness := newProviderLifecycleHarness(t, client)
+	for _, flags := range []cli.Flags{
+		{Agent: "bibit", Type: "skill", Name: "brief-status", Version: "v0.0.1"},
+		{Agent: "bibit", Type: "mcp", Name: "filesystem", Version: "v0.0.1"},
+		{Agent: "bibit", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"},
+		{Agent: "bibit", Type: "agent", Name: "bianbu-agent-default", Version: "v1.0.0"},
+	} {
+		result, err := harness.install.Install(context.Background(), flags)
+		if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+			t.Fatalf("Install(%+v) = %+v, %v", flags, result, err)
+		}
+	}
+	harness.assertManagedMCP(domain.AgentBibit, "filesystem", "v0.0.1", true)
+	harness.assertOnlyFakeExecutables()
+	manifest, err := harness.repository.List(domain.AgentBibit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := lifecycleProviderState{Manifest: manifest}
+	for _, root := range []struct{ label, path string }{
+		{label: "cache", path: harness.cacheHome},
+		{label: "apm", path: filepath.Join(harness.root, "home")},
+		{label: "agent", path: filepath.Join(harness.root, "agents", "bibit")},
+		{label: "mcp-state", path: harness.state},
+	} {
+		state.Nodes = append(state.Nodes, captureLifecycleTree(t, root.label, root.path)...)
+	}
+	return harness, state
+}
+
+func captureLifecycleTree(t *testing.T, label, root string) []lifecycleStateNode {
+	t.Helper()
+	var nodes []lifecycleStateNode
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		node := lifecycleStateNode{Path: label + "/" + filepath.ToSlash(relative)}
+		if entry.IsDir() {
+			node.Mode = 0o755
+		} else {
+			node.Mode = 0o644 | info.Mode().Perm()&0o111
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			node.Bytes = string(contents)
+		}
+		nodes = append(nodes, node)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return nodes
+}
+
+func TestRemoteProviderLifecycleMatchesLocal(t *testing.T) {
+	server := newLifecycleRemoteServer(t)
+	var localState, remoteState lifecycleProviderState
+	t.Run("local", func(t *testing.T) {
+		configureLifecycleTrustedTemp(t)
+		resources, err := filepath.Abs(filepath.Join("..", "cloud", "resources"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, err := local.New(resources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, localState = installLifecycleProviderState(t, client)
+	})
+	t.Run("remote", func(t *testing.T) {
+		configureLifecycleTrustedTemp(t)
+		_, remoteState = installLifecycleProviderState(t, server.client(t))
+	})
+	if !reflect.DeepEqual(localState, remoteState) {
+		t.Fatalf("lifecycle provider state differs:\nlocal:  %#v\nremote: %#v", localState, remoteState)
+	}
+}
+
+func TestRemoteMCPUninstallUsesCloudOnlyForPresentTarget(t *testing.T) {
+	for _, targetPresent := range []bool{false, true} {
+		t.Run(strconv.FormatBool(targetPresent), func(t *testing.T) {
+			configureLifecycleTrustedTemp(t)
+			server := newLifecycleRemoteServer(t)
+			harness := newProviderLifecycleHarness(t, server.client(t))
+			flags := cli.Flags{Agent: "bibit", Type: "mcp", Name: "filesystem", Version: "v0.0.1"}
+			if _, err := harness.install.Install(context.Background(), flags); err != nil {
+				t.Fatal(err)
+			}
+			if !targetPresent {
+				if err := os.Remove(filepath.Join(harness.state, "bianbu-agent-filesystem")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			server.resetRequests()
+			removed, err := harness.uninstall.Uninstall(context.Background(), cli.Flags{Agent: "bibit", Type: "mcp", Name: "filesystem"})
+			if err != nil || len(removed.Items) != 1 || removed.Items[0].Outcome != cli.UninstallOutcomeCompleted {
+				t.Fatalf("Uninstall() = %+v, %v", removed, err)
+			}
+			if targetPresent {
+				if got := server.requestCountSuffix("/versions/v0.0.1"); got != 1 {
+					t.Fatalf("exact MCP metadata requests = %d, want 1", got)
+				}
+				if got := server.requestCountSuffix("/versions/v0.0.1/content"); got != 1 {
+					t.Fatalf("exact MCP content requests = %d, want 1", got)
+				}
+				if got := server.requestCount(); got != 2 {
+					t.Fatalf("GetMCP request sequence = %d HTTP requests, want metadata+content only", got)
+				}
+			} else if got := server.requestCount(); got != 0 {
+				t.Fatalf("absent-target MCP uninstall made %d Cloud requests, want 0", got)
+			}
+			harness.assertManagedMCP(domain.AgentBibit, "filesystem", "", false)
+			harness.assertMCPOnlyPathsAbsent()
+			harness.assertOnlyFakeExecutables()
+		})
+	}
+}
+
+func TestRemotePluginUninstallRemainsOfflineAfterServerClose(t *testing.T) {
+	configureLifecycleTrustedTemp(t)
+	server := newLifecycleRemoteServer(t)
+	harness := newProviderLifecycleHarness(t, server.client(t))
+	if _, err := harness.install.Install(context.Background(), cli.Flags{
+		Agent: "bibit", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	requestsBeforeClose := server.requestCount()
+	server.server.Close()
+	removed, err := harness.uninstall.Uninstall(context.Background(), cli.Flags{Agent: "bibit", Type: "plugin", Name: "demo-plugin"})
+	if err != nil || len(removed.Items) != 1 || removed.Items[0].Outcome != cli.UninstallOutcomeCompleted {
+		t.Fatalf("offline Plugin Uninstall() = %+v, %v", removed, err)
+	}
+	if got := server.requestCount(); got != requestsBeforeClose {
+		t.Fatalf("offline Plugin Uninstall made %d requests, want unchanged %d", got, requestsBeforeClose)
+	}
+	assertMCPHarnessEnvironment(t, harness.fakeBin, filepath.Join(harness.root, "user-home"))
+	if _, err := os.Lstat(harness.calls); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("filesystem Plugin lifecycle unexpectedly invoked an Agent CLI: %v", err)
 	}
 }
