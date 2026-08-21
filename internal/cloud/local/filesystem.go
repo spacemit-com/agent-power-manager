@@ -1,7 +1,6 @@
 package local
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode/utf8"
 
 	"apm/internal/cloud"
+	"apm/internal/cloud/contentpolicy"
 	fsutil "apm/internal/utils/filesystem"
 )
 
@@ -36,35 +35,7 @@ func unsafeContent(format string, args ...any) error {
 }
 
 func isUnsafePayload(contents []byte) bool {
-	archiveSignatures := [][]byte{
-		{0x50, 0x4b, 0x03, 0x04},
-		{0x50, 0x4b, 0x05, 0x06},
-		{0x50, 0x4b, 0x07, 0x08},
-		{0x1f, 0x8b},
-		{'B', 'Z', 'h'},
-		{0xfd, '7', 'z', 'X', 'Z', 0x00},
-		{'7', 'z', 0xbc, 0xaf, 0x27, 0x1c},
-		{'R', 'a', 'r', '!', 0x1a, 0x07},
-		{'!', '<', 'a', 'r', 'c', 'h', '>', '\n'},
-		{0x7f, 'E', 'L', 'F'},
-	}
-	for _, signature := range archiveSignatures {
-		if bytes.HasPrefix(contents, signature) {
-			return true
-		}
-	}
-	if len(contents) >= 262 && bytes.Equal(contents[257:262], []byte("ustar")) {
-		return true
-	}
-	if !utf8.Valid(contents) || bytes.IndexByte(contents, 0) >= 0 {
-		return true
-	}
-	for _, character := range contents {
-		if character < 0x20 && character != '\n' && character != '\r' && character != '\t' && character != '\f' {
-			return true
-		}
-	}
-	return false
+	return contentpolicy.IsUnsafeText(contents)
 }
 
 func absoluteDestination(destination string) (string, error) {

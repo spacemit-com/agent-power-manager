@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"apm/internal/cloud"
+	"apm/internal/cloud/contentpolicy"
 )
 
 const (
@@ -245,8 +246,9 @@ func scanArchive(ctx context.Context, archive *os.File, compressedSize int64) (*
 		if node.size > maxArchiveFileSize {
 			return unsafeRemoteFilesystem("remote archive file %q exceeds %d bytes", node.name, maxArchiveFileSize)
 		}
-		prefix := newArchivePrefix()
-		actual, copyErr := io.CopyN(prefix, input, node.size)
+		var contents bytes.Buffer
+		contents.Grow(int(node.size))
+		actual, copyErr := io.CopyN(&contents, input, node.size)
 		if copyErr != nil || actual != node.size {
 			if copyErr == nil {
 				copyErr = io.ErrUnexpectedEOF
@@ -260,8 +262,8 @@ func scanArchive(ctx context.Context, archive *os.File, compressedSize int64) (*
 		if exceedsArchiveRatio(actualTotal, compressedSize) {
 			return unsafeRemoteFilesystem("remote archive extraction ratio exceeds %d", maxArchiveRatio)
 		}
-		if unsafeArchivePayload(prefix.Bytes()) {
-			return unsafeRemoteFilesystem("remote archive file %q contains an archive or executable signature", node.name)
+		if contentpolicy.IsUnsafeText(contents.Bytes()) {
+			return unsafeRemoteFilesystem("remote archive file %q contains unsafe non-text content", node.name)
 		}
 		manifest.headers = append(manifest.headers, node)
 		manifest.nodes[node.name] = node
@@ -441,7 +443,9 @@ func (c *Client) extractArchiveFiles(
 			return createErr
 		}
 		*created = append(*created, staged)
-		actual, copyErr := io.CopyN(output, input, node.size)
+		var contents bytes.Buffer
+		contents.Grow(int(node.size))
+		actual, copyErr := io.CopyN(io.MultiWriter(output, &contents), input, node.size)
 		prepareErr := staged.prepareForClose(output, node.mode)
 		closeErr := closeExtractedArchiveFile(output, hooks)
 		if copyErr != nil || actual != node.size || prepareErr != nil || closeErr != nil {
@@ -449,6 +453,9 @@ func (c *Client) extractArchiveFiles(
 				copyErr = io.ErrUnexpectedEOF
 			}
 			return classifyArchiveError(ctx, fmt.Sprintf("extract remote archive file %q", node.name), errors.Join(copyErr, prepareErr, closeErr))
+		}
+		if contentpolicy.IsUnsafeText(contents.Bytes()) {
+			return unsafeRemoteFilesystem("remote archive file %q changed to unsafe non-text content during extraction", node.name)
 		}
 		if actual > maxArchiveTreeSize-actualTotal {
 			return unsafeRemoteFilesystem("remote archive exceeds %d extracted bytes", maxArchiveTreeSize)
@@ -594,55 +601,4 @@ func exceedsArchiveRatio(extracted, compressed int64) bool {
 		return false
 	}
 	return extracted > compressed*maxArchiveRatio
-}
-
-type archivePrefix struct {
-	contents []byte
-}
-
-func newArchivePrefix() *archivePrefix {
-	return &archivePrefix{contents: make([]byte, 0, archivePrefixSize)}
-}
-
-func (prefix *archivePrefix) Write(contents []byte) (int, error) {
-	remaining := archivePrefixSize - len(prefix.contents)
-	if remaining > 0 {
-		if len(contents) < remaining {
-			remaining = len(contents)
-		}
-		prefix.contents = append(prefix.contents, contents[:remaining]...)
-	}
-	return len(contents), nil
-}
-
-func (prefix *archivePrefix) Bytes() []byte {
-	return prefix.contents
-}
-
-func unsafeArchivePayload(contents []byte) bool {
-	for _, signature := range [][]byte{
-		{0x1f, 0x8b},
-		{'P', 'K', 0x03, 0x04},
-		{'P', 'K', 0x05, 0x06},
-		{'P', 'K', 0x07, 0x08},
-		{0x7f, 'E', 'L', 'F'},
-		{'M', 'Z'},
-		{0x00, 'a', 's', 'm'},
-		{0xfe, 0xed, 0xfa, 0xce},
-		{0xce, 0xfa, 0xed, 0xfe},
-		{0xfe, 0xed, 0xfa, 0xcf},
-		{0xcf, 0xfa, 0xed, 0xfe},
-		{0xca, 0xfe, 0xba, 0xbe},
-		{0xbe, 0xba, 0xfe, 0xca},
-		{0xca, 0xfe, 0xba, 0xbf},
-		{0xbf, 0xba, 0xfe, 0xca},
-	} {
-		if bytes.HasPrefix(contents, signature) {
-			return true
-		}
-	}
-	if len(contents) >= 262 && bytes.Equal(contents[257:262], []byte("ustar")) {
-		return true
-	}
-	return false
 }

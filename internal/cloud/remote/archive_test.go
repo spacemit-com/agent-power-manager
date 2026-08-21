@@ -164,6 +164,10 @@ func TestExtractArchiveRejectsNestedArchivesAndExecutablesByContent(t *testing.T
 		body []byte
 	}{
 		{name: "gzip", body: []byte{0x1f, 0x8b, 0x08, 0x00}},
+		{name: "bzip2 disguised as markdown", body: []byte{'B', 'Z', 'h', '9'}},
+		{name: "xz disguised as markdown", body: []byte{0xfd, '7', 'z', 'X', 'Z', 0x00}},
+		{name: "7z disguised as markdown", body: []byte{'7', 'z', 0xbc, 0xaf, 0x27, 0x1c}},
+		{name: "RAR disguised as markdown", body: []byte{'R', 'a', 'r', '!', 0x1a, 0x07, 0x01, 0x00}},
 		{name: "zip local", body: []byte{'P', 'K', 0x03, 0x04}},
 		{name: "zip empty", body: []byte{'P', 'K', 0x05, 0x06}},
 		{name: "tar", body: tarPayload},
@@ -174,6 +178,10 @@ func TestExtractArchiveRejectsNestedArchivesAndExecutablesByContent(t *testing.T
 		{name: "Mach-O 64 little endian", body: []byte{0xcf, 0xfa, 0xed, 0xfe}},
 		{name: "Mach-O fat", body: []byte{0xca, 0xfe, 0xba, 0xbe}},
 		{name: "Wasm", body: []byte{0x00, 'a', 's', 'm'}},
+		{name: "invalid UTF-8", body: []byte("valid prefix\n\xff")},
+		{name: "NUL in text", body: []byte("valid prefix\x00suffix")},
+		{name: "forbidden control byte", body: []byte("valid prefix\x01suffix")},
+		{name: "binary after old prefix boundary", body: append(bytes.Repeat([]byte("a"), archivePrefixSize), 0xff)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -182,6 +190,33 @@ func TestExtractArchiveRejectsNestedArchivesAndExecutablesByContent(t *testing.T
 			assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), archive, destination), destination)
 		})
 	}
+}
+
+func TestExtractArchiveAcceptsValidUTF8TextControls(t *testing.T) {
+	body := []byte("标题\tvalue\r\nnext\fpage\n")
+	archive := stageTarGz(t, testTarEntry{name: "notes.md", body: body})
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	if err := new(Client).extractArchive(context.Background(), archive, destination); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join(destination, "notes.md"))
+	if err != nil || !bytes.Equal(contents, body) {
+		t.Fatalf("published text = %q, %v, want %q", contents, err, body)
+	}
+}
+
+func TestExtractArchiveRevalidatesPayloadDuringExtraction(t *testing.T) {
+	archive := stageTarGz(t, testTarEntry{name: "safe.md", body: []byte("safe")})
+	replacement := testTarGzBytes(t, testTarEntry{name: "safe.md", body: []byte{'B', 'Z', 'h', '9'}})
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	err := new(Client).extractArchiveWithHooks(context.Background(), archive, destination, archiveHooks{
+		afterInspect: func() {
+			if err := os.WriteFile(filepath.Join(archive.directory.path, archive.name), replacement, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	})
+	assertUnsafeWithoutDestination(t, err, destination)
 }
 
 func TestExtractArchiveRejectsArchiveExtensionsCaseInsensitively(t *testing.T) {
@@ -732,7 +767,7 @@ func exactRatioTarGzBytes(t *testing.T, trailing []byte) []byte {
 	if err := writer.WriteHeader(&tar.Header{Name: "payload.md", Typeflag: tar.TypeReg, Mode: 0o644, Size: payloadSize}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.CopyN(writer, zeroReader{}, payloadSize); err != nil {
+	if _, err := io.CopyN(writer, repeatedByteReader('a'), payloadSize); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -879,12 +914,12 @@ func mixedEntropyEntry(name string, size int64, seed uint64) testTarEntry {
 			random := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
 			noise := make([]byte, 128<<10)
 			for index := range noise {
-				noise[index] = byte(random.Uint64())
+				noise[index] = byte(0x20 + random.Uint64()%0x5f)
 			}
 			if _, err := output.Write(noise); err != nil {
 				return err
 			}
-			_, err := io.CopyN(output, zeroReader{}, size-int64(len(noise)))
+			_, err := io.CopyN(output, repeatedByteReader('a'), size-int64(len(noise)))
 			return err
 		},
 	}
