@@ -36,6 +36,21 @@ func TestDownloadSkillRejectsSourceRootSwapBeforeDescriptorSnapshot(t *testing.T
 	assertUnsafeNoDownloadResidue(t, err, destination)
 }
 
+func TestOpenatSnapshotBackendDownloadsValidSkillWithoutOpenat2(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "skills", testSkillRef.Name, testSkillRef.Version)
+	writeTestFile(t, filepath.Join(source, "SKILL.md"), "skill")
+	writeTestFile(t, filepath.Join(source, "payload.md"), "payload")
+
+	snapshot, err := capturePhysicalTreeOpenat(context.Background(), root, source, nil, nil)
+	if err != nil {
+		t.Fatalf("capturePhysicalTreeOpenat() error = %v", err)
+	}
+	if err := snapshot.requireRegularFile("SKILL.md"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDownloadSkillRejectsFileGrowthBetweenMetadataAndDescriptorRead(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "skills", testSkillRef.Name, testSkillRef.Version)

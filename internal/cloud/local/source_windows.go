@@ -1,4 +1,4 @@
-//go:build linux
+//go:build windows
 
 package local
 
@@ -12,10 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"golang.org/x/sys/unix"
+	"golang.org/x/sys/windows"
 )
-
-const sourceResolveFlags = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS
 
 type treeCaptureState struct {
 	ctx            context.Context
@@ -25,7 +23,7 @@ type treeCaptureState struct {
 }
 
 func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string)) (*treeSnapshot, error) {
-	root, relative, err := openResourcesRoot(resourcesRoot, source)
+	root, relative, err := openResourcesRootHandle(resourcesRoot, source)
 	if err != nil {
 		return nil, err
 	}
@@ -36,14 +34,14 @@ func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, befo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	sourceDirectory, err := openAt(root, relative, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC)
+	sourceDirectory, err := openRelativeHandle(root, relative)
 	if err != nil {
 		return nil, unsafeContent("open physical source tree %q: %v", source, err)
 	}
 	defer sourceDirectory.Close()
 	info, err := sourceDirectory.Stat()
 	if err != nil || !info.IsDir() {
-		return nil, unsafeContent("stat physical source tree %q: %v", source, err)
+		return nil, unsafeContent("source tree %q is not a physical directory", source)
 	}
 	state := &treeCaptureState{ctx: ctx, beforeFileOpen: beforeFileOpen}
 	if err := state.captureDirectory(sourceDirectory, ""); err != nil {
@@ -53,12 +51,12 @@ func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, befo
 }
 
 func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, sizeLimit int64, beforeFileOpen func(string)) ([]byte, fs.FileMode, error) {
-	root, relative, err := openResourcesRoot(resourcesRoot, source)
+	root, relative, err := openResourcesRootHandle(resourcesRoot, source)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer root.Close()
-	pathFile, err := openPathAt(root, relative)
+	pathFile, err := openRelativeHandle(root, relative)
 	if err != nil {
 		return nil, 0, unsafeContent("open physical source file %q: %v", source, err)
 	}
@@ -73,7 +71,7 @@ func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, size
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
-	dataFile, err := openAt(root, relative, unix.O_RDONLY|unix.O_CLOEXEC)
+	dataFile, err := openRelativeHandle(root, relative)
 	if err != nil {
 		return nil, 0, unsafeContent("open verified source file %q: %v", source, err)
 	}
@@ -82,7 +80,7 @@ func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, size
 	if err != nil || !dataInfo.Mode().IsRegular() || !os.SameFile(pathInfo, dataInfo) {
 		return nil, 0, unsafeContent("source file %q changed while opening", source)
 	}
-	if err := rejectMultipleLinks(dataInfo, source); err != nil {
+	if err := rejectMultipleLinksHandle(dataFile, source); err != nil {
 		return nil, 0, err
 	}
 	contents, err := readBoundedContext(ctx, dataFile, sizeLimit)
@@ -95,34 +93,125 @@ func capturePhysicalFile(ctx context.Context, resourcesRoot, source string, size
 	return contents, dataInfo.Mode().Perm(), nil
 }
 
-func openResourcesRoot(resourcesRoot, source string) (*os.File, string, error) {
-	root := filepath.Clean(resourcesRoot)
-	relative, err := filepath.Rel(root, filepath.Clean(source))
+func openResourcesRootHandle(resourcesRoot, source string) (*os.File, string, error) {
+	rootPath := filepath.Clean(resourcesRoot)
+	relative, err := filepath.Rel(rootPath, filepath.Clean(source))
 	if err != nil || relative == "." || relative == ".." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return nil, "", unsafeContent("source %q escapes resource root %q", source, root)
+		return nil, "", unsafeContent("source %q escapes resource root %q", source, rootPath)
 	}
-	how := &unix.OpenHow{
-		Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC),
-		Resolve: unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS,
-	}
-	fd, err := unix.Openat2(unix.AT_FDCWD, root, how)
+	root, err := openWindowsHandle(rootPath)
 	if err != nil {
-		return nil, "", unsafeContent("open physical resource root %q: %v", root, err)
+		return nil, "", unsafeContent("open physical resource root %q: %v", rootPath, err)
 	}
-	return os.NewFile(uintptr(fd), root), filepath.ToSlash(relative), nil
+	info, statErr := root.Stat()
+	if statErr != nil || !info.IsDir() {
+		_ = root.Close()
+		return nil, "", unsafeContent("resource root %q is not a physical directory", rootPath)
+	}
+	final, finalErr := finalHandlePath(root)
+	if finalErr != nil || !sameWindowsPath(final, rootPath) {
+		_ = root.Close()
+		return nil, "", unsafeContent("resource root %q contains a reparse-point ancestor", rootPath)
+	}
+	return root, relative, nil
 }
 
-func openAt(directory *os.File, relative string, flags int) (*os.File, error) {
-	how := &unix.OpenHow{Flags: uint64(flags), Resolve: sourceResolveFlags}
-	fd, err := unix.Openat2(int(directory.Fd()), relative, how)
+func openRelativeHandle(root *os.File, relative string) (*os.File, error) {
+	components := splitWindowsRelative(relative)
+	if len(components) == 0 {
+		return nil, fs.ErrInvalid
+	}
+	currentPath := root.Name()
+	var current *os.File
+	for _, component := range components {
+		currentPath = filepath.Join(currentPath, component)
+		next, err := openWindowsHandle(currentPath)
+		if current != nil {
+			closeErr := current.Close()
+			if err == nil {
+				err = closeErr
+			}
+		}
+		if err != nil {
+			if next != nil {
+				_ = next.Close()
+			}
+			return nil, err
+		}
+		final, err := finalHandlePath(next)
+		if err != nil || !sameWindowsPath(final, currentPath) {
+			_ = next.Close()
+			return nil, unsafeContent("source component %q resolves through a reparse point", currentPath)
+		}
+		current = next
+		currentPath = final
+	}
+	return current, nil
+}
+
+func openWindowsHandle(path string) (*os.File, error) {
+	pathUTF16, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
-	return os.NewFile(uintptr(fd), relative), nil
+	handle, err := windows.CreateFile(
+		pathUTF16,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var information windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &information); err != nil {
+		_ = windows.CloseHandle(handle)
+		return nil, err
+	}
+	if information.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		_ = windows.CloseHandle(handle)
+		return nil, unsafeContent("source path %q is a reparse point", path)
+	}
+	return os.NewFile(uintptr(handle), path), nil
 }
 
-func openPathAt(directory *os.File, relative string) (*os.File, error) {
-	return openAt(directory, relative, unix.O_PATH|unix.O_CLOEXEC|unix.O_NOFOLLOW)
+func finalHandlePath(file *os.File) (string, error) {
+	handle := windows.Handle(file.Fd())
+	buffer := make([]uint16, windows.MAX_PATH)
+	for {
+		length, err := windows.GetFinalPathNameByHandle(handle, &buffer[0], uint32(len(buffer)), 0)
+		if err != nil {
+			return "", err
+		}
+		if length < uint32(len(buffer)) {
+			return normalizeWindowsPath(windows.UTF16ToString(buffer[:length])), nil
+		}
+		buffer = make([]uint16, length+1)
+	}
+}
+
+func normalizeWindowsPath(path string) string {
+	if strings.HasPrefix(path, `\\?\UNC\`) {
+		path = `\\` + strings.TrimPrefix(path, `\\?\UNC\`)
+	} else {
+		path = strings.TrimPrefix(path, `\\?\`)
+	}
+	return filepath.Clean(path)
+}
+
+func sameWindowsPath(left, right string) bool {
+	return strings.EqualFold(normalizeWindowsPath(left), normalizeWindowsPath(right))
+}
+
+func splitWindowsRelative(path string) []string {
+	clean := filepath.Clean(path)
+	if clean == "" || clean == "." {
+		return nil
+	}
+	return strings.Split(clean, string(filepath.Separator))
 }
 
 func (state *treeCaptureState) captureDirectory(directory *os.File, parent string) error {
@@ -145,7 +234,7 @@ func (state *treeCaptureState) captureDirectory(directory *os.File, parent strin
 		if err := state.validateNodePath(relative); err != nil {
 			return err
 		}
-		pathFile, err := openPathAt(directory, entry.Name())
+		pathFile, err := openRelativeHandle(directory, entry.Name())
 		if err != nil {
 			return unsafeContent("open source path %q: %v", relative, err)
 		}
@@ -156,21 +245,9 @@ func (state *treeCaptureState) captureDirectory(directory *os.File, parent strin
 		}
 		switch {
 		case pathInfo.IsDir():
-			child, openErr := openAt(directory, entry.Name(), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC)
-			if openErr != nil {
-				_ = pathFile.Close()
-				return unsafeContent("open source directory %q: %v", relative, openErr)
-			}
-			childInfo, infoErr := child.Stat()
-			if infoErr != nil || !os.SameFile(pathInfo, childInfo) {
-				_ = child.Close()
-				_ = pathFile.Close()
-				return unsafeContent("source directory %q changed while opening", relative)
-			}
-			state.nodes = append(state.nodes, treeNodeSnapshot{relative: relative, mode: childInfo.Mode().Perm(), directory: true})
-			captureErr := state.captureDirectory(child, relative)
-			closeErr := child.Close()
-			_ = pathFile.Close()
+			state.nodes = append(state.nodes, treeNodeSnapshot{relative: relative, mode: pathInfo.Mode().Perm(), directory: true})
+			captureErr := state.captureDirectory(pathFile, relative)
+			closeErr := pathFile.Close()
 			if captureErr != nil || closeErr != nil {
 				return errors.Join(captureErr, closeErr)
 			}
@@ -178,7 +255,7 @@ func (state *treeCaptureState) captureDirectory(directory *os.File, parent strin
 			if state.beforeFileOpen != nil {
 				state.beforeFileOpen(relative)
 			}
-			dataFile, openErr := openAt(directory, entry.Name(), unix.O_RDONLY|unix.O_CLOEXEC)
+			dataFile, openErr := openRelativeHandle(directory, entry.Name())
 			if openErr != nil {
 				_ = pathFile.Close()
 				return unsafeContent("open verified source file %q: %v", relative, openErr)
@@ -189,7 +266,7 @@ func (state *treeCaptureState) captureDirectory(directory *os.File, parent strin
 				_ = pathFile.Close()
 				return unsafeContent("source file %q changed while opening", relative)
 			}
-			if linkErr := rejectMultipleLinks(dataInfo, relative); linkErr != nil {
+			if linkErr := rejectMultipleLinksHandle(dataFile, relative); linkErr != nil {
 				_ = dataFile.Close()
 				_ = pathFile.Close()
 				return linkErr
@@ -229,13 +306,13 @@ func (state *treeCaptureState) validateNodePath(relative string) error {
 	return nil
 }
 
-func rejectMultipleLinks(info fs.FileInfo, path string) error {
-	count, err := fileLinkCount(info)
-	if err != nil {
+func rejectMultipleLinksHandle(file *os.File, path string) error {
+	var information windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(windows.Handle(file.Fd()), &information); err != nil {
 		return unsafeContent("determine hard-link count for %q: %v", path, err)
 	}
-	if count > 1 {
-		return unsafeContent("source file %q has %d hard links", path, count)
+	if information.NumberOfLinks > 1 {
+		return unsafeContent("source file %q has %d hard links", path, information.NumberOfLinks)
 	}
 	return nil
 }

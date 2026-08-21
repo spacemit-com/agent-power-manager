@@ -24,6 +24,7 @@ type Client struct {
 	beforeSnapshotFileOpen func(string)
 	beforeTreePublish      func()
 	afterMCPDecode         func()
+	afterMCPClone          func()
 }
 
 var _ cloud.Client = (*Client)(nil)

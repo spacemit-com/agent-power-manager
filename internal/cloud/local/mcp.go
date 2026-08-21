@@ -45,10 +45,14 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPSer
 	if c.afterMCPDecode != nil {
 		c.afterMCPDecode()
 	}
+	clone := server.Clone()
+	if c.afterMCPClone != nil {
+		c.afterMCPClone()
+	}
 	if err := ctx.Err(); err != nil {
 		return domain.MCPServer{}, err
 	}
-	return server.Clone(), nil
+	return clone, nil
 }
 
 func decodeMCPServer(contents []byte) (domain.MCPServer, error) {

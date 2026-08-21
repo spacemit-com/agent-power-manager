@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"path/filepath"
 )
 
 const sourceCopyChunkSize = 32 << 10
@@ -17,6 +18,19 @@ type treeNodeSnapshot struct {
 
 type treeSnapshot struct {
 	nodes []treeNodeSnapshot
+}
+
+func (snapshot *treeSnapshot) requireRegularFile(path string) error {
+	required := filepath.Clean(path)
+	for _, node := range snapshot.nodes {
+		if filepath.Clean(node.relative) == required {
+			if !node.directory {
+				return nil
+			}
+			break
+		}
+	}
+	return unsafeContent("captured tree requires physical regular file %q", path)
 }
 
 func writeAllContext(ctx context.Context, destination io.Writer, contents []byte) error {

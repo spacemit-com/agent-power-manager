@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"syscall"
 	"testing"
 
 	"apm/internal/cloud/local"
@@ -207,7 +206,7 @@ func TestLocalClientListPreservesSkillMarkerFilesystemError(t *testing.T) {
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestLocalClientListPreservesSkillMarkerFilesystemError$")
 	cmd.Env = append(os.Environ(), "APM_TEST_UNREADABLE_MARKER_ROOT="+root)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+	configureUnprivilegedProcess(t, cmd)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("unprivileged marker-error check failed: %v\n%s", err, output)
 	}
