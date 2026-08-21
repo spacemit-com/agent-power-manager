@@ -1,6 +1,7 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -64,12 +65,13 @@ func TestLocalDownloadAgentWritesDestinationWithoutGlobalCache(t *testing.T) {
 }
 
 func TestLocalDownloadAgentSanitizesTemporaryModeBeforePublication(t *testing.T) {
+	wantContents := []byte("agent: demo\n")
 	root := t.TempDir()
 	source := filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml")
 	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(source, []byte("agent: demo\n"), 0o677); err != nil {
+	if err := os.WriteFile(source, wantContents, 0o677); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(source, 0o677); err != nil {
@@ -85,6 +87,12 @@ func TestLocalDownloadAgentSanitizesTemporaryModeBeforePublication(t *testing.T)
 		observedBeforeWrite = true
 		assertPrivateAgentStaging(t, temporary)
 	}
+	observedAfterWrite := false
+	client.agentTemporaryChmod = func(temporary *os.File, mode os.FileMode) error {
+		observedAfterWrite = true
+		assertCompletePrivateAgentStaging(t, temporary, wantContents)
+		return temporary.Chmod(mode)
+	}
 	client.beforeAgentPublish = func() {
 		matches, globErr := filepath.Glob(filepath.Join(filepath.Dir(destination), ".agent.yaml.tmp-*"))
 		if globErr != nil {
@@ -97,6 +105,7 @@ func TestLocalDownloadAgentSanitizesTemporaryModeBeforePublication(t *testing.T)
 	}
 	t.Cleanup(func() {
 		client.beforeAgentWrite = nil
+		client.agentTemporaryChmod = nil
 		client.beforeAgentPublish = nil
 	})
 
@@ -107,21 +116,37 @@ func TestLocalDownloadAgentSanitizesTemporaryModeBeforePublication(t *testing.T)
 	if !observedBeforeWrite {
 		t.Fatal("Agent temporary file was not observed before write")
 	}
+	if !observedAfterWrite {
+		t.Fatal("Agent temporary file was not observed after write")
+	}
 	assertPublishedAgentFile(t, destination)
 }
 
 func TestLocalDownloadAgentCleansTemporaryAfterChmodFailure(t *testing.T) {
-	client := newAgentTestClient(t)
+	wantContents := []byte("agent: demo\n")
+	root := t.TempDir()
+	source := filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, wantContents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "agent.yaml")
 	chmodErr := errors.New("chmod failed")
-	client.agentTemporaryChmod = func(*os.File, os.FileMode) error {
+	client.agentTemporaryChmod = func(temporary *os.File, _ os.FileMode) error {
+		assertCompletePrivateAgentStaging(t, temporary, wantContents)
 		return chmodErr
 	}
 	t.Cleanup(func() { client.agentTemporaryChmod = nil })
 
-	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	err := client.DownloadAgent(context.Background(), ref, destination)
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	err = client.DownloadAgent(context.Background(), ref, destination)
 	if !errors.Is(err, chmodErr) {
 		t.Fatalf("DownloadAgent() error = %v, want chmod failure", err)
 	}
@@ -131,6 +156,29 @@ func TestLocalDownloadAgentCleansTemporaryAfterChmodFailure(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("Agent chmod failure cleanup left entries: %v", entries)
+	}
+}
+
+func assertCompletePrivateAgentStaging(t *testing.T, temporary *os.File, want []byte) {
+	t.Helper()
+	assertPrivateAgentStaging(t, temporary)
+	info, err := temporary.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != int64(len(want)) {
+		t.Fatalf("Agent temporary size at chmod = %d, want %d", info.Size(), len(want))
+	}
+	got := make([]byte, len(want))
+	n, err := temporary.ReadAt(got, 0)
+	if err != nil {
+		t.Fatalf("read Agent temporary at chmod: %v", err)
+	}
+	if n != len(want) {
+		t.Fatalf("Agent temporary bytes read at chmod = %d, want %d", n, len(want))
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("Agent temporary contents at chmod = %q, want %q", got, want)
 	}
 }
 

@@ -30,6 +30,9 @@ func assertPublishedAgentFile(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("published Agent mode for %q = %v, want regular file", path, info.Mode())
+	}
 	if mode := info.Mode().Perm(); mode != 0o644 {
 		t.Fatalf("published Agent mode for %q = %o, want 644", path, mode)
 	}
