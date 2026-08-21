@@ -252,12 +252,12 @@ func (c *installFakeCloud) Resolve(ctx context.Context, query domain.PowerRef) (
 	return domain.PowerRef{}, errors.New("cloud power not found")
 }
 
-func (c *installFakeCloud) DownloadSkill(domain.PowerRef) error {
+func (c *installFakeCloud) DownloadSkill(context.Context, domain.PowerRef, string) error {
 	*c.calls = append(*c.calls, "cloud:download-skill")
 	return c.fixture.cloudGetErr
 }
 
-func (c *installFakeCloud) DownloadAgent(domain.PowerRef) error {
+func (c *installFakeCloud) DownloadAgent(context.Context, domain.PowerRef, string) error {
 	*c.calls = append(*c.calls, "cloud:download-agent")
 	return nil
 }
@@ -280,17 +280,17 @@ type installFakeCache struct {
 	fixture *installFixture
 }
 
-func (c *installFakeCache) StageSkill(domain.PowerRef) (string, error) {
-	return c.stage("skill")
+func (c *installFakeCache) PrepareSkill(context.Context, domain.PowerRef) (string, error) {
+	return c.prepare("skill")
 }
 
-func (c *installFakeCache) StageAgent(domain.PowerRef) (string, error) {
-	return c.stage("agent")
+func (c *installFakeCache) PrepareAgent(context.Context, domain.PowerRef) (string, error) {
+	return c.prepare("agent")
 }
 
-func (c *installFakeCache) stage(power string) (string, error) {
+func (c *installFakeCache) prepare(power string) (string, error) {
 	agent := c.fixture.currentAgent
-	*c.calls = append(*c.calls, "cache:stage-"+power+":"+string(agent))
+	*c.calls = append(*c.calls, "cache:prepare-"+power+":"+string(agent))
 	if c.fixture.cacheCalls == nil {
 		c.fixture.cacheCalls = make(map[domain.AgentID]int)
 	}

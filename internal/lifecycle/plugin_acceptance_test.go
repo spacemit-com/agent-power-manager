@@ -338,7 +338,7 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	if err != nil {
 		t.Fatal(err)
 	}
-	powerCache, err := cache.NewFilesystem()
+	powerCache, err := cache.NewFilesystem(cloudClient)
 	if err != nil {
 		t.Fatal(err)
 	}

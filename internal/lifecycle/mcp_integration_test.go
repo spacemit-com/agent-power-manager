@@ -150,7 +150,7 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	if err != nil {
 		t.Fatal(err)
 	}
-	powerCache, err := cache.NewFilesystem()
+	powerCache, err := cache.NewFilesystem(cloudClient)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,8 +32,8 @@ func (c *stubCloudClient) Resolve(ctx context.Context, ref domain.PowerRef) (dom
 	return ref, nil
 }
 
-func (*stubCloudClient) DownloadSkill(domain.PowerRef) error { return nil }
-func (*stubCloudClient) DownloadAgent(domain.PowerRef) error { return nil }
+func (*stubCloudClient) DownloadSkill(context.Context, domain.PowerRef, string) error { return nil }
+func (*stubCloudClient) DownloadAgent(context.Context, domain.PowerRef, string) error { return nil }
 func (*stubCloudClient) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }

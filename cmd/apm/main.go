@@ -81,7 +81,7 @@ func newInstallLifecycle() (cli.InstallLifecycle, error) {
 	if err != nil {
 		return nil, err
 	}
-	powerCache, err := cache.NewFilesystem()
+	powerCache, err := cache.NewFilesystem(cloudClient)
 	if err != nil {
 		return nil, fmt.Errorf("create power cache: %w", err)
 	}

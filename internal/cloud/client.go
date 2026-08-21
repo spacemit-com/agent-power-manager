@@ -14,13 +14,31 @@ type Catalog interface {
 	Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error)
 }
 
-// Client 定义 Cloud 资源发现和获取边界。
-// Skill 与 Agent 暂保留旧缓存下载语义；Plugin 只写入调用方目录，缓存与 marketplace 由 pluginresource 独占管理。
+// SkillSource 定义向调用方私有目录下载精确版本 Skill 的边界；destination 必须不存在或是空物理目录。
+type SkillSource interface {
+	DownloadSkill(context.Context, domain.PowerRef, string) error
+}
+
+// PluginSource 定义向调用方私有目录下载精确版本 Plugin 的边界；缓存和 marketplace 由 pluginresource 独占管理。
+type PluginSource interface {
+	DownloadPlugin(context.Context, domain.PowerRef, string) error
+}
+
+// MCPSource 定义读取精确版本 MCP 领域值的边界，不写入本地缓存。
+type MCPSource interface {
+	GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error)
+}
+
+// AgentSource 定义向调用方私有文件下载精确版本 Agent 的边界；destination 必须不存在。
+type AgentSource interface {
+	DownloadAgent(context.Context, domain.PowerRef, string) error
+}
+
+// Client 定义 Cloud 资源发现及各类精确版本获取边界。
 type Client interface {
 	Catalog
-	DownloadSkill(domain.PowerRef) error
-	GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error)
-	DownloadPlugin(context.Context, domain.PowerRef, string) error
-	// DownloadAgent 将指定版本的 Agent yaml 原子复制到本地缓存。
-	DownloadAgent(domain.PowerRef) error
+	SkillSource
+	PluginSource
+	MCPSource
+	AgentSource
 }

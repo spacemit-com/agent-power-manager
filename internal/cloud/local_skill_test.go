@@ -1,6 +1,7 @@
 package cloud_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,14 +18,15 @@ func TestLocalClientDownloadSkillValidatesRefAndNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = client.DownloadSkill(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill}); err == nil || errors.Is(err, cloud.ErrNotFound) {
-		t.Fatalf("empty version error = %v, want non-sentinel parameter error", err)
+	destination := filepath.Join(t.TempDir(), "download")
+	if err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill}, destination); !errors.Is(err, cloud.ErrNotFound) {
+		t.Fatalf("empty version error = %v, want ErrNotFound", err)
 	}
 	for _, ref := range []domain.PowerRef{
-		{Name: "demo", Type: domain.PowerTypePlugin, Version: "1.0.0"},
-		{Name: "missing", Type: domain.PowerTypeSkill, Version: "1.0.0"},
+		{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+		{Name: "missing", Type: domain.PowerTypeSkill, Version: "v1.0.0"},
 	} {
-		if err = client.DownloadSkill(ref); !errors.Is(err, cloud.ErrNotFound) {
+		if err = client.DownloadSkill(context.Background(), ref, destination); !errors.Is(err, cloud.ErrNotFound) {
 			t.Fatalf("DownloadSkill(%#v) error = %v, want ErrNotFound", ref, err)
 		}
 	}
@@ -33,7 +35,7 @@ func TestLocalClientDownloadSkillValidatesRefAndNotFound(t *testing.T) {
 func TestLocalClientDownloadSkillMapsInvalidSourceLayoutToNotFound(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	path := filepath.Join(root, "skills", "demo", "1.0.0")
+	path := filepath.Join(root, "skills", "demo", "v1.0.0")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +46,7 @@ func TestLocalClientDownloadSkillMapsInvalidSourceLayoutToNotFound(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.DownloadSkill(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"})
+	err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "download"))
 	if !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("DownloadSkill() error = %v, want ErrNotFound", err)
 	}
@@ -53,7 +55,7 @@ func TestLocalClientDownloadSkillMapsInvalidSourceLayoutToNotFound(t *testing.T)
 func TestLocalClientDownloadSkillMapsSymlinkMarkerToNotFound(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	version := filepath.Join(root, "skills", "demo", "1.0.0")
+	version := filepath.Join(root, "skills", "demo", "v1.0.0")
 	if err := os.MkdirAll(version, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -69,17 +71,17 @@ func TestLocalClientDownloadSkillMapsSymlinkMarkerToNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = client.DownloadSkill(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"})
+	err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "download"))
 	if !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("DownloadSkill() error = %v, want ErrNotFound", err)
 	}
 }
 
-func TestLocalClientDownloadSkillCopiesAtomicallyAndIsIdempotent(t *testing.T) {
+func TestLocalDownloadSkillWritesDestinationWithoutGlobalCache(t *testing.T) {
 	root := t.TempDir()
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	source := filepath.Join(root, "skills", "demo", "1.0.0")
+	source := filepath.Join(root, "skills", "demo", "v1.0.0")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -93,23 +95,52 @@ func TestLocalClientDownloadSkillCopiesAtomicallyAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
-	if err = client.DownloadSkill(ref); err != nil {
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
+	destination := filepath.Join(t.TempDir(), "download")
+	if err = client.DownloadSkill(context.Background(), ref, destination); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(cacheHome, "apm", "skills", "demo", "1.0.0")
+	target := destination
 	for _, name := range []string{"SKILL.md", "skill-card.md"} {
 		if _, err = os.Stat(filepath.Join(target, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err = os.Stat(filepath.Join(cacheHome, "apm", ".tmp")); !os.IsNotExist(err) {
-		t.Fatalf("cache temp remains: %v", err)
+	if _, err = os.Lstat(filepath.Join(cacheHome, "apm")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Local provider touched global cache: %v", err)
 	}
 	if err = os.RemoveAll(source); err != nil {
 		t.Fatal(err)
 	}
-	if err = client.DownloadSkill(ref); err != nil {
-		t.Fatalf("idempotent DownloadSkill() error = %v", err)
+	if err = client.DownloadSkill(context.Background(), ref, filepath.Join(t.TempDir(), "second")); !errors.Is(err, cloud.ErrNotFound) {
+		t.Fatalf("second DownloadSkill() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLocalDownloadSkillRejectsNonEmptyDestination(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "skills", "demo", "v1.0.0")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client, err := cloud.NewLocalClient(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "download")
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destination, "old"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, destination); err == nil {
+		t.Fatal("DownloadSkill() error = nil, want non-empty destination error")
+	}
+	if got, err := os.ReadFile(filepath.Join(destination, "old")); err != nil || string(got) != "old" {
+		t.Fatalf("destination changed = %q, %v", got, err)
 	}
 }

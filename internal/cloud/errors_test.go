@@ -3,6 +3,7 @@ package cloud_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"apm/internal/cloud"
@@ -18,5 +19,20 @@ func TestLocalClientResolveMissingExactPowerReturnsNotFound(t *testing.T) {
 	})
 	if !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("Resolve() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCloudErrorSentinelsClassifyWrappedErrors(t *testing.T) {
+	for _, want := range []error{
+		cloud.ErrNotFound,
+		cloud.ErrYanked,
+		cloud.ErrInvalidResponse,
+		cloud.ErrIntegrity,
+		cloud.ErrUnsafeContent,
+		cloud.ErrProviderConfig,
+	} {
+		if err := fmt.Errorf("provider request: %w", want); !errors.Is(err, want) {
+			t.Fatalf("errors.Is(%v, %v) = false", err, want)
+		}
 	}
 }

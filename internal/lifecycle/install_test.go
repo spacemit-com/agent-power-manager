@@ -34,10 +34,10 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 	}
 	wantCalls := []string{
 		"acquire", "recover", "refresh", "cloud:resolve",
-		"resolve:bibit", "config:find:bibit", "cache:stage-skill:bibit", "transaction:install:bibit",
-		"resolve:claude-code", "config:find:claude-code", "cache:stage-skill:claude-code", "transaction:install:claude-code",
+		"resolve:bibit", "config:find:bibit", "cache:prepare-skill:bibit", "transaction:install:bibit",
+		"resolve:claude-code", "config:find:claude-code", "cache:prepare-skill:claude-code", "transaction:install:claude-code",
 		"resolve:codex", "config:find:codex",
-		"resolve:hermes-agent", "config:find:hermes-agent", "cache:stage-skill:hermes-agent", "transaction:install:hermes-agent",
+		"resolve:hermes-agent", "config:find:hermes-agent", "cache:prepare-skill:hermes-agent", "transaction:install:hermes-agent",
 		"release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {

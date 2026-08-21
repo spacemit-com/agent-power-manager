@@ -1,25 +1,36 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sync"
 
 	"apm/internal/domain"
 	"apm/internal/paths"
 	"apm/internal/utils/filesystem"
 )
 
-// FilesystemCache 从本地版本化缓存读取能力内容。
+// FilesystemCache 将精确版本内容发布到缓存，并物化为公共 staging。
 type FilesystemCache struct {
+	source          Source
 	cacheRoot       string
 	stagingPath     string
 	stagingTempPath string
+
+	locksMu   sync.Mutex
+	pathLocks map[string]*sync.Mutex
+	stagingMu sync.Mutex
 }
 
-// NewFilesystem 创建使用默认缓存和 staging 路径的缓存。
-func NewFilesystem() (*FilesystemCache, error) {
+// NewFilesystem 创建使用默认缓存和 staging 路径的缓存；source 仅能写入 Cache 提供的私有目标。
+func NewFilesystem(source Source) (*FilesystemCache, error) {
+	if isNilSource(source) {
+		return nil, errors.New("create filesystem cache with nil source")
+	}
 	cacheRoot, err := paths.CachePath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve cache path: %w", err)
@@ -33,21 +44,198 @@ func NewFilesystem() (*FilesystemCache, error) {
 		return nil, fmt.Errorf("resolve staging temporary path: %w", err)
 	}
 	return &FilesystemCache{
+		source:          source,
 		cacheRoot:       cacheRoot,
 		stagingPath:     stagingPath,
 		stagingTempPath: stagingTempPath,
+		pathLocks:       make(map[string]*sync.Mutex),
 	}, nil
 }
 
-// StageSkill 将指定版本的缓存 Skill 复制到公共 staging。
-func (c *FilesystemCache) StageSkill(ref domain.PowerRef) (string, error) {
+func isNilSource(source Source) bool {
+	if source == nil {
+		return true
+	}
+	value := reflect.ValueOf(source)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+// PrepareSkill 确保精确版本 Skill 已原子发布到缓存并返回可安装 staging 根目录。
+func (c *FilesystemCache) PrepareSkill(ctx context.Context, ref domain.PowerRef) (string, error) {
+	if ref.Type != domain.PowerTypeSkill || ref.Version == "" {
+		return "", errors.New("exact Skill type and version are required")
+	}
+	final := filepath.Join(c.cacheRoot, "skills", ref.Name, ref.Version)
+	lock := c.lockFor(final)
+	lock.Lock()
+	defer lock.Unlock()
+	if hit, err := cachedSkill(final); err != nil {
+		return "", err
+	} else if !hit {
+		if err := c.downloadSkill(ctx, ref, final); err != nil {
+			return "", err
+		}
+	}
+	c.stagingMu.Lock()
+	defer c.stagingMu.Unlock()
 	return c.stageSkill(ref)
 }
 
-func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, resultErr error) {
-	if ref.Version == "" {
-		return "", errors.New("power version is required")
+// PrepareAgent 确保精确版本 Agent 已原子发布到缓存并返回可安装 staging 根目录。
+func (c *FilesystemCache) PrepareAgent(ctx context.Context, ref domain.PowerRef) (string, error) {
+	if ref.Type != domain.PowerTypeAgent || ref.Version == "" {
+		return "", errors.New("exact Agent type and version are required")
 	}
+	final := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version)
+	lock := c.lockFor(final)
+	lock.Lock()
+	defer lock.Unlock()
+	if hit, err := cachedAgent(final); err != nil {
+		return "", err
+	} else if !hit {
+		if err := c.downloadAgent(ctx, ref, final); err != nil {
+			return "", err
+		}
+	}
+	c.stagingMu.Lock()
+	defer c.stagingMu.Unlock()
+	return c.stageAgent(ref)
+}
+
+func (c *FilesystemCache) lockFor(path string) *sync.Mutex {
+	c.locksMu.Lock()
+	defer c.locksMu.Unlock()
+	lock := c.pathLocks[path]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		c.pathLocks[path] = lock
+	}
+	return lock
+}
+
+func (c *FilesystemCache) downloadSkill(ctx context.Context, ref domain.PowerRef, final string) (resultErr error) {
+	temporary, err := c.newTemporaryVersion("skill-" + ref.Name + "-")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := os.RemoveAll(temporary); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove Skill temporary version %q: %w", temporary, err))
+		}
+	}()
+	if err := c.source.DownloadSkill(ctx, ref, temporary); err != nil {
+		return fmt.Errorf("download Skill %+v: %w", ref, err)
+	}
+	if hit, err := cachedSkill(temporary); err != nil || !hit {
+		if err != nil {
+			return err
+		}
+		return errors.New("downloaded Skill has no physical SKILL.md")
+	}
+	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
+		return fmt.Errorf("create Skill cache parent %q: %w", filepath.Dir(final), err)
+	}
+	if err := os.Rename(temporary, final); err != nil {
+		return fmt.Errorf("publish Skill cache %q: %w", final, err)
+	}
+	return nil
+}
+
+func (c *FilesystemCache) downloadAgent(ctx context.Context, ref domain.PowerRef, final string) (resultErr error) {
+	temporary, err := c.newTemporaryVersion("agent-" + ref.Name + "-")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := os.RemoveAll(temporary); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove Agent temporary version %q: %w", temporary, err))
+		}
+	}()
+	destination := filepath.Join(temporary, "agent.yaml")
+	if err := c.source.DownloadAgent(ctx, ref, destination); err != nil {
+		return fmt.Errorf("download Agent %+v: %w", ref, err)
+	}
+	if hit, err := cachedAgent(temporary); err != nil || !hit {
+		if err != nil {
+			return err
+		}
+		return errors.New("downloaded Agent has no physical agent.yaml")
+	}
+	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
+		return fmt.Errorf("create Agent cache parent %q: %w", filepath.Dir(final), err)
+	}
+	if err := os.Rename(temporary, final); err != nil {
+		return fmt.Errorf("publish Agent cache %q: %w", final, err)
+	}
+	return nil
+}
+
+func (c *FilesystemCache) newTemporaryVersion(prefix string) (string, error) {
+	if err := os.MkdirAll(filepath.Join(c.cacheRoot, ".tmp"), 0o755); err != nil {
+		return "", fmt.Errorf("create cache temporary root: %w", err)
+	}
+	temporary, err := os.MkdirTemp(filepath.Join(c.cacheRoot, ".tmp"), prefix)
+	if err != nil {
+		return "", fmt.Errorf("create cache temporary version: %w", err)
+	}
+	return temporary, nil
+}
+
+func cachedSkill(root string) (bool, error) {
+	info, err := os.Lstat(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat Skill cache %q: %w", root, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("Skill cache %q is not a physical directory", root)
+	}
+	marker, err := os.Lstat(filepath.Join(root, "SKILL.md"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("Skill cache %q has no SKILL.md", root)
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat Skill cache marker %q: %w", root, err)
+	}
+	if !marker.Mode().IsRegular() {
+		return false, fmt.Errorf("Skill cache marker %q is not a physical regular file", root)
+	}
+	return true, nil
+}
+
+func cachedAgent(root string) (bool, error) {
+	info, err := os.Lstat(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat Agent cache %q: %w", root, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("Agent cache %q is not a physical directory", root)
+	}
+	marker := filepath.Join(root, "agent.yaml")
+	info, err = os.Lstat(marker)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("Agent cache %q has no agent.yaml", root)
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat Agent cache marker %q: %w", marker, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("Agent cache marker %q is not a physical regular file", marker)
+	}
+	return true, nil
+}
+
+func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, resultErr error) {
 	if err := os.RemoveAll(c.stagingPath); err != nil {
 		return "", fmt.Errorf("remove staging path %q: %w", c.stagingPath, err)
 	}
@@ -59,15 +247,7 @@ func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, r
 			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err))
 		}
 	}()
-
 	source := filepath.Join(c.cacheRoot, "skills", ref.Name, ref.Version)
-	if _, err := os.Stat(source); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", ErrMiss
-		}
-		return "", fmt.Errorf("stat cache path %q: %w", source, err)
-	}
-
 	target := filepath.Join(c.stagingTempPath, "skills", ref.Name)
 	if err := filesystem.CopyDir(source, target); err != nil {
 		return "", fmt.Errorf("copy cache path %q to staging path %q: %w", source, target, err)
@@ -78,19 +258,10 @@ func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, r
 	if err := os.Rename(c.stagingTempPath, c.stagingPath); err != nil {
 		return "", fmt.Errorf("rename staging temporary path %q to staging path %q: %w", c.stagingTempPath, c.stagingPath, err)
 	}
-
 	return c.stagingPath, nil
 }
 
-// StageAgent 将指定版本的缓存 Agent yaml 复制到公共 staging。
-func (c *FilesystemCache) StageAgent(ref domain.PowerRef) (string, error) {
-	return c.stageAgent(ref)
-}
-
 func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (stagingRoot string, resultErr error) {
-	if ref.Version == "" {
-		return "", errors.New("power version is required")
-	}
 	if err := os.RemoveAll(c.stagingPath); err != nil {
 		return "", fmt.Errorf("remove staging path %q: %w", c.stagingPath, err)
 	}
@@ -102,16 +273,11 @@ func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (stagingRoot string, r
 			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err))
 		}
 	}()
-
 	source := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version, "agent.yaml")
 	contents, err := os.ReadFile(source)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", ErrMiss
-		}
 		return "", fmt.Errorf("read cache path %q: %w", source, err)
 	}
-
 	target := filepath.Join(c.stagingTempPath, "agents", ref.Name)
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return "", fmt.Errorf("create staging target %q: %w", target, err)

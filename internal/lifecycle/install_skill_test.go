@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"testing"
 
-	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/transaction"
@@ -26,7 +25,7 @@ func TestInstallFirstInstallOrdersDependenciesAndReturnsInstalled(t *testing.T) 
 	}
 	wantEvents := []string{
 		"acquire", "recover", "refresh", "cloud:resolve",
-		"resolve:codex", "config:find:codex", "cache:stage-skill:codex",
+		"resolve:codex", "config:find:codex", "cache:prepare-skill:codex",
 		"transaction:install:codex", "release",
 	}
 	assertEventSubsequence(t, calls, wantEvents)
@@ -37,15 +36,12 @@ func TestInstallFirstInstallOrdersDependenciesAndReturnsInstalled(t *testing.T) 
 	}})
 }
 
-func TestInstallCacheMissGetsCloudAndFetchesAgain(t *testing.T) {
+func TestInstallPreparesCacheBeforeTransaction(t *testing.T) {
 	var calls []string
 	service := newInstallService(t, &calls, installFixture{
 		snapshot:  domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
 		cloudRefs: []domain.PowerRef{{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}},
 		selected:  "v1.0.0",
-		cacheResponses: map[domain.AgentID][]installCacheResponse{
-			domain.AgentCodex: {{err: cache.ErrMiss}, {staging: "/staging/codex"}},
-		},
 	})
 
 	result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "skill", Name: "demo"})
@@ -54,7 +50,7 @@ func TestInstallCacheMissGetsCloudAndFetchesAgain(t *testing.T) {
 	}
 	wantCalls := []string{
 		"acquire", "recover", "refresh", "cloud:resolve", "resolve:codex", "config:find:codex",
-		"cache:stage-skill:codex", "cloud:download-skill", "cache:stage-skill:codex", "transaction:install:codex", "release",
+		"cache:prepare-skill:codex", "transaction:install:codex", "release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want %v", calls, wantCalls)
@@ -169,15 +165,8 @@ func TestInstallAgentFailuresReturnFailedResultAndMarkerAfterRelease(t *testing.
 		{name: "Config Find", configure: func(f *installFixture, cause error) {
 			f.configFindErrors = map[domain.AgentID]error{domain.AgentCodex: cause}
 		}},
-		{name: "first Fetch", configure: func(f *installFixture, cause error) {
+		{name: "Cache Prepare", configure: func(f *installFixture, cause error) {
 			f.cacheResponses = map[domain.AgentID][]installCacheResponse{domain.AgentCodex: {{err: cause}}}
-		}},
-		{name: "Cloud Get", configure: func(f *installFixture, cause error) {
-			f.cacheResponses = map[domain.AgentID][]installCacheResponse{domain.AgentCodex: {{err: cache.ErrMiss}}}
-			f.cloudGetErr = cause
-		}},
-		{name: "second Fetch", configure: func(f *installFixture, cause error) {
-			f.cacheResponses = map[domain.AgentID][]installCacheResponse{domain.AgentCodex: {{err: cache.ErrMiss}, {err: cause}}}
 		}},
 		{name: "Transaction Install", configure: func(f *installFixture, cause error) {
 			f.transactionInstallErr = map[domain.AgentID]error{domain.AgentCodex: cause}

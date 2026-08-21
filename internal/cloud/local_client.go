@@ -11,16 +11,12 @@ import (
 	"strings"
 
 	"apm/internal/domain"
-	"apm/internal/paths"
-
 	"github.com/Masterminds/semver/v3"
 )
 
 // LocalClient 从本地目录读取能力资源。
 type LocalClient struct {
 	resourcesRoot string
-	cacheRoot     string
-	cacheTempRoot string
 }
 
 // NewLocalClient 使用绝对资源根目录创建本地客户端。
@@ -28,18 +24,8 @@ func NewLocalClient(resourcesRoot string) (*LocalClient, error) {
 	if !filepath.IsAbs(resourcesRoot) {
 		return nil, fmt.Errorf("resource root must be absolute: %q", resourcesRoot)
 	}
-	cacheRoot, err := paths.CachePath()
-	if err != nil {
-		return nil, fmt.Errorf("resolve cache path: %w", err)
-	}
-	cacheTempRoot, err := paths.CacheTempPath()
-	if err != nil {
-		return nil, fmt.Errorf("resolve cache temporary path: %w", err)
-	}
 	return &LocalClient{
 		resourcesRoot: resourcesRoot,
-		cacheRoot:     cacheRoot,
-		cacheTempRoot: cacheTempRoot,
 	}, nil
 }
 

@@ -1,7 +1,7 @@
 package cache_test
 
 import (
-	"errors"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,40 +10,23 @@ import (
 	"apm/internal/domain"
 )
 
-func TestFilesystemCacheStagesSingleAgentYAML(t *testing.T) {
+func TestPrepareAgentPublishesSingleFileAndStaging(t *testing.T) {
 	_, cacheHome := setCacheEnvironment(t)
-	store, err := cache.NewFilesystem()
+	store, err := cache.NewFilesystem(&recordingSource{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-
-	source := filepath.Join(cacheHome, "apm", "agents", ref.Name, ref.Version, "agent.yaml")
-	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(source, []byte("schema_version: 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	staging, err := store.StageAgent(ref)
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	staging, err := store.PrepareAgent(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(staging, "agents", ref.Name, "agent.yaml")
-	if _, err := os.Stat(want); err != nil {
-		t.Fatalf("staged agent %q missing: %v", want, err)
-	}
-}
-
-func TestFilesystemCacheStageAgentMiss(t *testing.T) {
-	setCacheEnvironment(t)
-	store, err := cache.NewFilesystem()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref := domain.PowerRef{Name: "missing", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	if _, err := store.StageAgent(ref); !errors.Is(err, cache.ErrMiss) {
-		t.Fatalf("StageAgent() error = %v, want ErrMiss", err)
+	for _, path := range []string{
+		filepath.Join(cacheHome, "apm", "agents", "demo", "v1.0.0", "agent.yaml"),
+		filepath.Join(staging, "agents", "demo", "agent.yaml"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("published Agent %q: %v", path, err)
+		}
 	}
 }

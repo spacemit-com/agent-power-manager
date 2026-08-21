@@ -165,7 +165,7 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	locker, _ := lock.NewDefault()
-	powerCache, _ := cache.NewFilesystem()
+	powerCache, _ := cache.NewFilesystem(cloudClient)
 	pluginResources := newIntegrationPluginResources(t, cloudClient)
 	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
 	if err != nil {
@@ -277,7 +277,7 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 				t.Fatal(err)
 			}
 			locker, _ := lock.NewDefault()
-			powerCache, _ := cache.NewFilesystem()
+			powerCache, _ := cache.NewFilesystem(cloudClient)
 			pluginResources := newIntegrationPluginResources(t, cloudClient)
 			installer, _ := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
 			uninstaller, _ := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
@@ -402,7 +402,7 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	powerCache, err := cache.NewFilesystem()
+	powerCache, err := cache.NewFilesystem(cloudClient)
 	if err != nil {
 		t.Fatal(err)
 	}

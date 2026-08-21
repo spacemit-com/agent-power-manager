@@ -19,54 +19,71 @@ func (c *LocalClient) listAgents(ctx context.Context) ([]domain.PowerRef, error)
 	return c.listResources(ctx, "agents", "agent.yaml", domain.PowerTypeAgent)
 }
 
-// DownloadAgent 将指定版本的 Agent yaml 原子复制到本地缓存；不做内容解析。
-func (c *LocalClient) DownloadAgent(ref domain.PowerRef) (resultErr error) {
-	if ref.Version == "" {
-		return errors.New("power version is required")
+// DownloadAgent 将精确版本 Agent yaml 原子复制至调用方提供的私有文件，不访问全局缓存。
+func (c *LocalClient) DownloadAgent(ctx context.Context, ref domain.PowerRef, destination string) (resultErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	if ref.Type != domain.PowerTypeAgent {
+	if ref.Type != domain.PowerTypeAgent || !safePowerIdentity(ref) || !isCanonicalVersion(ref.Version) {
 		return ErrNotFound
 	}
-	if err := os.RemoveAll(c.cacheTempRoot); err != nil {
-		return fmt.Errorf("clean cache temporary path %q: %w", c.cacheTempRoot, err)
-	}
-	defer func() {
-		if err := os.RemoveAll(c.cacheTempRoot); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("clean cache temporary path %q: %w", c.cacheTempRoot, err))
-		}
-	}()
-
-	final := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version, "agent.yaml")
-	temporary := filepath.Join(c.cacheTempRoot, "agents", ref.Name, ref.Version, "agent.yaml")
 	source := filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version, "agent.yaml")
-
-	if _, err := os.Stat(final); err == nil {
-		return nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("stat cache power %q: %w", final, err)
-	}
-	sourceInfo, err := os.Stat(source)
-	if errors.Is(err, fs.ErrNotExist) || (err == nil && !sourceInfo.Mode().IsRegular()) {
+	info, err := os.Lstat(source)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && !info.Mode().IsRegular()) {
 		return ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("stat source agent %q: %w", source, err)
+		return fmt.Errorf("stat source Agent %q: %w", source, err)
+	}
+	destination, err = absoluteDestination(destination)
+	if err != nil {
+		return err
+	}
+	if err := validateAgentDestination(destination); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return fmt.Errorf("create Agent destination parent %q: %w", filepath.Dir(destination), err)
 	}
 	contents, err := os.ReadFile(source)
 	if err != nil {
-		return fmt.Errorf("read source agent %q: %w", source, err)
+		return fmt.Errorf("read source Agent %q: %w", source, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(temporary), 0o755); err != nil {
-		return fmt.Errorf("create cache temporary parent %q: %w", filepath.Dir(temporary), err)
+	temporary, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+".tmp-")
+	if err != nil {
+		return fmt.Errorf("create Agent temporary destination beside %q: %w", destination, err)
 	}
-	if err := os.WriteFile(temporary, contents, 0o644); err != nil {
-		return fmt.Errorf("write cache temporary agent %q: %w", temporary, err)
+	temporaryName := temporary.Name()
+	defer func() {
+		if err := os.Remove(temporaryName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove Agent temporary destination %q: %w", temporaryName, err))
+		}
+	}()
+	if err := temporary.Chmod(info.Mode().Perm()); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("set Agent temporary mode %q: %w", temporaryName, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
-		return fmt.Errorf("create cache parent %q: %w", filepath.Dir(final), err)
+	if _, err := temporary.Write(contents); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("write Agent temporary destination %q: %w", temporaryName, err)
 	}
-	if err := os.Rename(temporary, final); err != nil {
-		return fmt.Errorf("commit cached agent %q: %w", final, err)
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close Agent temporary destination %q: %w", temporaryName, err)
+	}
+	if err := os.Rename(temporaryName, destination); err != nil {
+		return fmt.Errorf("publish Agent destination %q: %w", destination, err)
 	}
 	return nil
+}
+
+func validateAgentDestination(destination string) error {
+	if err := validatePluginDestinationAncestors(filepath.Dir(destination)); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(destination); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("stat Agent destination %q: %w", destination, err)
+	}
+	return fmt.Errorf("Agent destination %q must not exist", destination)
 }

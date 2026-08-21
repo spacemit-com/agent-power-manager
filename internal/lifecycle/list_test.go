@@ -55,8 +55,8 @@ func (c *listFakeCloud) List(ctx context.Context) ([]domain.PowerRef, error) {
 func (*listFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.PowerRef, error) {
 	return ref, nil
 }
-func (*listFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
-func (*listFakeCloud) DownloadAgent(domain.PowerRef) error { return nil }
+func (*listFakeCloud) DownloadSkill(context.Context, domain.PowerRef, string) error { return nil }
+func (*listFakeCloud) DownloadAgent(context.Context, domain.PowerRef, string) error { return nil }
 func (*listFakeCloud) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }

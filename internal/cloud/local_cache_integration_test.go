@@ -1,7 +1,7 @@
 package cloud_test
 
 import (
-	"errors"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +11,7 @@ import (
 	"apm/internal/domain"
 )
 
-func TestLocalCloudAndCacheStageDownloadStageSkill(t *testing.T) {
+func TestLocalCloudAndCachePrepareSkill(t *testing.T) {
 	realHome := t.TempDir()
 	stateHome := t.TempDir()
 	cacheHome := t.TempDir()
@@ -26,19 +26,13 @@ func TestLocalCloudAndCacheStageDownloadStageSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := cache.NewFilesystem()
+	store, err := cache.NewFilesystem(client)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"}
 
-	if _, err = store.StageSkill(ref); !errors.Is(err, cache.ErrMiss) {
-		t.Fatalf("first staging call error = %v, want ErrMiss", err)
-	}
-	if err = client.DownloadSkill(ref); err != nil {
-		t.Fatal(err)
-	}
-	stagingRoot, err := store.StageSkill(ref)
+	stagingRoot, err := store.PrepareSkill(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}

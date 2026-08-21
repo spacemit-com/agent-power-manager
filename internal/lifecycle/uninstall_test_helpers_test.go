@@ -145,7 +145,7 @@ func (*uninstallFakeCloud) List(context.Context) ([]domain.PowerRef, error) { re
 func (*uninstallFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.PowerRef, error) {
 	return ref, nil
 }
-func (*uninstallFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
+func (*uninstallFakeCloud) DownloadSkill(context.Context, domain.PowerRef, string) error { return nil }
 func (c *uninstallFakeCloud) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
 	recordUninstallEvent(c.calls, c.fixture, "cloud:get-mcp:"+ref.Version)
 	if err := ctx.Err(); err != nil {
@@ -158,7 +158,7 @@ func (*uninstallFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, stri
 	panic("Plugin uninstall must not call Cloud DownloadPlugin")
 }
 
-func (*uninstallFakeCloud) DownloadAgent(domain.PowerRef) error {
+func (*uninstallFakeCloud) DownloadAgent(context.Context, domain.PowerRef, string) error {
 	panic("Agent uninstall must not call Cloud DownloadAgent")
 }
 
