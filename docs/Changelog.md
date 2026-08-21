@@ -2,6 +2,64 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-21
+
+分类：新增功能
+
+用户需求：基于 APC 统一资源接口新增可切换的 Local/Remote Cloud Client provider，补齐 Agent 只读获取，并将 Plugin Cloud 资源迁移为以 apc-plugin.json 为权威、由 APM 派生 Agent 配置的 canonical 包。
+
+相关提交：
+
+- `b2dce66 docs(cloud): design provider clients and canonical plugins`
+- `cd23b13 docs(cloud): plan provider client implementation`
+- `52d3790 refactor(cloud): add context-aware catalog resolution`
+- `167a228 fix(cloud): filter invalid local resource versions`
+- `3d984a9 refactor(cache): own skill and agent publication`
+- `5224b3f fix(cache): preserve staging during publication`
+- `2665946 fix(cache): report staging cleanup failures`
+- `ed1eb08 refactor(cloud): isolate local provider plugin`
+- `2e9a27d fix(cloud): harden local provider snapshots`
+- `8571928 fix(cloud): support portable local snapshots`
+- `58e3802 fix(cloud): inspect local nodes without data access`
+- `843c7db fix(cloud): restore safe Darwin local snapshots`
+- `ed051a1 feat(cloud): add remote catalog provider`
+- `e8f6d84 fix(cloud): harden remote response handling`
+- `6688a26 fix(cloud): preserve remote transport errors`
+- `e06ee77 feat(cloud): verify remote mcp and agent content`
+- `8e56fc4 fix(cloud): secure remote content publication`
+- `329dbef fix(cloud): enforce remote directory trust`
+- `574f94c feat(cloud): safely unpack remote power archives`
+- `fadcdda fix(cloud): bound remote archive parsing`
+- `dcd6939 fix(cloud): separate archive stream limits`
+- `81fb210 refactor(plugin): derive agent manifests from apc index`
+- `f8a2b50 fix(plugin): close canonical artifact schema`
+- `cf7de56 test(cloud): verify local and remote provider parity`
+- `c5ed545 fix(cloud): normalize local publication modes`
+- `9b2e11d fix(cloud): keep local agent staging private`
+- `23a3226 test(cloud): verify local staging write order`
+- `3bc7e19 test(cloud): strengthen provider parity evidence`
+- `3ddc16b feat(cloud): select local or remote providers`
+- `a9bf414 fix(cloud): validate provider configuration`
+- `eaa8440 fix(cloud): harden provider construction`
+- `9ffe171 chore(cloud): exclude task review report`
+- `08f2c49 docs(cloud): document provider runtime and apc plugins`
+- `267619c docs(cloud): correct provider architecture details`
+- `07d7205 docs(cloud): align c4 interface signatures`
+- `088acd4 chore(repo): remove task review artifact`
+- `c86030a test(cloud): isolate trusted test roots`
+- `b1b9fe9 fix(cloud): trust private sticky-root children`
+- `17e1860 test(cloud): honor gotmpdir isolation`
+- `f9d0787 fix(cloud): enforce local provider identity contract`
+- `6bb3237 fix(cloud): validate remote JSON media types`
+- `0cd67d6 fix(cloud): align archive text safety policy`
+- `4b2e8f0 docs(cloud): mark provider implementation complete`
+- `f470470 docs(agent): define agent power read interfaces`
+- `f22f2f4 docs(apm): clarify MCP uninstall cloud dependency`
+
+解决方案或完成结果：建立统一、context-aware 的 Cloud Client 虚拟端口和静态 provider registry，由 composition root 默认选择 Remote，并允许通过环境变量显式切换 Local；两种 provider 对 Skill、Plugin、MCP、Agent 四类资源提供一致的 List、Resolve 和精确获取语义，Remote 额外执行严格协议、size、MD5、归档与文本完整性校验且不自动 fallback。Skill 与 Agent 的版本化发布归 cache 管理；Plugin 以 canonical `apc-plugin.json` 和共享资源树为权威，由 APM 校验后派生各 Agent native manifest 与 marketplace。Plugin Uninstall/Fix 复用已有 canonical artifact 离线恢复；目标仍存在的 MCP Uninstall 按无缓存约束读取精确定义。
+
+验证结果或限制：最终审查前及修复后均通过 gofmt、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、隔离临时目录构建与 `git diff --check`，并通过 Local/Remote 的 Darwin、FreeBSD、Windows 相关包交叉编译以及 provider 负面等价、归档攻击和恢复测试。网络测试只使用 `httptest`，HOME、cache、Agent 根和 CLI 均使用 fake home/fake executable，未访问真实 Agent 环境。Remote 配置、网络、协议或内容错误不会 fallback 到 Local；Agent 仅提供只读获取，不包含 Submission；旧 Cloud API、旧 cache 与缺少 canonical 索引的 Plugin artifact 不兼容并 fail closed。
+
 ## 2026-08-20
 
 分类：新增功能
