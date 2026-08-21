@@ -21,7 +21,7 @@ func TestDownloadAgentPreservesRawBytesAndPublishesMode(t *testing.T) {
 	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	destination := filepath.Join(trustedTestDir(t), "agent.yaml")
 	if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); err != nil {
 		t.Fatal(err)
 	}
@@ -41,31 +41,34 @@ func TestDownloadAgentPreservesRawBytesAndPublishesMode(t *testing.T) {
 	}
 }
 
-func TestDownloadAgentAcceptsPhysicalParentThroughSymlinkedAncestor(t *testing.T) {
+func TestDownloadAgentRejectsSymlinkedAncestorWithoutRequest(t *testing.T) {
 	contents := []byte("schema_version: 1\n")
+	var requests atomic.Int32
 	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
-	physicalRoot := t.TempDir()
+	physicalRoot := trustedTestDir(t)
 	physicalParent := filepath.Join(physicalRoot, "private", "tmp")
 	if err := os.MkdirAll(physicalParent, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	aliasRoot := filepath.Join(t.TempDir(), "var")
+	aliasRoot := filepath.Join(trustedTestDir(t), "var")
 	if err := os.Symlink(filepath.Join(physicalRoot, "private"), aliasRoot); err != nil {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(aliasRoot, "tmp", "agent.yaml")
 
-	if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); err != nil {
-		t.Fatal(err)
+	if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("DownloadAgent() error = %v, want symlink ancestor ErrUnsafeContent", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(physicalParent, "agent.yaml")); err != nil || !bytes.Equal(got, contents) {
-		t.Fatalf("physical destination = %q, %v, want %q", got, err, contents)
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("requests = %d, want symlink ancestor rejected before network", got)
 	}
+	assertDirectoryEmpty(t, physicalParent)
 }
 
-func TestDownloadAgentPinsParentAcrossAncestorSubstitution(t *testing.T) {
+func TestDownloadAgentKeepsPinnedParentAfterSameProcessRename(t *testing.T) {
 	contents := []byte("schema_version: 1\n")
 	contentStarted := make(chan struct{})
 	releaseContent := make(chan struct{})
@@ -76,14 +79,14 @@ func TestDownloadAgentPinsParentAcrossAncestorSubstitution(t *testing.T) {
 		}
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
-	root := t.TempDir()
+	root := trustedTestDir(t)
 	parent := filepath.Join(root, "destination")
 	if err := os.Mkdir(parent, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	originalParent := filepath.Join(root, "pinned-original")
-	attackerParent := filepath.Join(root, "attacker")
-	if err := os.Mkdir(attackerParent, 0o755); err != nil {
+	replacementParent := filepath.Join(root, "replacement")
+	if err := os.Mkdir(replacementParent, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(parent, "agent.yaml")
@@ -95,7 +98,7 @@ func TestDownloadAgentPinsParentAcrossAncestorSubstitution(t *testing.T) {
 	if err := os.Rename(parent, originalParent); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(attackerParent, parent); err != nil {
+	if err := os.Symlink(replacementParent, parent); err != nil {
 		t.Fatal(err)
 	}
 	close(releaseContent)
@@ -106,8 +109,8 @@ func TestDownloadAgentPinsParentAcrossAncestorSubstitution(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(originalParent, "agent.yaml")); err != nil || !bytes.Equal(got, contents) {
 		t.Fatalf("pinned destination = %q, %v, want %q", got, err, contents)
 	}
-	if entries, err := os.ReadDir(attackerParent); err != nil || len(entries) != 0 {
-		t.Fatalf("attacker directory changed: %v, %v", entries, err)
+	if entries, err := os.ReadDir(replacementParent); err != nil || len(entries) != 0 {
+		t.Fatalf("same-process replacement directory changed: %v, %v", entries, err)
 	}
 }
 
@@ -116,7 +119,7 @@ func TestDownloadAgentChmodsStagedDescriptorBeforeNoReplacePublication(t *testin
 	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
-	parent := t.TempDir()
+	parent := trustedTestDir(t)
 	destination := filepath.Join(parent, "agent.yaml")
 	client.beforeAgentPublish = func(staged *stagedContent) {
 		opened, err := staged.openRead()
@@ -157,12 +160,12 @@ func TestDownloadAgentChmodsStagedDescriptorBeforeNoReplacePublication(t *testin
 	}
 }
 
-func TestDownloadAgentRejectsStagedEntrySubstitutionWithoutDeletingReplacement(t *testing.T) {
+func TestDownloadAgentDetectsStagedIdentityCorruptionWithoutDeletingReplacement(t *testing.T) {
 	contents := []byte("schema_version: 1\n")
 	client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
-	parent := t.TempDir()
+	parent := trustedTestDir(t)
 	destination := filepath.Join(parent, "agent.yaml")
 	sentinel := filepath.Join(parent, "sentinel")
 	if err := os.WriteFile(sentinel, []byte("preserve"), 0o600); err != nil {
@@ -204,7 +207,7 @@ func TestDownloadAgentRejectsMD5MismatchWithoutDestination(t *testing.T) {
 		}
 		writeExactMetadata(t, w, remoteAgentRef, contents, map[string]any{"content_md5": md5Hex([]byte("different"))})
 	})
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	destination := filepath.Join(trustedTestDir(t), "agent.yaml")
 	err := client.DownloadAgent(context.Background(), remoteAgentRef, destination)
 	if !errors.Is(err, cloud.ErrIntegrity) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrIntegrity", err)
@@ -216,9 +219,9 @@ func TestDownloadAgentRejectsMD5MismatchWithoutDestination(t *testing.T) {
 }
 
 func TestDownloadAgentRejectsUnsafeOrExistingDestinationWithoutRequest(t *testing.T) {
-	parent := t.TempDir()
+	parent := trustedTestDir(t)
 	symlinkParent := filepath.Join(parent, "linked")
-	if err := os.Symlink(t.TempDir(), symlinkParent); err != nil {
+	if err := os.Symlink(trustedTestDir(t), symlinkParent); err != nil {
 		t.Fatal(err)
 	}
 	existing := filepath.Join(parent, "existing.yaml")
@@ -248,6 +251,54 @@ func TestDownloadAgentRejectsUnsafeOrExistingDestinationWithoutRequest(t *testin
 	}
 }
 
+func TestDownloadAgentRejectsWritableDirectoryTrustViolationsWithoutRequest(t *testing.T) {
+	var requests atomic.Int32
+	client := newContentClient(t, remoteAgentRef, nil, func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	})
+	tests := []struct {
+		name    string
+		prepare func(*testing.T) string
+	}{
+		{
+			name: "writable terminal parent",
+			prepare: func(t *testing.T) string {
+				parent := trustedTestDir(t)
+				if err := os.Chmod(parent, 0o770); err != nil {
+					t.Fatal(err)
+				}
+				return parent
+			},
+		},
+		{
+			name: "writable ancestor",
+			prepare: func(t *testing.T) string {
+				root := trustedTestDir(t)
+				ancestor := filepath.Join(root, "writable")
+				parent := filepath.Join(ancestor, "destination")
+				if err := os.MkdirAll(parent, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(ancestor, 0o707); err != nil {
+					t.Fatal(err)
+				}
+				return parent
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destination := filepath.Join(tt.prepare(t), "agent.yaml")
+			if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); !errors.Is(err, cloud.ErrUnsafeContent) {
+				t.Fatalf("DownloadAgent() error = %v, want directory trust ErrUnsafeContent", err)
+			}
+		})
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("requests = %d, want untrusted directories rejected before network", got)
+	}
+}
+
 func TestDownloadAgentRejectsCrossOriginContentRedirect(t *testing.T) {
 	var targetRequests atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -264,7 +315,7 @@ func TestDownloadAgentRejectsCrossOriginContentRedirect(t *testing.T) {
 	}))
 	defer source.Close()
 	client := newRemoteTestClient(t, source.URL)
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	destination := filepath.Join(trustedTestDir(t), "agent.yaml")
 	err := client.DownloadAgent(context.Background(), remoteAgentRef, destination)
 	if !errors.Is(err, cloud.ErrInvalidResponse) {
 		t.Fatalf("DownloadAgent() error = %v, want redirect ErrInvalidResponse", err)
@@ -282,7 +333,7 @@ func TestDownloadAgentRejectsWrongReferenceBeforeRequest(t *testing.T) {
 	client := newContentClient(t, remoteAgentRef, nil, func(http.ResponseWriter, *http.Request) {
 		requests.Add(1)
 	})
-	err := client.DownloadAgent(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo-agent", Version: "v1.2.3"}, filepath.Join(t.TempDir(), "agent.yaml"))
+	err := client.DownloadAgent(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo-agent", Version: "v1.2.3"}, filepath.Join(trustedTestDir(t), "agent.yaml"))
 	if !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrNotFound", err)
 	}

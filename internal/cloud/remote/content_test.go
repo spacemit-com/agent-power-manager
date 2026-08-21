@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -32,7 +33,7 @@ func TestDownloadVerifiedContentStagesExactBytesWithPrivateMode(t *testing.T) {
 		requests = append(requests, r.URL.Path)
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
-	directory := openTestPinnedDirectory(t, t.TempDir())
+	directory := openTestPinnedDirectory(t, trustedTestDir(t))
 	temporary, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", directory, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +131,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parent := t.TempDir()
+			parent := trustedTestDir(t)
 			directory := openTestPinnedDirectory(t, parent)
 			client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
 				tt.serve(t, w, r)
@@ -179,7 +180,7 @@ func TestDownloadVerifiedContentRejectsInvalidMetadataAndProtocol(t *testing.T) 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var contentHits atomic.Int32
-			parent := t.TempDir()
+			parent := trustedTestDir(t)
 			directory := openTestPinnedDirectory(t, parent)
 			client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/content") {
@@ -238,7 +239,7 @@ func TestDownloadVerifiedContentClassifiesContentLengthSentinels(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			parent := t.TempDir()
+			parent := trustedTestDir(t)
 			directory := openTestPinnedDirectory(t, parent)
 			temporary, err := client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", directory, 0o600)
 			if tt.want == nil {
@@ -263,7 +264,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 		client := newRemoteTestClient(t, "http://127.0.0.1:1")
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		directory := openTestPinnedDirectory(t, t.TempDir())
+		directory := openTestPinnedDirectory(t, trustedTestDir(t))
 		_, err := client.downloadVerifiedContent(ctx, remoteAgentRef, "application/yaml", directory, 0o600)
 		if !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
 			t.Fatalf("downloadVerifiedContent() error = %v, want only context.Canceled classification", err)
@@ -286,7 +287,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 		}))
 		defer server.Close()
 		client := newRemoteTestClient(t, server.URL)
-		parent := t.TempDir()
+		parent := trustedTestDir(t)
 		directory := openTestPinnedDirectory(t, parent)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
@@ -318,7 +319,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		directory := openTestPinnedDirectory(t, t.TempDir())
+		directory := openTestPinnedDirectory(t, trustedTestDir(t))
 		_, err = client.downloadVerifiedContent(context.Background(), remoteAgentRef, "application/yaml", directory, 0o600)
 		if !errors.Is(err, transportErr) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
 			t.Fatalf("downloadVerifiedContent() error = %v, want only transport identity", err)
@@ -380,6 +381,28 @@ func openTestPinnedDirectory(t *testing.T, path string) *pinnedDirectory {
 	t.Cleanup(func() {
 		if err := directory.close(); err != nil {
 			t.Errorf("close pinned test directory: %v", err)
+		}
+	})
+	return directory
+}
+
+func trustedTestDir(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	physicalHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := os.MkdirTemp(physicalHome, ".apm-remote-secure-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(directory); err != nil {
+			t.Errorf("remove trusted test directory %q: %v", directory, err)
 		}
 	})
 	return directory

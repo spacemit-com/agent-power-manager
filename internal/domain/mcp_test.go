@@ -63,12 +63,16 @@ func TestDecodeMCPServerJSONPreservesForbiddenFieldPresence(t *testing.T) {
 		name string
 		body string
 	}{
+		{name: "transport null", body: `{"transport":null,"command":"npx"}`},
+		{name: "stdio command null", body: `{"transport":"stdio","command":null}`},
+		{name: "stdio args null", body: `{"transport":"stdio","command":"npx","args":null}`},
 		{name: "stdio URL null", body: `{"transport":"stdio","command":"npx","url":null}`},
 		{name: "stdio URL empty", body: `{"transport":"stdio","command":"npx","url":""}`},
 		{name: "http command null", body: `{"transport":"http","url":"https://mcp.example.com/mcp","command":null}`},
 		{name: "http command empty", body: `{"transport":"http","url":"https://mcp.example.com/mcp","command":""}`},
 		{name: "http args null", body: `{"transport":"http","url":"https://mcp.example.com/mcp","args":null}`},
 		{name: "http args empty", body: `{"transport":"http","url":"https://mcp.example.com/mcp","args":[]}`},
+		{name: "http URL null", body: `{"transport":"http","url":null}`},
 	}
 	for _, tt := range invalid {
 		t.Run("invalid/"+tt.name, func(t *testing.T) {

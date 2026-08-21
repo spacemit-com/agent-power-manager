@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,9 @@ type presentJSONValue[T any] struct {
 
 func (value *presentJSONValue[T]) UnmarshalJSON(data []byte) error {
 	value.present = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return fmt.Errorf("present MCP field must not be null: %w", ErrInvalidMCPServer)
+	}
 	return json.Unmarshal(data, &value.value)
 }
 

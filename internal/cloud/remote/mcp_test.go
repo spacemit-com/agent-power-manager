@@ -19,7 +19,7 @@ func TestGetMCPReturnsStrictValidatedDefinitionAndCleansOwnedDirectory(t *testin
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
-	root := t.TempDir()
+	root := trustedTestDir(t)
 	sentinel := filepath.Join(root, "preserve")
 	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
@@ -43,24 +43,29 @@ func TestGetMCPReturnsStrictValidatedDefinitionAndCleansOwnedDirectory(t *testin
 	}
 }
 
-func TestGetMCPAcceptsTemporaryParentThroughSymlinkedAncestor(t *testing.T) {
+func TestGetMCPRejectsInjectedTemporaryParentThroughSymlinkedAncestor(t *testing.T) {
 	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	var requests int
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
-	physicalRoot := t.TempDir()
+	physicalRoot := trustedTestDir(t)
 	physicalParent := filepath.Join(physicalRoot, "private", "tmp")
 	if err := os.MkdirAll(physicalParent, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	aliasRoot := filepath.Join(t.TempDir(), "var")
+	aliasRoot := filepath.Join(trustedTestDir(t), "var")
 	if err := os.Symlink(filepath.Join(physicalRoot, "private"), aliasRoot); err != nil {
 		t.Fatal(err)
 	}
 	client.mcpTempParent = filepath.Join(aliasRoot, "tmp")
 
-	if _, err := client.GetMCP(context.Background(), remoteMCPRef); err != nil {
-		t.Fatal(err)
+	if _, err := client.GetMCP(context.Background(), remoteMCPRef); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("GetMCP() error = %v, want symlink ancestor ErrUnsafeContent", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want injected symlink ancestor rejected before network", requests)
 	}
 	assertDirectoryEmpty(t, physicalParent)
 }
@@ -71,6 +76,9 @@ func TestGetMCPCanonicalizesSymlinkedSystemTempDirectory(t *testing.T) {
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
 	physicalParent := t.TempDir()
+	if err := os.Chmod(physicalParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	alias := filepath.Join(t.TempDir(), "tmp-alias")
 	if err := os.Symlink(physicalParent, alias); err != nil {
 		t.Fatal(err)
@@ -83,12 +91,12 @@ func TestGetMCPCanonicalizesSymlinkedSystemTempDirectory(t *testing.T) {
 	assertDirectoryEmpty(t, physicalParent)
 }
 
-func TestGetMCPCleanupDoesNotDeleteSubstitutedTemporaryChild(t *testing.T) {
+func TestGetMCPCleanupDetectsOwnedChildIdentityCorruption(t *testing.T) {
 	contents := []byte(`{"transport":"stdio","command":"npx"}`)
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
-	root := t.TempDir()
+	root := trustedTestDir(t)
 	client.mcpTempParent = root
 	var replacement string
 	client.beforeMCPCleanup = func(owned *ownedDirectory) {
@@ -122,7 +130,11 @@ func TestGetMCPRejectsStrictJSONInvalidUnionAndPlainHTTP(t *testing.T) {
 		{name: "duplicate field", body: `{"transport":"stdio","command":"first","command":"second"}`},
 		{name: "case-fold duplicate field", body: `{"transport":"stdio","command":"first","COMMAND":"second"}`},
 		{name: "trailing value", body: `{"transport":"stdio","command":"npx"} {}`},
+		{name: "null transport", body: `{"transport":null,"command":"npx"}`},
+		{name: "stdio null command", body: `{"transport":"stdio","command":null}`},
+		{name: "stdio null args", body: `{"transport":"stdio","command":"npx","args":null}`},
 		{name: "stdio forbidden null URL", body: `{"transport":"stdio","command":"npx","url":null}`},
+		{name: "http null URL", body: `{"transport":"http","url":null}`},
 		{name: "http forbidden empty command", body: `{"transport":"http","url":"https://mcp.example.com/mcp","command":""}`},
 		{name: "http forbidden empty args", body: `{"transport":"http","url":"https://mcp.example.com/mcp","args":[]}`},
 		{name: "plain HTTP", body: `{"transport":"http","url":"http://mcp.example.com/mcp"}`},
@@ -133,7 +145,7 @@ func TestGetMCPRejectsStrictJSONInvalidUnionAndPlainHTTP(t *testing.T) {
 			client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 				serveValidContent(t, w, r, remoteMCPRef, contents)
 			})
-			root := t.TempDir()
+			root := trustedTestDir(t)
 			client.mcpTempParent = root
 			_, err := client.GetMCP(context.Background(), remoteMCPRef)
 			if !errors.Is(err, cloud.ErrInvalidResponse) {
@@ -149,12 +161,12 @@ func TestGetMCPRejectsSymlinkTemporaryParentWithoutDeletingTarget(t *testing.T) 
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
-	target := t.TempDir()
+	target := trustedTestDir(t)
 	sentinel := filepath.Join(target, "preserve")
 	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(t.TempDir(), "linked")
+	link := filepath.Join(trustedTestDir(t), "linked")
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
@@ -172,5 +184,26 @@ func TestGetMCPRejectsSymlinkTemporaryParentWithoutDeletingTarget(t *testing.T) 
 	}
 	if len(entries) != 1 || !strings.HasPrefix(entries[0].Name(), "preserve") {
 		t.Fatalf("temporary parent target changed: %v", entries)
+	}
+}
+
+func TestGetMCPRejectsWritableInjectedTemporaryParentWithoutRequest(t *testing.T) {
+	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	requests := 0
+	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		serveValidContent(t, w, r, remoteMCPRef, contents)
+	})
+	root := trustedTestDir(t)
+	if err := os.Chmod(root, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	client.mcpTempParent = root
+
+	if _, err := client.GetMCP(context.Background(), remoteMCPRef); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("GetMCP() error = %v, want directory trust ErrUnsafeContent", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want untrusted parent rejected before network", requests)
 	}
 }
