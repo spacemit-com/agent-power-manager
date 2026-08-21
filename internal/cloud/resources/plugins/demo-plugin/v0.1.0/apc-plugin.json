@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "name": "demo-plugin",
+  "version": "v0.1.0",
+  "description": "Second shared Plugin fixture managed by APC",
+  "skills": [
+    "skills/demo-plugin"
+  ]
+}

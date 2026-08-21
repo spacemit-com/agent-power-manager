@@ -1,6 +1,0 @@
-{
-  "name": "demo-plugin",
-  "version": "0.0.1",
-  "description": "Shared Codex plugin fixture managed by APM Cloud",
-  "skills": "./skills/"
-}

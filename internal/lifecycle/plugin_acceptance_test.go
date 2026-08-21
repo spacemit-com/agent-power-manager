@@ -368,31 +368,28 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 
 func writeAcceptancePluginPackage(t *testing.T, root, logical, release string) {
 	t.Helper()
-	nativeVersion := strings.TrimPrefix(release, "v")
 	packageRoot := filepath.Join(root, "plugins", logical, release)
-	manifest := `{"name":"` + logical + `","version":"` + nativeVersion + `","description":"acceptance fixture"}`
-	for _, relative := range []string{
-		filepath.Join(".codex-plugin", "plugin.json"),
-		filepath.Join(".claude-plugin", "plugin.json"),
-	} {
-		path := filepath.Join(packageRoot, relative)
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	skillRoot := filepath.Join(packageRoot, "skills", logical)
+	if err := os.MkdirAll(skillRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := json.Marshal(map[string]any{
+		"schema_version": 1,
+		"name":           logical,
+		"version":        release,
+		"description":    "acceptance fixture",
+		"skills":         []string{"skills/" + logical},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, "apc-plugin.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"SKILL.md", "skill-card.md"} {
+		if err := os.WriteFile(filepath.Join(skillRoot, marker), []byte(marker+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	hermesRoot := filepath.Join(packageRoot, ".hermes-plugin")
-	if err := os.MkdirAll(hermesRoot, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(hermesRoot, "__init__.py"), []byte("def register(ctx):\n    return None\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	hermesManifest := "name: " + logical + "\nversion: " + nativeVersion + "\ndescription: acceptance fixture\nauthor: APM\n"
-	if err := os.WriteFile(filepath.Join(hermesRoot, "plugin.yaml"), []byte(hermesManifest), 0o600); err != nil {
-		t.Fatal(err)
 	}
 }
 

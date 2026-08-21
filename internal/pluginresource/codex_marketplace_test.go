@@ -21,8 +21,7 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
   "name": "demo",
   "version": "0.1.0",
   "description": "Demo tools",
-  "author": {"name": "Example Author"},
-  "interface": {"displayName": "Demo Display", "category": "Productivity"}
+  "skills": "./skills/"
 }`
 	if err := os.WriteFile(filepath.Join(pluginPath, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
@@ -57,8 +56,8 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Name != "apm-demo" || document.Interface.DisplayName != "Demo Display" {
-		t.Fatalf("marketplace identity = %q/%q, want apm-demo/Demo Display", document.Name, document.Interface.DisplayName)
+	if document.Name != "apm-demo" || document.Interface.DisplayName != "demo" {
+		t.Fatalf("marketplace identity = %q/%q, want apm-demo/demo", document.Name, document.Interface.DisplayName)
 	}
 	if len(document.Plugins) != 1 {
 		t.Fatalf("plugins count = %d, want 1", len(document.Plugins))
@@ -67,16 +66,16 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 	if plugin.Name != "demo" || plugin.Source.Source != "local" || plugin.Source.Path != "./plugins/demo" {
 		t.Fatalf("plugin identity/source = %#v, want demo local ./plugins/demo", plugin)
 	}
-	if plugin.Policy.Installation != "AVAILABLE" || plugin.Policy.Authentication != "ON_INSTALL" || plugin.Category != "Productivity" {
-		t.Fatalf("plugin policy/category = %#v/%q, want AVAILABLE ON_INSTALL/Productivity", plugin.Policy, plugin.Category)
+	if plugin.Policy.Installation != "AVAILABLE" || plugin.Policy.Authentication != "ON_INSTALL" || plugin.Category != "Coding" {
+		t.Fatalf("plugin policy/category = %#v/%q, want AVAILABLE ON_INSTALL/Coding", plugin.Policy, plugin.Category)
 	}
 	if _, err := os.Lstat(filepath.Join(root, ".claude-plugin", "marketplace.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Claude marketplace stat error = %v, want not exist", err)
 	}
 }
 
-func TestCodexMarketplaceUsesUnbrandedDisplayDefaults(t *testing.T) {
-	// 捕获错误变更：缺失展示字段时输出空值或复制外部品牌默认值。
+func TestCodexMarketplaceRejectsIncompleteGeneratedManifest(t *testing.T) {
+	// 捕获错误变更：builder 接纳缺失 canonical description/skills 的 schema 漂移文件。
 	root := t.TempDir()
 	pluginPath := filepath.Join(root, "plugins", "demo")
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".codex-plugin"), 0o700); err != nil {
@@ -86,21 +85,7 @@ func TestCodexMarketplaceUsesUnbrandedDisplayDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (codexMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
-		t.Fatalf("Build() error = %v", err)
-	}
-	var document struct {
-		Interface struct {
-			DisplayName string `json:"displayName"`
-		} `json:"interface"`
-		Plugins []struct {
-			Category string `json:"category"`
-		} `json:"plugins"`
-	}
-	if err := decodeJSONFile(filepath.Join(root, ".agents", "plugins", "marketplace.json"), &document); err != nil {
-		t.Fatal(err)
-	}
-	if document.Interface.DisplayName != "demo" || len(document.Plugins) != 1 || document.Plugins[0].Category != "Coding" {
-		t.Fatalf("defaults = %q/%#v, want demo/Coding", document.Interface.DisplayName, document.Plugins)
+	if err := (codexMarketplaceBuilder{}).Build(ref, root, pluginPath); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("Build() error = %v, want ErrInvalidArtifact", err)
 	}
 }

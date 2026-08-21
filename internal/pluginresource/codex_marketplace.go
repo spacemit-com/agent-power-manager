@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"apm/internal/domain"
 	"apm/internal/pluginartifact"
@@ -45,7 +46,7 @@ func (codexMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath strin
 	if err := decodePluginManifest(pluginPath, codexManifestPath, &manifest); err != nil {
 		return fmt.Errorf("decode Codex plugin manifest: %w", err)
 	}
-	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
+	if err := validateCodexPluginManifest(ref, manifest); err != nil {
 		return err
 	}
 	document, err := newCodexMarketplaceDocument(ref, manifest)
@@ -69,7 +70,7 @@ func (codexMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error 
 	if err := decodePluginManifest(pluginPath, codexManifestPath, &manifest); err != nil {
 		return fmt.Errorf("decode Codex plugin manifest: %w", err)
 	}
-	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
+	if err := validateCodexPluginManifest(ref, manifest); err != nil {
 		return err
 	}
 	want, err := newCodexMarketplaceDocument(ref, manifest)
@@ -91,21 +92,23 @@ func newCodexMarketplaceDocument(ref domain.PowerRef, manifest codexPluginManife
 	if err != nil {
 		return codexMarketplaceDocument{}, err
 	}
-	displayName := manifest.Interface.DisplayName
-	if displayName == "" {
-		displayName = ref.Name
-	}
-	category := manifest.Interface.Category
-	if category == "" {
-		category = "Coding"
-	}
 	document := codexMarketplaceDocument{Name: marketplaceName}
-	document.Interface.DisplayName = displayName
-	plugin := codexMarketplacePlugin{Name: manifest.Name, Category: category}
+	document.Interface.DisplayName = manifest.Name
+	plugin := codexMarketplacePlugin{Name: manifest.Name, Category: "Coding"}
 	plugin.Source.Source = "local"
 	plugin.Source.Path = localPluginSourcePrefix + manifest.Name
 	plugin.Policy.Installation = "AVAILABLE"
 	plugin.Policy.Authentication = "ON_INSTALL"
 	document.Plugins = []codexMarketplacePlugin{plugin}
 	return document, nil
+}
+
+func validateCodexPluginManifest(ref domain.PowerRef, manifest codexPluginManifest) error {
+	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
+		return err
+	}
+	if strings.TrimSpace(manifest.Description) == "" || manifest.Skills != "./skills/" {
+		return fmt.Errorf("Codex Plugin manifest is incomplete: %w", ErrInvalidArtifact)
+	}
+	return nil
 }

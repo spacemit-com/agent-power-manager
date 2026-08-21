@@ -14,11 +14,12 @@ import (
 	"apm/internal/cloud"
 	"apm/internal/cloud/local"
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 	"apm/internal/utils/filesystem"
 )
 
 func TestLocalClientDownloadsOneSharedPluginPackage(t *testing.T) {
-	// 捕获错误变更：按 Agent 选择或裁剪原始包，导致下载结果缺少其他 Agent 的原生入口。
+	// 捕获错误变更：Local 下载夹带 APM 派生文件，或遗漏 canonical 索引与 Skill markers。
 	root, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
@@ -33,14 +34,17 @@ func TestLocalClientDownloadsOneSharedPluginPackage(t *testing.T) {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
 	for _, required := range []string{
-		filepath.Join(".codex-plugin", "plugin.json"),
-		filepath.Join(".claude-plugin", "plugin.json"),
-		filepath.Join(".hermes-plugin", "__init__.py"),
-		filepath.Join(".hermes-plugin", "plugin.yaml"),
+		"apc-plugin.json",
 		filepath.Join("skills", "demo-plugin", "SKILL.md"),
+		filepath.Join("skills", "demo-plugin", "skill-card.md"),
 	} {
 		if _, err := os.Stat(filepath.Join(destination, required)); err != nil {
 			t.Fatalf("stat downloaded shared entry %q: %v", required, err)
+		}
+	}
+	for _, forbidden := range []string{".codex-plugin", ".claude-plugin", ".hermes-plugin", ".agents"} {
+		if _, err := os.Lstat(filepath.Join(destination, forbidden)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("generated path %q stat error = %v, want absent", forbidden, err)
 		}
 	}
 	for _, forbidden := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes} {
@@ -138,7 +142,7 @@ func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *test
 					t.Fatal(err)
 				}
 			case "manifest symlink":
-				manifest := filepath.Join(source, ".codex-plugin", "plugin.json")
+				manifest := filepath.Join(source, "apc-plugin.json")
 				if err := os.Remove(manifest); err != nil {
 					t.Fatal(err)
 				}
@@ -314,7 +318,7 @@ func TestLocalClientDownloadPluginAllowsCallerControlledRelativeDestination(t *t
 	if err := client.DownloadPlugin(context.Background(), ref, "plugin"); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(working, "plugin", ".codex-plugin", "plugin.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(working, "plugin", "apc-plugin.json")); err != nil {
 		t.Fatalf("stat relative destination manifest: %v", err)
 	}
 }
@@ -377,12 +381,18 @@ type treeSnapshotEntry struct {
 func writeRawSharedPluginPackage(t *testing.T, root string, ref domain.PowerRef) string {
 	t.Helper()
 	source := filepath.Join(root, "plugins", ref.Name, ref.Version)
-	if err := os.MkdirAll(filepath.Join(source, ".codex-plugin"), 0o700); err != nil {
+	skillRoot := filepath.Join(source, "skills", ref.Name)
+	if err := os.MkdirAll(skillRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"name":"demo-plugin","version":"0.1.0"}`
-	if err := os.WriteFile(filepath.Join(source, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+	manifest := fmt.Sprintf(`{"schema_version":1,"name":%q,"version":%q,"description":"Demo","skills":[%q]}`, ref.Name, ref.Version, "skills/"+ref.Name)
+	if err := os.WriteFile(filepath.Join(source, "apc-plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	for _, marker := range []string{"SKILL.md", "skill-card.md"} {
+		if err := os.WriteFile(filepath.Join(skillRoot, marker), []byte(marker+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(source, "payload.txt"), []byte("payload"), 0o600); err != nil {
 		t.Fatal(err)
@@ -520,11 +530,14 @@ func validateBundledPluginFixtures(root string) error {
 				return fmt.Errorf("Plugin fixture version %q is not a directory", filepath.Join(plugin.Name(), version.Name()))
 			}
 			versionRoot := filepath.Join(pluginRoot, version.Name())
+			ref := domain.PowerRef{Name: plugin.Name(), Type: domain.PowerTypePlugin, Version: version.Name()}
+			if err := pluginartifact.ValidateRawPackage(ref, versionRoot); err != nil {
+				return fmt.Errorf("Plugin fixture %s@%s is not canonical: %w", plugin.Name(), version.Name(), err)
+			}
 			for _, required := range []string{
-				filepath.Join(".codex-plugin", "plugin.json"),
-				filepath.Join(".claude-plugin", "plugin.json"),
-				filepath.Join(".hermes-plugin", "plugin.yaml"),
-				filepath.Join(".hermes-plugin", "__init__.py"),
+				"apc-plugin.json",
+				filepath.Join("skills", plugin.Name(), "SKILL.md"),
+				filepath.Join("skills", plugin.Name(), "skill-card.md"),
 			} {
 				info, err := os.Stat(filepath.Join(versionRoot, required))
 				if err != nil || !info.Mode().IsRegular() {
@@ -532,6 +545,7 @@ func validateBundledPluginFixtures(root string) error {
 				}
 			}
 			legacyNames := map[string]bool{"codex": true, "claude-code": true, "hermes-agent": true}
+			generatedNames := map[string]bool{".codex-plugin": true, ".claude-plugin": true, ".hermes-plugin": true}
 			if err := filepath.WalkDir(versionRoot, func(path string, entry os.DirEntry, err error) error {
 				if err != nil {
 					return err
@@ -544,6 +558,9 @@ func validateBundledPluginFixtures(root string) error {
 					for _, component := range strings.Split(relative, string(filepath.Separator)) {
 						if legacyNames[component] {
 							return fmt.Errorf("Plugin fixture %s@%s contains recursive legacy Agent layout %q", plugin.Name(), version.Name(), relative)
+						}
+						if generatedNames[component] {
+							return fmt.Errorf("Plugin fixture %s@%s contains generated Agent layout %q", plugin.Name(), version.Name(), relative)
 						}
 					}
 					return nil

@@ -133,7 +133,7 @@ func (service *Service) Ensure(ctx context.Context, ref domain.PowerRef) (artifa
 		return Artifact{}, err
 	}
 	// Cloud raw package 在共享 builder 读取 manifest 前统一拒绝 marketplace。
-	if err := pluginartifact.ValidateRawPackage(temporaryPluginPath); err != nil {
+	if err := pluginartifact.ValidateRawPackage(ref, temporaryPluginPath); err != nil {
 		return Artifact{}, errors.Join(ErrInvalidArtifact, err)
 	}
 	if err := service.builder.Build(ref, temporaryRoot, temporaryPluginPath); err != nil {

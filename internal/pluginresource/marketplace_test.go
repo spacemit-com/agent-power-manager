@@ -45,23 +45,22 @@ func TestSharedMarketplaceBuilderBuildsBothDocumentsInOneRoot(t *testing.T) {
 	}
 }
 
-func TestSharedMarketplaceBuilderRejectsEitherInvalidNativeManifest(t *testing.T) {
-	// 捕获错误变更：协调器只校验一份原生 manifest，或容忍版本/逻辑名称不精确匹配。
+func TestSharedMarketplaceBuilderRejectsInvalidCanonicalIdentity(t *testing.T) {
+	// 捕获错误变更：协调器在生成原生 manifest 前未复验 canonical 精确身份。
 	for _, test := range []struct {
-		name           string
-		codexManifest  string
-		claudeManifest string
+		name     string
+		manifest string
 	}{
-		{name: "Codex versioned name", codexManifest: `{"name":"demo-v1.2.3","version":"1.2.3"}`, claudeManifest: `{"name":"demo","version":"1.2.3"}`},
-		{name: "Claude wrong version", codexManifest: `{"name":"demo","version":"1.2.3"}`, claudeManifest: `{"name":"demo","version":"1.2.4"}`},
+		{name: "wrong name", manifest: `{"schema_version":1,"name":"other","version":"v1.2.3","description":"Demo","skills":["skills/demo"]}`},
+		{name: "wrong version", manifest: `{"schema_version":1,"name":"demo","version":"v1.2.4","description":"Demo","skills":["skills/demo"]}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			pluginPath := filepath.Join(root, "plugins", "demo")
-			if err := writeTestPluginManifest(pluginPath, codexManifestPath, test.codexManifest); err != nil {
+			if err := writeSharedTestPluginManifests(pluginPath, `{"name":"demo","version":"1.2.3","description":"Demo"}`); err != nil {
 				t.Fatal(err)
 			}
-			if err := writeTestPluginManifest(pluginPath, claudeManifestPath, test.claudeManifest); err != nil {
+			if err := writeTestPluginManifest(pluginPath, "apc-plugin.json", test.manifest); err != nil {
 				t.Fatal(err)
 			}
 			ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}
@@ -119,7 +118,7 @@ func TestNewRejectsNilAndTypedNilDownloaders(t *testing.T) {
 }
 
 func TestEnsureRejectsInvalidSharedPackagesWithoutPublishingCache(t *testing.T) {
-	// 捕获错误变更：信任任一原生 manifest 身份、跟随 symlink 或接纳 Cloud 自带 marketplace。
+	// 捕获错误变更：信任错误 canonical 身份、跟随 symlink 或接纳 Cloud 自带派生内容。
 	tests := []struct {
 		name  string
 		write func(*testing.T, string) error
@@ -127,41 +126,41 @@ func TestEnsureRejectsInvalidSharedPackagesWithoutPublishingCache(t *testing.T) 
 		{
 			name: "wrong name",
 			write: func(_ *testing.T, destination string) error {
-				return writeTestPluginManifest(destination, codexManifestPath, `{"name":"other","version":"0.1.0"}`)
+				return writeTestPluginManifest(destination, "apc-plugin.json", `{"schema_version":1,"name":"other","version":"v0.1.0","description":"Demo","skills":["skills/demo"]}`)
 			},
 		},
 		{
 			name: "wrong version",
 			write: func(_ *testing.T, destination string) error {
-				return writeTestPluginManifest(destination, claudeManifestPath, `{"name":"demo","version":"0.2.0"}`)
+				return writeTestPluginManifest(destination, "apc-plugin.json", `{"schema_version":1,"name":"demo","version":"v0.2.0","description":"Demo","skills":["skills/demo"]}`)
 			},
 		},
 		{
-			name: "noncanonical native version",
+			name: "noncanonical canonical version",
 			write: func(_ *testing.T, destination string) error {
-				return writeTestPluginManifest(destination, codexManifestPath, `{"name":"demo","version":"0.1"}`)
+				return writeTestPluginManifest(destination, "apc-plugin.json", `{"schema_version":1,"name":"demo","version":"0.1.0","description":"Demo","skills":["skills/demo"]}`)
 			},
 		},
 		{
 			name: "missing manifest",
 			write: func(_ *testing.T, destination string) error {
-				return os.Remove(filepath.Join(destination, claudeManifestPath))
+				return os.Remove(filepath.Join(destination, "apc-plugin.json"))
 			},
 		},
 		{
 			name: "second JSON value",
 			write: func(_ *testing.T, destination string) error {
-				return writeTestPluginManifest(destination, codexManifestPath, `{"name":"demo","version":"0.1.0"} {}`)
+				return writeTestPluginManifest(destination, "apc-plugin.json", `{"schema_version":1,"name":"demo","version":"v0.1.0","description":"Demo","skills":["skills/demo"]} {}`)
 			},
 		},
 		{
 			name: "symlink manifest",
 			write: func(t *testing.T, destination string) error {
 				target := filepath.Join(t.TempDir(), "plugin.json")
-				if err := os.WriteFile(target, []byte(`{"name":"demo","version":"0.1.0"}`), 0o600); err != nil {
+				if err := os.WriteFile(target, []byte(`{"schema_version":1,"name":"demo","version":"v0.1.0","description":"Demo","skills":["skills/demo"]}`), 0o600); err != nil {
 					return err
 				}
-				manifestPath := filepath.Join(destination, claudeManifestPath)
+				manifestPath := filepath.Join(destination, "apc-plugin.json")
 				if err := os.Remove(manifestPath); err != nil {
 					return err
 				}
@@ -210,12 +209,12 @@ func TestEnsureWithLocalCloudRejectsSymlinkedSourceBeforePublishingArtifact(t *t
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "xdg-cache"))
 	ref := testPluginRef()
 	source := filepath.Join(resourceRoot, "plugins", ref.Name, ref.Version)
-	manifestPath := filepath.Join(source, codexManifestPath)
+	manifestPath := filepath.Join(source, "apc-plugin.json")
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	externalManifest := filepath.Join(t.TempDir(), "outside-plugin.json")
-	wantExternal := `{"name":"demo","version":"0.1.0"}`
+	wantExternal := `{"schema_version":1,"name":"demo","version":"v0.1.0","description":"Demo","skills":["skills/demo"]}`
 	if err := os.WriteFile(externalManifest, []byte(wantExternal), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -292,8 +291,8 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 	validClaude := `{
   "name":"apm-demo",
   "owner":{"name":"APM"},
-  "metadata":{"description":"APM local marketplace for demo","version":"0.1.0"},
-	  "plugins":[{"name":"demo","source":"./plugins/demo","description":"APM local marketplace for demo"}]
+  "metadata":{"description":"Demo","version":"0.1.0"},
+	  "plugins":[{"name":"demo","source":"./plugins/demo","description":"Demo"}]
 }`
 	tests := []struct {
 		name   string
@@ -344,7 +343,7 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 		{
 			name: "manifest changed after publish",
 			mutate: func(t *testing.T, root string) {
-				writeFileForTest(t, filepath.Join(root, "plugins", "demo", claudeManifestPath), `{"name":"other","version":"0.1.0"}`)
+				writeFileForTest(t, filepath.Join(root, "plugins", "demo", claudeManifestPath), `{"name":"other","version":"0.1.0","description":"Demo","skills":["./skills/"]}`)
 			},
 		},
 	}
@@ -386,11 +385,11 @@ func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCach
 	}{
 		{
 			name:     "description changed to object",
-			manifest: `{"name":"demo","version":"0.1.0","description":{"text":"Demo"},"author":{"name":"APM"}}`,
+			manifest: `{"name":"demo","version":"0.1.0","description":{"text":"Demo"},"skills":"./skills/"}`,
 		},
 		{
-			name:     "author changed to string",
-			manifest: `{"name":"demo","version":"0.1.0","description":"Demo","author":"APM"}`,
+			name:     "skills changed to array",
+			manifest: `{"name":"demo","version":"0.1.0","description":"Demo","skills":["./skills/"]}`,
 		},
 	}
 	for _, test := range tests {
@@ -399,7 +398,7 @@ func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCach
 			var calls atomic.Int32
 			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				calls.Add(1)
-				return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0","description":"Demo","author":{"name":"APM"}}`)
+				return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0","description":"Demo"}`)
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
@@ -494,10 +493,38 @@ func writeTestPluginManifest(pluginPath, relativePath, content string) error {
 }
 
 func writeSharedTestPluginManifests(pluginPath, content string) error {
-	if err := writeTestPluginManifest(pluginPath, codexManifestPath, content); err != nil {
+	var native struct {
+		Name        string `json:"name"`
+		Version     string `json:"version"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal([]byte(content), &native); err != nil {
 		return err
 	}
-	return writeTestPluginManifest(pluginPath, claudeManifestPath, content)
+	if native.Description == "" {
+		native.Description = "Demo"
+	}
+	canonical := map[string]any{
+		"schema_version": 1,
+		"name":           native.Name,
+		"version":        "v" + native.Version,
+		"description":    native.Description,
+		"skills":         []string{"skills/" + native.Name},
+	}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return err
+	}
+	if err := writeTestPluginManifest(pluginPath, "apc-plugin.json", string(encoded)); err != nil {
+		return err
+	}
+	skillRoot := filepath.Join(pluginPath, "skills", native.Name)
+	for _, marker := range []string{"SKILL.md", "skill-card.md"} {
+		if err := writeTestPluginManifest(skillRoot, marker, marker+"\n"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeFileForTest(t *testing.T, path, content string) {

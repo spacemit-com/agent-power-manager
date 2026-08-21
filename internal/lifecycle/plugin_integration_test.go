@@ -687,11 +687,13 @@ func TestPluginAcceptanceSharedArtifact(t *testing.T) {
 func assertCompleteAcceptancePluginTree(t *testing.T, root string) {
 	t.Helper()
 	for _, relative := range []string{
+		"apc-plugin.json",
 		filepath.Join(".codex-plugin", "plugin.json"),
 		filepath.Join(".claude-plugin", "plugin.json"),
 		filepath.Join(".hermes-plugin", "plugin.yaml"),
 		filepath.Join(".hermes-plugin", "__init__.py"),
 		filepath.Join("skills", "demo-plugin", "SKILL.md"),
+		filepath.Join("skills", "demo-plugin", "skill-card.md"),
 	} {
 		if info, err := os.Stat(filepath.Join(root, relative)); err != nil || !info.Mode().IsRegular() {
 			t.Fatalf("complete Plugin tree %q missing %q: %v", root, relative, err)

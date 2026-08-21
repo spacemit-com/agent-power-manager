@@ -220,8 +220,13 @@ func writeValidMarketplaceRecoveryArtifact(t *testing.T, root string, ref domain
 	}
 	nativeVersion := strings.TrimPrefix(ref.Version, "v")
 	files := map[string]string{
-		filepath.Join("plugins", actualName, ".codex-plugin", "plugin.json"):  fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","author":{"name":"APM"}}`, actualName, nativeVersion),
-		filepath.Join("plugins", actualName, ".claude-plugin", "plugin.json"): fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","author":{"name":"APM"}}`, actualName, nativeVersion),
+		filepath.Join("plugins", actualName, "apc-plugin.json"):                     fmt.Sprintf(`{"schema_version":1,"name":%q,"version":%q,"description":"Demo","skills":[%q]}`, actualName, ref.Version, "skills/"+actualName),
+		filepath.Join("plugins", actualName, "skills", actualName, "SKILL.md"):      "# Demo\n",
+		filepath.Join("plugins", actualName, "skills", actualName, "skill-card.md"): "# Skill Card\n",
+		filepath.Join("plugins", actualName, ".codex-plugin", "plugin.json"):        fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","skills":"./skills/"}`, actualName, nativeVersion),
+		filepath.Join("plugins", actualName, ".claude-plugin", "plugin.json"):       fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","skills":["./skills/"]}`, actualName, nativeVersion),
+		filepath.Join("plugins", actualName, ".hermes-plugin", "plugin.yaml"):       fmt.Sprintf("name: %s\nversion: %s\ndescription: Demo\nauthor: APM\n", actualName, nativeVersion),
+		filepath.Join("plugins", actualName, ".hermes-plugin", "__init__.py"):       "def register(ctx):\n    return None\n",
 		filepath.Join(".agents", "plugins", "marketplace.json"): fmt.Sprintf(`{
   "name":"apm-%s",
   "interface":{"displayName":%q},
@@ -1008,7 +1013,8 @@ func TestRecoverMarketplacePluginCommitDoesNotRequirePreviousCache(t *testing.T)
 	}
 }
 
-func TestRecoverMarketplacePluginValidatesOnlyJournalAgentMarketplace(t *testing.T) {
+func TestRecoverMarketplacePluginRequiresCompleteSharedArtifact(t *testing.T) {
+	// 捕获错误变更：恢复只校验 journal Agent，忽略同一共享 artifact 的另一份派生 marketplace 损坏。
 	tests := []struct {
 		name              string
 		agent             domain.AgentID
@@ -1017,12 +1023,12 @@ func TestRecoverMarketplacePluginValidatesOnlyJournalAgentMarketplace(t *testing
 		replacement       string
 	}{
 		{
-			name: "Codex ignores corrupted Claude marketplace", agent: domain.AgentCodex,
+			name: "Codex rejects corrupted Claude marketplace", agent: domain.AgentCodex,
 			unrelatedRelative: filepath.Join(".claude-plugin", "marketplace.json"),
 			old:               `"name":"apm-demo"`, replacement: `"name":"apm-other"`,
 		},
 		{
-			name: "Claude ignores corrupted Codex marketplace", agent: domain.AgentClaudeCode,
+			name: "Claude rejects corrupted Codex marketplace", agent: domain.AgentClaudeCode,
 			unrelatedRelative: filepath.Join(".agents", "plugins", "marketplace.json"),
 			old:               `"name":"apm-demo"`, replacement: `"name":"apm-other"`,
 		},
@@ -1047,12 +1053,10 @@ func TestRecoverMarketplacePluginValidatesOnlyJournalAgentMarketplace(t *testing
 			}
 
 			result, err := fixture.recover()
-			if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
-				t.Fatalf("Recover() = %+v, %v", result, err)
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != RecoveryCommit {
+				t.Fatalf("Recover() = %+v, %v, want indeterminate commit", result, err)
 			}
-			if fixture.store.found || fixture.manifests.setRef != fixture.journal.Power {
-				t.Fatalf("commit did not finish: journal=%t manifest=%+v", fixture.store.found, fixture.manifests.setRef)
-			}
+			assertRequiredArtifactFailureRetainedState(t, fixture, PhaseCommitting)
 		})
 	}
 }
@@ -1581,11 +1585,11 @@ func TestRecoverMarketplacePluginRejectsCodexKnownFieldTypeCorruptionBeforeWrite
 	}{
 		{
 			name:     "description changed to object",
-			manifest: `{"name":"demo","version":"2.0.0","description":{"text":"Demo"},"author":{"name":"APM"}}`,
+			manifest: `{"name":"demo","version":"2.0.0","description":{"text":"Demo"},"skills":"./skills/"}`,
 		},
 		{
-			name:     "author changed to string",
-			manifest: `{"name":"demo","version":"2.0.0","description":"Demo","author":"APM"}`,
+			name:     "skills changed to array",
+			manifest: `{"name":"demo","version":"2.0.0","description":"Demo","skills":["./skills/"]}`,
 		},
 	}
 	for _, test := range tests {

@@ -21,7 +21,7 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
   "name": "demo",
   "version": "0.1.0",
   "description": "Demo tools",
-  "author": {"name": "Example Author"}
+  "skills": ["./skills/"]
 }`
 	if err := os.WriteFile(filepath.Join(pluginPath, ".claude-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
@@ -53,8 +53,8 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Name != "apm-demo" || document.Owner.Name != "Example Author" {
-		t.Fatalf("marketplace identity/owner = %q/%q, want apm-demo/Example Author", document.Name, document.Owner.Name)
+	if document.Name != "apm-demo" || document.Owner.Name != "APM" {
+		t.Fatalf("marketplace identity/owner = %q/%q, want apm-demo/APM", document.Name, document.Owner.Name)
 	}
 	if document.Metadata.Version != "0.1.0" || document.Metadata.Description != "Demo tools" {
 		t.Fatalf("metadata = %#v, want 0.1.0/Demo tools", document.Metadata)
@@ -71,8 +71,8 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 	}
 }
 
-func TestClaudeMarketplaceUsesExactAPMDefaults(t *testing.T) {
-	// 捕获错误变更：缺失作者或描述时输出空值或非 APM 约定默认值。
+func TestClaudeMarketplaceRejectsIncompleteGeneratedManifest(t *testing.T) {
+	// 捕获错误变更：builder 接纳缺失 canonical description/skills 的 schema 漂移文件。
 	root := t.TempDir()
 	pluginPath := filepath.Join(root, "plugins", "demo")
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".claude-plugin"), 0o700); err != nil {
@@ -82,25 +82,7 @@ func TestClaudeMarketplaceUsesExactAPMDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (claudeMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
-		t.Fatalf("Build() error = %v", err)
-	}
-	var document struct {
-		Owner struct {
-			Name string `json:"name"`
-		} `json:"owner"`
-		Metadata struct {
-			Description string `json:"description"`
-		} `json:"metadata"`
-		Plugins []struct {
-			Description string `json:"description"`
-		} `json:"plugins"`
-	}
-	if err := decodeJSONFile(filepath.Join(root, ".claude-plugin", "marketplace.json"), &document); err != nil {
-		t.Fatal(err)
-	}
-	wantDescription := "APM local marketplace for demo"
-	if document.Owner.Name != "APM" || document.Metadata.Description != wantDescription || len(document.Plugins) != 1 || document.Plugins[0].Description != wantDescription {
-		t.Fatalf("defaults = %q/%q/%#v, want APM/%q", document.Owner.Name, document.Metadata.Description, document.Plugins, wantDescription)
+	if err := (claudeMarketplaceBuilder{}).Build(ref, root, pluginPath); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("Build() error = %v, want ErrInvalidArtifact", err)
 	}
 }

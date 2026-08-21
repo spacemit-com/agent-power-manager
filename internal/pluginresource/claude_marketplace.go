@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 )
 
 const (
@@ -15,12 +17,7 @@ const (
 
 type claudeMarketplaceBuilder struct{}
 
-type claudePluginManifest struct {
-	Name        string       `json:"name"`
-	Version     string       `json:"version"`
-	Description string       `json:"description"`
-	Author      pluginAuthor `json:"author"`
-}
+type claudePluginManifest = pluginartifact.ClaudePluginManifest
 
 type claudeMarketplaceDocument struct {
 	Name  string `json:"name"`
@@ -46,7 +43,7 @@ func (claudeMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath stri
 	if err := decodePluginManifest(pluginPath, claudeManifestPath, &manifest); err != nil {
 		return fmt.Errorf("decode Claude plugin manifest: %w", err)
 	}
-	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
+	if err := validateClaudePluginManifest(ref, manifest); err != nil {
 		return err
 	}
 	document, err := newClaudeMarketplaceDocument(ref, manifest)
@@ -70,7 +67,7 @@ func (claudeMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error
 	if err := decodePluginManifest(pluginPath, claudeManifestPath, &manifest); err != nil {
 		return fmt.Errorf("decode Claude plugin manifest: %w", err)
 	}
-	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
+	if err := validateClaudePluginManifest(ref, manifest); err != nil {
 		return err
 	}
 	want, err := newClaudeMarketplaceDocument(ref, manifest)
@@ -92,22 +89,24 @@ func newClaudeMarketplaceDocument(ref domain.PowerRef, manifest claudePluginMani
 	if err != nil {
 		return claudeMarketplaceDocument{}, err
 	}
-	description := manifest.Description
-	if description == "" {
-		description = "APM local marketplace for " + ref.Name
-	}
-	author := manifest.Author.Name
-	if author == "" {
-		author = "APM"
-	}
 	document := claudeMarketplaceDocument{Name: marketplaceName}
-	document.Owner.Name = author
-	document.Metadata.Description = description
+	document.Owner.Name = "APM"
+	document.Metadata.Description = manifest.Description
 	document.Metadata.Version = manifest.Version
 	document.Plugins = []claudeMarketplacePlugin{{
 		Name:        manifest.Name,
 		Source:      localPluginSourcePrefix + manifest.Name,
-		Description: description,
+		Description: manifest.Description,
 	}}
 	return document, nil
+}
+
+func validateClaudePluginManifest(ref domain.PowerRef, manifest claudePluginManifest) error {
+	if err := validateManifestIdentity(ref, manifest.Name, manifest.Version); err != nil {
+		return err
+	}
+	if strings.TrimSpace(manifest.Description) == "" || !reflect.DeepEqual(manifest.Skills, []string{"./skills/"}) {
+		return fmt.Errorf("Claude Plugin manifest is incomplete: %w", ErrInvalidArtifact)
+	}
+	return nil
 }

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -810,8 +812,11 @@ type testDownloader struct {
 	calls int
 }
 
-func (downloader *testDownloader) DownloadPlugin(_ context.Context, _ domain.PowerRef, destination string) error {
+func (downloader *testDownloader) DownloadPlugin(_ context.Context, ref domain.PowerRef, destination string) error {
 	downloader.calls++
+	if err := writeSharedTestPluginManifests(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
+		return err
+	}
 	return os.WriteFile(filepath.Join(destination, "payload.txt"), []byte("payload"), 0o600)
 }
 
@@ -848,12 +853,15 @@ func newBlockingDownloader() *blockingDownloader {
 	}
 }
 
-func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, _ domain.PowerRef, destination string) error {
+func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, ref domain.PowerRef, destination string) error {
 	switch downloader.started.Add(1) {
 	case 1:
 		close(downloader.firstStarted)
 	}
 	<-downloader.release
+	if err := writeSharedTestPluginManifests(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
+		return err
+	}
 	return os.WriteFile(filepath.Join(destination, "payload.txt"), []byte("payload"), 0o600)
 }
 

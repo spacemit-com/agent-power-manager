@@ -4,22 +4,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"apm/internal/domain"
 	"apm/internal/paths"
+	"apm/internal/pluginartifact"
+	"apm/internal/utils/jsonstrict"
 )
 
 const localPluginSourcePrefix = "./plugins/"
 
-type pluginAuthor struct {
-	Name string `json:"name"`
-}
-
 // sharedMarketplaceBuilder 在同一个临时 Artifact 根内顺序生成并复验两份 marketplace。
-// 它只读取 Codex/Claude 的 JSON manifest，不解析或审计 Hermes 原生入口。
+// 它先从唯一 canonical 索引生成全部 Agent manifest，再生成两份 marketplace。
 type sharedMarketplaceBuilder struct {
 	codex  codexMarketplaceBuilder
 	claude claudeMarketplaceBuilder
@@ -54,6 +53,13 @@ func builtInBuilder() artifactBuilder {
 }
 
 func (builder sharedMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath string) error {
+	manifest, err := pluginartifact.LoadAPCPluginManifest(ref, pluginPath)
+	if err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
+	}
+	if err := writeAgentManifests(pluginPath, manifest); err != nil {
+		return err
+	}
 	if err := builder.codex.Build(ref, root, pluginPath); err != nil {
 		return fmt.Errorf("build Codex marketplace: %w", err)
 	}
@@ -64,11 +70,8 @@ func (builder sharedMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginP
 }
 
 func (builder sharedMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error {
-	if err := builder.codex.Validate(ref, root); err != nil {
-		return fmt.Errorf("validate Codex marketplace: %w", err)
-	}
-	if err := builder.claude.Validate(ref, root); err != nil {
-		return fmt.Errorf("validate Claude marketplace: %w", err)
+	if err := pluginartifact.ValidateShared(ref, root); err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
 	}
 	return nil
 }
@@ -93,28 +96,66 @@ func decodePluginManifest(pluginPath, relativePath string, target any) error {
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("plugin manifest %q is not a physical regular file: %w", path, ErrInvalidArtifact)
 	}
-	if err := decodeJSONFile(path, target); err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
+	}
+	if err := jsonstrict.Decode(data, target, true); err != nil {
 		return errors.Join(ErrInvalidArtifact, err)
 	}
 	return nil
 }
 
 func writeJSONFile(path string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+	return writePrivateFile(path, func(writer io.Writer) error {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(value)
+	})
+}
+
+func writePrivateFile(path string, encode func(io.Writer) error) (resultErr error) {
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("derived Plugin file %q already exists: %w", path, ErrInvalidArtifact)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return errors.Join(ErrInvalidArtifact, err)
+	}
+	file, err := os.CreateTemp(parent, ".apm-derived-*")
 	if err != nil {
-		return err
+		return errors.Join(ErrInvalidArtifact, err)
 	}
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	encodeErr := encoder.Encode(value)
+	temporary := file.Name()
+	defer func() {
+		if temporary != "" {
+			resultErr = errors.Join(resultErr, os.Remove(temporary))
+		}
+	}()
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return errors.Join(ErrInvalidArtifact, err)
+	}
+	encodeErr := encode(file)
 	closeErr := file.Close()
-	if encodeErr != nil {
-		return encodeErr
+	if encodeErr != nil || closeErr != nil {
+		return errors.Join(ErrInvalidArtifact, encodeErr, closeErr)
 	}
-	return closeErr
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("derived Plugin file %q appeared during generation: %w", path, ErrInvalidArtifact)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return errors.Join(ErrInvalidArtifact, err)
+	}
+	if err := os.Link(temporary, path); err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
+	}
+	if err := os.Remove(temporary); err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
+	}
+	temporary = ""
+	return nil
 }
 
 // validateManifestIdentity 精确映射 APM 的 vMAJOR.MINOR.PATCH 与原生 MAJOR.MINOR.PATCH；不做 trim 或规范化。

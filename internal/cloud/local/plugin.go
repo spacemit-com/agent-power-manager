@@ -37,7 +37,7 @@ func (c *Client) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destin
 	if err != nil {
 		return err
 	}
-	if err := snapshot.requireRegularFile(filepath.Join(".codex-plugin", "plugin.json")); err != nil {
+	if err := snapshot.requireRegularFile("apc-plugin.json"); err != nil {
 		return err
 	}
 	resolvedDestination, err := absoluteDestination(destination)
