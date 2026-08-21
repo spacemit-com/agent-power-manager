@@ -93,6 +93,22 @@ func TestResolveRejectsInvalidQueryWithoutRequest(t *testing.T) {
 	}
 }
 
+func TestResolvePrefersCancelledContextOverInvalidQuery(t *testing.T) {
+	t.Parallel()
+
+	client := newRemoteTestClient(t, "http://127.0.0.1:1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := client.Resolve(ctx, domain.PowerRef{Type: "workflow", Name: "../demo"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Resolve() error = %v, want context.Canceled", err)
+	}
+	if errors.Is(err, cloud.ErrNotFound) {
+		t.Fatalf("Resolve() error = %v, cancelled context must take precedence over invalid query", err)
+	}
+}
+
 func TestResolveRejectsLatestIdentityMismatch(t *testing.T) {
 	t.Parallel()
 
@@ -165,7 +181,7 @@ func TestResolveMapsYankedMetadataAndHTTPStatuses(t *testing.T) {
 	}{
 		{name: "HTTP 404", status: http.StatusNotFound, want: cloud.ErrNotFound},
 		{name: "HTTP 410", status: http.StatusGone, want: cloud.ErrYanked},
-		{name: "metadata yanked", status: http.StatusOK, body: map[string]any{"status": "yanked"}, want: cloud.ErrYanked},
+		{name: "metadata yanked", status: http.StatusOK, body: map[string]any{"status": "yanked", "yanked_at": "2026-08-19T01:02:03Z", "yank_reason": "Security issue"}, want: cloud.ErrYanked},
 		{name: "unknown metadata status", status: http.StatusOK, body: map[string]any{"status": "draft"}, want: cloud.ErrInvalidResponse},
 	}
 
@@ -189,6 +205,50 @@ func TestResolveMapsYankedMetadataAndHTTPStatuses(t *testing.T) {
 			_, err := client.Resolve(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"})
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("Resolve() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveValidatesYankedMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		yankedAt   any
+		yankReason any
+		want       error
+	}{
+		{name: "valid", yankedAt: "2026-08-19T01:02:03Z", yankReason: "Security issue", want: cloud.ErrYanked},
+		{name: "missing yanked time", yankReason: "Security issue", want: cloud.ErrInvalidResponse},
+		{name: "non-UTC yanked time", yankedAt: "2026-08-19T09:02:03+08:00", yankReason: "Security issue", want: cloud.ErrInvalidResponse},
+		{name: "missing public reason", yankedAt: "2026-08-19T01:02:03Z", want: cloud.ErrInvalidResponse},
+		{name: "blank public reason", yankedAt: "2026-08-19T01:02:03Z", yankReason: " \t\n", want: cloud.ErrInvalidResponse},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				metadata := validMetadata("skill", "demo", "v1.0.0")
+				metadata["status"] = "yanked"
+				if tt.yankedAt != nil {
+					metadata["yanked_at"] = tt.yankedAt
+				}
+				if tt.yankReason != nil {
+					metadata["yank_reason"] = tt.yankReason
+				}
+				writeJSON(t, w, metadata)
+			}))
+			defer server.Close()
+			client := newRemoteTestClient(t, server.URL)
+
+			_, err := client.Resolve(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"})
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Resolve() error = %v, want %v", err, tt.want)
+			}
+			if tt.want == cloud.ErrInvalidResponse && errors.Is(err, cloud.ErrYanked) {
+				t.Fatalf("Resolve() error = %v, malformed yanked metadata must not map to ErrYanked", err)
 			}
 		})
 	}

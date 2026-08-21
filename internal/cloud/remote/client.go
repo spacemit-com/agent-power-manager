@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,7 +20,14 @@ import (
 const (
 	maxJSONResponse = 20 << 20
 	maxProblemBody  = 8 << 10
+	maxProblemField = 128
 )
+
+type problemDTO struct {
+	Status  *int   `json:"status"`
+	Code    string `json:"code"`
+	TraceID string `json:"trace_id"`
+}
 
 // Client 通过已验证的 APC base URL 查询远端目录；HTTP Client 必须设置整体超时。
 type Client struct {
@@ -54,7 +62,13 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 			return fmt.Errorf("remote redirect crosses configured origin: %w", cloud.ErrInvalidResponse)
 		}
 		if callerRedirect != nil {
-			return callerRedirect(req, via)
+			if err := callerRedirect(req, via); err != nil {
+				return err
+			}
+			if req.URL.User != nil || !sameOrigin(&normalized, req.URL) {
+				return fmt.Errorf("remote redirect policy changed configured origin: %w", cloud.ErrInvalidResponse)
+			}
+			return nil
 		}
 		if len(via) >= 10 {
 			return fmt.Errorf("remote request stopped after 10 redirects: %w", cloud.ErrInvalidResponse)
@@ -150,13 +164,16 @@ func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		problem, readErr := io.ReadAll(io.LimitReader(response.Body, maxProblemBody))
 		if readErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("read remote HTTP %d problem: %w", response.StatusCode, ctxErr)
+			}
 			return fmt.Errorf("read remote HTTP %d problem: %w", response.StatusCode, errors.Join(cloud.ErrInvalidResponse, readErr))
 		}
-		detail := strings.TrimSpace(string(problem))
-		if detail == "" {
+		problemContext := safeProblemContext(response, problem)
+		if problemContext == "" {
 			return fmt.Errorf("remote catalog returned HTTP %d: %w", response.StatusCode, cloud.ErrInvalidResponse)
 		}
-		return fmt.Errorf("remote catalog returned HTTP %d: %s: %w", response.StatusCode, detail, cloud.ErrInvalidResponse)
+		return fmt.Errorf("remote catalog returned HTTP %d %s: %w", response.StatusCode, problemContext, cloud.ErrInvalidResponse)
 	}
 	if response.ContentLength > maxJSONResponse {
 		return fmt.Errorf("remote JSON response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
@@ -164,6 +181,9 @@ func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any
 
 	payload, err := io.ReadAll(io.LimitReader(response.Body, maxJSONResponse+1))
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("read remote JSON response: %w", ctxErr)
+		}
 		return fmt.Errorf("read remote JSON response: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	if len(payload) > maxJSONResponse {
@@ -181,4 +201,54 @@ func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any
 		return fmt.Errorf("decode remote JSON response trailing data: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	return nil
+}
+
+func safeProblemContext(response *http.Response, body []byte) string {
+	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/problem+json" {
+		return ""
+	}
+
+	var problem problemDTO
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := decoder.Decode(&problem); err != nil {
+		return ""
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return ""
+	}
+	if problem.Status == nil || *problem.Status != response.StatusCode || !isStableProblemCode(problem.Code) || !isStableProblemTraceID(problem.TraceID) {
+		return ""
+	}
+	if problem.TraceID == "" {
+		return fmt.Sprintf("code=%s", problem.Code)
+	}
+	return fmt.Sprintf("code=%s trace_id=%s", problem.Code, problem.TraceID)
+}
+
+func isStableProblemCode(value string) bool {
+	if len(value) < 1 || len(value) > maxProblemField {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isStableProblemTraceID(value string) bool {
+	if len(value) > maxProblemField {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '_' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }

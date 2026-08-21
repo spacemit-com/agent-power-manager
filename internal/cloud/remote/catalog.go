@@ -55,7 +55,7 @@ func (c *Client) List(ctx context.Context) ([]domain.PowerRef, error) {
 		if page.Items == nil {
 			return nil, fmt.Errorf("list remote resources with missing items: %w", cloud.ErrInvalidResponse)
 		}
-		if _, err := time.Parse(time.RFC3339, page.SnapshotUpdatedAt); err != nil {
+		if err := validateAPCTimestamp(page.SnapshotUpdatedAt); err != nil {
 			return nil, fmt.Errorf("list remote resources with invalid snapshot timestamp: %w", errors.Join(cloud.ErrInvalidResponse, err))
 		}
 		if firstSnapshot == "" {
@@ -114,10 +114,22 @@ func validateResourceMetadata(metadata resourceMetadataDTO) (domain.PowerRef, *s
 	if metadata.ContentType != expectedContentType(ref.Type) {
 		return domain.PowerRef{}, nil, fmt.Errorf("resource %s/%s/%s has content type %q: %w", ref.Type, ref.Name, ref.Version, metadata.ContentType, cloud.ErrInvalidResponse)
 	}
-	if _, err := time.Parse(time.RFC3339, metadata.PublishedAt); err != nil {
+	if err := validateAPCTimestamp(metadata.PublishedAt); err != nil {
 		return domain.PowerRef{}, nil, fmt.Errorf("resource %s/%s/%s has invalid publish timestamp: %w", ref.Type, ref.Name, ref.Version, errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	return ref, version, nil
+}
+
+func validateAPCTimestamp(value string) error {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return err
+	}
+	_, offset := parsed.Zone()
+	if offset != 0 || !strings.HasSuffix(value, "Z") {
+		return errors.New("timestamp is not RFC3339 UTC")
+	}
+	return nil
 }
 
 func validatePowerIdentity(powerType domain.PowerType, name, version string) (domain.PowerRef, *semver.Version, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -117,6 +118,45 @@ func TestClientRejectsCrossOriginRedirectBeforeCallerPolicy(t *testing.T) {
 	}
 }
 
+func TestClientRejectsCallerRedirectMutationToCrossOrigin(t *testing.T) {
+	t.Parallel()
+
+	var targetRequests atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetRequests.Add(1)
+		writeJSON(t, w, validCatalogPage(testSnapshot, nil, ""))
+	}))
+	defer target.Close()
+	targetURL, err := url.Parse(target.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/redirected", http.StatusFound)
+	}))
+	defer source.Close()
+	client, err := New(source.URL, &http.Client{
+		Timeout: time.Second,
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			req.URL.Scheme = targetURL.Scheme
+			req.URL.Host = targetURL.Host
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = client.List(context.Background())
+	if !errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("List() error = %v, want post-policy cross-origin ErrInvalidResponse", err)
+	}
+	if got := targetRequests.Load(); got != 0 {
+		t.Fatalf("caller-mutated cross-origin target requests = %d, want 0", got)
+	}
+}
+
 func TestClientDelegatesSameOriginRedirectToCopiedCallerPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -212,6 +252,143 @@ func TestListMapsStatusAndBoundsProblemBody(t *testing.T) {
 			}
 			if tt.forbidText != "" && strings.Contains(err.Error(), tt.forbidText) {
 				t.Fatalf("List() error leaked response tail: %v", err)
+			}
+		})
+	}
+}
+
+func TestListExposesOnlySafeProblemFields(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+		"type":"https://apc.example.com/problems/validation-failed",
+		"title":"TOP_SECRET_TITLE",
+		"status":422,
+		"code":"RESOURCE_VALIDATION_FAILED",
+		"detail":"TOP_SECRET_DETAIL",
+		"instance":"/TOP_SECRET_INSTANCE",
+		"trace_id":"tr_01JABCDEF",
+		"errors":[{"message":"TOP_SECRET_ERROR"}]
+	}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	client := newRemoteTestClient(t, server.URL)
+
+	_, err := client.List(context.Background())
+	if !errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("List() error = %v, want ErrInvalidResponse", err)
+	}
+	for _, safe := range []string{"HTTP 422", "RESOURCE_VALIDATION_FAILED", "tr_01JABCDEF"} {
+		if !strings.Contains(err.Error(), safe) {
+			t.Fatalf("List() error = %v, want safe problem field %q", err, safe)
+		}
+	}
+	for _, secret := range []string{"TOP_SECRET_TITLE", "TOP_SECRET_DETAIL", "TOP_SECRET_INSTANCE", "TOP_SECRET_ERROR"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("List() error leaked private problem field %q: %v", secret, err)
+		}
+	}
+}
+
+func TestListDoesNotExposeMalformedOrUnexpectedProblemBody(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+		forbidden   []string
+	}{
+		{
+			name:        "unexpected media type",
+			contentType: "text/plain",
+			body:        "TOP_SECRET_RAW",
+			forbidden:   []string{"TOP_SECRET_RAW"},
+		},
+		{
+			name:        "malformed JSON",
+			contentType: "application/problem+json",
+			body:        `{"code":"TOP_SECRET_MALFORMED"`,
+			forbidden:   []string{"TOP_SECRET_MALFORMED"},
+		},
+		{
+			name:        "unsafe stable field",
+			contentType: "application/problem+json",
+			body:        `{"status":500,"code":"UNSAFE\nCODE","trace_id":"tr_01JABCDEF"}`,
+			forbidden:   []string{"UNSAFE", "tr_01JABCDEF"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			client := newRemoteTestClient(t, server.URL)
+
+			_, err := client.List(context.Background())
+			if !errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("List() error = %v, want ErrInvalidResponse", err)
+			}
+			if !strings.Contains(err.Error(), "HTTP 500") {
+				t.Fatalf("List() error = %v, want stable HTTP status", err)
+			}
+			for _, forbidden := range tt.forbidden {
+				if strings.Contains(err.Error(), forbidden) {
+					t.Fatalf("List() error leaked problem body field %q: %v", forbidden, err)
+				}
+			}
+		})
+	}
+}
+
+func TestListPrefersContextCancellationDuringResponseBodyRead(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		contentType string
+		partialBody string
+	}{
+		{name: "success body", status: http.StatusOK, contentType: "application/json", partialBody: `{"snapshot_updated_at":"`},
+		{name: "problem body", status: http.StatusInternalServerError, contentType: "application/problem+json", partialBody: `{"status":500,"code":"SERVER_`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			started := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.partialBody))
+				w.(http.Flusher).Flush()
+				close(started)
+				<-r.Context().Done()
+			}))
+			defer server.Close()
+			client := newRemoteTestClient(t, server.URL)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() {
+				_, err := client.List(ctx)
+				done <- err
+			}()
+
+			<-started
+			cancel()
+			err := <-done
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("List() error = %v, want context.Canceled", err)
+			}
+			if errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("List() error = %v, context cancellation must not join ErrInvalidResponse", err)
 			}
 		})
 	}

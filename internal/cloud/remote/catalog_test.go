@@ -176,6 +176,34 @@ func TestListRejectsInvalidSnapshotTimestamp(t *testing.T) {
 	}
 }
 
+func TestListRejectsNonUTCTimestamps(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		snapshot  string
+		published string
+	}{
+		{name: "snapshot offset", snapshot: "2026-08-18T17:30:12.123456+08:00", published: testPublished},
+		{name: "published offset", snapshot: testSnapshot, published: "2026-08-18T17:30:12+08:00"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			item := validMetadata("skill", "demo", "v1.0.0")
+			item["published_at"] = tt.published
+			server := newCatalogServer(t, map[string]any{"": validCatalogPage(tt.snapshot, []any{item}, "")})
+			defer server.Close()
+			client := newRemoteTestClient(t, server.URL)
+
+			if _, err := client.List(context.Background()); !errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("List() error = %v, want non-UTC ErrInvalidResponse", err)
+			}
+		})
+	}
+}
+
 func TestListIgnoresUnknownOptionalResponseFields(t *testing.T) {
 	t.Parallel()
 

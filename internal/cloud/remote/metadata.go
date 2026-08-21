@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"apm/internal/cloud"
 	"apm/internal/domain"
@@ -23,6 +24,9 @@ type exactMetadataDTO struct {
 
 // Resolve 将同类型同名称的 latest 或精确版本查询解析为精确 PowerRef；响应身份必须与请求一致。
 func (c *Client) Resolve(ctx context.Context, query domain.PowerRef) (domain.PowerRef, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.PowerRef{}, fmt.Errorf("resolve remote resource: %w", err)
+	}
 	if !validResolveQuery(query) {
 		return domain.PowerRef{}, fmt.Errorf("resolve invalid remote resource identity: %w", cloud.ErrNotFound)
 	}
@@ -65,6 +69,9 @@ func (c *Client) resolveExact(ctx context.Context, query domain.PowerRef) (domai
 	case "published":
 		return resolved, nil
 	case "yanked":
+		if validateAPCTimestamp(metadata.YankedAt) != nil || strings.TrimSpace(metadata.YankReason) == "" {
+			return domain.PowerRef{}, fmt.Errorf("exact remote resource has invalid yanked metadata: %w", cloud.ErrInvalidResponse)
+		}
 		return domain.PowerRef{}, fmt.Errorf("exact remote resource is yanked: %w", cloud.ErrYanked)
 	default:
 		return domain.PowerRef{}, fmt.Errorf("exact remote resource has invalid status %q: %w", metadata.Status, cloud.ErrInvalidResponse)
