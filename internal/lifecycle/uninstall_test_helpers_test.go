@@ -141,10 +141,16 @@ type uninstallFakeCloud struct {
 	fixture *uninstallFixture
 }
 
-func (*uninstallFakeCloud) List() ([]domain.PowerRef, error)    { return nil, nil }
+func (*uninstallFakeCloud) List(context.Context) ([]domain.PowerRef, error) { return nil, nil }
+func (*uninstallFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.PowerRef, error) {
+	return ref, nil
+}
 func (*uninstallFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
-func (c *uninstallFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error) {
+func (c *uninstallFakeCloud) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
 	recordUninstallEvent(c.calls, c.fixture, "cloud:get-mcp:"+ref.Version)
+	if err := ctx.Err(); err != nil {
+		return domain.MCPServer{}, err
+	}
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 

@@ -1,12 +1,27 @@
 package lifecycle
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
 	"apm/internal/cli"
 	"apm/internal/domain"
 )
+
+// resolvePower 按显式类型走精确 Cloud 解析；未指定类型时保留跨类型歧义检查。
+func (s *InstallService) resolvePower(ctx context.Context, flags cli.Flags) (domain.PowerRef, error) {
+	if flags.Type != "" {
+		return s.cloud.Resolve(ctx, domain.PowerRef{
+			Type: domain.PowerType(flags.Type), Name: flags.Name, Version: flags.Version,
+		})
+	}
+	refs, err := s.cloud.List(ctx)
+	if err != nil {
+		return domain.PowerRef{}, fmt.Errorf("list Cloud powers for install: %w", err)
+	}
+	return resolveInstallPower(flags, refs, s.versions)
+}
 
 // resolveInstallPower 在可信引用中解析 Install 的能力类型和目标版本。
 func resolveInstallPower(flags cli.Flags, refs []domain.PowerRef, selector VersionSelector) (domain.PowerRef, error) {

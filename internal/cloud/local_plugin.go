@@ -101,7 +101,10 @@ func validatePluginSourcePackage(resourcesRoot, source string) error {
 }
 
 // listPlugins 根据 `<logical>/<version>` 共享原始包目录发现逻辑 Plugin，不审计各 Agent 入口完整性。
-func (c *LocalClient) listPlugins() ([]domain.PowerRef, error) {
+func (c *LocalClient) listPlugins(ctx context.Context) ([]domain.PowerRef, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	root := filepath.Join(c.resourcesRoot, "plugins")
 	logicalEntries, err := os.ReadDir(root)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -113,6 +116,9 @@ func (c *LocalClient) listPlugins() ([]domain.PowerRef, error) {
 
 	refs := make([]domain.PowerRef, 0)
 	for _, logical := range logicalEntries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !logical.IsDir() {
 			continue
 		}
@@ -122,6 +128,9 @@ func (c *LocalClient) listPlugins() ([]domain.PowerRef, error) {
 			return nil, fmt.Errorf("read Plugin resource %q: %w", logicalRoot, err)
 		}
 		for _, version := range versions {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if !version.IsDir() {
 				continue
 			}

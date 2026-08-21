@@ -47,7 +47,7 @@ func (s *ListService) List(ctx context.Context, flags cli.Flags) (cli.ListResult
 	if flags.Installed {
 		return s.listInstalled(ctx, flags)
 	}
-	refs, err := s.cloud.List()
+	refs, err := s.cloud.List(ctx)
 	if err != nil {
 		return cli.ListResult{}, fmt.Errorf("list Cloud powers: %w", err)
 	}

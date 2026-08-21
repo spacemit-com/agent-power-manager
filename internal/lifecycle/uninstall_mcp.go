@@ -22,7 +22,7 @@ func (s *UninstallService) uninstallMCP(ctx context.Context, agent domain.AgentI
 	request := transaction.MCPUninstallRequest{Agent: agent, Power: ref, Adapter: mcpAdapter}
 	switch presence {
 	case adapter.MCPPresent:
-		server, err := s.cloud.GetMCP(ref)
+		server, err := s.cloud.GetMCP(ctx, ref)
 		if err != nil {
 			return transaction.UninstallResult{}, fmt.Errorf("get MCP %+v from Cloud for uninstall: %w", ref, err)
 		}

@@ -33,7 +33,7 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 		t.Fatal(err)
 	}
 	wantCalls := []string{
-		"acquire", "recover", "refresh", "cloud:list",
+		"acquire", "recover", "refresh", "cloud:resolve",
 		"resolve:bibit", "config:find:bibit", "cache:stage-skill:bibit", "transaction:install:bibit",
 		"resolve:claude-code", "config:find:claude-code", "cache:stage-skill:claude-code", "transaction:install:claude-code",
 		"resolve:codex", "config:find:codex",
@@ -111,7 +111,7 @@ func TestInstallExplicitPluginManifestFastPathFallsBackWhenAnyAgentDiffers(t *te
 	}
 	assertZeroInstallResult(t, result)
 	wantCalls := []string{
-		"acquire", "recover", "refresh", "config:find:codex", "config:find:hermes-agent", "cloud:list", "release",
+		"acquire", "recover", "refresh", "config:find:codex", "config:find:hermes-agent", "cloud:resolve", "release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want fallback %v", calls, wantCalls)
@@ -135,7 +135,7 @@ func TestInstallPluginFastPathRequiresExplicitCanonicalVersion(t *testing.T) {
 		t.Fatalf("Install() error = %v, want Cloud cause %v", err, cloudCause)
 	}
 	assertZeroInstallResult(t, result)
-	wantCalls := []string{"acquire", "recover", "refresh", "cloud:list", "release"}
+	wantCalls := []string{"acquire", "recover", "refresh", "cloud:resolve", "release"}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want normal resolution %v", calls, wantCalls)
 	}

@@ -1,6 +1,7 @@
 package cloud_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -36,7 +37,7 @@ func agentCachePath(t *testing.T, ref domain.PowerRef) string {
 
 func TestLocalClientListsAgents(t *testing.T) {
 	client := newAgentTestClient(t)
-	refs, err := client.List()
+	refs, err := client.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

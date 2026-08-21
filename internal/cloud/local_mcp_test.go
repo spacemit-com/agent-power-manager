@@ -1,6 +1,7 @@
 package cloud_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ func TestLocalClientListsMCPWithSkillsInStableOrder(t *testing.T) {
 	writeCloudMarker(t, filepath.Join(root, "mcps", "alpha", "v1.0.0", "MCP.json"), `{"transport":"stdio","command":"npx"}`)
 	client := newMCPTestClient(t, root)
 
-	got, err := client.List()
+	got, err := client.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestLocalClientGetMCPReadsExactVersionWithoutCacheMaterialization(t *testin
 		t.Fatal(err)
 	}
 
-	got, err := client.GetMCP(domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v1.2.3"})
+	got, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v1.2.3"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func TestLocalClientGetMCPRejectsInvalidResourceDefinitions(t *testing.T) {
 			root := t.TempDir()
 			writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), tt.body)
 			client := newMCPTestClient(t, root)
-			if _, err := client.GetMCP(domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); err == nil || errors.Is(err, cloud.ErrNotFound) {
+			if _, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); err == nil || errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("GetMCP() error = %v, want definition error", err)
 			}
 		})
@@ -99,10 +100,74 @@ func TestLocalClientGetMCPMapsUnsupportedReferencesAndSymlinkMarkerToNotFound(t 
 		{Name: "missing", Type: domain.PowerTypeMCP, Version: "v1.0.0"},
 		{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"},
 	} {
-		if _, err := client.GetMCP(ref); !errors.Is(err, cloud.ErrNotFound) {
+		if _, err := client.GetMCP(context.Background(), ref); !errors.Is(err, cloud.ErrNotFound) {
 			t.Fatalf("GetMCP(%#v) error = %v, want ErrNotFound", ref, err)
 		}
 	}
+}
+
+func TestLocalClientResolveReturnsLatestOrExact(t *testing.T) {
+	client := newMCPTestClient(t, writeTwoVersionRoot(t))
+
+	latest, err := client.Resolve(context.Background(), domain.PowerRef{
+		Type: domain.PowerTypeMCP, Name: "filesystem",
+	})
+	if err != nil || latest.Version != "v0.2.0" {
+		t.Fatalf("Resolve latest = %#v, %v", latest, err)
+	}
+	exact, err := client.Resolve(context.Background(), domain.PowerRef{
+		Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v0.1.0",
+	})
+	if err != nil || exact.Version != "v0.1.0" {
+		t.Fatalf("Resolve exact = %#v, %v", exact, err)
+	}
+}
+
+func TestLocalClientListSortsVersionsBySemVer(t *testing.T) {
+	root := t.TempDir()
+	writeCloudMarker(t, filepath.Join(root, "mcps", "filesystem", "v0.10.0", "MCP.json"), `{"transport":"stdio","command":"npx"}`)
+	writeCloudMarker(t, filepath.Join(root, "mcps", "filesystem", "v0.2.0", "MCP.json"), `{"transport":"stdio","command":"npx"}`)
+	client := newMCPTestClient(t, root)
+
+	got, err := client.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []domain.PowerRef{
+		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.2.0"},
+		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.10.0"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("List() = %#v, want %#v", got, want)
+	}
+}
+
+func TestLocalClientListReturnsCanceledContext(t *testing.T) {
+	client := newMCPTestClient(t, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := client.List(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("List() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestLocalClientGetMCPReturnsCanceledContext(t *testing.T) {
+	client := newMCPTestClient(t, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := client.GetMCP(ctx, domain.PowerRef{Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v0.1.0"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetMCP() error = %v, want context.Canceled", err)
+	}
+}
+
+func writeTwoVersionRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeCloudMarker(t, filepath.Join(root, "mcps", "filesystem", "v0.1.0", "MCP.json"), `{"transport":"stdio","command":"npx"}`)
+	writeCloudMarker(t, filepath.Join(root, "mcps", "filesystem", "v0.2.0", "MCP.json"), `{"transport":"stdio","command":"npx"}`)
+	return root
 }
 
 func newMCPTestClient(t *testing.T, root string) *cloud.LocalClient {

@@ -17,15 +17,40 @@ type stubCloudClient struct {
 	err   error
 }
 
-func (c *stubCloudClient) List() ([]domain.PowerRef, error) {
+func (c *stubCloudClient) List(ctx context.Context) ([]domain.PowerRef, error) {
 	*c.calls = append(*c.calls, "cloud-list")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return c.refs, c.err
+}
+
+func (c *stubCloudClient) Resolve(ctx context.Context, ref domain.PowerRef) (domain.PowerRef, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.PowerRef{}, err
+	}
+	return ref, nil
 }
 
 func (*stubCloudClient) DownloadSkill(domain.PowerRef) error { return nil }
 func (*stubCloudClient) DownloadAgent(domain.PowerRef) error { return nil }
-func (*stubCloudClient) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
+func (*stubCloudClient) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
+}
+
+func TestSearchPassesCancelledContextToCloud(t *testing.T) {
+	var calls []string
+	service, err := NewSearch(&fakeInspector{calls: &calls}, &stubCloudClient{calls: &calls})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = service.Search(ctx, cli.Flags{Keyword: "demo"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Search() error = %v, want context.Canceled", err)
+	}
 }
 func (*stubCloudClient) DownloadPlugin(context.Context, domain.PowerRef, string) error {
 	return errors.New("unexpected Plugin download")

@@ -1,6 +1,7 @@
 package cloud_test
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -32,7 +33,7 @@ func TestLocalClientListsCommittedSkillFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.List()
+	got, err := client.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestLocalClientListSortsAndIgnoresInvalidSkillDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.List()
+	got, err := client.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +134,7 @@ func TestLocalClientListSkipsSymlinkSkillMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.List()
+	got, err := client.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func TestLocalClientListRequiresReadableResourceRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = client.List(); err == nil {
+	if _, err = client.List(context.Background()); err == nil {
 		t.Fatal("List() error = nil, want missing resource-root error")
 	}
 }
@@ -202,7 +203,7 @@ func TestLocalClientListReturnsEmptyWithoutSkillsDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.List()
+	got, err := client.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +219,7 @@ func assertListMarkerFilesystemError(t *testing.T, root string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = client.List()
+	_, err = client.List(context.Background())
 	marker := filepath.Join(root, "skills", "demo", "1.0.0", "SKILL.md")
 	if err == nil {
 		t.Fatal("List() error = nil, want marker filesystem error")

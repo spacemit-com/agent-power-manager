@@ -32,7 +32,7 @@ var _ cli.SearchLifecycle = (*SearchService)(nil)
 // Search 先只读检查活动日志并告警，再查询和筛选 Cloud Power；检查失败不阻断只读查询。
 func (s *SearchService) Search(ctx context.Context, flags cli.Flags) (cli.SearchResult, error) {
 	inspectJournal(ctx, "search", s.inspector)
-	refs, err := s.cloud.List()
+	refs, err := s.cloud.List(ctx)
 	if err != nil {
 		return cli.SearchResult{}, fmt.Errorf("list Cloud powers for search: %w", err)
 	}

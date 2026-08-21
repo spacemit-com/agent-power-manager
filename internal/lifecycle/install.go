@@ -94,11 +94,7 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 		return result, nil
 	}
 
-	refs, err := s.cloud.List()
-	if err != nil {
-		return cli.InstallResult{}, releaseInstall(unlock, fmt.Errorf("list Cloud powers for install: %w", err))
-	}
-	ref, err := resolveInstallPower(flags, refs, s.versions)
+	ref, err := s.resolvePower(ctx, flags)
 	if err != nil {
 		return cli.InstallResult{}, releaseInstall(unlock, err)
 	}

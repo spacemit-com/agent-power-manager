@@ -24,7 +24,7 @@ func TestInstallMCPFirstInstallOrdersCLIAndCloudWithoutCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"acquire", "recover", "refresh", "cloud:list", "resolve-mcp:codex",
+		"acquire", "recover", "refresh", "cloud:resolve", "resolve-mcp:codex",
 		"config:find:codex", "mcp:inspect:codex", "cloud:get-mcp:v1.0.0",
 		"transaction:install-mcp:codex", "release",
 	}

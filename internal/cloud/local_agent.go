@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,8 +12,11 @@ import (
 )
 
 // listAgents 枚举 agents 目录下的版本化 agent.yaml 资源。
-func (c *LocalClient) listAgents() ([]domain.PowerRef, error) {
-	return c.listResources("agents", "agent.yaml", domain.PowerTypeAgent)
+func (c *LocalClient) listAgents(ctx context.Context) ([]domain.PowerRef, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return c.listResources(ctx, "agents", "agent.yaml", domain.PowerTypeAgent)
 }
 
 // DownloadAgent 将指定版本的 Agent yaml 原子复制到本地缓存；不做内容解析。

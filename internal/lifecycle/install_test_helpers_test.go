@@ -219,9 +219,37 @@ type installFakeCloud struct {
 	fixture *installFixture
 }
 
-func (c *installFakeCloud) List() ([]domain.PowerRef, error) {
+func (c *installFakeCloud) List(ctx context.Context) ([]domain.PowerRef, error) {
 	*c.calls = append(*c.calls, "cloud:list")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return c.fixture.cloudRefs, c.fixture.cloudListErr
+}
+
+func (c *installFakeCloud) Resolve(ctx context.Context, query domain.PowerRef) (domain.PowerRef, error) {
+	*c.calls = append(*c.calls, "cloud:resolve")
+	if err := ctx.Err(); err != nil {
+		return domain.PowerRef{}, err
+	}
+	if c.fixture.cloudListErr != nil {
+		return domain.PowerRef{}, c.fixture.cloudListErr
+	}
+	if query.Version != "" && c.fixture.versionErr != nil {
+		return domain.PowerRef{}, c.fixture.versionErr
+	}
+	for _, ref := range c.fixture.cloudRefs {
+		if ref.Type != query.Type || ref.Name != query.Name {
+			continue
+		}
+		if query.Version == "" && c.fixture.selected != "" && ref.Version != c.fixture.selected {
+			continue
+		}
+		if query.Version == "" || ref.Version == query.Version {
+			return ref, nil
+		}
+	}
+	return domain.PowerRef{}, errors.New("cloud power not found")
 }
 
 func (c *installFakeCloud) DownloadSkill(domain.PowerRef) error {
@@ -234,8 +262,11 @@ func (c *installFakeCloud) DownloadAgent(domain.PowerRef) error {
 	return nil
 }
 
-func (c *installFakeCloud) GetMCP(ref domain.PowerRef) (domain.MCPServer, error) {
+func (c *installFakeCloud) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
 	*c.calls = append(*c.calls, "cloud:get-mcp:"+ref.Version)
+	if err := ctx.Err(); err != nil {
+		return domain.MCPServer{}, err
+	}
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 

@@ -45,13 +45,19 @@ type listFakeCloud struct {
 	fixture *listFixture
 }
 
-func (c *listFakeCloud) List() ([]domain.PowerRef, error) {
+func (c *listFakeCloud) List(ctx context.Context) ([]domain.PowerRef, error) {
 	*c.calls = append(*c.calls, "cloud-list")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return c.fixture.cloudRefs, c.fixture.cloudErr
+}
+func (*listFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.PowerRef, error) {
+	return ref, nil
 }
 func (*listFakeCloud) DownloadSkill(domain.PowerRef) error { return nil }
 func (*listFakeCloud) DownloadAgent(domain.PowerRef) error { return nil }
-func (*listFakeCloud) GetMCP(domain.PowerRef) (domain.MCPServer, error) {
+func (*listFakeCloud) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
 func (*listFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, string) error {

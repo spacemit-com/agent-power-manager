@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +14,11 @@ import (
 	"apm/internal/domain"
 )
 
-// GetMCP 直接读取精确版本的 MCP 定义，不写入 Cache 或 staging。
-func (c *LocalClient) GetMCP(ref domain.PowerRef) (domain.MCPServer, error) {
+// GetMCP 直接读取精确版本的 MCP 定义，不写入 Cache 或 staging，读取前必须响应取消。
+func (c *LocalClient) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.MCPServer{}, err
+	}
 	if ref.Name == "" || ref.Version == "" {
 		return domain.MCPServer{}, fmt.Errorf("MCP name and version are required")
 	}
@@ -28,6 +32,9 @@ func (c *LocalClient) GetMCP(ref domain.PowerRef) (domain.MCPServer, error) {
 	}
 	if err != nil {
 		return domain.MCPServer{}, fmt.Errorf("stat MCP marker %q: %w", markerPath, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return domain.MCPServer{}, err
 	}
 	contents, err := os.ReadFile(markerPath)
 	if err != nil {

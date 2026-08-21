@@ -280,7 +280,7 @@ func testMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 	t.Helper()
 	harness := newIsolatedMCPHarness(t, agent)
 	ref := domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}
-	server, err := harness.cloud.GetMCP(ref)
+	server, err := harness.cloud.GetMCP(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}

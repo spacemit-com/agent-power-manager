@@ -431,7 +431,7 @@ func TestLocalClientListsPluginsFromSharedPackages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.List()
+	got, err := client.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +452,7 @@ func TestLocalClientListAcceptsEmptySharedPackageWithoutAuditingAgentEntries(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.List()
+	got, err := client.List(context.Background())
 	want := []domain.PowerRef{{Name: "empty", Type: domain.PowerTypePlugin, Version: "v1.0.0"}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("List() = %#v, %v; want %#v", got, err, want)
@@ -466,7 +466,7 @@ func TestLocalClientPluginMissingRootReturnsEmptyList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.List()
+	got, err := client.List(context.Background())
 	if err != nil || len(got) != 0 {
 		t.Fatalf("List() = %#v, %v", got, err)
 	}

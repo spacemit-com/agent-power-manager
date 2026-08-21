@@ -40,18 +40,18 @@ func (s *InstallService) installMCP(ctx context.Context, agent domain.AgentID, r
 		request.Previous = &previousCopy
 	}
 	if presence == adapter.MCPPresent && installed && previous.Version != ref.Version {
-		previousServer, err := s.cloud.GetMCP(previous)
+		previousServer, err := s.cloud.GetMCP(ctx, previous)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("get previous MCP %+v from Cloud: %w", previous, err)
 		}
-		server, err := s.cloud.GetMCP(ref)
+		server, err := s.cloud.GetMCP(ctx, ref)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("get target MCP %+v from Cloud: %w", ref, err)
 		}
 		request.PreviousServer = mcpServerPointer(previousServer)
 		request.Server = mcpServerPointer(server)
 	} else if presence == adapter.MCPAbsent && !installed {
-		server, err := s.cloud.GetMCP(ref)
+		server, err := s.cloud.GetMCP(ctx, ref)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("get MCP %+v from Cloud: %w", ref, err)
 		}
