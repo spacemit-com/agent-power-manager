@@ -16,13 +16,20 @@ import (
 )
 
 const (
-	maxTreeFileSize = int64(10 << 20)
-	maxTreeSize     = int64(100 << 20)
-	maxTreeNodes    = 1000
-	maxTreeDepth    = 16
-	maxTreePathSize = 255
-	maxSingleSize   = int64(20 << 20)
+	maxTreeFileSize        = int64(10 << 20)
+	maxTreeSize            = int64(100 << 20)
+	maxTreeNodes           = 1000
+	maxTreeDepth           = 16
+	maxTreePathSize        = 255
+	maxSingleSize          = int64(20 << 20)
+	publishedDirectoryMode = fs.FileMode(0o755)
+	publishedFileMode      = fs.FileMode(0o644)
 )
+
+// sanitizedTreeFileMode 仅保留源文件执行位，其余发布权限固定与 Remote provider 一致。
+func sanitizedTreeFileMode(sourceMode fs.FileMode) fs.FileMode {
+	return publishedFileMode | sourceMode.Perm()&0o111
+}
 
 func unsafeContent(format string, args ...any) error {
 	return fmt.Errorf("%s: %w", fmt.Sprintf(format, args...), cloud.ErrUnsafeContent)
@@ -167,6 +174,9 @@ func copyTreeAtomically(ctx context.Context, snapshot *treeSnapshot, destination
 	if err := copyTreeSnapshot(ctx, snapshot, temporary); err != nil {
 		return fmt.Errorf("copy source %s snapshot: %w", label, err)
 	}
+	if err := os.Chmod(temporary, publishedDirectoryMode); err != nil {
+		return fmt.Errorf("set %s temporary root mode %q: %w", label, temporary, err)
+	}
 	if beforePublish != nil {
 		beforePublish()
 	}
@@ -202,19 +212,23 @@ func copyTreeSnapshot(ctx context.Context, snapshot *treeSnapshot, destination s
 		}
 		target := filepath.Join(destination, node.relative)
 		if node.directory {
-			if err := os.Mkdir(target, node.mode.Perm()); err != nil {
+			if err := os.Mkdir(target, 0o700); err != nil {
+				return err
+			}
+			if err := os.Chmod(target, publishedDirectoryMode); err != nil {
 				return err
 			}
 			continue
 		}
-		output, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, node.mode.Perm())
+		output, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			return err
 		}
 		copyErr := writeAllContext(ctx, output, node.contents)
+		chmodErr := output.Chmod(sanitizedTreeFileMode(node.mode))
 		closeOutputErr := output.Close()
-		if copyErr != nil || closeOutputErr != nil {
-			return errors.Join(copyErr, closeOutputErr)
+		if copyErr != nil || chmodErr != nil || closeOutputErr != nil {
+			return errors.Join(copyErr, chmodErr, closeOutputErr)
 		}
 	}
 	return ctx.Err()

@@ -46,7 +46,7 @@ func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destina
 	if err := validateFileDestination(destination); err != nil {
 		return err
 	}
-	contents, sourceMode, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
+	contents, _, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destina
 			resultErr = errors.Join(resultErr, fmt.Errorf("remove Agent temporary destination %q: %w", temporaryName, err))
 		}
 	}()
-	if err := temporary.Chmod(sourceMode); err != nil {
+	if err := temporary.Chmod(publishedFileMode); err != nil {
 		_ = temporary.Close()
 		return fmt.Errorf("set Agent temporary mode %q: %w", temporaryName, err)
 	}

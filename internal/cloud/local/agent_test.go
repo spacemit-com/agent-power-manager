@@ -63,6 +63,54 @@ func TestLocalDownloadAgentWritesDestinationWithoutGlobalCache(t *testing.T) {
 	}
 }
 
+func TestLocalDownloadAgentSanitizesTemporaryModeBeforePublication(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("agent: demo\n"), 0o677); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(source, 0o677); err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	client.beforeAgentPublish = func() {
+		matches, globErr := filepath.Glob(filepath.Join(filepath.Dir(destination), ".agent.yaml.tmp-*"))
+		if globErr != nil {
+			t.Fatal(globErr)
+		}
+		if len(matches) != 1 {
+			t.Fatalf("staged Agent files = %v, want one", matches)
+		}
+		info, statErr := os.Stat(matches[0])
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		if mode := info.Mode().Perm(); mode != 0o644 {
+			t.Fatalf("staged Agent mode before publication = %o, want 644", mode)
+		}
+	}
+	t.Cleanup(func() { client.beforeAgentPublish = nil })
+
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	if err := client.DownloadAgent(context.Background(), ref, destination); err != nil {
+		t.Fatalf("DownloadAgent() error = %v", err)
+	}
+	info, err := os.Stat(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o644 {
+		t.Fatalf("published Agent mode = %o, want 644", mode)
+	}
+}
+
 func TestLocalClientDownloadAgentRejectsWrongType(t *testing.T) {
 	client := newAgentTestClient(t)
 	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeSkill, Version: "v1.0.0"}

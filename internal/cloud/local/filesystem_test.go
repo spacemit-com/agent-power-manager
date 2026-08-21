@@ -16,6 +16,74 @@ import (
 
 var testSkillRef = domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 
+func TestLocalTreeDownloadsSanitizePublicationModes(t *testing.T) {
+	tests := []struct {
+		name     string
+		root     string
+		marker   string
+		ref      domain.PowerRef
+		download func(*Client, context.Context, domain.PowerRef, string) error
+	}{
+		{
+			name: "Skill", root: "skills", marker: "SKILL.md", ref: testSkillRef,
+			download: func(client *Client, ctx context.Context, ref domain.PowerRef, destination string) error {
+				return client.DownloadSkill(ctx, ref, destination)
+			},
+		},
+		{
+			name: "Plugin", root: "plugins", marker: "apc-plugin.json",
+			ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
+			download: func(client *Client, ctx context.Context, ref domain.PowerRef, destination string) error {
+				return client.DownloadPlugin(ctx, ref, destination)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resources := t.TempDir()
+			source := filepath.Join(resources, test.root, test.ref.Name, test.ref.Version)
+			nested := filepath.Join(source, "scripts")
+			if err := os.MkdirAll(nested, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(source, test.marker)
+			if err := os.WriteFile(marker, []byte("marker\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			executable := filepath.Join(nested, "run.sh")
+			if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o710); err != nil {
+				t.Fatal(err)
+			}
+			for path, mode := range map[string]os.FileMode{
+				source: 0o700, nested: 0o711, marker: 0o600, executable: 0o710,
+			} {
+				if err := os.Chmod(path, mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			client, err := New(resources)
+			if err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(t.TempDir(), "download")
+			if err := test.download(client, context.Background(), test.ref, destination); err != nil {
+				t.Fatalf("Download%s() error = %v", test.name, err)
+			}
+			for relative, want := range map[string]os.FileMode{
+				".": 0o755, "scripts": 0o755, test.marker: 0o644, filepath.Join("scripts", "run.sh"): 0o754,
+			} {
+				info, err := os.Stat(filepath.Join(destination, relative))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := info.Mode().Perm(); got != want {
+					t.Errorf("published %s mode = %o, want %o", relative, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestDownloadSkillRejectsUnsafeSourceTree(t *testing.T) {
 	tests := []struct {
 		name   string
