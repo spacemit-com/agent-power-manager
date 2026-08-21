@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +30,8 @@ const (
 	archivePrefixSize  = 4096
 )
 
+var errArchiveDecompressedLimit = errors.New("remote archive decompressed byte limit exceeded")
+
 type archiveNode struct {
 	name      string
 	directory bool
@@ -53,6 +54,7 @@ type archiveDestination struct {
 
 type archiveHooks struct {
 	beforeInspect          func()
+	afterInspect           func()
 	beforePublish          func()
 	afterDestinationRemove func()
 	closeFile              func(*os.File) error
@@ -140,6 +142,9 @@ func (c *Client) extractArchiveInto(ctx context.Context, archive *stagedContent,
 	if err != nil {
 		return err
 	}
+	if hooks.afterInspect != nil {
+		hooks.afterInspect()
+	}
 
 	output, err := destination.parent.createOwned(".apm-archive-")
 	if err != nil {
@@ -221,7 +226,7 @@ func (c *Client) extractArchiveInto(ctx context.Context, archive *stagedContent,
 func scanArchive(ctx context.Context, archive *os.File, compressedSize int64) (*archiveManifest, error) {
 	manifest := &archiveManifest{nodes: make(map[string]archiveNode)}
 	actualTotal := int64(0)
-	err := walkArchive(ctx, archive, func(header *tar.Header, input io.Reader) error {
+	err := walkArchive(ctx, archive, compressedSize, func(header *tar.Header, input io.Reader) error {
 		node, err := validateArchiveHeader(header)
 		if err != nil {
 			return err
@@ -407,7 +412,7 @@ func (c *Client) extractArchiveFiles(
 ) error {
 	headerIndex := 0
 	actualTotal := int64(0)
-	err := walkArchive(ctx, archive, func(header *tar.Header, input io.Reader) error {
+	err := walkArchive(ctx, archive, compressedSize, func(header *tar.Header, input io.Reader) error {
 		if headerIndex >= len(manifest.headers) {
 			return unsafeRemoteFilesystem("remote archive changed between validation and extraction")
 		}
@@ -470,7 +475,7 @@ func closeExtractedArchiveFile(file *os.File, hooks archiveHooks) error {
 	return file.Close()
 }
 
-func walkArchive(ctx context.Context, archive *os.File, visit func(*tar.Header, io.Reader) error) (resultErr error) {
+func walkArchive(ctx context.Context, archive *os.File, compressedSize int64, visit func(*tar.Header, io.Reader) error) (resultErr error) {
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
 		return classifyArchiveError(ctx, "rewind verified remote archive", err)
 	}
@@ -486,7 +491,8 @@ func walkArchive(ctx context.Context, archive *os.File, visit func(*tar.Header, 
 			resultErr = errors.Join(resultErr, classifyArchiveError(ctx, "close verified remote gzip content", gzipReader.Close()))
 		}
 	}()
-	tarReader := tar.NewReader(gzipReader)
+	decompressed := newArchiveDecompressedReader(gzipReader, compressedSize)
+	tarReader := tar.NewReader(decompressed)
 	for {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("read remote archive: %w", err)
@@ -503,7 +509,7 @@ func walkArchive(ctx context.Context, archive *os.File, visit func(*tar.Header, 
 		}
 	}
 	var extra [1]byte
-	count, readErr := gzipReader.Read(extra[:])
+	count, readErr := decompressed.Read(extra[:])
 	if count != 0 {
 		return unsafeRemoteFilesystem("remote tar contains content after its terminator")
 	}
@@ -521,6 +527,49 @@ func walkArchive(ctx context.Context, archive *os.File, visit func(*tar.Header, 
 		return classifyArchiveError(ctx, "check verified remote gzip boundary", trailingErr)
 	}
 	return nil
+}
+
+type archiveDecompressedReader struct {
+	reader    io.Reader
+	remaining int64
+}
+
+func newArchiveDecompressedReader(reader io.Reader, compressedSize int64) io.Reader {
+	return &archiveDecompressedReader{reader: reader, remaining: archiveDecompressedBudget(compressedSize)}
+}
+
+func (reader *archiveDecompressedReader) Read(buffer []byte) (int, error) {
+	if len(buffer) == 0 {
+		return 0, nil
+	}
+	if reader.remaining > 0 {
+		if int64(len(buffer)) > reader.remaining {
+			buffer = buffer[:reader.remaining]
+		}
+		count, err := reader.reader.Read(buffer)
+		reader.remaining -= int64(count)
+		return count, err
+	}
+	var extra [1]byte
+	count, err := reader.reader.Read(extra[:])
+	if count > 0 {
+		return 0, errArchiveDecompressedLimit
+	}
+	if err != nil {
+		return 0, err
+	}
+	return 0, io.ErrNoProgress
+}
+
+// archiveDecompressedBudget 同时约束 gzip 解压总量和压缩比，预算包含 tar 元数据及填充。
+func archiveDecompressedBudget(compressedSize int64) int64 {
+	if compressedSize <= 0 {
+		return 0
+	}
+	if compressedSize <= maxArchiveTreeSize/maxArchiveRatio {
+		return compressedSize * maxArchiveRatio
+	}
+	return maxArchiveTreeSize
 }
 
 func classifyArchiveError(ctx context.Context, operation string, err error) error {
@@ -576,6 +625,7 @@ func unsafeArchivePayload(contents []byte) bool {
 		{'P', 'K', 0x05, 0x06},
 		{'P', 'K', 0x07, 0x08},
 		{0x7f, 'E', 'L', 'F'},
+		{'M', 'Z'},
 		{0x00, 'a', 's', 'm'},
 		{0xfe, 0xed, 0xfa, 0xce},
 		{0xce, 0xfa, 0xed, 0xfe},
@@ -592,10 +642,6 @@ func unsafeArchivePayload(contents []byte) bool {
 	}
 	if len(contents) >= 262 && bytes.Equal(contents[257:262], []byte("ustar")) {
 		return true
-	}
-	if len(contents) >= 0x40 && bytes.HasPrefix(contents, []byte("MZ")) {
-		offset := uint64(binary.LittleEndian.Uint32(contents[0x3c:0x40]))
-		return offset <= uint64(len(contents)-4) && bytes.Equal(contents[offset:offset+4], []byte{'P', 'E', 0, 0})
 	}
 	return false
 }

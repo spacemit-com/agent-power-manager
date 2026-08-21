@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -154,6 +155,10 @@ func TestExtractArchiveRejectsNestedArchivesAndExecutablesByContent(t *testing.T
 	copy(pePayload, []byte("MZ"))
 	binary.LittleEndian.PutUint32(pePayload[0x3c:], 0x80)
 	copy(pePayload[0x80:], []byte{'P', 'E', 0, 0})
+	latePEPayload := make([]byte, archivePrefixSize+4)
+	copy(latePEPayload, []byte("MZ"))
+	binary.LittleEndian.PutUint32(latePEPayload[0x3c:], archivePrefixSize)
+	copy(latePEPayload[archivePrefixSize:], []byte{'P', 'E', 0, 0})
 	tests := []struct {
 		name string
 		body []byte
@@ -164,6 +169,8 @@ func TestExtractArchiveRejectsNestedArchivesAndExecutablesByContent(t *testing.T
 		{name: "tar", body: tarPayload},
 		{name: "ELF", body: []byte{0x7f, 'E', 'L', 'F'}},
 		{name: "PE", body: pePayload},
+		{name: "MZ with invalid PE offset", body: []byte("MZ plain text")},
+		{name: "PE signature at prefix boundary", body: latePEPayload},
 		{name: "Mach-O 64 little endian", body: []byte{0xcf, 0xfa, 0xed, 0xfe}},
 		{name: "Mach-O fat", body: []byte{0xca, 0xfe, 0xba, 0xbe}},
 		{name: "Wasm", body: []byte{0x00, 'a', 's', 'm'}},
@@ -259,6 +266,146 @@ func TestExtractArchiveRejectsResourceLimits(t *testing.T) {
 	})
 }
 
+func TestExtractArchiveRejectsPAXAndGNUExtendedMetadataBombs(t *testing.T) {
+	const metadataSize = 512 << 10
+	tests := []struct {
+		name   string
+		header tar.Header
+	}{
+		{
+			name: "PAX records",
+			header: tar.Header{
+				Name:       "safe.md",
+				Typeflag:   tar.TypeReg,
+				Mode:       0o644,
+				Size:       4,
+				Format:     tar.FormatPAX,
+				PAXRecords: map[string]string{"APM.metadata": strings.Repeat("x", metadataSize)},
+			},
+		},
+		{
+			name: "GNU long link",
+			header: tar.Header{
+				Name:     "safe.md",
+				Linkname: strings.Repeat("x", metadataSize),
+				Typeflag: tar.TypeReg,
+				Mode:     0o644,
+				Size:     4,
+				Format:   tar.FormatGNU,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			archive := stageTarGzWithHeader(t, &tt.header, []byte("safe"))
+			opened, err := archive.openRead()
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, statErr := opened.Stat()
+			if err := errors.Join(statErr, opened.Close()); err != nil {
+				t.Fatal(err)
+			}
+			if info.Size()*maxArchiveRatio >= metadataSize {
+				t.Fatalf("compressed fixture size = %d, want metadata to exceed its 100x ratio budget", info.Size())
+			}
+
+			destination := filepath.Join(trustedTestDir(t), "resource")
+			err = new(Client).extractArchive(context.Background(), archive, destination)
+			assertUnsafeWithoutDestination(t, err, destination)
+			if !errors.Is(err, errArchiveDecompressedLimit) {
+				t.Fatalf("extractArchive() error = %v, want metadata rejected by decompressed limit", err)
+			}
+		})
+	}
+}
+
+func TestExtractArchiveEnforcesDecompressedRatioAtExactByteBoundary(t *testing.T) {
+	t.Run("exact budget is accepted", func(t *testing.T) {
+		archive := stageArchiveBytes(t, exactRatioTarGzBytes(t, nil))
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		if err := new(Client).extractArchive(context.Background(), archive, destination); err != nil {
+			t.Fatalf("extractArchive() error = %v, want exact ratio budget accepted", err)
+		}
+		if info, err := os.Stat(filepath.Join(destination, "payload.md")); err != nil || info.Size() != 24_064 {
+			t.Fatalf("payload = %v, %v, want 24064-byte regular file", info, err)
+		}
+	})
+
+	t.Run("one decompressed byte over budget is rejected", func(t *testing.T) {
+		archive := stageArchiveBytes(t, exactRatioTarGzBytes(t, []byte{'X'}))
+		destination := filepath.Join(trustedTestDir(t), "resource")
+		err := new(Client).extractArchive(context.Background(), archive, destination)
+		assertUnsafeWithoutDestination(t, err, destination)
+		if !errors.Is(err, errArchiveDecompressedLimit) {
+			t.Fatalf("extractArchive() error = %v, want decompressed limit sentinel", err)
+		}
+	})
+}
+
+func TestExtractArchiveEnforcesDecompressedLimitAgainDuringExtraction(t *testing.T) {
+	archive := stageTarGz(t, testTarEntry{name: "safe.md", body: []byte("safe")})
+	replacement := tarGzHeaderBytes(t, &tar.Header{
+		Name:       "safe.md",
+		Typeflag:   tar.TypeReg,
+		Mode:       0o644,
+		Size:       4,
+		Format:     tar.FormatPAX,
+		PAXRecords: map[string]string{"APM.metadata": strings.Repeat("x", 512<<10)},
+	}, []byte("safe"))
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	err := new(Client).extractArchiveWithHooks(context.Background(), archive, destination, archiveHooks{
+		afterInspect: func() {
+			if err := os.WriteFile(filepath.Join(archive.directory.path, archive.name), replacement, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	})
+	assertUnsafeWithoutDestination(t, err, destination)
+	if !errors.Is(err, errArchiveDecompressedLimit) {
+		t.Fatalf("extractArchive() error = %v, want second-pass decompressed limit sentinel", err)
+	}
+}
+
+func TestArchiveDecompressedReaderReportsOverflowWithoutOverreading(t *testing.T) {
+	tests := []struct {
+		name           string
+		compressedSize int64
+		contents       []byte
+		wantContents   int
+		wantRead       int
+		wantLimitError bool
+	}{
+		{name: "exact ratio budget", compressedSize: 1, contents: make([]byte, 100), wantContents: 100, wantRead: 100},
+		{name: "one over ratio budget", compressedSize: 1, contents: make([]byte, 101), wantContents: 100, wantRead: 101, wantLimitError: true},
+		{name: "zero compressed size", compressedSize: 0, contents: []byte{0}, wantRead: 1, wantLimitError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &countingReader{reader: bytes.NewReader(tt.contents)}
+			contents, err := io.ReadAll(newArchiveDecompressedReader(input, tt.compressedSize))
+			if errors.Is(err, errArchiveDecompressedLimit) != tt.wantLimitError {
+				t.Fatalf("ReadAll() error = %v, want limit error %t", err, tt.wantLimitError)
+			}
+			if len(contents) != tt.wantContents || input.read != tt.wantRead {
+				t.Fatalf("ReadAll() returned %d bytes after reading %d, want %d returned and %d read", len(contents), input.read, tt.wantContents, tt.wantRead)
+			}
+		})
+	}
+
+	if got := archiveDecompressedBudget(maxRemoteContentSize); got != maxArchiveTreeSize {
+		t.Fatalf("archiveDecompressedBudget(max compressed size) = %d, want %d", got, maxArchiveTreeSize)
+	}
+	if got := archiveDecompressedBudget(math.MaxInt64); got != maxArchiveTreeSize {
+		t.Fatalf("archiveDecompressedBudget(MaxInt64) = %d, want overflow-safe cap %d", got, maxArchiveTreeSize)
+	}
+	count, err := io.Copy(io.Discard, newArchiveDecompressedReader(io.LimitReader(zeroReader{}, maxArchiveTreeSize), maxRemoteContentSize))
+	if err != nil || count != maxArchiveTreeSize {
+		t.Fatalf("copy at maximum decompressed budget = %d, %v, want exact %d-byte acceptance", count, err, maxArchiveTreeSize)
+	}
+}
+
 func TestExtractArchiveRejectsShortEntryAndTrailingTarContent(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -271,6 +418,24 @@ func TestExtractArchiveRejectsShortEntryAndTrailingTarContent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			destination := filepath.Join(trustedTestDir(t), "resource")
 			assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), tt.archive(t), destination), destination)
+		})
+	}
+}
+
+func TestExtractArchiveRejectsConcatenatedAndTrailingGzipContent(t *testing.T) {
+	valid := testTarGzBytes(t, testTarEntry{name: "safe.md", body: []byte("safe")})
+	secondMember := testTarGzBytes(t, testTarEntry{name: "second.md", body: []byte("second")})
+	tests := []struct {
+		name     string
+		contents []byte
+	}{
+		{name: "concatenated gzip member", contents: append(append([]byte(nil), valid...), secondMember...)},
+		{name: "compressed trailing bytes", contents: append(append([]byte(nil), valid...), []byte("trailing")...)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destination := filepath.Join(trustedTestDir(t), "resource")
+			assertUnsafeWithoutDestination(t, new(Client).extractArchive(context.Background(), stageArchiveBytes(t, tt.contents), destination), destination)
 		})
 	}
 }
@@ -364,6 +529,28 @@ func stageTarGz(t *testing.T, entries ...testTarEntry) *stagedContent {
 	return stageCompressedTar(t, func(tarOutput io.Writer) error { return writeTestTar(tarOutput, entries) })
 }
 
+func stageTarGzWithHeader(t *testing.T, header *tar.Header, body []byte) *stagedContent {
+	t.Helper()
+	return stageArchiveBytes(t, tarGzHeaderBytes(t, header, body))
+}
+
+func tarGzHeaderBytes(t *testing.T, header *tar.Header, body []byte) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	gzipWriter := gzip.NewWriter(&output)
+	writer := tar.NewWriter(gzipWriter)
+	if err := writer.WriteHeader(header); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(writer.Close(), gzipWriter.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
 func testTarGzBytes(t *testing.T, entries ...testTarEntry) []byte {
 	t.Helper()
 	var output bytes.Buffer
@@ -428,6 +615,72 @@ func stageCompressedTar(t *testing.T, writeTar func(io.Writer) error) *stagedCon
 		t.Fatal(err)
 	}
 	return staged
+}
+
+func stageArchiveBytes(t *testing.T, contents []byte) *stagedContent {
+	t.Helper()
+	parent := openTestPinnedDirectory(t, trustedTestDir(t))
+	staged, file, err := parent.createStaged(".test-archive-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = staged.remove() })
+	_, writeErr := file.Write(contents)
+	prepareErr := staged.prepareForClose(file, 0o600)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, prepareErr, closeErr); err != nil {
+		t.Fatal(err)
+	}
+	return staged
+}
+
+func exactRatioTarGzBytes(t *testing.T, trailing []byte) []byte {
+	t.Helper()
+	const (
+		payloadSize     = 24_064
+		decompressedLen = 25_600
+		compressedLen   = decompressedLen / 100
+	)
+	var plain bytes.Buffer
+	writer := tar.NewWriter(&plain)
+	if err := writer.WriteHeader(&tar.Header{Name: "payload.md", Typeflag: tar.TypeReg, Mode: 0o644, Size: payloadSize}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.CopyN(writer, zeroReader{}, payloadSize); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if plain.Len() != decompressedLen {
+		t.Fatalf("plain tar size = %d, want %d", plain.Len(), decompressedLen)
+	}
+	plain.Write(trailing)
+
+	var compressed bytes.Buffer
+	gzipWriter := gzip.NewWriter(&compressed)
+	if _, err := plain.WriteTo(gzipWriter); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return padGzipHeaderToSize(t, compressed.Bytes(), compressedLen)
+}
+
+func padGzipHeaderToSize(t *testing.T, contents []byte, size int) []byte {
+	t.Helper()
+	const gzipHeaderSize = 10
+	extraFieldSize := size - len(contents) - 2
+	if len(contents) < gzipHeaderSize || extraFieldSize < 0 || extraFieldSize > math.MaxUint16 {
+		t.Fatalf("cannot pad %d-byte gzip stream to %d bytes", len(contents), size)
+	}
+	padded := make([]byte, size)
+	copy(padded, contents[:gzipHeaderSize])
+	padded[3] |= 0x04
+	binary.LittleEndian.PutUint16(padded[gzipHeaderSize:], uint16(extraFieldSize))
+	copy(padded[gzipHeaderSize+2+extraFieldSize:], contents[gzipHeaderSize:])
+	return padded
 }
 
 func stageSizedContent(t *testing.T, size int64) *stagedContent {
@@ -535,6 +788,17 @@ type zeroReader struct{}
 func (zeroReader) Read(buffer []byte) (int, error) {
 	clear(buffer)
 	return len(buffer), nil
+}
+
+type countingReader struct {
+	reader io.Reader
+	read   int
+}
+
+func (reader *countingReader) Read(buffer []byte) (int, error) {
+	count, err := reader.reader.Read(buffer)
+	reader.read += count
+	return count, err
 }
 
 func assertUnsafeWithoutDestination(t *testing.T, err error, destination string) {

@@ -69,11 +69,25 @@ type ownedDirectoryCreateOps struct {
 	unlinkat func(int, string, int) error
 }
 
+type ownedDirectoryNamedCreateOps struct {
+	mkdirat  func(int, string, uint32) error
+	fstatat  func(int, string, *unix.Stat_t, int) error
+	unlinkat func(int, string, int) error
+}
+
 func defaultOwnedDirectoryCreateOps() ownedDirectoryCreateOps {
 	return ownedDirectoryCreateOps{
 		mkdirat:  unix.Mkdirat,
 		openat:   unix.Openat,
 		fstat:    unix.Fstat,
+		fstatat:  unix.Fstatat,
+		unlinkat: unix.Unlinkat,
+	}
+}
+
+func defaultOwnedDirectoryNamedCreateOps() ownedDirectoryNamedCreateOps {
+	return ownedDirectoryNamedCreateOps{
+		mkdirat:  unix.Mkdirat,
 		fstatat:  unix.Fstatat,
 		unlinkat: unix.Unlinkat,
 	}
@@ -277,18 +291,29 @@ func (directory *pinnedDirectory) createOwned(prefix string) (*ownedDirectory, e
 }
 
 func (directory *pinnedDirectory) createOwnedNamed(name string, mode fs.FileMode) (*ownedDirectory, error) {
+	return directory.createOwnedNamedWithOps(name, mode, defaultOwnedDirectoryNamedCreateOps())
+}
+
+func (directory *pinnedDirectory) createOwnedNamedWithOps(name string, mode fs.FileMode, ops ownedDirectoryNamedCreateOps) (*ownedDirectory, error) {
 	if directory == nil || directory.file == nil || !validSecureEntryName(name) {
 		return nil, unsafeRemoteFilesystem("invalid owned remote directory entry %q", name)
 	}
-	if err := unix.Mkdirat(int(directory.file.Fd()), name, 0o700); err != nil {
+	if err := ops.mkdirat(int(directory.file.Fd()), name, 0o700); err != nil {
 		return nil, fmt.Errorf("create owned remote directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
 	}
 	var createdStat unix.Stat_t
-	if err := unix.Fstatat(int(directory.file.Fd()), name, &createdStat, unix.AT_SYMLINK_NOFOLLOW); err != nil || unixNodeType(createdStat) != unix.S_IFDIR {
+	if err := ops.fstatat(int(directory.file.Fd()), name, &createdStat, unix.AT_SYMLINK_NOFOLLOW); err != nil || unixNodeType(createdStat) != unix.S_IFDIR {
+		var cleanupErr error
+		if err != nil {
+			cleanupErr = ops.unlinkat(int(directory.file.Fd()), name, unix.AT_REMOVEDIR)
+			if errors.Is(cleanupErr, unix.ENOENT) {
+				cleanupErr = nil
+			}
+		}
 		if err == nil {
 			err = fs.ErrInvalid
 		}
-		return nil, fmt.Errorf("snapshot owned remote directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err))
+		return nil, fmt.Errorf("snapshot owned remote directory entry %q: %w", name, errors.Join(cloud.ErrUnsafeContent, err, cleanupErr))
 	}
 	fd, openErr := unix.Openat(
 		int(directory.file.Fd()),

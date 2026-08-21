@@ -68,6 +68,37 @@ func TestCreateOwnedCleansExclusiveChildAfterFstatFailure(t *testing.T) {
 	assertDirectoryEmpty(t, parentPath)
 }
 
+func TestCreateOwnedNamedCleansExclusiveChildAfterSnapshotFailure(t *testing.T) {
+	parentPath := trustedTestDir(t)
+	parent := openTestPinnedDirectory(t, parentPath)
+	injected := errors.New("injected named child snapshot failure")
+	ops := defaultOwnedDirectoryNamedCreateOps()
+	ops.fstatat = func(int, string, *unix.Stat_t, int) error {
+		return injected
+	}
+	unlinkat := ops.unlinkat
+	unlinkCalls := 0
+	ops.unlinkat = func(directoryFD int, name string, flags int) error {
+		unlinkCalls++
+		if directoryFD != int(parent.file.Fd()) || name != "child" || flags != unix.AT_REMOVEDIR {
+			t.Fatalf("Unlinkat(%d, %q, %d), want pinned parent fd, exact child name, and AT_REMOVEDIR", directoryFD, name, flags)
+		}
+		return unlinkat(directoryFD, name, flags)
+	}
+
+	owned, err := parent.createOwnedNamedWithOps("child", 0o755, ops)
+	if !errors.Is(err, injected) || !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("createOwnedNamedWithOps() error = %v, want injected failure classified unsafe", err)
+	}
+	if owned != nil {
+		t.Fatalf("createOwnedNamedWithOps() = %#v, want no returned ownership after failure", owned)
+	}
+	if unlinkCalls != 1 {
+		t.Fatalf("Unlinkat calls = %d, want 1", unlinkCalls)
+	}
+	assertDirectoryEmpty(t, parentPath)
+}
+
 func TestCreateOwnedRejectsChildWithoutExactPrivateMode(t *testing.T) {
 	parentPath := trustedTestDir(t)
 	parent := openTestPinnedDirectory(t, parentPath)
