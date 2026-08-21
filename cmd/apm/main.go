@@ -10,6 +10,7 @@ import (
 	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/config"
 	"apm/internal/lifecycle"
 	"apm/internal/lock"
@@ -139,12 +140,13 @@ func newFixLifecycle() (cli.FixLifecycle, error) {
 	return lifecycle.NewFix(locker, transactions)
 }
 
-func newLocalCloudClient() (*cloud.LocalClient, error) {
+// newLocalCloudClient 仅构造本地提供方，并向生产消费者暴露 cloud.Client 接口。
+func newLocalCloudClient() (cloud.Client, error) {
 	resourcesRoot, err := filepath.Abs(filepath.Join("internal", "cloud", "resources"))
 	if err != nil {
 		return nil, fmt.Errorf("resolve local Cloud resources: %w", err)
 	}
-	cloudClient, err := cloud.NewLocalClient(resourcesRoot)
+	cloudClient, err := local.New(resourcesRoot)
 	if err != nil {
 		return nil, fmt.Errorf("create local Cloud client: %w", err)
 	}

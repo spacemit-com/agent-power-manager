@@ -1,4 +1,4 @@
-package cloud_test
+package local_test
 
 import (
 	"context"
@@ -12,17 +12,18 @@ import (
 	"testing"
 
 	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/domain"
 	"apm/internal/utils/filesystem"
 )
 
 func TestLocalClientDownloadsOneSharedPluginPackage(t *testing.T) {
 	// 捕获错误变更：按 Agent 选择或裁剪原始包，导致下载结果缺少其他 Agent 的原生入口。
-	root, err := filepath.Abs("resources")
+	root, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestLocalClientDownloadPluginRejectsDestinationInsideSourceWithoutMutation(
 				}
 			}
 			before := snapshotTree(t, source)
-			client, err := cloud.NewLocalClient(root)
+			client, err := local.New(root)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,7 +173,7 @@ func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			client, err := cloud.NewLocalClient(root)
+			client, err := local.New(root)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -199,7 +200,7 @@ func TestLocalClientDownloadPluginAllowsDestinationWithSourceNamePrefix(t *testi
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
 	source := writeRawSharedPluginPackage(t, root, ref)
 	destination := source + "-copy"
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,11 +214,11 @@ func TestLocalClientDownloadPluginAllowsDestinationWithSourceNamePrefix(t *testi
 
 func TestLocalClientDownloadPluginReturnsExactMissesBeforeTouchingDestination(t *testing.T) {
 	// 捕获错误变更：先拼接未校验的 Agent/ref 路径，或把精确 miss 暴露为文件系统错误。
-	root, err := filepath.Abs("resources")
+	root, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,11 +248,11 @@ func TestLocalClientDownloadPluginReturnsExactMissesBeforeTouchingDestination(t 
 
 func TestLocalClientDownloadPluginRejectsUnsafeDestinations(t *testing.T) {
 	// 捕获错误变更：跟随软链接目标或覆盖调用方已有内容。
-	root, err := filepath.Abs("resources")
+	root, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,11 +300,11 @@ func TestLocalClientDownloadPluginRejectsUnsafeDestinations(t *testing.T) {
 
 func TestLocalClientDownloadPluginAllowsCallerControlledRelativeDestination(t *testing.T) {
 	// 捕获错误变更：将“调用方控制”额外收窄为只允许绝对路径。
-	root, err := filepath.Abs("resources")
+	root, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,11 +325,11 @@ func TestLocalClientDownloadPluginDoesNotCreateCloudOwnedCacheOrStaging(t *testi
 	cacheHome := t.TempDir()
 	t.Setenv("APM_HOME", stateHome)
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	root, err := filepath.Abs("resources")
+	root, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +428,7 @@ func TestLocalClientListsPluginsFromSharedPackages(t *testing.T) {
 	writeRawPluginPackageDir(t, root, "demo-plugin", "v0.0.1")
 	writeRawPluginPackageDir(t, root, "ignored", "not-a-version")
 
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +449,7 @@ func TestLocalClientListAcceptsEmptySharedPackageWithoutAuditingAgentEntries(t *
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	writeRawPluginPackageDir(t, root, "empty", "v1.0.0")
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +463,7 @@ func TestLocalClientListAcceptsEmptySharedPackageWithoutAuditingAgentEntries(t *
 func TestLocalClientPluginMissingRootReturnsEmptyList(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +474,7 @@ func TestLocalClientPluginMissingRootReturnsEmptyList(t *testing.T) {
 }
 
 func TestBundledPluginResourcesAreCompleteSharedPackagesForEveryVersion(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("resources", "plugins"))
+	root, err := filepath.Abs(filepath.Join("..", "resources", "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +484,7 @@ func TestBundledPluginResourcesAreCompleteSharedPackagesForEveryVersion(t *testi
 }
 
 func TestBundledPluginResourceGuardRejectsRecursiveLegacyLayout(t *testing.T) {
-	source, err := filepath.Abs(filepath.Join("resources", "plugins"))
+	source, err := filepath.Abs(filepath.Join("..", "resources", "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}

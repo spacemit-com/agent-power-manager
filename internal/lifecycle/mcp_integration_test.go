@@ -14,6 +14,7 @@ import (
 	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
@@ -136,7 +137,7 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	if err != nil {
 		t.Fatal(err)
 	}
-	cloudClient, err := cloud.NewLocalClient(resources)
+	cloudClient, err := local.New(resources)
 	if err != nil {
 		t.Fatal(err)
 	}

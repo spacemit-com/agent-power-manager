@@ -15,6 +15,7 @@ import (
 	"apm/internal/cache"
 	"apm/internal/cli"
 	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
@@ -154,7 +155,7 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	t.Setenv("BIANBU_AGENT_HOME", filepath.Join(root, "absent-bibit"))
 	assertPluginHarnessEnvironment(t, fakeBin, isolatedHome)
 	resources, _ := filepath.Abs(filepath.Join("..", "cloud", "resources"))
-	cloudClient, err := cloud.NewLocalClient(resources)
+	cloudClient, err := local.New(resources)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +267,7 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 			t.Setenv("HERMES_HOME", agentRoots[domain.AgentHermes])
 			t.Setenv("BIANBU_AGENT_HOME", agentRoots[domain.AgentBibit])
 			assertPluginHarnessEnvironment(t, fakeBin, isolatedHome)
-			cloudClient, err := cloud.NewLocalClient(resources)
+			cloudClient, err := local.New(resources)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -387,7 +388,7 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	t.Setenv("HERMES_HOME", agentRoots[domain.AgentHermes])
 	t.Setenv("BIANBU_AGENT_HOME", agentRoots[domain.AgentBibit])
 	assertPluginHarnessEnvironment(t, fakeBin, isolatedHome)
-	cloudClient, err := cloud.NewLocalClient(resources)
+	cloudClient, err := local.New(resources)
 	if err != nil {
 		t.Fatal(err)
 	}

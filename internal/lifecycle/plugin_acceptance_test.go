@@ -16,7 +16,7 @@ import (
 	"apm/internal/adapter"
 	"apm/internal/cache"
 	"apm/internal/cli"
-	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
@@ -323,7 +323,7 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	t.Setenv("BIANBU_AGENT_HOME", agentHomes[domain.AgentBibit])
 	assertPluginHarnessEnvironment(t, fakeBin, isolatedHome)
 
-	cloudClient, err := cloud.NewLocalClient(resources)
+	cloudClient, err := local.New(resources)
 	if err != nil {
 		t.Fatal(err)
 	}

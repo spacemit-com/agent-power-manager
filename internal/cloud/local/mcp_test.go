@@ -1,4 +1,4 @@
-package cloud_test
+package local_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/domain"
 )
 
@@ -38,7 +39,7 @@ func TestLocalClientGetMCPReadsExactVersionWithoutCacheMaterialization(t *testin
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	writeCloudMarker(t, filepath.Join(root, "mcps", "filesystem", "v1.2.3", "MCP.json"), `{"transport":"stdio","command":"npx","args":["-y","pkg"]}`)
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func TestLocalClientGetMCPRejectsInvalidResourceDefinitions(t *testing.T) {
 	}
 }
 
-func TestLocalClientGetMCPMapsUnsupportedReferencesAndSymlinkMarkerToNotFound(t *testing.T) {
+func TestLocalClientGetMCPMapsUnsupportedReferencesToNotFoundAndSymlinkToUnsafeContent(t *testing.T) {
 	root := t.TempDir()
 	realMarker := filepath.Join(root, "real.json")
 	writeCloudMarker(t, realMarker, `{"transport":"stdio","command":"npx"}`)
@@ -98,11 +99,13 @@ func TestLocalClientGetMCPMapsUnsupportedReferencesAndSymlinkMarkerToNotFound(t 
 	for _, ref := range []domain.PowerRef{
 		{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"},
 		{Name: "missing", Type: domain.PowerTypeMCP, Version: "v1.0.0"},
-		{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"},
 	} {
 		if _, err := client.GetMCP(context.Background(), ref); !errors.Is(err, cloud.ErrNotFound) {
 			t.Fatalf("GetMCP(%#v) error = %v, want ErrNotFound", ref, err)
 		}
+	}
+	if _, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("GetMCP(symlink) error = %v, want ErrUnsafeContent", err)
 	}
 }
 
@@ -170,10 +173,10 @@ func writeTwoVersionRoot(t *testing.T) string {
 	return root
 }
 
-func newMCPTestClient(t *testing.T, root string) *cloud.LocalClient {
+func newMCPTestClient(t *testing.T, root string) *local.Client {
 	t.Helper()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}

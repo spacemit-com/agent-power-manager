@@ -1,6 +1,6 @@
 //go:build !linux
 
-package cloud
+package local
 
 import (
 	"errors"

@@ -1,4 +1,4 @@
-package cloud
+package local
 
 import (
 	"context"
@@ -8,11 +8,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"apm/internal/cloud"
 	"apm/internal/domain"
 )
 
 // listAgents 枚举 agents 目录下的版本化 agent.yaml 资源。
-func (c *LocalClient) listAgents(ctx context.Context) ([]domain.PowerRef, error) {
+func (c *Client) listAgents(ctx context.Context) ([]domain.PowerRef, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -20,34 +21,37 @@ func (c *LocalClient) listAgents(ctx context.Context) ([]domain.PowerRef, error)
 }
 
 // DownloadAgent 将精确版本 Agent yaml 原子复制至调用方提供的私有文件，不访问全局缓存。
-func (c *LocalClient) DownloadAgent(ctx context.Context, ref domain.PowerRef, destination string) (resultErr error) {
+func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destination string) (resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if ref.Type != domain.PowerTypeAgent || !safePowerIdentity(ref) || !isCanonicalVersion(ref.Version) {
-		return ErrNotFound
+		return cloud.ErrNotFound
 	}
 	source := filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version, "agent.yaml")
 	info, err := os.Lstat(source)
-	if errors.Is(err, fs.ErrNotExist) || (err == nil && !info.Mode().IsRegular()) {
-		return ErrNotFound
+	if errors.Is(err, fs.ErrNotExist) {
+		return cloud.ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("stat source Agent %q: %w", source, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return unsafeContent("source Agent %q is not a physical regular file", source)
 	}
 	destination, err = absoluteDestination(destination)
 	if err != nil {
 		return err
 	}
-	if err := validateAgentDestination(destination); err != nil {
+	if err := validateFileDestination(destination); err != nil {
+		return err
+	}
+	contents, sourceMode, err := readPhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize)
+	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return fmt.Errorf("create Agent destination parent %q: %w", filepath.Dir(destination), err)
-	}
-	contents, err := os.ReadFile(source)
-	if err != nil {
-		return fmt.Errorf("read source Agent %q: %w", source, err)
 	}
 	temporary, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+".tmp-")
 	if err != nil {
@@ -59,7 +63,7 @@ func (c *LocalClient) DownloadAgent(ctx context.Context, ref domain.PowerRef, de
 			resultErr = errors.Join(resultErr, fmt.Errorf("remove Agent temporary destination %q: %w", temporaryName, err))
 		}
 	}()
-	if err := temporary.Chmod(info.Mode().Perm()); err != nil {
+	if err := temporary.Chmod(sourceMode); err != nil {
 		_ = temporary.Close()
 		return fmt.Errorf("set Agent temporary mode %q: %w", temporaryName, err)
 	}
@@ -73,20 +77,11 @@ func (c *LocalClient) DownloadAgent(ctx context.Context, ref domain.PowerRef, de
 	if c.beforeAgentPublish != nil {
 		c.beforeAgentPublish()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := renameAgentNoReplace(temporaryName, destination); err != nil {
 		return fmt.Errorf("publish Agent destination %q: %w", destination, err)
 	}
 	return nil
-}
-
-func validateAgentDestination(destination string) error {
-	if err := validatePluginDestinationAncestors(filepath.Dir(destination)); err != nil {
-		return err
-	}
-	if _, err := os.Lstat(destination); errors.Is(err, fs.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("stat Agent destination %q: %w", destination, err)
-	}
-	return fmt.Errorf("Agent destination %q must not exist", destination)
 }

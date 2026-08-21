@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/domain"
 )
 
@@ -222,7 +222,7 @@ func TestEnsureWithLocalCloudRejectsSymlinkedSourceBeforePublishingArtifact(t *t
 	if err := os.Symlink(externalManifest, manifestPath); err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(resourceRoot)
+	client, err := local.New(resourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-package cloud_test
+package local_test
 
 import (
 	"context"
@@ -12,24 +12,24 @@ import (
 	"syscall"
 	"testing"
 
-	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/domain"
 )
 
-func TestNewLocalClientRejectsRelativeResourceRoot(t *testing.T) {
+func TestNewRejectsRelativeResourceRoot(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	if _, err := cloud.NewLocalClient("resources"); err == nil {
-		t.Fatal("NewLocalClient() error = nil, want relative-path error")
+	if _, err := local.New("resources"); err == nil {
+		t.Fatal("New() error = nil, want relative-path error")
 	}
 }
 
 func TestLocalClientListsCommittedSkillFixture(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	root, err := filepath.Abs("resources")
+	root, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestLocalClientListSortsAndIgnoresInvalidSkillDirectories(t *testing.T) {
 	writeSkill("alpha", "v1.0.0", true)
 	writeSkill("ignored", "v1.0.0", false)
 
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestLocalClientListExcludesMarkerBackedInvalidVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestLocalClientListSkipsSymlinkSkillMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestLocalClientListPreservesSkillMarkerFilesystemError(t *testing.T) {
 func TestLocalClientListRequiresReadableResourceRoot(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "missing")
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestLocalClientListRequiresReadableResourceRoot(t *testing.T) {
 
 func TestLocalClientListReturnsEmptyWithoutSkillsDirectory(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	client, err := cloud.NewLocalClient(t.TempDir())
+	client, err := local.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestLocalClientListReturnsEmptyWithoutSkillsDirectory(t *testing.T) {
 func assertListMarkerFilesystemError(t *testing.T, root string) {
 	t.Helper()
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}

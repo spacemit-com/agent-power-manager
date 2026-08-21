@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/domain"
 	"apm/internal/utils/filesystem"
 )
@@ -28,7 +28,7 @@ func TestEnsureBuildsOneCompleteSharedArtifactFromLocalCloud(t *testing.T) {
 	}
 	t.Setenv("APM_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	client, err := cloud.NewLocalClient(resourcesRoot)
+	client, err := local.New(resourcesRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

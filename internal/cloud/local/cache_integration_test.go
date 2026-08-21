@@ -1,4 +1,4 @@
-package cloud_test
+package local_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"apm/internal/cache"
-	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/domain"
 )
 
@@ -18,11 +18,11 @@ func TestLocalCloudAndCachePrepareSkill(t *testing.T) {
 	t.Setenv("HOME", realHome)
 	t.Setenv("APM_HOME", stateHome)
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	resourcesRoot, err := filepath.Abs("resources")
+	resourcesRoot, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(resourcesRoot)
+	client, err := local.New(resourcesRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

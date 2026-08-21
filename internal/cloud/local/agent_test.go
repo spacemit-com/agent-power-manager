@@ -1,4 +1,4 @@
-package cloud
+package local
 
 import (
 	"context"
@@ -7,16 +7,17 @@ import (
 	"path/filepath"
 	"testing"
 
+	"apm/internal/cloud"
 	"apm/internal/domain"
 )
 
-func newAgentTestClient(t *testing.T) *LocalClient {
+func newAgentTestClient(t *testing.T) *Client {
 	t.Helper()
-	resources, err := filepath.Abs("resources")
+	resources, err := filepath.Abs("../resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewLocalClient(resources)
+	client, err := New(resources)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestLocalDownloadAgentWritesDestinationWithoutGlobalCache(t *testing.T) {
 func TestLocalClientDownloadAgentRejectsWrongType(t *testing.T) {
 	client := newAgentTestClient(t)
 	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
-	if err := client.DownloadAgent(context.Background(), ref, filepath.Join(t.TempDir(), "agent.yaml")); !errors.Is(err, ErrNotFound) {
+	if err := client.DownloadAgent(context.Background(), ref, filepath.Join(t.TempDir(), "agent.yaml")); !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrNotFound", err)
 	}
 }

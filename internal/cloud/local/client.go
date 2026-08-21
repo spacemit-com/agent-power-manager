@@ -1,4 +1,5 @@
-package cloud
+// Package local 提供只读本地资源目录的 Cloud Client 实现。
+package local
 
 import (
 	"context"
@@ -10,28 +11,31 @@ import (
 	"sort"
 	"strings"
 
+	"apm/internal/cloud"
 	"apm/internal/domain"
 	"github.com/Masterminds/semver/v3"
 )
 
-// LocalClient 从本地目录读取能力资源。
-type LocalClient struct {
+// Client 从绝对本地目录读取能力资源，不拥有缓存、staging 或用户目录。
+type Client struct {
 	resourcesRoot      string
 	beforeAgentPublish func()
 }
 
-// NewLocalClient 使用绝对资源根目录创建本地客户端。
-func NewLocalClient(resourcesRoot string) (*LocalClient, error) {
+var _ cloud.Client = (*Client)(nil)
+
+// New 使用绝对资源根目录创建本地 Client；相对路径不被接受。
+func New(resourcesRoot string) (*Client, error) {
 	if !filepath.IsAbs(resourcesRoot) {
 		return nil, fmt.Errorf("resource root must be absolute: %q", resourcesRoot)
 	}
-	return &LocalClient{
+	return &Client{
 		resourcesRoot: resourcesRoot,
 	}, nil
 }
 
 // List 按类型、名称和 SemVer 升序返回有效的本地 Power 资源；枚举期间必须响应取消。
-func (c *LocalClient) List(ctx context.Context) ([]domain.PowerRef, error) {
+func (c *Client) List(ctx context.Context) ([]domain.PowerRef, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -75,12 +79,12 @@ func (c *LocalClient) List(ctx context.Context) ([]domain.PowerRef, error) {
 }
 
 // Resolve 返回同类型同名能力的精确版本或最大 SemVer，且不改变 List 返回的引用切片。
-func (c *LocalClient) Resolve(ctx context.Context, query domain.PowerRef) (domain.PowerRef, error) {
+func (c *Client) Resolve(ctx context.Context, query domain.PowerRef) (domain.PowerRef, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.PowerRef{}, err
 	}
 	if !safePowerIdentity(query) {
-		return domain.PowerRef{}, ErrNotFound
+		return domain.PowerRef{}, cloud.ErrNotFound
 	}
 	refs, err := c.List(ctx)
 	if err != nil {
@@ -110,7 +114,7 @@ func (c *LocalClient) Resolve(ctx context.Context, query domain.PowerRef) (domai
 		}
 	}
 	if !found {
-		return domain.PowerRef{}, ErrNotFound
+		return domain.PowerRef{}, cloud.ErrNotFound
 	}
 	return latest, nil
 }
@@ -140,7 +144,7 @@ func safePowerIdentity(ref domain.PowerRef) bool {
 	}
 }
 
-func (c *LocalClient) listResources(ctx context.Context, directory, markerName string, powerType domain.PowerType) ([]domain.PowerRef, error) {
+func (c *Client) listResources(ctx context.Context, directory, markerName string, powerType domain.PowerType) ([]domain.PowerRef, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -11,10 +11,23 @@ import (
 	"testing"
 
 	"apm/internal/cli"
+	"apm/internal/cloud"
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/logging"
 )
+
+func TestNewLocalCloudClientReturnsCloudClient(t *testing.T) {
+	changeToRepositoryRoot(t)
+	client, err := newLocalCloudClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want cloud.Client = client
+	if want == nil {
+		t.Fatal("newLocalCloudClient() returned nil cloud.Client")
+	}
+}
 
 type recordingPluginPackageDownloader struct {
 	ctx         context.Context

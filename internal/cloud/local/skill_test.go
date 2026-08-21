@@ -1,4 +1,4 @@
-package cloud_test
+package local_test
 
 import (
 	"context"
@@ -8,13 +8,14 @@ import (
 	"testing"
 
 	"apm/internal/cloud"
+	"apm/internal/cloud/local"
 	"apm/internal/domain"
 )
 
 func TestLocalClientDownloadSkillValidatesRefAndNotFound(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestLocalClientDownloadSkillValidatesRefAndNotFound(t *testing.T) {
 	}
 }
 
-func TestLocalClientDownloadSkillMapsInvalidSourceLayoutToNotFound(t *testing.T) {
+func TestLocalClientDownloadSkillMapsInvalidSourceLayoutToUnsafeContent(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	path := filepath.Join(root, "skills", "demo", "v1.0.0")
@@ -42,17 +43,17 @@ func TestLocalClientDownloadSkillMapsInvalidSourceLayoutToNotFound(t *testing.T)
 	if err := os.WriteFile(path, []byte("not a skill directory"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "download"))
-	if !errors.Is(err, cloud.ErrNotFound) {
-		t.Fatalf("DownloadSkill() error = %v, want ErrNotFound", err)
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("DownloadSkill() error = %v, want ErrUnsafeContent", err)
 	}
 }
 
-func TestLocalClientDownloadSkillMapsSymlinkMarkerToNotFound(t *testing.T) {
+func TestLocalClientDownloadSkillMapsSymlinkMarkerToUnsafeContent(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	version := filepath.Join(root, "skills", "demo", "v1.0.0")
@@ -66,14 +67,14 @@ func TestLocalClientDownloadSkillMapsSymlinkMarkerToNotFound(t *testing.T) {
 	if err := os.Symlink(realMarker, filepath.Join(version, "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "download"))
-	if !errors.Is(err, cloud.ErrNotFound) {
-		t.Fatalf("DownloadSkill() error = %v, want ErrNotFound", err)
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("DownloadSkill() error = %v, want ErrUnsafeContent", err)
 	}
 }
 
@@ -91,7 +92,7 @@ func TestLocalDownloadSkillWritesDestinationWithoutGlobalCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "skill-card.md"), []byte("card"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestLocalDownloadSkillRejectsNonEmptyDestination(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(root)
+	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
