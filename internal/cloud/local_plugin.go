@@ -134,6 +134,9 @@ func (c *LocalClient) listPlugins(ctx context.Context) ([]domain.PowerRef, error
 			if !version.IsDir() {
 				continue
 			}
+			if _, valid := canonicalPowerVersion(version.Name()); !valid {
+				continue
+			}
 			ref := domain.PowerRef{Name: logical.Name(), Type: domain.PowerTypePlugin, Version: version.Name()}
 			if _, err := domain.PluginRuntimeName(ref); err != nil {
 				continue

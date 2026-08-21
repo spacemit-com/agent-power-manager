@@ -92,10 +92,10 @@ func TestLocalClientListSortsAndIgnoresInvalidSkillDirectories(t *testing.T) {
 			}
 		}
 	}
-	writeSkill("zeta", "2.0.0", true)
-	writeSkill("alpha", "1.1.0", true)
-	writeSkill("alpha", "1.0.0", true)
-	writeSkill("ignored", "1.0.0", false)
+	writeSkill("zeta", "v2.0.0", true)
+	writeSkill("alpha", "v1.1.0", true)
+	writeSkill("alpha", "v1.0.0", true)
+	writeSkill("ignored", "v1.0.0", false)
 
 	client, err := cloud.NewLocalClient(root)
 	if err != nil {
@@ -106,10 +106,38 @@ func TestLocalClientListSortsAndIgnoresInvalidSkillDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []domain.PowerRef{
-		{Name: "alpha", Type: domain.PowerTypeSkill, Version: "1.0.0"},
-		{Name: "alpha", Type: domain.PowerTypeSkill, Version: "1.1.0"},
-		{Name: "zeta", Type: domain.PowerTypeSkill, Version: "2.0.0"},
+		{Name: "alpha", Type: domain.PowerTypeSkill, Version: "v1.0.0"},
+		{Name: "alpha", Type: domain.PowerTypeSkill, Version: "v1.1.0"},
+		{Name: "zeta", Type: domain.PowerTypeSkill, Version: "v2.0.0"},
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("List() = %#v, want %#v", got, want)
+	}
+}
+
+func TestLocalClientListExcludesMarkerBackedInvalidVersion(t *testing.T) {
+	// 捕获错误变更：带有效 marker 的非规范版本进入排序，触发 SemVer 解析 panic 或泄露为可安装引用。
+	root := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	for _, version := range []string{"v1.0.0", "not-semver"} {
+		marker := filepath.Join(root, "skills", "demo", version, "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(marker, []byte("skill"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client, err := cloud.NewLocalClient(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := client.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []domain.PowerRef{{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("List() = %#v, want %#v", got, want)
 	}
@@ -118,7 +146,7 @@ func TestLocalClientListSortsAndIgnoresInvalidSkillDirectories(t *testing.T) {
 func TestLocalClientListSkipsSymlinkSkillMarker(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	version := filepath.Join(root, "skills", "demo", "1.0.0")
+	version := filepath.Join(root, "skills", "demo", "v1.0.0")
 	if err := os.MkdirAll(version, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -154,14 +182,14 @@ func TestLocalClientListPreservesSkillMarkerFilesystemError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := os.Chmod(filepath.Join(root, "skills", "demo", "1.0.0"), 0o700); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := os.Chmod(filepath.Join(root, "skills", "demo", "v1.0.0"), 0o700); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			t.Error(err)
 		}
 		if err := os.RemoveAll(root); err != nil {
 			t.Error(err)
 		}
 	})
-	version := filepath.Join(root, "skills", "demo", "1.0.0")
+	version := filepath.Join(root, "skills", "demo", "v1.0.0")
 	if err := os.MkdirAll(version, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +248,7 @@ func assertListMarkerFilesystemError(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	_, err = client.List(context.Background())
-	marker := filepath.Join(root, "skills", "demo", "1.0.0", "SKILL.md")
+	marker := filepath.Join(root, "skills", "demo", "v1.0.0", "SKILL.md")
 	if err == nil {
 		t.Fatal("List() error = nil, want marker filesystem error")
 	}

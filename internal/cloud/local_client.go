@@ -77,7 +77,12 @@ func (c *LocalClient) List(ctx context.Context) ([]domain.PowerRef, error) {
 		if refs[i].Name != refs[j].Name {
 			return refs[i].Name < refs[j].Name
 		}
-		return semver.MustParse(refs[i].Version).LessThan(semver.MustParse(refs[j].Version))
+		left, leftOK := canonicalPowerVersion(refs[i].Version)
+		right, rightOK := canonicalPowerVersion(refs[j].Version)
+		if !leftOK || !rightOK {
+			return refs[i].Version < refs[j].Version
+		}
+		return left.LessThan(right)
 	})
 	return refs, nil
 }
@@ -95,6 +100,7 @@ func (c *LocalClient) Resolve(ctx context.Context, query domain.PowerRef) (domai
 		return domain.PowerRef{}, err
 	}
 	var latest domain.PowerRef
+	var latestVersion *semver.Version
 	found := false
 	for _, ref := range refs {
 		if ref.Type != query.Type || ref.Name != query.Name {
@@ -106,8 +112,13 @@ func (c *LocalClient) Resolve(ctx context.Context, query domain.PowerRef) (domai
 			}
 			continue
 		}
-		if !found || semver.MustParse(ref.Version).GreaterThan(semver.MustParse(latest.Version)) {
+		version, valid := canonicalPowerVersion(ref.Version)
+		if !valid {
+			continue
+		}
+		if !found || version.GreaterThan(latestVersion) {
 			latest = ref
+			latestVersion = version
 			found = true
 		}
 	}
@@ -115,6 +126,19 @@ func (c *LocalClient) Resolve(ctx context.Context, query domain.PowerRef) (domai
 		return domain.PowerRef{}, ErrNotFound
 	}
 	return latest, nil
+}
+
+// canonicalPowerVersion 解析严格的 vMAJOR.MINOR.PATCH 版本；预发布和构建元数据不属于本地资源标识。
+func canonicalPowerVersion(version string) (*semver.Version, bool) {
+	if !strings.HasPrefix(version, "v") {
+		return nil, false
+	}
+	native := strings.TrimPrefix(version, "v")
+	parsed, err := semver.StrictNewVersion(native)
+	if err != nil || parsed.Prerelease() != "" || parsed.Metadata() != "" || parsed.String() != native {
+		return nil, false
+	}
+	return parsed, true
 }
 
 func safePowerIdentity(ref domain.PowerRef) bool {
@@ -158,6 +182,9 @@ func (c *LocalClient) listResources(ctx context.Context, directory, markerName s
 				return nil, err
 			}
 			if !version.IsDir() {
+				continue
+			}
+			if _, valid := canonicalPowerVersion(version.Name()); !valid {
 				continue
 			}
 			markerPath := filepath.Join(root, entry.Name(), version.Name(), markerName)
