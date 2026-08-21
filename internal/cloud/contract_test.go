@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -60,6 +61,45 @@ func TestProviderContract(t *testing.T) {
 	})
 	t.Run("oracle_mutations", testCanonicalPowerOracleMutations)
 	t.Run("wire_mutations", testCanonicalRemoteServerProtocolMutations)
+}
+
+func TestProviderContractRejectsIncompleteSkillPackage(t *testing.T) {
+	root := privateTestDir(t)
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "incomplete-skill", Version: "v1.0.0"}
+	source := filepath.Join(root, "skills", ref.Name, ref.Version)
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	localClient, err := local.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteFixture := &canonicalRemoteServer{resources: []canonicalRemoteResource{{
+		ref: ref, contentType: "application/gzip", content: deterministicArchive(t, source),
+	}}}
+	server := httptest.NewServer(http.HandlerFunc(remoteFixture.serveHTTP))
+	t.Cleanup(server.Close)
+	remoteClient, err := remote.New(server.URL, &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, provider := range []struct {
+		name   string
+		client cloud.Client
+	}{{name: "local", client: localClient}, {name: "remote", client: remoteClient}} {
+		t.Run(provider.name, func(t *testing.T) {
+			destinationRoot := privateTestDir(t)
+			destination := filepath.Join(destinationRoot, "skill")
+			err := provider.client.DownloadSkill(context.Background(), ref, destination)
+			assertExclusiveContractError(t, err, cloud.ErrUnsafeContent)
+			assertNoDownloadResidue(t, destinationRoot, destination)
+		})
+	}
 }
 
 func TestProviderFactoriesUseTestingTempRoot(t *testing.T) {
@@ -345,6 +385,34 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 				assertNoDownloadResidue(t, root, destination)
 			}
 		})
+	}
+
+	for _, invalidName := range []string{"Bad_Name", "a--b", strings.Repeat("a", 65)} {
+		for _, operation := range []contractOperation{
+			{name: "Resolve", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: invalidName}, invoke: resolveOperation},
+			{name: "DownloadSkill", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: invalidName, Version: "v1.0.0"}, hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
+				return domain.MCPServer{}, client.DownloadSkill(ctx, ref, destination)
+			}},
+			{name: "GetMCP", ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: invalidName, Version: "v1.0.0"}, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
+				return client.GetMCP(ctx, ref)
+			}},
+			{name: "DownloadAgent", ref: domain.PowerRef{Type: domain.PowerTypeAgent, Name: invalidName, Version: "v1.0.0"}, hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
+				return domain.MCPServer{}, client.DownloadAgent(ctx, ref, destination)
+			}},
+		} {
+			t.Run("invalid_name/"+operation.name+"/"+invalidName, func(t *testing.T) {
+				root := privateTestDir(t)
+				destination := filepath.Join(root, "destination")
+				server, err := operation.invoke(context.Background(), client, operation.ref, destination)
+				assertExclusiveContractError(t, err, cloud.ErrNotFound)
+				if !reflect.DeepEqual(server, domain.MCPServer{}) {
+					t.Fatalf("%s(invalid name) MCP result = %#v, want zero", operation.name, server)
+				}
+				if operation.hasDestination {
+					assertNoDownloadResidue(t, root, destination)
+				}
+			})
+		}
 	}
 }
 

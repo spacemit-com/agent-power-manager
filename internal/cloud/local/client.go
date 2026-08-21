@@ -50,11 +50,11 @@ func (c *Client) List(ctx context.Context) ([]domain.PowerRef, error) {
 	if _, err := os.ReadDir(c.resourcesRoot); err != nil {
 		return nil, fmt.Errorf("read resource root %q: %w", c.resourcesRoot, err)
 	}
-	refs, err := c.listResources(ctx, "skills", "SKILL.md", domain.PowerTypeSkill)
+	refs, err := c.listResources(ctx, "skills", domain.PowerTypeSkill, "SKILL.md", "skill-card.md")
 	if err != nil {
 		return nil, err
 	}
-	mcpRefs, err := c.listResources(ctx, "mcps", "MCP.json", domain.PowerTypeMCP)
+	mcpRefs, err := c.listResources(ctx, "mcps", domain.PowerTypeMCP, "MCP.json")
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func canonicalPowerVersion(version string) (*semver.Version, bool) {
 }
 
 func safePowerIdentity(ref domain.PowerRef) bool {
-	if ref.Name == "" || ref.Name == "." || ref.Name == ".." || strings.ContainsAny(ref.Name, `/\\`) || filepath.Base(ref.Name) != ref.Name {
+	if !domain.IsCanonicalPowerName(ref.Name) {
 		return false
 	}
 	switch ref.Type {
@@ -152,7 +152,8 @@ func safePowerIdentity(ref domain.PowerRef) bool {
 	}
 }
 
-func (c *Client) listResources(ctx context.Context, directory, markerName string, powerType domain.PowerType) ([]domain.PowerRef, error) {
+// listResources 仅枚举名称、版本与全部物理 marker 均符合 Cloud 契约的资源。
+func (c *Client) listResources(ctx context.Context, directory string, powerType domain.PowerType, markerNames ...string) ([]domain.PowerRef, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -172,6 +173,9 @@ func (c *Client) listResources(ctx context.Context, directory, markerName string
 		if !entry.IsDir() {
 			continue
 		}
+		if !domain.IsCanonicalPowerName(entry.Name()) {
+			continue
+		}
 		versions, err := os.ReadDir(filepath.Join(root, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read %s resource directory %q: %w", powerType, entry.Name(), err)
@@ -186,15 +190,23 @@ func (c *Client) listResources(ctx context.Context, directory, markerName string
 			if _, valid := canonicalPowerVersion(version.Name()); !valid {
 				continue
 			}
-			markerPath := filepath.Join(root, entry.Name(), version.Name(), markerName)
-			marker, err := os.Lstat(markerPath)
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
+			complete := true
+			for _, markerName := range markerNames {
+				markerPath := filepath.Join(root, entry.Name(), version.Name(), markerName)
+				marker, err := os.Lstat(markerPath)
+				if errors.Is(err, fs.ErrNotExist) {
+					complete = false
+					break
+				}
+				if err != nil {
+					return nil, fmt.Errorf("stat %s marker %q: %w", powerType, markerPath, err)
+				}
+				if !marker.Mode().IsRegular() {
+					complete = false
+					break
+				}
 			}
-			if err != nil {
-				return nil, fmt.Errorf("stat %s marker %q: %w", powerType, markerPath, err)
-			}
-			if !marker.Mode().IsRegular() {
+			if !complete {
 				continue
 			}
 			refs = append(refs, domain.PowerRef{Name: entry.Name(), Type: powerType, Version: version.Name()})

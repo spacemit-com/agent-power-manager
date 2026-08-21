@@ -53,6 +53,25 @@ func TestLocalClientDownloadSkillMapsInvalidSourceLayoutToUnsafeContent(t *testi
 	}
 }
 
+func TestLocalClientDownloadSkillRejectsMissingSkillCard(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "skills", "demo", "v1.0.0")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client, err := local.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "download"))
+	if !errors.Is(err, cloud.ErrUnsafeContent) || errors.Is(err, cloud.ErrNotFound) {
+		t.Fatalf("DownloadSkill() error = %v, want only ErrUnsafeContent", err)
+	}
+}
+
 func TestLocalClientDownloadSkillMapsSymlinkMarkerToUnsafeContent(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

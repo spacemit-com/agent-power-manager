@@ -22,6 +22,8 @@ func TestSkillAcceptsExactFileAndTreeSizeLimits(t *testing.T) {
 		name := "payload-" + strconv.Itoa(index) + ".md"
 		if index == 0 {
 			name = "SKILL.md"
+		} else if index == 1 {
+			name = "skill-card.md"
 		}
 		writeRepeatedTextFile(t, filepath.Join(source, name), maxTreeFileSize)
 	}

@@ -17,7 +17,7 @@ func (c *Client) listAgents(ctx context.Context) ([]domain.PowerRef, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return c.listResources(ctx, "agents", "agent.yaml", domain.PowerTypeAgent)
+	return c.listResources(ctx, "agents", domain.PowerTypeAgent, "agent.yaml")
 }
 
 // DownloadAgent 将精确版本 Agent yaml 原子复制至调用方提供的私有文件，不访问全局缓存。

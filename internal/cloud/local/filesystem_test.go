@@ -50,6 +50,9 @@ func TestLocalTreeDownloadsSanitizePublicationModes(t *testing.T) {
 			if err := os.WriteFile(marker, []byte("marker\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			if test.ref.Type == domain.PowerTypeSkill {
+				writeTestFile(t, filepath.Join(source, "skill-card.md"), "card\n")
+			}
 			executable := filepath.Join(nested, "run.sh")
 			if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o710); err != nil {
 				t.Fatal(err)
@@ -74,6 +77,9 @@ func TestLocalTreeDownloadsSanitizePublicationModes(t *testing.T) {
 				"scripts":                          {mode: 0o755, directory: true},
 				test.marker:                        {mode: 0o644},
 				filepath.Join("scripts", "run.sh"): {mode: 0o754},
+			}
+			if test.ref.Type == domain.PowerTypeSkill {
+				expectations["skill-card.md"] = publishedNodeExpectation{mode: 0o644}
 			}
 			assertPublishedTree(t, destination, expectations)
 		})
@@ -175,6 +181,7 @@ func TestDownloadSkillRejectsUnsafeSourceTree(t *testing.T) {
 			root := t.TempDir()
 			source := filepath.Join(root, "skills", testSkillRef.Name, testSkillRef.Version)
 			writeTestFile(t, filepath.Join(source, "SKILL.md"), "skill")
+			writeTestFile(t, filepath.Join(source, "skill-card.md"), "card")
 			test.mutate(t, root, source)
 			client, err := New(root)
 			if err != nil {
@@ -191,6 +198,7 @@ func TestDownloadSkillRejectsOverlappingAndNonEmptyDestination(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "skills", testSkillRef.Name, testSkillRef.Version)
 	writeTestFile(t, filepath.Join(source, "SKILL.md"), "skill")
+	writeTestFile(t, filepath.Join(source, "skill-card.md"), "card")
 	client, err := New(root)
 	if err != nil {
 		t.Fatal(err)

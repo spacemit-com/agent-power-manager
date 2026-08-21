@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"apm/internal/cloud"
 	"apm/internal/cloud/local"
 	"apm/internal/domain"
 )
@@ -89,6 +90,9 @@ func TestLocalClientListSortsAndIgnoresInvalidSkillDirectories(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(name), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			if err := os.WriteFile(filepath.Join(dir, "skill-card.md"), []byte("card"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	writeSkill("zeta", "v2.0.0", true)
@@ -114,6 +118,72 @@ func TestLocalClientListSortsAndIgnoresInvalidSkillDirectories(t *testing.T) {
 	}
 }
 
+func TestLocalClientRejectsNonCanonicalPowerNames(t *testing.T) {
+	for _, name := range []string{"Bad_Name", "a--b", strings.Repeat("a", 65)} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeCloudMarker(t, filepath.Join(root, "skills", name, "v1.0.0", "SKILL.md"), "skill")
+			writeCloudMarker(t, filepath.Join(root, "skills", name, "v1.0.0", "skill-card.md"), "card")
+			writeCloudMarker(t, filepath.Join(root, "mcps", name, "v1.0.0", "MCP.json"), `{"transport":"stdio","command":"npx"}`)
+			writeCloudMarker(t, filepath.Join(root, "agents", name, "v1.0.0", "agent.yaml"), "agent: demo\n")
+
+			client, err := local.New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refs, err := client.List(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(refs) != 0 {
+				t.Fatalf("List() = %#v, want invalid names excluded", refs)
+			}
+
+			operations := []struct {
+				name string
+				ref  domain.PowerRef
+				run  func() error
+			}{
+				{name: "Resolve", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: name}, run: func() error {
+					_, resolveErr := client.Resolve(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: name})
+					return resolveErr
+				}},
+				{name: "DownloadSkill", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: name, Version: "v1.0.0"}, run: func() error {
+					return client.DownloadSkill(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: name, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "skill"))
+				}},
+				{name: "GetMCP", ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: name, Version: "v1.0.0"}, run: func() error {
+					_, getErr := client.GetMCP(context.Background(), domain.PowerRef{Type: domain.PowerTypeMCP, Name: name, Version: "v1.0.0"})
+					return getErr
+				}},
+				{name: "DownloadAgent", ref: domain.PowerRef{Type: domain.PowerTypeAgent, Name: name, Version: "v1.0.0"}, run: func() error {
+					return client.DownloadAgent(context.Background(), domain.PowerRef{Type: domain.PowerTypeAgent, Name: name, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "agent.yaml"))
+				}},
+			}
+			for _, operation := range operations {
+				if err := operation.run(); !errors.Is(err, cloud.ErrNotFound) {
+					t.Errorf("%s(%+v) error = %v, want ErrNotFound", operation.name, operation.ref, err)
+				}
+			}
+		})
+	}
+}
+
+func TestLocalClientListExcludesSkillWithoutCompleteMarkers(t *testing.T) {
+	root := t.TempDir()
+	writeCloudMarker(t, filepath.Join(root, "skills", "demo", "v1.0.0", "SKILL.md"), "skill")
+	client, err := local.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, err := client.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("List() = %#v, want incomplete Skill excluded", refs)
+	}
+}
+
 func TestLocalClientListExcludesMarkerBackedInvalidVersion(t *testing.T) {
 	// 捕获错误变更：带有效 marker 的非规范版本进入排序，触发 SemVer 解析 panic 或泄露为可安装引用。
 	root := t.TempDir()
@@ -124,6 +194,9 @@ func TestLocalClientListExcludesMarkerBackedInvalidVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(marker, []byte("skill"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(filepath.Dir(marker), "skill-card.md"), []byte("card"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

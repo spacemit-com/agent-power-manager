@@ -49,21 +49,27 @@ func (c *Client) validateSkillSource(ctx context.Context, source string) (*treeS
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, unsafeContent("source Skill %q is not a physical directory", source)
 	}
-	marker, err := os.Lstat(filepath.Join(source, "SKILL.md"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, cloud.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("stat source Skill marker %q: %w", source, err)
-	}
-	if !marker.Mode().IsRegular() || marker.Mode()&os.ModeSymlink != 0 {
-		return nil, unsafeContent("source Skill marker %q is not a physical regular file", filepath.Join(source, "SKILL.md"))
+	for _, markerName := range []string{"SKILL.md", "skill-card.md"} {
+		markerPath := filepath.Join(source, markerName)
+		marker, markerErr := os.Lstat(markerPath)
+		if errors.Is(markerErr, fs.ErrNotExist) {
+			return nil, unsafeContent("source Skill marker %q is missing", markerPath)
+		}
+		if markerErr != nil {
+			return nil, fmt.Errorf("stat source Skill marker %q: %w", markerPath, markerErr)
+		}
+		if !marker.Mode().IsRegular() || marker.Mode()&os.ModeSymlink != 0 {
+			return nil, unsafeContent("source Skill marker %q is not a physical regular file", markerPath)
+		}
 	}
 	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
 		return nil, err
 	}
 	if err := snapshot.requireRegularFile("SKILL.md"); err != nil {
+		return nil, err
+	}
+	if err := snapshot.requireRegularFile("skill-card.md"); err != nil {
 		return nil, err
 	}
 	return snapshot, nil

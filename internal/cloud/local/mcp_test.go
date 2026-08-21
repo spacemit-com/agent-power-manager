@@ -16,6 +16,7 @@ import (
 func TestLocalClientListsMCPWithSkillsInStableOrder(t *testing.T) {
 	root := t.TempDir()
 	writeCloudMarker(t, filepath.Join(root, "skills", "zeta", "v1.0.0", "SKILL.md"), "skill")
+	writeCloudMarker(t, filepath.Join(root, "skills", "zeta", "v1.0.0", "skill-card.md"), "card")
 	writeCloudMarker(t, filepath.Join(root, "mcps", "alpha", "v2.0.0", "MCP.json"), `{"transport":"http","url":"https://example.com/mcp"}`)
 	writeCloudMarker(t, filepath.Join(root, "mcps", "alpha", "v1.0.0", "MCP.json"), `{"transport":"stdio","command":"npx"}`)
 	client := newMCPTestClient(t, root)
