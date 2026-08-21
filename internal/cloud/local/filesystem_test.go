@@ -69,17 +69,13 @@ func TestLocalTreeDownloadsSanitizePublicationModes(t *testing.T) {
 			if err := test.download(client, context.Background(), test.ref, destination); err != nil {
 				t.Fatalf("Download%s() error = %v", test.name, err)
 			}
-			for relative, want := range map[string]os.FileMode{
-				".": 0o755, "scripts": 0o755, test.marker: 0o644, filepath.Join("scripts", "run.sh"): 0o754,
-			} {
-				info, err := os.Stat(filepath.Join(destination, relative))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if got := info.Mode().Perm(); got != want {
-					t.Errorf("published %s mode = %o, want %o", relative, got, want)
-				}
+			expectations := map[string]publishedNodeExpectation{
+				".":                                {mode: 0o755, directory: true},
+				"scripts":                          {mode: 0o755, directory: true},
+				test.marker:                        {mode: 0o644},
+				filepath.Join("scripts", "run.sh"): {mode: 0o754},
 			}
+			assertPublishedTree(t, destination, expectations)
 		})
 	}
 }

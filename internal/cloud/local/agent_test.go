@@ -80,6 +80,11 @@ func TestLocalDownloadAgentSanitizesTemporaryModeBeforePublication(t *testing.T)
 		t.Fatal(err)
 	}
 	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	observedBeforeWrite := false
+	client.beforeAgentWrite = func(temporary *os.File) {
+		observedBeforeWrite = true
+		assertPrivateAgentStaging(t, temporary)
+	}
 	client.beforeAgentPublish = func() {
 		matches, globErr := filepath.Glob(filepath.Join(filepath.Dir(destination), ".agent.yaml.tmp-*"))
 		if globErr != nil {
@@ -88,26 +93,44 @@ func TestLocalDownloadAgentSanitizesTemporaryModeBeforePublication(t *testing.T)
 		if len(matches) != 1 {
 			t.Fatalf("staged Agent files = %v, want one", matches)
 		}
-		info, statErr := os.Stat(matches[0])
-		if statErr != nil {
-			t.Fatal(statErr)
-		}
-		if mode := info.Mode().Perm(); mode != 0o644 {
-			t.Fatalf("staged Agent mode before publication = %o, want 644", mode)
-		}
+		assertPublishedAgentFile(t, matches[0])
 	}
-	t.Cleanup(func() { client.beforeAgentPublish = nil })
+	t.Cleanup(func() {
+		client.beforeAgentWrite = nil
+		client.beforeAgentPublish = nil
+	})
 
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
 	if err := client.DownloadAgent(context.Background(), ref, destination); err != nil {
 		t.Fatalf("DownloadAgent() error = %v", err)
 	}
-	info, err := os.Stat(destination)
-	if err != nil {
-		t.Fatal(err)
+	if !observedBeforeWrite {
+		t.Fatal("Agent temporary file was not observed before write")
 	}
-	if mode := info.Mode().Perm(); mode != 0o644 {
-		t.Fatalf("published Agent mode = %o, want 644", mode)
+	assertPublishedAgentFile(t, destination)
+}
+
+func TestLocalDownloadAgentCleansTemporaryAfterChmodFailure(t *testing.T) {
+	client := newAgentTestClient(t)
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "agent.yaml")
+	chmodErr := errors.New("chmod failed")
+	client.agentTemporaryChmod = func(*os.File, os.FileMode) error {
+		return chmodErr
+	}
+	t.Cleanup(func() { client.agentTemporaryChmod = nil })
+
+	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	err := client.DownloadAgent(context.Background(), ref, destination)
+	if !errors.Is(err, chmodErr) {
+		t.Fatalf("DownloadAgent() error = %v, want chmod failure", err)
+	}
+	entries, readErr := os.ReadDir(parent)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("Agent chmod failure cleanup left entries: %v", entries)
 	}
 }
 

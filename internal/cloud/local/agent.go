@@ -63,13 +63,22 @@ func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destina
 			resultErr = errors.Join(resultErr, fmt.Errorf("remove Agent temporary destination %q: %w", temporaryName, err))
 		}
 	}()
-	if err := temporary.Chmod(publishedFileMode); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("set Agent temporary mode %q: %w", temporaryName, err)
+	if c.beforeAgentWrite != nil {
+		c.beforeAgentWrite(temporary)
 	}
 	if _, err := temporary.Write(contents); err != nil {
 		_ = temporary.Close()
 		return fmt.Errorf("write Agent temporary destination %q: %w", temporaryName, err)
+	}
+	var chmodErr error
+	if c.agentTemporaryChmod != nil {
+		chmodErr = c.agentTemporaryChmod(temporary, publishedFileMode)
+	} else {
+		chmodErr = temporary.Chmod(publishedFileMode)
+	}
+	if chmodErr != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("set Agent temporary mode %q: %w", temporaryName, chmodErr)
 	}
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close Agent temporary destination %q: %w", temporaryName, err)
