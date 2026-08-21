@@ -16,7 +16,8 @@ import (
 
 // LocalClient 从本地目录读取能力资源。
 type LocalClient struct {
-	resourcesRoot string
+	resourcesRoot      string
+	beforeAgentPublish func()
 }
 
 // NewLocalClient 使用绝对资源根目录创建本地客户端。

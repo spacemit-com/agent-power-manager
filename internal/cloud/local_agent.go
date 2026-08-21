@@ -70,7 +70,10 @@ func (c *LocalClient) DownloadAgent(ctx context.Context, ref domain.PowerRef, de
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close Agent temporary destination %q: %w", temporaryName, err)
 	}
-	if err := os.Rename(temporaryName, destination); err != nil {
+	if c.beforeAgentPublish != nil {
+		c.beforeAgentPublish()
+	}
+	if err := renameAgentNoReplace(temporaryName, destination); err != nil {
 		return fmt.Errorf("publish Agent destination %q: %w", destination, err)
 	}
 	return nil

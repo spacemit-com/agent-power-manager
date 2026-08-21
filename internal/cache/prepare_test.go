@@ -163,6 +163,44 @@ func TestPrepareSkillSameVersionConcurrencyDownloadsOnce(t *testing.T) {
 	}
 }
 
+func TestPrepareRejectsUnsafeOrNoncanonicalReferenceBeforeCacheHit(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*cache.FilesystemCache, context.Context, domain.PowerRef) (string, error)
+		ref     domain.PowerRef
+		marker  string
+		path    []string
+	}{
+		{name: "Skill traversal", prepare: (*cache.FilesystemCache).PrepareSkill, ref: domain.PowerRef{Name: "../escaped", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, marker: "SKILL.md", path: []string{"escaped", "v1.0.0"}},
+		{name: "Skill noncanonical version", prepare: (*cache.FilesystemCache).PrepareSkill, ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}, marker: "SKILL.md", path: []string{"skills", "demo", "1.0.0"}},
+		{name: "Agent traversal", prepare: (*cache.FilesystemCache).PrepareAgent, ref: domain.PowerRef{Name: "../escaped", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, marker: "agent.yaml", path: []string{"escaped", "v1.0.0"}},
+		{name: "Agent noncanonical version", prepare: (*cache.FilesystemCache).PrepareAgent, ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "1.0.0"}, marker: "agent.yaml", path: []string{"agents", "demo", "1.0.0"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, cacheHome := setCacheEnvironment(t)
+			source := &recordingSource{}
+			store, err := cache.NewFilesystem(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			trap := filepath.Join(append([]string{cacheHome, "apm"}, test.path...)...)
+			if err := os.MkdirAll(trap, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(trap, test.marker), []byte("trap"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := test.prepare(store, context.Background(), test.ref); err == nil {
+				t.Fatal("Prepare() error = nil, want exact-reference validation error")
+			}
+			if source.skillCalls != 0 || source.agentCalls != 0 {
+				t.Fatalf("source calls = skill:%d agent:%d, want zero", source.skillCalls, source.agentCalls)
+			}
+		})
+	}
+}
+
 func TestNewFilesystemRejectsTypedNilSource(t *testing.T) {
 	var source *recordingSource
 	if store, err := cache.NewFilesystem(source); store != nil || err == nil {

@@ -7,11 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 
 	"apm/internal/domain"
 	"apm/internal/paths"
 	"apm/internal/utils/filesystem"
+
+	"github.com/Masterminds/semver/v3"
 )
 
 // FilesystemCache 将精确版本内容发布到缓存，并物化为公共 staging。
@@ -20,6 +23,8 @@ type FilesystemCache struct {
 	cacheRoot       string
 	stagingPath     string
 	stagingTempPath string
+	copyDir         func(string, string) error
+	readFile        func(string) ([]byte, error)
 
 	locksMu   sync.Mutex
 	pathLocks map[string]*sync.Mutex
@@ -48,6 +53,8 @@ func NewFilesystem(source Source) (*FilesystemCache, error) {
 		cacheRoot:       cacheRoot,
 		stagingPath:     stagingPath,
 		stagingTempPath: stagingTempPath,
+		copyDir:         filesystem.CopyDir,
+		readFile:        os.ReadFile,
 		pathLocks:       make(map[string]*sync.Mutex),
 	}, nil
 }
@@ -67,7 +74,7 @@ func isNilSource(source Source) bool {
 
 // PrepareSkill 确保精确版本 Skill 已原子发布到缓存并返回可安装 staging 根目录。
 func (c *FilesystemCache) PrepareSkill(ctx context.Context, ref domain.PowerRef) (string, error) {
-	if ref.Type != domain.PowerTypeSkill || ref.Version == "" {
+	if !validExactCacheRef(ref, domain.PowerTypeSkill) {
 		return "", errors.New("exact Skill type and version are required")
 	}
 	final := filepath.Join(c.cacheRoot, "skills", ref.Name, ref.Version)
@@ -88,7 +95,7 @@ func (c *FilesystemCache) PrepareSkill(ctx context.Context, ref domain.PowerRef)
 
 // PrepareAgent 确保精确版本 Agent 已原子发布到缓存并返回可安装 staging 根目录。
 func (c *FilesystemCache) PrepareAgent(ctx context.Context, ref domain.PowerRef) (string, error) {
-	if ref.Type != domain.PowerTypeAgent || ref.Version == "" {
+	if !validExactCacheRef(ref, domain.PowerTypeAgent) {
 		return "", errors.New("exact Agent type and version are required")
 	}
 	final := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version)
@@ -105,6 +112,18 @@ func (c *FilesystemCache) PrepareAgent(ctx context.Context, ref domain.PowerRef)
 	c.stagingMu.Lock()
 	defer c.stagingMu.Unlock()
 	return c.stageAgent(ref)
+}
+
+func validExactCacheRef(ref domain.PowerRef, powerType domain.PowerType) bool {
+	if ref.Type != powerType || ref.Name == "" || ref.Name == "." || ref.Name == ".." || strings.ContainsAny(ref.Name, `/\\`) || filepath.Base(ref.Name) != ref.Name {
+		return false
+	}
+	if !strings.HasPrefix(ref.Version, "v") {
+		return false
+	}
+	native := strings.TrimPrefix(ref.Version, "v")
+	version, err := semver.StrictNewVersion(native)
+	return err == nil && version.Prerelease() == "" && version.Metadata() == "" && version.String() == native
 }
 
 func (c *FilesystemCache) lockFor(path string) *sync.Mutex {
@@ -235,61 +254,62 @@ func cachedAgent(root string) (bool, error) {
 	return true, nil
 }
 
-func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, resultErr error) {
-	if err := os.RemoveAll(c.stagingPath); err != nil {
-		return "", fmt.Errorf("remove staging path %q: %w", c.stagingPath, err)
+func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (string, error) {
+	candidate, err := c.newStagingCandidate()
+	if err != nil {
+		return "", err
 	}
-	if err := os.RemoveAll(c.stagingTempPath); err != nil {
-		return "", fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err)
-	}
-	defer func() {
-		if err := os.RemoveAll(c.stagingTempPath); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err))
-		}
-	}()
+	defer os.RemoveAll(candidate)
 	source := filepath.Join(c.cacheRoot, "skills", ref.Name, ref.Version)
-	target := filepath.Join(c.stagingTempPath, "skills", ref.Name)
-	if err := filesystem.CopyDir(source, target); err != nil {
+	target := filepath.Join(candidate, "skills", ref.Name)
+	if err := c.copyDir(source, target); err != nil {
 		return "", fmt.Errorf("copy cache path %q to staging path %q: %w", source, target, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(c.stagingPath), 0o755); err != nil {
-		return "", fmt.Errorf("create staging parent path %q: %w", filepath.Dir(c.stagingPath), err)
-	}
-	if err := os.Rename(c.stagingTempPath, c.stagingPath); err != nil {
-		return "", fmt.Errorf("rename staging temporary path %q to staging path %q: %w", c.stagingTempPath, c.stagingPath, err)
+	if err := c.publishStagingCandidate(candidate); err != nil {
+		return "", err
 	}
 	return c.stagingPath, nil
 }
 
-func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (stagingRoot string, resultErr error) {
-	if err := os.RemoveAll(c.stagingPath); err != nil {
-		return "", fmt.Errorf("remove staging path %q: %w", c.stagingPath, err)
+func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (string, error) {
+	candidate, err := c.newStagingCandidate()
+	if err != nil {
+		return "", err
 	}
-	if err := os.RemoveAll(c.stagingTempPath); err != nil {
-		return "", fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err)
-	}
-	defer func() {
-		if err := os.RemoveAll(c.stagingTempPath); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove staging temporary path %q: %w", c.stagingTempPath, err))
-		}
-	}()
+	defer os.RemoveAll(candidate)
 	source := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version, "agent.yaml")
-	contents, err := os.ReadFile(source)
+	contents, err := c.readFile(source)
 	if err != nil {
 		return "", fmt.Errorf("read cache path %q: %w", source, err)
 	}
-	target := filepath.Join(c.stagingTempPath, "agents", ref.Name)
+	target := filepath.Join(candidate, "agents", ref.Name)
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return "", fmt.Errorf("create staging target %q: %w", target, err)
 	}
 	if err := os.WriteFile(filepath.Join(target, "agent.yaml"), contents, 0o644); err != nil {
 		return "", fmt.Errorf("write staging agent %q: %w", filepath.Join(target, "agent.yaml"), err)
 	}
-	if err := os.MkdirAll(filepath.Dir(c.stagingPath), 0o755); err != nil {
-		return "", fmt.Errorf("create staging parent path %q: %w", filepath.Dir(c.stagingPath), err)
-	}
-	if err := os.Rename(c.stagingTempPath, c.stagingPath); err != nil {
-		return "", fmt.Errorf("rename staging temporary path %q to staging path %q: %w", c.stagingTempPath, c.stagingPath, err)
+	if err := c.publishStagingCandidate(candidate); err != nil {
+		return "", err
 	}
 	return c.stagingPath, nil
+}
+
+func (c *FilesystemCache) newStagingCandidate() (string, error) {
+	parent := filepath.Dir(c.stagingTempPath)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", fmt.Errorf("create staging temporary parent %q: %w", parent, err)
+	}
+	candidate, err := os.MkdirTemp(parent, filepath.Base(c.stagingTempPath)+"-")
+	if err != nil {
+		return "", fmt.Errorf("create staging candidate: %w", err)
+	}
+	return candidate, nil
+}
+
+func (c *FilesystemCache) publishStagingCandidate(candidate string) error {
+	if err := replaceStaging(candidate, c.stagingPath); err != nil {
+		return fmt.Errorf("publish staging candidate %q to %q: %w", candidate, c.stagingPath, err)
+	}
+	return nil
 }

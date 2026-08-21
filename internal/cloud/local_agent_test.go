@@ -1,4 +1,4 @@
-package cloud_test
+package cloud
 
 import (
 	"context"
@@ -7,17 +7,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	"apm/internal/cloud"
 	"apm/internal/domain"
 )
 
-func newAgentTestClient(t *testing.T) *cloud.LocalClient {
+func newAgentTestClient(t *testing.T) *LocalClient {
 	t.Helper()
 	resources, err := filepath.Abs("resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := cloud.NewLocalClient(resources)
+	client, err := NewLocalClient(resources)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +65,36 @@ func TestLocalDownloadAgentWritesDestinationWithoutGlobalCache(t *testing.T) {
 func TestLocalClientDownloadAgentRejectsWrongType(t *testing.T) {
 	client := newAgentTestClient(t)
 	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
-	if err := client.DownloadAgent(context.Background(), ref, filepath.Join(t.TempDir(), "agent.yaml")); !errors.Is(err, cloud.ErrNotFound) {
+	if err := client.DownloadAgent(context.Background(), ref, filepath.Join(t.TempDir(), "agent.yaml")); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLocalDownloadAgentDoesNotReplaceConcurrentDestination(t *testing.T) {
+	client := newAgentTestClient(t)
+	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	reachedPublish := make(chan struct{})
+	allowPublish := make(chan struct{})
+	client.beforeAgentPublish = func() {
+		close(reachedPublish)
+		<-allowPublish
+	}
+	t.Cleanup(func() { client.beforeAgentPublish = nil })
+
+	result := make(chan error, 1)
+	go func() {
+		result <- client.DownloadAgent(context.Background(), domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, destination)
+	}()
+	<-reachedPublish
+	if err := os.WriteFile(destination, []byte("racer"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	close(allowPublish)
+	if err := <-result; err == nil {
+		t.Fatal("DownloadAgent() error = nil, want no-replace publication error")
+	}
+	if got, err := os.ReadFile(destination); err != nil || string(got) != "racer" {
+		t.Fatalf("concurrent destination = %q, %v, want racer", got, err)
 	}
 }
 
