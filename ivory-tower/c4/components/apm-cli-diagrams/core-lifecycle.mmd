@@ -155,8 +155,8 @@ classDiagram
     }
     class PowerCache {
         <<interface>>
-        +StageSkill(PowerRef) (stagingRoot string, error)
-        +StageAgent(PowerRef) (stagingRoot string, error)
+        +PrepareSkill(Context, PowerRef) (stagingRoot string, error)
+        +PrepareAgent(Context, PowerRef) (stagingRoot string, error)
     }
     class PluginResourceManager {
         <<interface>>
@@ -174,10 +174,11 @@ classDiagram
     }
     class CloudClient {
         <<interface>>
-        +List() ([]PowerRef, error)
-        +DownloadSkill(PowerRef) error
-        +DownloadAgent(PowerRef) error
-        +GetMCP(PowerRef) (MCPServer, error)
+        +List(Context) ([]PowerRef, error)
+        +Resolve(Context, PowerRef) (PowerRef, error)
+        +DownloadSkill(Context, PowerRef, destination) error
+        +DownloadAgent(Context, PowerRef, destination) error
+        +GetMCP(Context, PowerRef) (MCPServer, error)
         +DownloadPlugin(Context, PowerRef, destination) error
     }
     class VersionSelector {
@@ -207,8 +208,8 @@ classDiagram
     installService --> InstallBatchError : successful Release only
     installService --> Locker : one lock interval
     installService --> TransactionManager : Recover / InstallSkill / InstallAgent / InstallMCP / InstallPlugin
-    installService --> CloudClient : List / DownloadSkill / DownloadAgent / GetMCP
-    installService --> PowerCache : Skill StageSkill / Agent StageAgent only
+    installService --> CloudClient : List / Resolve / GetMCP; Cache and Plugin Resource consume sources
+    installService --> PowerCache : Skill PrepareSkill / Agent PrepareAgent only
     installService --> PluginResourceManager : Plugin Ensure / Lookup / StageFilesystem
     installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveAgent / ResolveMCP / ResolvePlugin
     installService --> ConfigRepository : Find
@@ -236,4 +237,4 @@ classDiagram
     TransactionManager --|> Recoverer : embeds
     Inspector --> InspectionResult : returns
     TransactionManager --> ConfigRepository : Set / Remove
-    PluginResourceManager --> PluginArtifact : returns immutable shared artifact, caller uses MarketplaceFor (ADR-014)
+    PluginResourceManager --> PluginArtifact : returns canonical-derived immutable shared artifact, caller uses MarketplaceFor (ADR-017)

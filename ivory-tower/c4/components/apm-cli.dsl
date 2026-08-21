@@ -1,6 +1,6 @@
 // 由 containers/apm.dsl 的 !include 引用；本文件内容处于 CLI Binary 容器内。
 
-cliEntry = component "CLI Entry" "cobra 命令路由；Search、List、Install、Uninstall、Fix 分别通过独立 factory 创建专属端口；Fix 无业务 stdout。" "Go (cobra)" {
+cliEntry = component "CLI Entry" "cobra 命令路由；Search、List、Install、Uninstall、Fix 分别通过独立 factory 创建专属端口；Fix 无业务 stdout。" "cmd/apm (Go, cobra)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cli-entry.mmd"
     }
@@ -18,7 +18,7 @@ lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install�
         "fixLifecycle" "apm-cli-lifecycle-diagrams/fix.mmd"
     }
 }
-adapterRegistry = component "Adapter Registry" "管理 Bibit、Codex、Claude Code、Hermes 四个内置 Agent；分别 ResolveSkill、ResolveMCP、ResolvePlugin。Codex/Claude Plugin 使用 marketplace，Hermes/Bibit 使用 filesystem（ADR-014）。" "Go" {
+adapterRegistry = component "Adapter Registry" "管理 Bibit、Codex、Claude Code、Hermes 四个内置 Agent；分别 ResolveSkill、ResolveAgent、ResolveMCP、ResolvePlugin。Codex/Claude Plugin 使用 marketplace，Hermes/Bibit 使用 filesystem（ADR-015/017）。" "internal/adapter (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/adapter-registry.mmd"
     }
@@ -33,23 +33,27 @@ lockManager = component "Lock Manager" "基于 flock 实现防重入文件锁；
         "classDiagram" "apm-cli-diagrams/lock-manager.mmd"
     }
 }
-cacheManager = component "Cache Manager" "只供 Skill 从 type/name/version 缓存物化 staging；MCP 和 Plugin 不访问。" "Go" {
+cacheManager = component "Cache Manager" "internal/cache 通过 Source 注入同一 Cloud Client；PrepareSkill/PrepareAgent 独占命中复验、私有下载目标、精确版本原子 cache 发布与公共 staging。" "internal/cache (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cache-manager.mmd"
     }
 }
-cloudClient = component "Cloud Client" "List 扫描全部 Power；DownloadSkill 保持既有缓存语义，DownloadPlugin(ref, destination) 写入完整多 Agent 原始包；GetMCP 返回安装定义（ADR-014）。" "Go (local filesystem)" {
+cloudComposition = component "Cloud Composition" "cmd/apm.newCloudClient 每次创建 registry，显式注册 local|remote factory，按环境只打开一个 provider；默认 remote，禁止 fallback（ADR-016）。" "cmd/apm/cloud.go (Go)"
+providerRegistry = component "Provider Registry" "internal/cloud.ProviderRegistry 为实例级显式注册表；拒绝空、重复、未知 provider 及 nil/typed-nil Client。" "internal/cloud (Go)"
+cloudClient = component "Cloud Client Ports" "internal/cloud.Client 组合 Catalog、SkillSource、PluginSource、MCPSource、AgentSource；List/Resolve 与所有来源访问都可取消，provider 不拥有 APM cache/staging。" "internal/cloud (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cloud-client.mmd"
     }
 }
-pluginResource = component "Plugin Resource" "每个 Plugin 版本下载并原子发布一份共享不可变 artifact；同时生成 Codex/Claude marketplace，并为 Hermes/Bibit 提供 filesystem staging（ADR-014）。" "Go" {
+localProvider = component "Local Provider" "internal/cloud/local.Client 从显式绝对 canonical fixture 根读取四类 Power；复制物理目录/文件或严格解码 MCP。" "internal/cloud/local (Go)"
+remoteProvider = component "Remote Provider" "internal/cloud/remote.Client 读取 APC HTTP 目录/latest/exact/content，校验协议、size/MD5 与安全归档；不 retry/fallback。" "internal/cloud/remote (Go)"
+pluginResource = component "Plugin Resource" "internal/pluginresource 下载 canonical apc-plugin.json + skills，严格解析闭集并派生 Codex/Claude/Hermes 原生配置与双 marketplace，一次发布共享不可变 artifact（ADR-017）。" "internal/pluginresource (Go)" {
 }
-pluginArtifactValidator = component "Plugin Artifact Validator" "中立只读校验：拒绝 symlink/特殊文件，并复验当前消费路径所需的原生 manifest 与已生成 marketplace；不下载、不生成、不修改 artifact。" "Go" {
+pluginArtifactValidator = component "Plugin Artifact Validator" "internal/pluginartifact 中立只读校验：复验 canonical apc-plugin 身份/Skill 闭集、派生 manifest/marketplace 与物理树；不下载、不生成、不修改 artifact。" "internal/pluginartifact (Go)" {
 }
 pluginArtifactCache = component "Plugin Artifact Cache Roots" "cache/plugins/<logical-name>/<version>；所有 Agent 共用的不可变 artifact 根，不属于通用 Cache Manager。" "filesystem" {
 }
-rawPluginDestination = component "Raw Plugin Destination" "Plugin Resource 创建的空临时 plugins/<name> 目录；Cloud 在此写入完整多 Agent 原始包。" "filesystem" {
+rawPluginDestination = component "Canonical Plugin Destination" "Plugin Resource 创建的空私有临时 plugins/<name> 目录；Cloud 只写 apc-plugin.json + skills。" "filesystem" {
 }
 codexMarketplaceBuilder = component "Codex Marketplace Builder" "从 Codex 原生 Plugin manifest 构建并复验单条目本地 marketplace。" "Go" {
 }
@@ -61,20 +65,30 @@ journalStore = component "Journal Store" "唯一 transactions/active.json，sche
 }
 
 cliEntry -> lifecycle "通过五个独立 factory 调用 Search/List/Install/Uninstall/Fix 生命周期用例"
+cliEntry -> cloudComposition "Search/List/Install/Uninstall factory 创建 Cloud；Fix 不调用"
+cloudComposition -> providerRegistry "每次注册 local|remote 并 Open 选中 ID"
+providerRegistry -> localProvider "local factory"
+providerRegistry -> remoteProvider "remote factory"
+localProvider -> cloudClient "implements internal/cloud.Client"
+remoteProvider -> cloudClient "implements internal/cloud.Client"
+cloudComposition -> lifecycle "注入选中 Client；Fix 例外"
+cloudComposition -> cacheManager "Install 将同一选中 Client 作为 Source 注入"
+cloudComposition -> pluginResource "Install/Uninstall 将同一选中 Client 作为 Downloader 注入"
 lifecycle -> adapterRegistry "installed List/Install/Uninstall 刷新快照；Install/Uninstall 按 Agent 与 Power 类型解析 Adapter"
 lifecycle -> configModel "installed List、Install 与 Uninstall 读取/处理 manifest 事实"
 lifecycle -> lockManager "仅 Fix、Install、Uninstall 在各自边界获取/释放；Search 与两种 List 不获取"
-lifecycle -> cacheManager "Skill Install：为每个实际安装 Agent StageSkill 到公共 staging"
-lifecycle -> cloudClient "Search/List/Install List；Skill DownloadSkill；MCP GetMCP"
+lifecycle -> cacheManager "Skill/Agent Install：PrepareSkill/PrepareAgent 返回公共 staging"
+lifecycle -> cloudClient "Search/List/Install List/Resolve；Install MCP GetMCP；Uninstall 仅 target present MCP 精确 GetMCP"
 lifecycle -> pluginResource "Plugin Ensure / Lookup / StageFilesystem；返回的 Artifact 再由调用方 MarketplaceFor(agent)"
 lifecycle -> transactionManager "Install/Uninstall/Fix 的可恢复事务"
-pluginResource -> cloudClient "DownloadPlugin(ref, destination) 到共享制品临时 Plugin 叶子"
-pluginResource -> rawPluginDestination "创建并控制空的原始包 destination"
-cloudClient -> rawPluginDestination "写入完整多 Agent 原始包，不生成 marketplace"
-pluginResource -> pluginArtifactCache "一次发布、复验共享 immutable artifact"
-pluginResource -> pluginArtifactValidator "构建后与 cache hit 完整只读复验"
-pluginResource -> codexMarketplaceBuilder "构建与复验 Codex 单条目 marketplace"
-pluginResource -> claudeMarketplaceBuilder "构建与复验 Claude 单条目 marketplace"
+cacheManager -> cloudClient "Source.DownloadSkill/DownloadAgent 写入 Cache 私有目标"
+pluginResource -> cloudClient "DownloadPlugin(ctx, ref, destination) 到临时 canonical Plugin 叶子"
+pluginResource -> rawPluginDestination "创建并控制空的 canonical destination"
+cloudClient -> rawPluginDestination "只写 apc-plugin.json + skills，不生成 Agent 配置/marketplace"
+pluginResource -> pluginArtifactCache "保留 canonical 并一次发布共享 immutable artifact"
+pluginResource -> pluginArtifactValidator "严格解析 canonical，构建后与 cache hit 完整只读复验"
+pluginResource -> codexMarketplaceBuilder "从 canonical model 构建 Codex 原生 manifest 与单条目 marketplace"
+pluginResource -> claudeMarketplaceBuilder "从 canonical model 构建 Claude 原生 manifest 与单条目 marketplace"
 transactionManager -> adapterRegistry "Plugin marketplace/Plugin 与 filesystem 变更"
 transactionManager -> journalStore "create/update/delete schema v1 journal"
 transactionManager -> configModel "commit/rollback manifest Set/Remove"
@@ -82,5 +96,4 @@ transactionManager -> pluginArtifactValidator "recovery 仅复验固定方向实
 adapterRegistry -> targetAgent "Skill 访问 profile 根；MCP 通过各自 CLI；Codex/Claude Plugin 使用 marketplace；Hermes/Bibit 发布 plugins/<name>" "本地文件系统 / CLI"
 configModel -> apm.installedPower "读写 JSON 清单"
 cacheManager -> apm.powerCache "读取版本化缓存"
-cloudClient -> apm.powerCache "DownloadSkill 经临时目录原子写入文件型缓存"
-cloudClient -> cloudRegistry "扫描 Skill/MCP/Plugin fixture；读取 MCP 与完整多 Agent Plugin 包" "本地文件系统"
+localProvider -> cloudRegistry "扫描 canonical Skill/Plugin/MCP/Agent fixture" "本地文件系统"

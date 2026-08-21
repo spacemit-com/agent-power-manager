@@ -1,21 +1,50 @@
 classDiagram
-    note for PowerCache "只服务 Skill 与 Agent 的版本化 Cache/Staging；MCP 与所有 Plugin 均不使用此接口"
-    class PowerCache {
-        <<interface>>
-        +StageSkill(PowerRef) (stagingRoot string, error)
-        +StageAgent(PowerRef) (stagingRoot string, error)
+    note for PowerCache "internal/cache 只管理 Skill 与 Agent：复验 cache hit，miss 时创建唯一私有目标，经 Source 下载和 marker 复验后按精确版本原子发布，再原子物化公共 staging"
+    class CacheSource {
+        <<interface: internal/cache.Source>>
+        +DownloadSkill(Context, PowerRef, destination) error
+        +DownloadAgent(Context, PowerRef, destination) error
     }
-
-    note for FilesystemCache "按 type/name/version 读取缓存；把叶子复制到 staging/<type-directory>/<name>，返回 staging 根"
+    class PowerCache {
+        <<interface: internal/cache.PowerCache>>
+        +PrepareSkill(Context, PowerRef) stagingRoot
+        +PrepareAgent(Context, PowerRef) stagingRoot
+    }
     class FilesystemCache {
-        +StageSkill(PowerRef) (stagingRoot string, error)
-        +StageAgent(PowerRef) (stagingRoot string, error)
+        <<internal/cache.FilesystemCache>>
+        +PrepareSkill(Context, PowerRef) stagingRoot
+        +PrepareAgent(Context, PowerRef) stagingRoot
+    }
+    class CloudClient {
+        <<internal/cloud.Client>>
+    }
+    class VersionedPowerCache {
+        <<cache/skills or cache/agents/name/version>>
+    }
+    class PublicStaging {
+        <<staging/skills or staging/agents/name>>
     }
 
     FilesystemCache ..|> PowerCache
-    PowerCache --> PowerRef : consumes
+    FilesystemCache --> CacheSource : injected source
+    CloudClient ..|> CacheSource
+    FilesystemCache --> VersionedPowerCache : validate and publish immutable version
+    FilesystemCache --> PublicStaging : atomically replace candidate
 
-    note for PluginArtifactCache "Plugin Resource 独占共享 immutable artifact：cache/plugins/<logical-name>/<version>；同一根包含完整 Plugin、Codex/Claude marketplace，并供 Hermes/Bibit staging（ADR-014）"
-    class PluginArtifactCache {
-        +artifactRoot(PowerRef) string
+    class PluginResource {
+        <<internal/pluginresource>>
+        +Ensure(Context, PowerRef) Artifact
+        +Lookup(PowerRef) Artifact
+        +StageFilesystem(PowerRef) stagingRoot
     }
+    class PluginArtifactValidator {
+        <<internal/pluginartifact>>
+    }
+    class PluginArtifactCache {
+        <<cache/plugins/name/version>>
+    }
+
+    PluginResource --> CloudClient : DownloadPlugin canonical package
+    PluginResource --> PluginArtifactValidator : parse apc-plugin and validate derived files
+    PluginResource --> PluginArtifactCache : publish shared immutable artifact
+    note for PluginArtifactCache "Plugin cache 不属于 PowerCache；Plugin Resource 保留 apc-plugin.json + skills，并派生 Codex/Claude/Hermes 配置与双 marketplace（ADR-017）"

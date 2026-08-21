@@ -10,7 +10,7 @@ flowchart TD
     Type -->|Skill| SkillResolve[ResolveSkill + Config Find]
     SkillResolve --> SkillSame{same manifest version?}
     SkillSame -->|yes| Unchanged[unchanged]
-    SkillSame -->|no| Cache[Cache StageSkill / miss 时 Cloud DownloadSkill / StageSkill]
+    SkillSame -->|no| Cache[Cache PrepareSkill；hit 复验，miss 时私有目标 DownloadSkill 后原子发布 cache/staging]
     Cache --> FSTx[filesystem Install transaction]
     FSTx --> FSJournal[schema v1 driver=filesystem]
 
@@ -29,7 +29,7 @@ flowchart TD
 
     Type -->|Plugin| PluginManifest[Config Find target exact version]
     PluginManifest -->|same version| Unchanged
-    PluginManifest -->|missing or different| PluginEnsure[Plugin Resource Ensure 共享 artifact；仅 miss 时 Cloud 下载完整包并生成双 marketplace]
+    PluginManifest -->|missing or different| PluginEnsure[Plugin Resource Ensure 共享 artifact；仅 miss 时 Cloud 下载 apc-plugin.json + skills，再派生 Agent 配置与双 marketplace]
     PluginEnsure --> PluginResolve[ResolvePlugin]
     PluginResolve --> PluginFacts[检查目标及旧版本的精确 Agent 事实]
     PluginFacts -->|Codex / Claude| PreviousLookup[Artifact MarketplaceFor；旧版本仅 Lookup，验证本地 marketplace/source 与逻辑 selector]
