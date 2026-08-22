@@ -34,11 +34,12 @@ type AgentSource interface {
 	DownloadAgent(context.Context, domain.PowerRef, string) error
 }
 
-// Client 定义 Cloud 资源发现及各类精确版本获取边界。
+// Client 定义 Cloud 资源发现、各类精确版本获取及提交边界。
 type Client interface {
 	Catalog
 	SkillSource
 	PluginSource
 	MCPSource
 	AgentSource
+	Submission
 }

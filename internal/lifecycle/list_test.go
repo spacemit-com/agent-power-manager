@@ -57,6 +57,15 @@ func (*listFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.Po
 }
 func (*listFakeCloud) DownloadSkill(context.Context, domain.PowerRef, string) error { return nil }
 func (*listFakeCloud) DownloadAgent(context.Context, domain.PowerRef, string) error { return nil }
+func (*listFakeCloud) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
+	return domain.SubmissionReceipt{}, nil
+}
+func (*listFakeCloud) GetSubmission(context.Context, string) (domain.Submission, error) {
+	return domain.Submission{}, nil
+}
+func (*listFakeCloud) ListSubmissions(context.Context, domain.SubmissionListQuery) (domain.SubmissionList, error) {
+	return domain.SubmissionList{}, nil
+}
 func (*listFakeCloud) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }

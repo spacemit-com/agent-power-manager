@@ -175,6 +175,15 @@ func (*recordingCloudClient) GetMCP(context.Context, domain.PowerRef) (domain.MC
 func (*recordingCloudClient) DownloadAgent(context.Context, domain.PowerRef, string) error {
 	return nil
 }
+func (*recordingCloudClient) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
+	return domain.SubmissionReceipt{}, nil
+}
+func (*recordingCloudClient) GetSubmission(context.Context, string) (domain.Submission, error) {
+	return domain.Submission{}, nil
+}
+func (*recordingCloudClient) ListSubmissions(context.Context, domain.SubmissionListQuery) (domain.SubmissionList, error) {
+	return domain.SubmissionList{}, nil
+}
 
 func pluginRefForMainTest() domain.PowerRef {
 	return domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}

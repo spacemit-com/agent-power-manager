@@ -161,6 +161,15 @@ func (*uninstallFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, stri
 func (*uninstallFakeCloud) DownloadAgent(context.Context, domain.PowerRef, string) error {
 	panic("Agent uninstall must not call Cloud DownloadAgent")
 }
+func (*uninstallFakeCloud) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
+	panic("Uninstall must not call Cloud Submit")
+}
+func (*uninstallFakeCloud) GetSubmission(context.Context, string) (domain.Submission, error) {
+	panic("Uninstall must not call Cloud GetSubmission")
+}
+func (*uninstallFakeCloud) ListSubmissions(context.Context, domain.SubmissionListQuery) (domain.SubmissionList, error) {
+	panic("Uninstall must not call Cloud ListSubmissions")
+}
 
 type uninstallFakeRegistry struct {
 	calls   *[]string

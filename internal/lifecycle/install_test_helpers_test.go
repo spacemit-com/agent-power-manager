@@ -261,6 +261,16 @@ func (c *installFakeCloud) DownloadAgent(context.Context, domain.PowerRef, strin
 	*c.calls = append(*c.calls, "cloud:download-agent")
 	return nil
 }
+func (c *installFakeCloud) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
+	*c.calls = append(*c.calls, "cloud:submit")
+	return domain.SubmissionReceipt{}, nil
+}
+func (c *installFakeCloud) GetSubmission(context.Context, string) (domain.Submission, error) {
+	return domain.Submission{}, nil
+}
+func (c *installFakeCloud) ListSubmissions(context.Context, domain.SubmissionListQuery) (domain.SubmissionList, error) {
+	return domain.SubmissionList{}, nil
+}
 
 func (c *installFakeCloud) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
 	*c.calls = append(*c.calls, "cloud:get-mcp:"+ref.Version)

@@ -34,6 +34,15 @@ func (c *stubCloudClient) Resolve(ctx context.Context, ref domain.PowerRef) (dom
 
 func (*stubCloudClient) DownloadSkill(context.Context, domain.PowerRef, string) error { return nil }
 func (*stubCloudClient) DownloadAgent(context.Context, domain.PowerRef, string) error { return nil }
+func (*stubCloudClient) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
+	return domain.SubmissionReceipt{}, nil
+}
+func (*stubCloudClient) GetSubmission(context.Context, string) (domain.Submission, error) {
+	return domain.Submission{}, nil
+}
+func (*stubCloudClient) ListSubmissions(context.Context, domain.SubmissionListQuery) (domain.SubmissionList, error) {
+	return domain.SubmissionList{}, nil
+}
 func (*stubCloudClient) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
