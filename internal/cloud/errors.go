@@ -15,4 +15,12 @@ var (
 	ErrUnsafeContent = errors.New("cloud unsafe content")
 	// ErrProviderConfig 表示提供方配置缺失或无效。
 	ErrProviderConfig = errors.New("cloud provider configuration error")
+	// ErrSubmissionUnsupported 表示 provider 不支持提交。
+	ErrSubmissionUnsupported = errors.New("cloud submission unsupported")
+	// ErrSubmissionConflict 表示提交与活动申请、版本或审批状态冲突。
+	ErrSubmissionConflict = errors.New("cloud submission conflict")
+	// ErrAuth 表示 API Key 无效或无权操作。
+	ErrAuth = errors.New("cloud authentication failure")
+	// ErrUnavailable 表示依赖服务（官网认证等）不可用。
+	ErrUnavailable = errors.New("cloud service unavailable")
 )
