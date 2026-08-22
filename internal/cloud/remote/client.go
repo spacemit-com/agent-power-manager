@@ -32,6 +32,7 @@ type problemDTO struct {
 type Client struct {
 	baseURL            *url.URL
 	http               *http.Client
+	apiKey             string
 	mcpTempParent      string
 	beforeAgentPublish func(*stagedContent)
 	beforeMCPCleanup   func(*ownedDirectory)
@@ -39,8 +40,13 @@ type Client struct {
 
 var _ cloud.Catalog = (*Client)(nil)
 
-// New 创建远端目录 Client；非回环 HTTP、含路径歧义的 URL 和无界 HTTP Client 均被拒绝。
+// New 创建匿名远端目录 Client；非回环 HTTP、含路径歧义的 URL 和无界 HTTP Client 均被拒绝。
 func New(baseURL string, httpClient *http.Client) (*Client, error) {
+	return NewWithAPIKey(baseURL, httpClient, "")
+}
+
+// NewWithAPIKey 创建远端目录 Client 并注入 Bearer 凭据；apiKey 为空表示匿名（仅资源读取与下载）。
+func NewWithAPIKey(baseURL string, httpClient *http.Client, apiKey string) (*Client, error) {
 	if httpClient == nil || httpClient.Timeout <= 0 {
 		return nil, fmt.Errorf("create remote Client with bounded HTTP client: %w", cloud.ErrProviderConfig)
 	}
@@ -78,7 +84,7 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 		return nil
 	}
 
-	return &Client{baseURL: &normalized, http: &clientCopy}, nil
+	return &Client{baseURL: &normalized, http: &clientCopy, apiKey: apiKey}, nil
 }
 
 func validRedirectRequest(baseURL *url.URL, request *http.Request) bool {
