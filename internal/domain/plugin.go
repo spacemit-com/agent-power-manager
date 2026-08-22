@@ -62,6 +62,19 @@ func canonicalNativePluginVersion(version string) (string, error) {
 	return parsed.String(), nil
 }
 
+// CanonicalPowerVersion 校验并返回规范化的 vMAJOR.MINOR.PATCH 版本，
+// 拒绝 prerelease 与 metadata；所有 Power 类型共用此约束。
+func CanonicalPowerVersion(version string) (string, error) {
+	if !strings.HasPrefix(version, "v") {
+		return "", fmt.Errorf("version %q must use vMAJOR.MINOR.PATCH", version)
+	}
+	parsed, err := semver.StrictNewVersion(strings.TrimPrefix(version, "v"))
+	if err != nil || parsed.Prerelease() != "" || parsed.Metadata() != "" || "v"+parsed.String() != version {
+		return "", fmt.Errorf("version %q must use vMAJOR.MINOR.PATCH", version)
+	}
+	return version, nil
+}
+
 // IsCanonicalPowerName 校验 APC Power 的 1-64 字节小写 kebab 名称；连字符只能分隔非空字母数字段。
 func IsCanonicalPowerName(name string) bool {
 	if len(name) < 1 || len(name) > 64 || name[0] == '-' || name[len(name)-1] == '-' || strings.Contains(name, "--") {
