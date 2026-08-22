@@ -41,7 +41,16 @@ func newFixEntry(t *testing.T, stdout, stderr io.Writer, factory cli.FixLifecycl
 	}, func() (cli.UninstallLifecycle, error) {
 		t.Fatal("Fix dispatched to Uninstall factory")
 		return nil, nil
-	}, factory)
+	}, factory, func() (cli.ValidateLifecycle, error) {
+		t.Fatal("Fix dispatched to Validate factory")
+		return nil, nil
+	}, func() (cli.SubmitLifecycle, error) {
+		t.Fatal("Fix dispatched to Submit factory")
+		return nil, nil
+	}, func() (cli.SubmissionQueryLifecycle, error) {
+		t.Fatal("Fix dispatched to Submission factory")
+		return nil, nil
+	})
 }
 
 func TestFixRejectsArgumentsAndCommandFlagsBeforeFactory(t *testing.T) {

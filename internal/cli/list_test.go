@@ -45,6 +45,15 @@ func newListEntry(t *testing.T, stdout, stderr io.Writer, factory cli.ListLifecy
 	}, func() (cli.FixLifecycle, error) {
 		t.Fatal("List dispatched to Fix factory")
 		return nil, nil
+	}, func() (cli.ValidateLifecycle, error) {
+		t.Fatal("List dispatched to Validate factory")
+		return nil, nil
+	}, func() (cli.SubmitLifecycle, error) {
+		t.Fatal("List dispatched to Submit factory")
+		return nil, nil
+	}, func() (cli.SubmissionQueryLifecycle, error) {
+		t.Fatal("List dispatched to Submission factory")
+		return nil, nil
 	})
 }
 

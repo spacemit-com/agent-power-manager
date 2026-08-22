@@ -45,6 +45,15 @@ func newUninstallEntry(t *testing.T, stdout, stderr io.Writer, factory cli.Unins
 	}, factory, func() (cli.FixLifecycle, error) {
 		t.Fatal("Uninstall dispatched to Fix factory")
 		return nil, nil
+	}, func() (cli.ValidateLifecycle, error) {
+		t.Fatal("Uninstall dispatched to Validate factory")
+		return nil, nil
+	}, func() (cli.SubmitLifecycle, error) {
+		t.Fatal("Uninstall dispatched to Submit factory")
+		return nil, nil
+	}, func() (cli.SubmissionQueryLifecycle, error) {
+		t.Fatal("Uninstall dispatched to Submission factory")
+		return nil, nil
 	})
 }
 

@@ -21,7 +21,34 @@ func clearCloudEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("APM_CLOUD_PROVIDER", "")
 	t.Setenv("APC_BASE_URL", "")
+	t.Setenv("APC_API_KEY", "")
 	t.Setenv("APM_CLOUD_LOCAL_ROOT", "")
+}
+
+func TestNewSubmitLifecycleRequiresAPIKey(t *testing.T) {
+	clearCloudEnvironment(t)
+	if _, err := newSubmitLifecycle(); err == nil {
+		t.Fatal("newSubmitLifecycle() error = nil, want error when APC_API_KEY missing")
+	}
+}
+
+func TestNewSubmissionQueryLifecycleRequiresAPIKey(t *testing.T) {
+	clearCloudEnvironment(t)
+	if _, err := newSubmissionQueryLifecycle(); err == nil {
+		t.Fatal("newSubmissionQueryLifecycle() error = nil, want error when APC_API_KEY missing")
+	}
+}
+
+func TestNewSubmitLifecycleWithAPIKey(t *testing.T) {
+	clearCloudEnvironment(t)
+	t.Setenv("APC_API_KEY", "test-key")
+	service, err := newSubmitLifecycle()
+	if err != nil {
+		t.Fatalf("newSubmitLifecycle() error = %v", err)
+	}
+	if service == nil {
+		t.Fatal("newSubmitLifecycle() = nil, want service")
+	}
 }
 
 func TestNewCloudClientConfigurationContract(t *testing.T) {

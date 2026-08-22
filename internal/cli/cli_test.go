@@ -27,6 +27,12 @@ func newTestEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
 		return emptyUninstallLifecycle{}, nil
 	}, func() (cli.FixLifecycle, error) {
 		return emptyFixLifecycle{}, nil
+	}, func() (cli.ValidateLifecycle, error) {
+		return emptyValidateLifecycle{}, nil
+	}, func() (cli.SubmitLifecycle, error) {
+		return emptySubmitLifecycle{}, nil
+	}, func() (cli.SubmissionQueryLifecycle, error) {
+		return emptySubmissionLifecycle{}, nil
 	})
 }
 
@@ -57,6 +63,28 @@ func (emptyUninstallLifecycle) Uninstall(context.Context, cli.Flags) (cli.Uninst
 type emptyFixLifecycle struct{}
 
 func (emptyFixLifecycle) Fix(context.Context) error { return nil }
+
+type emptyValidateLifecycle struct{}
+
+func (emptyValidateLifecycle) Validate(context.Context, cli.Flags, []string) (cli.ValidateResult, error) {
+	return cli.ValidateResult{}, nil
+}
+
+type emptySubmitLifecycle struct{}
+
+func (emptySubmitLifecycle) Submit(context.Context, cli.Flags, []string) (cli.SubmitResult, error) {
+	return cli.SubmitResult{}, nil
+}
+
+type emptySubmissionLifecycle struct{}
+
+func (emptySubmissionLifecycle) Get(context.Context, string) (cli.SubmissionQueryResult, error) {
+	return cli.SubmissionQueryResult{}, nil
+}
+
+func (emptySubmissionLifecycle) List(context.Context, cli.Flags) (cli.SubmissionQueryResult, error) {
+	return cli.SubmissionQueryResult{}, nil
+}
 
 func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
@@ -292,6 +320,18 @@ func TestCLIFixConstructsOnlyFixLifecycle(t *testing.T) {
 		func() (cli.FixLifecycle, error) {
 			fixCalls++
 			return emptyFixLifecycle{}, nil
+		},
+		func() (cli.ValidateLifecycle, error) {
+			unexpectedFactory("Validate")
+			return nil, nil
+		},
+		func() (cli.SubmitLifecycle, error) {
+			unexpectedFactory("Submit")
+			return nil, nil
+		},
+		func() (cli.SubmissionQueryLifecycle, error) {
+			unexpectedFactory("Submission")
+			return nil, nil
 		},
 	)
 

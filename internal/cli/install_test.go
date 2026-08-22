@@ -45,6 +45,15 @@ func newInstallEntry(t *testing.T, stdout, stderr io.Writer, factory cli.Install
 	}, func() (cli.FixLifecycle, error) {
 		t.Fatal("Install dispatched to Fix factory")
 		return nil, nil
+	}, func() (cli.ValidateLifecycle, error) {
+		t.Fatal("Install dispatched to Validate factory")
+		return nil, nil
+	}, func() (cli.SubmitLifecycle, error) {
+		t.Fatal("Install dispatched to Submit factory")
+		return nil, nil
+	}, func() (cli.SubmissionQueryLifecycle, error) {
+		t.Fatal("Install dispatched to Submission factory")
+		return nil, nil
 	})
 }
 

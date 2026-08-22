@@ -20,6 +20,7 @@ const (
 	defaultAPCBaseURL    = "http://127.0.0.1:8080"
 	cloudProviderEnv     = "APM_CLOUD_PROVIDER"
 	apcBaseURLEnv        = "APC_BASE_URL"
+	apcAPIKeyEnv         = "APC_API_KEY"
 	localRootEnv         = "APM_CLOUD_LOCAL_ROOT"
 )
 
@@ -48,7 +49,7 @@ func newCloudClient() (cloud.Client, error) {
 		if baseURL == "" {
 			baseURL = defaultAPCBaseURL
 		}
-		client, err := remote.New(baseURL, newRemoteHTTPClient())
+		client, err := remote.NewWithAPIKey(baseURL, newRemoteHTTPClient(), os.Getenv(apcAPIKeyEnv))
 		if err != nil {
 			return nil, fmt.Errorf("configure Remote Cloud provider from %s: invalid value: %w", apcBaseURLEnv, cloud.ErrProviderConfig)
 		}
@@ -66,6 +67,14 @@ func newCloudClient() (cloud.Client, error) {
 		return nil, fmt.Errorf("select Cloud provider from %s=%q: %w", cloudProviderEnv, provider, err)
 	}
 	return client, nil
+}
+
+// requireAPIKey 校验 APC_API_KEY 已配置；错误信息不打印完整 Key。
+func requireAPIKey() error {
+	if strings.TrimSpace(os.Getenv(apcAPIKeyEnv)) == "" {
+		return fmt.Errorf("submission requires %s: %w", apcAPIKeyEnv, cloud.ErrProviderConfig)
+	}
+	return nil
 }
 
 func newRemoteHTTPClient() *http.Client {

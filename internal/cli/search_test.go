@@ -54,6 +54,15 @@ func newSearchEntry(t *testing.T, stdout, stderr io.Writer, factory cli.SearchLi
 	}, func() (cli.FixLifecycle, error) {
 		t.Fatal("Search dispatched to Fix factory")
 		return nil, nil
+	}, func() (cli.ValidateLifecycle, error) {
+		t.Fatal("Search dispatched to Validate factory")
+		return nil, nil
+	}, func() (cli.SubmitLifecycle, error) {
+		t.Fatal("Search dispatched to Submit factory")
+		return nil, nil
+	}, func() (cli.SubmissionQueryLifecycle, error) {
+		t.Fatal("Search dispatched to Submission factory")
+		return nil, nil
 	})
 }
 

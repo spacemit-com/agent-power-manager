@@ -28,10 +28,42 @@ func main() {
 		newInstallLifecycle,
 		newUninstallLifecycle,
 		newFixLifecycle,
+		newValidateLifecycle,
+		newSubmitLifecycle,
+		newSubmissionQueryLifecycle,
 	)
 	if err := entry.Execute(os.Args[1:]); err != nil {
 		os.Exit(1)
 	}
+}
+
+// newValidateLifecycle 创建 validate 命令所需的离线校验生命周期，无 Cloud 依赖。
+func newValidateLifecycle() (cli.ValidateLifecycle, error) {
+	return lifecycle.NewValidate()
+}
+
+// newSubmitLifecycle 创建 submit 命令所需的生命周期；需要 APC_API_KEY。
+func newSubmitLifecycle() (cli.SubmitLifecycle, error) {
+	if err := requireAPIKey(); err != nil {
+		return nil, err
+	}
+	cloudClient, err := newCloudClient()
+	if err != nil {
+		return nil, err
+	}
+	return lifecycle.NewSubmit(cloudClient)
+}
+
+// newSubmissionQueryLifecycle 创建 submission get/list 命令所需的生命周期；需要 APC_API_KEY。
+func newSubmissionQueryLifecycle() (cli.SubmissionQueryLifecycle, error) {
+	if err := requireAPIKey(); err != nil {
+		return nil, err
+	}
+	cloudClient, err := newCloudClient()
+	if err != nil {
+		return nil, err
+	}
+	return lifecycle.NewSubmissionQuery(cloudClient)
 }
 
 // newSearchLifecycle 创建 Search 命令所需的默认生命周期依赖。
