@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"apm/internal/domain"
 	"apm/internal/pluginartifact"
@@ -15,9 +14,6 @@ import (
 func validatePlugin(ctx context.Context, request Request) (Validation, error) {
 	if err := ctx.Err(); err != nil {
 		return Validation{}, err
-	}
-	if strings.TrimSpace(request.ChangeSummary) == "" {
-		return Validation{}, fmt.Errorf("plugin requires --change-summary: %w", ErrInvalid)
 	}
 	stats, err := validateSourceTree(request.Path)
 	if err != nil {

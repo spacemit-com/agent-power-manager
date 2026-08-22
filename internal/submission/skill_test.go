@@ -83,12 +83,15 @@ func TestValidateSkill(t *testing.T) {
 	}
 }
 
-func TestValidateSkillRequiresVersion(t *testing.T) {
+func TestValidateSkillAllowsMissingVersion(t *testing.T) {
 	dir := t.TempDir()
 	writeValidSkill(t, dir)
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir, ChangeSummary: "x"})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got.Version != "" {
+		t.Fatalf("Version = %q, want empty", got.Version)
 	}
 }
 
@@ -101,12 +104,11 @@ func TestValidateSkillRejectsNonCanonicalVersion(t *testing.T) {
 	}
 }
 
-func TestValidateSkillRequiresChangeSummary(t *testing.T) {
+func TestValidateSkillAllowsMissingChangeSummary(t *testing.T) {
 	dir := t.TempDir()
 	writeValidSkill(t, dir)
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir, Version: "v1.0.0"})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	if _, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir, Version: "v1.0.0"}); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
 

@@ -37,12 +37,11 @@ func TestValidatePlugin(t *testing.T) {
 	}
 }
 
-func TestValidatePluginRequiresChangeSummary(t *testing.T) {
+func TestValidatePluginAllowsMissingChangeSummary(t *testing.T) {
 	dir := t.TempDir()
 	writeValidPlugin(t, dir)
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	if _, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir}); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
 

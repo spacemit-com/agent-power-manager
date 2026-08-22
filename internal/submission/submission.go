@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"apm/internal/domain"
 )
@@ -15,6 +16,19 @@ const maxUploadSize = 20 << 20
 // Prepare 校验源并确定性打包（Skill/Plugin）或 JCS 规范化（MCP），
 // 计算 MD5 并组装 Content；全程内存内，不写临时文件。
 func Prepare(ctx context.Context, request Request) (Content, error) {
+	switch request.Type {
+	case domain.PowerTypeSkill:
+		if strings.TrimSpace(request.Version) == "" {
+			return Content{}, fmt.Errorf("skill submit requires --version: %w", ErrInvalid)
+		}
+		if strings.TrimSpace(request.ChangeSummary) == "" {
+			return Content{}, fmt.Errorf("skill submit requires --change-summary: %w", ErrInvalid)
+		}
+	case domain.PowerTypePlugin:
+		if strings.TrimSpace(request.ChangeSummary) == "" {
+			return Content{}, fmt.Errorf("plugin submit requires --change-summary: %w", ErrInvalid)
+		}
+	}
 	validation, err := Validate(ctx, request)
 	if err != nil {
 		return Content{}, err

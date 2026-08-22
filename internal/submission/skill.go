@@ -15,14 +15,10 @@ func validateSkill(ctx context.Context, request Request) (Validation, error) {
 	if err := ctx.Err(); err != nil {
 		return Validation{}, err
 	}
-	if strings.TrimSpace(request.Version) == "" {
-		return Validation{}, fmt.Errorf("skill requires --version: %w", ErrInvalid)
-	}
-	if _, err := domain.CanonicalPowerVersion(request.Version); err != nil {
-		return Validation{}, fmt.Errorf("skill version: %w", errors.Join(ErrInvalid, err))
-	}
-	if strings.TrimSpace(request.ChangeSummary) == "" {
-		return Validation{}, fmt.Errorf("skill requires --change-summary: %w", ErrInvalid)
+	if request.Version != "" {
+		if _, err := domain.CanonicalPowerVersion(request.Version); err != nil {
+			return Validation{}, fmt.Errorf("skill version: %w", errors.Join(ErrInvalid, err))
+		}
 	}
 	stats, err := validateSourceTree(request.Path)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,6 +60,24 @@ func TestPrepareMCPProducesCanonicalJSON(t *testing.T) {
 		t.Fatalf("MCP bytes not JSON object: %q", got.Bytes)
 	}
 	verifyMD5(t, got.Bytes, got.MD5)
+}
+
+func TestPrepareRequiresSkillVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeValidSkill(t, dir)
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir, ChangeSummary: "x"})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Prepare() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestPrepareRequiresChangeSummary(t *testing.T) {
+	dir := t.TempDir()
+	writeValidSkill(t, dir)
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir, Version: "v1.0.0"})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Prepare() error = %v, want ErrInvalid", err)
+	}
 }
 
 func TestPrepareRejectsInvalid(t *testing.T) {
