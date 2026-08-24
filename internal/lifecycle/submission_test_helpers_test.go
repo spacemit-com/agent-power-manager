@@ -13,7 +13,7 @@ type recordingSubmissionClient struct {
 	submitCalls []domain.SubmissionRequest
 	getCalls    []string
 	listCalls   []domain.SubmissionListQuery
-	receipt     domain.SubmissionReceipt
+	receipt     domain.SubmissionResult
 	detail      domain.Submission
 	list        domain.SubmissionList
 	submitErr   error
@@ -21,7 +21,7 @@ type recordingSubmissionClient struct {
 	listErr     error
 }
 
-func (c *recordingSubmissionClient) Submit(_ context.Context, request domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
+func (c *recordingSubmissionClient) Submit(_ context.Context, request domain.SubmissionRequest) (domain.SubmissionResult, error) {
 	c.submitCalls = append(c.submitCalls, request)
 	return c.receipt, c.submitErr
 }

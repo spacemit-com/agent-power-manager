@@ -10,8 +10,8 @@ import (
 
 type stubSubmission struct{ err error }
 
-func (s stubSubmission) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
-	return domain.SubmissionReceipt{}, s.err
+func (s stubSubmission) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
+	return domain.SubmissionResult{}, s.err
 }
 func (s stubSubmission) GetSubmission(context.Context, string) (domain.Submission, error) {
 	return domain.Submission{}, s.err

@@ -31,21 +31,21 @@ type submissionMetadataDTO struct {
 }
 
 type submissionReceiptDTO struct {
-	SubmissionID string `json:"submission_id"`
-	Status       string `json:"status"`
-	StatusURL    string `json:"status_url"`
+	SubmissionID string                  `json:"submission_id"`
+	Status       domain.SubmissionStatus `json:"status"`
+	StatusURL    string                  `json:"status_url"`
 }
 
 type submissionDTO struct {
-	SubmissionID     string           `json:"submission_id"`
-	Type             domain.PowerType `json:"type"`
-	Name             string           `json:"name"`
-	Version          string           `json:"version"`
-	Status           string           `json:"status"`
-	ContentAvailable bool             `json:"content_available"`
-	ValidationErrors []string         `json:"validation_errors"`
-	ReviewComment    string           `json:"review_comment"`
-	PublishedVersion string           `json:"published_version"`
+	SubmissionID     string                  `json:"submission_id"`
+	Type             domain.PowerType        `json:"type"`
+	Name             string                  `json:"name"`
+	Version          string                  `json:"version"`
+	Status           domain.SubmissionStatus `json:"status"`
+	ContentAvailable bool                    `json:"content_available"`
+	ValidationErrors []string                `json:"validation_errors"`
+	ReviewComment    string                  `json:"review_comment"`
+	PublishedVersion string                  `json:"published_version"`
 }
 
 type submissionSummaryDTO struct {
@@ -62,13 +62,17 @@ type submissionListDTO struct {
 	NextCursor string                 `json:"next_cursor"`
 }
 
-// Submit 上传 multipart 提交并返回 2xx 的 receipt；不自动重试，中断由服务端 Idempotency-Key 去重。
-func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
+// Submit 上传 multipart 提交并区分 202 接收与 200 幂等重放；不自动重试，中断由服务端 Idempotency-Key 去重。
+func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (domain.SubmissionResult, error) {
 	if err := ctx.Err(); err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("submit remote resource: %w", err)
+		return domain.SubmissionResult{}, fmt.Errorf("submit remote resource: %w", err)
 	}
 	if c.apiKey == "" {
-		return domain.SubmissionReceipt{}, fmt.Errorf("submit remote resource requires API key: %w", cloud.ErrAuth)
+		return domain.SubmissionResult{}, fmt.Errorf("submit remote resource requires API key: %w", cloud.ErrAuth)
+	}
+	expectedContentType := submissionContentType(request.Type)
+	if expectedContentType == "" || request.ContentType != expectedContentType {
+		return domain.SubmissionResult{}, fmt.Errorf("submit remote resource type %q requires content type %q, got %q", request.Type, expectedContentType, request.ContentType)
 	}
 	metadata, err := json.Marshal(submissionMetadataDTO{
 		Type:          request.Type,
@@ -79,25 +83,25 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 		ContentMD5:    request.ContentMD5,
 	})
 	if err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("encode remote submission metadata: %w", err)
+		return domain.SubmissionResult{}, fmt.Errorf("encode remote submission metadata: %w", err)
 	}
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if err := writeMultipartPart(writer, "metadata", "application/json", metadata); err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("write remote submission metadata part: %w", err)
+		return domain.SubmissionResult{}, fmt.Errorf("write remote submission metadata part: %w", err)
 	}
 	if err := writeMultipartPart(writer, "content", request.ContentType, request.Content); err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("write remote submission content part: %w", err)
+		return domain.SubmissionResult{}, fmt.Errorf("write remote submission content part: %w", err)
 	}
 	if err := writer.Close(); err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("close remote submission multipart: %w", err)
+		return domain.SubmissionResult{}, fmt.Errorf("close remote submission multipart: %w", err)
 	}
 
 	endpoint := c.endpoint("api", "v1", "submissions")
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), &body)
 	if err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("create remote submission request: %w", err)
+		return domain.SubmissionResult{}, fmt.Errorf("create remote submission request: %w", err)
 	}
 	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
 	httpRequest.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -107,42 +111,101 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 	response, err := c.http.Do(httpRequest)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return domain.SubmissionReceipt{}, fmt.Errorf("submit remote resource: %w", ctxErr)
+			return domain.SubmissionResult{}, fmt.Errorf("submit remote resource: %w", ctxErr)
 		}
-		return domain.SubmissionReceipt{}, fmt.Errorf("submit remote resource: %w", err)
+		return domain.SubmissionResult{}, fmt.Errorf("submit remote resource: %w", err)
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return domain.SubmissionReceipt{}, c.classifySubmissionError(ctx, response)
+	switch response.StatusCode {
+	case http.StatusAccepted:
+		receipt, err := decodeSubmissionReceipt(ctx, response)
+		if err != nil {
+			return domain.SubmissionResult{}, err
+		}
+		return domain.SubmissionResult{Outcome: domain.SubmissionAccepted, SubmissionID: receipt.SubmissionID, Status: receipt.Status, StatusURL: receipt.StatusURL}, nil
+	case http.StatusOK:
+		replay, err := decodeSubmission(ctx, response)
+		if err != nil {
+			return domain.SubmissionResult{}, err
+		}
+		return domain.SubmissionResult{Outcome: domain.SubmissionReplayed, SubmissionID: replay.SubmissionID, Status: replay.Status}, nil
+	default:
+		if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
+			return domain.SubmissionResult{}, fmt.Errorf("unexpected remote submission status %d: %w", response.StatusCode, cloud.ErrInvalidResponse)
+		}
+		return domain.SubmissionResult{}, c.classifySubmissionError(ctx, response)
 	}
+}
+
+// submissionContentType 返回 PowerType 对应的合法请求内容媒体类型；未知类型返回空串。
+func submissionContentType(powerType domain.PowerType) string {
+	switch powerType {
+	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+		return "application/gzip"
+	case domain.PowerTypeMCP:
+		return "application/json"
+	case domain.PowerTypeAgent:
+		return "application/yaml"
+	default:
+		return ""
+	}
+}
+
+// readSubmissionJSON 校验响应 Content-Type、限制并读取 2xx JSON 响应体、严格解码（拒绝重复键与未知字段）。
+func readSubmissionJSON(ctx context.Context, response *http.Response, target any) error {
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return domain.SubmissionReceipt{}, fmt.Errorf("remote submission response has content type %q: %w", response.Header.Get("Content-Type"), cloud.ErrInvalidResponse)
+		return fmt.Errorf("remote submission response has content type %q: %w", response.Header.Get("Content-Type"), cloud.ErrInvalidResponse)
 	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, maxJSONResponse+1))
 	if err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("read remote submission response: %w", classifyResponseReadError(ctx, err))
+		return fmt.Errorf("read remote submission response: %w", classifyResponseReadError(ctx, err))
 	}
 	if len(payload) > maxJSONResponse {
-		return domain.SubmissionReceipt{}, fmt.Errorf("remote submission response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
+		return fmt.Errorf("remote submission response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
 	}
+	if err := jsonstrict.Decode(payload, target, true); err != nil {
+		return fmt.Errorf("decode remote submission response: %w", errors.Join(cloud.ErrInvalidResponse, err))
+	}
+	return nil
+}
+
+// decodeSubmissionReceipt 解码 202 的 receipt；身份、状态与非空 status_url 必须合法。
+func decodeSubmissionReceipt(ctx context.Context, response *http.Response) (submissionReceiptDTO, error) {
 	var receipt submissionReceiptDTO
-	if err := jsonstrict.Decode(payload, &receipt, false); err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("decode remote submission response: %w", errors.Join(cloud.ErrInvalidResponse, err))
+	if err := readSubmissionJSON(ctx, response, &receipt); err != nil {
+		return submissionReceiptDTO{}, err
 	}
-	status, err := parseSubmissionStatus(receipt.Status)
+	status, err := parseSubmissionStatus(string(receipt.Status))
 	if err != nil {
-		return domain.SubmissionReceipt{}, fmt.Errorf("remote submission receipt has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
+		return submissionReceiptDTO{}, fmt.Errorf("remote submission receipt has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	if receipt.SubmissionID == "" {
-		return domain.SubmissionReceipt{}, fmt.Errorf("remote submission receipt has empty submission_id: %w", cloud.ErrInvalidResponse)
+		return submissionReceiptDTO{}, fmt.Errorf("remote submission receipt has empty submission_id: %w", cloud.ErrInvalidResponse)
 	}
-	return domain.SubmissionReceipt{
-		SubmissionID: receipt.SubmissionID,
-		Status:       status,
-		StatusURL:    receipt.StatusURL,
-	}, nil
+	if receipt.StatusURL == "" {
+		return submissionReceiptDTO{}, fmt.Errorf("remote submission receipt has empty status_url: %w", cloud.ErrInvalidResponse)
+	}
+	receipt.Status = status
+	return receipt, nil
+}
+
+// decodeSubmission 解码 200 的完整 Submission 详情；身份与状态必须合法。
+func decodeSubmission(ctx context.Context, response *http.Response) (submissionDTO, error) {
+	var dto submissionDTO
+	if err := readSubmissionJSON(ctx, response, &dto); err != nil {
+		return submissionDTO{}, err
+	}
+	status, err := parseSubmissionStatus(string(dto.Status))
+	if err != nil {
+		return submissionDTO{}, fmt.Errorf("remote submission has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
+	}
+	if dto.SubmissionID == "" {
+		return submissionDTO{}, fmt.Errorf("remote submission has empty submission_id: %w", cloud.ErrInvalidResponse)
+	}
+	dto.Status = status
+	return dto, nil
 }
 
 // GetSubmission 读取一次提交详情；响应身份必须与请求 id 一致。
@@ -157,7 +220,7 @@ func (c *Client) GetSubmission(ctx context.Context, submissionID string) (domain
 	if err := c.getJSON(ctx, c.endpoint("api", "v1", "submissions", submissionID), &dto); err != nil {
 		return domain.Submission{}, fmt.Errorf("get remote submission: %w", err)
 	}
-	status, err := parseSubmissionStatus(dto.Status)
+	status, err := parseSubmissionStatus(string(dto.Status))
 	if err != nil {
 		return domain.Submission{}, fmt.Errorf("get remote submission has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
@@ -241,12 +304,14 @@ func writeMultipartPart(writer *multipart.Writer, name, contentType string, body
 	return nil
 }
 
-// classifySubmissionError 将非 2xx 提交响应映射为稳定错误，并提取 problem code/trace_id。
+// classifySubmissionError 将非 2xx 提交响应映射为稳定错误，并提取 problem code/trace_id；
+// 409 ALREADY_PUBLISHED 同时匹配 ErrAlreadyPublished 与 ErrSubmissionConflict。
 func (c *Client) classifySubmissionError(ctx context.Context, response *http.Response) error {
 	problem, readErr := io.ReadAll(io.LimitReader(response.Body, maxProblemBody))
 	if readErr != nil {
 		return fmt.Errorf("read remote HTTP %d problem: %w", response.StatusCode, classifyResponseReadError(ctx, readErr))
 	}
+	decoded, hasProblem := decodeProblem(response, problem)
 	var sentinel error
 	switch response.StatusCode {
 	case http.StatusNotFound:
@@ -254,17 +319,20 @@ func (c *Client) classifySubmissionError(ctx context.Context, response *http.Res
 	case http.StatusUnauthorized, http.StatusForbidden:
 		sentinel = cloud.ErrAuth
 	case http.StatusConflict:
-		sentinel = cloud.ErrSubmissionConflict
+		if hasProblem && decoded.Code == "ALREADY_PUBLISHED" {
+			sentinel = errors.Join(cloud.ErrAlreadyPublished, cloud.ErrSubmissionConflict)
+		} else {
+			sentinel = cloud.ErrSubmissionConflict
+		}
 	case http.StatusServiceUnavailable:
 		sentinel = cloud.ErrUnavailable
 	default:
 		sentinel = cloud.ErrInvalidResponse
 	}
-	problemContext := safeProblemContext(response, problem)
-	if problemContext == "" {
+	if !hasProblem {
 		return fmt.Errorf("remote submission returned HTTP %d: %w", response.StatusCode, sentinel)
 	}
-	return fmt.Errorf("remote submission returned HTTP %d %s: %w", response.StatusCode, problemContext, sentinel)
+	return fmt.Errorf("remote submission returned HTTP %d %s: %w", response.StatusCode, formatProblemContext(decoded), sentinel)
 }
 
 func parseSubmissionStatus(value string) (domain.SubmissionStatus, error) {

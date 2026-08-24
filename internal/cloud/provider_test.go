@@ -21,8 +21,8 @@ func (*stubClient) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, e
 	return domain.MCPServer{}, nil
 }
 func (*stubClient) DownloadAgent(context.Context, domain.PowerRef, string) error { return nil }
-func (*stubClient) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
-	return domain.SubmissionReceipt{}, nil
+func (*stubClient) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
+	return domain.SubmissionResult{}, nil
 }
 func (*stubClient) GetSubmission(context.Context, string) (domain.Submission, error) {
 	return domain.Submission{}, nil

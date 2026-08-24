@@ -31,17 +31,10 @@ type SubmissionRequest struct {
 	Version        string
 	Description    string
 	ChangeSummary  string
-	ContentType    string // "application/gzip" 或 "application/json"
+	ContentType    string // "application/gzip"、"application/json" 或 "application/yaml"
 	Content        []byte
 	ContentMD5     string
 	IdempotencyKey string
-}
-
-// SubmissionReceipt 表示 APC 对 202 Accepted 的返回。
-type SubmissionReceipt struct {
-	SubmissionID string
-	Status       SubmissionStatus
-	StatusURL    string
 }
 
 // SubmissionOutcome 表示一次提交请求的最终处理结果类别，用于区分新创建的提交与幂等重放的提交。

@@ -10,8 +10,8 @@ import (
 var _ cloud.Submission = (*Client)(nil)
 
 // Submit 空实现：Local provider 只做 fixture 只读，不提供上传，fail loud 返回 ErrSubmissionUnsupported。
-func (c *Client) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
-	return domain.SubmissionReceipt{}, cloud.ErrSubmissionUnsupported
+func (c *Client) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
+	return domain.SubmissionResult{}, cloud.ErrSubmissionUnsupported
 }
 
 // GetSubmission 空实现：Local provider 只读，不提供提交查询。

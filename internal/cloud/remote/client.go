@@ -220,19 +220,34 @@ func classifyResponseReadError(ctx context.Context, readErr error) error {
 	return errors.Join(cloud.ErrInvalidResponse, readErr)
 }
 
-func safeProblemContext(response *http.Response, body []byte) string {
+// decodeProblem 解析 application/problem+json 响应体为稳定的 problemDTO；
+// Content-Type、status、code、trace_id 任一不合法时返回 ok=false，且绝不暴露 title/detail 等私有字段。
+func decodeProblem(response *http.Response, body []byte) (problemDTO, bool) {
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/problem+json" {
-		return ""
+		return problemDTO{}, false
 	}
 
 	var problem problemDTO
 	if err := jsonstrict.Decode(body, &problem, false); err != nil {
-		return ""
+		return problemDTO{}, false
 	}
 	if problem.Status == nil || *problem.Status != response.StatusCode || !isStableProblemCode(problem.Code) || !isStableProblemTraceID(problem.TraceID) {
+		return problemDTO{}, false
+	}
+	return problem, true
+}
+
+// safeProblemContext 通过 decodeProblem 读取稳定 code/trace_id 并格式化；解码失败或字段不安全时返回空串。
+func safeProblemContext(response *http.Response, body []byte) string {
+	problem, ok := decodeProblem(response, body)
+	if !ok {
 		return ""
 	}
+	return formatProblemContext(problem)
+}
+
+func formatProblemContext(problem problemDTO) string {
 	if problem.TraceID == "" {
 		return fmt.Sprintf("code=%s", problem.Code)
 	}

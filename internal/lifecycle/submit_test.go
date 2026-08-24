@@ -20,7 +20,7 @@ func TestNewSubmitRejectsNilCloud(t *testing.T) {
 
 func TestSubmitPreparesAndUploads(t *testing.T) {
 	client := &recordingSubmissionClient{
-		receipt: domain.SubmissionReceipt{SubmissionID: "sub_1", Status: domain.SubmissionReceived},
+		receipt: domain.SubmissionResult{SubmissionID: "sub_1", Status: domain.SubmissionReceived},
 	}
 	service, err := NewSubmit(client)
 	if err != nil {

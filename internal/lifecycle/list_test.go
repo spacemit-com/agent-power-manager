@@ -57,8 +57,8 @@ func (*listFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.Po
 }
 func (*listFakeCloud) DownloadSkill(context.Context, domain.PowerRef, string) error { return nil }
 func (*listFakeCloud) DownloadAgent(context.Context, domain.PowerRef, string) error { return nil }
-func (*listFakeCloud) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionReceipt, error) {
-	return domain.SubmissionReceipt{}, nil
+func (*listFakeCloud) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
+	return domain.SubmissionResult{}, nil
 }
 func (*listFakeCloud) GetSubmission(context.Context, string) (domain.Submission, error) {
 	return domain.Submission{}, nil
