@@ -39,7 +39,7 @@ func TestLocalClientGetMCPReadsExactVersionWithoutCacheMaterialization(t *testin
 	root := t.TempDir()
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
-	writeCloudMarker(t, filepath.Join(root, "mcps", "filesystem", "v1.2.3", "MCP.json"), `{"transport":"stdio","command":"npx","args":["-y","pkg"]}`)
+	writeCloudMarker(t, filepath.Join(root, "mcps", "filesystem", "v1.2.3", "MCP.json"), mcpResourceJSON("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx","args":["-y","pkg"]}`))
 	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +59,62 @@ func TestLocalClientGetMCPReadsExactVersionWithoutCacheMaterialization(t *testin
 	}
 	if len(entries) != 0 {
 		t.Fatalf("GetMCP() materialized cache entries: %v", entries)
+	}
+}
+
+func TestLocalClientGetMCPRejectsEmbeddedIdentityMismatch(t *testing.T) {
+	root := t.TempDir()
+	writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), mcpResourceJSON("shadow", "v1.0.0", `{"transport":"stdio","command":"npx"}`))
+	client := newMCPTestClient(t, root)
+
+	_, err := client.GetMCP(context.Background(), domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"})
+
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
+	}
+}
+
+func TestLocalClientGetMCPRejectsLegacyAndDuplicateResourceMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "legacy definition only", body: `{"transport":"stdio","command":"npx"}`},
+		{name: "duplicate metadata", body: `{"schema_version":1,"name":"demo","name":"shadow","version":"v1.0.0","description":"Demo MCP server","definition":{"transport":"stdio","command":"npx"}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), tt.body)
+			client := newMCPTestClient(t, root)
+
+			_, err := client.GetMCP(context.Background(), domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"})
+
+			if !errors.Is(err, cloud.ErrUnsafeContent) {
+				t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
+			}
+		})
+	}
+}
+
+func TestLocalClientGetMCPReturnsMutationIsolatedDefinition(t *testing.T) {
+	root := t.TempDir()
+	writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), mcpResourceJSON("demo", "v1.0.0", `{"transport":"stdio","command":"npx","args":["original"]}`))
+	client := newMCPTestClient(t, root)
+	ref := domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}
+
+	first, err := client.GetMCP(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Args[0] = "mutated"
+	second, err := client.GetMCP(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := second.Args; !reflect.DeepEqual(got, []string{"original"}) {
+		t.Fatalf("second GetMCP() args = %v, want mutation-isolated definition", got)
 	}
 }
 
@@ -84,10 +140,10 @@ func TestLocalClientGetMCPRejectsInvalidResourceDefinitions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), tt.body)
+			writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), mcpResourceJSON("demo", "v1.0.0", tt.body))
 			client := newMCPTestClient(t, root)
-			if _, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); err == nil || errors.Is(err, cloud.ErrNotFound) {
-				t.Fatalf("GetMCP() error = %v, want definition error", err)
+			if _, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); !errors.Is(err, cloud.ErrUnsafeContent) {
+				t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
 			}
 		})
 	}
@@ -201,4 +257,8 @@ func writeCloudMarker(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func mcpResourceJSON(name, version, definition string) string {
+	return `{"schema_version":1,"name":"` + name + `","version":"` + version + `","description":"Demo MCP server","definition":` + definition + `}`
 }

@@ -14,7 +14,7 @@ import (
 
 var _ cloud.MCPSource = (*Client)(nil)
 
-// GetMCP 在私有临时目录中验证精确版本 MCP 内容，严格解码后返回不共享可变切片的领域值。
+// GetMCP 在私有临时目录中验证精确版本 MCP 资源；资源身份必须与 ref 一致。
 func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (server domain.MCPServer, resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return domain.MCPServer{}, fmt.Errorf("get remote MCP: %w", err)
@@ -52,14 +52,18 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (server domain
 	if err := ctx.Err(); err != nil {
 		return domain.MCPServer{}, fmt.Errorf("decode remote MCP: %w", err)
 	}
-	server, err = domain.DecodeMCPServerJSON(contents)
+	resource, err := domain.DecodeMCPResourceJSON(contents)
 	if err != nil {
-		return domain.MCPServer{}, fmt.Errorf("validate remote MCP definition: %w", errors.Join(cloud.ErrInvalidResponse, err))
+		return domain.MCPServer{}, fmt.Errorf("validate remote MCP resource: %w", errors.Join(cloud.ErrInvalidResponse, err))
+	}
+	if err := resource.ValidatePowerRef(ref); err != nil {
+		return domain.MCPServer{}, fmt.Errorf("validate remote MCP resource identity: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	if err := ctx.Err(); err != nil {
 		return domain.MCPServer{}, fmt.Errorf("return remote MCP: %w", err)
 	}
-	return server.Clone(), nil
+	server = resource.Definition.Clone()
+	return server, nil
 }
 
 func (c *Client) createMCPTemporaryDirectory() (*pinnedDirectory, *ownedDirectory, error) {

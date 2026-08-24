@@ -15,7 +15,7 @@ import (
 )
 
 func TestGetMCPReturnsStrictValidatedDefinitionAndCleansOwnedDirectory(t *testing.T) {
-	contents := []byte(`{"transport":"stdio","command":"npx","args":["-y","pkg"]}`)
+	contents := mcpResourceBytes("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx","args":["-y","pkg"]}`)
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
@@ -43,8 +43,92 @@ func TestGetMCPReturnsStrictValidatedDefinitionAndCleansOwnedDirectory(t *testin
 	}
 }
 
+func TestGetMCPRejectsEmbeddedIdentityMismatch(t *testing.T) {
+	contents := mcpResourceBytes("shadow", "v1.2.3", `{"transport":"stdio","command":"npx"}`)
+	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteMCPRef, contents)
+	})
+	root := trustedTestDir(t)
+	client.mcpTempParent = root
+
+	_, err := client.GetMCP(context.Background(), remoteMCPRef)
+
+	if !errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("GetMCP() error = %v, want ErrInvalidResponse", err)
+	}
+	assertDirectoryEmpty(t, root)
+}
+
+func TestGetMCPRejectsLegacyAndDuplicateResourceMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{name: "legacy definition only", body: []byte(`{"transport":"stdio","command":"npx"}`)},
+		{name: "duplicate metadata", body: []byte(`{"schema_version":1,"name":"filesystem","name":"shadow","version":"v1.2.3","description":"Filesystem MCP server","definition":{"transport":"stdio","command":"npx"}}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := newContentClient(t, remoteMCPRef, tt.body, func(w http.ResponseWriter, r *http.Request) {
+				serveValidContent(t, w, r, remoteMCPRef, tt.body)
+			})
+			root := trustedTestDir(t)
+			client.mcpTempParent = root
+
+			_, err := client.GetMCP(context.Background(), remoteMCPRef)
+
+			if !errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("GetMCP() error = %v, want ErrInvalidResponse", err)
+			}
+			assertDirectoryEmpty(t, root)
+		})
+	}
+}
+
+func TestGetMCPReturnsMutationIsolatedDefinition(t *testing.T) {
+	contents := mcpResourceBytes("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx","args":["original"]}`)
+	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		serveValidContent(t, w, r, remoteMCPRef, contents)
+	})
+	client.mcpTempParent = trustedTestDir(t)
+
+	first, err := client.GetMCP(context.Background(), remoteMCPRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Args[0] = "mutated"
+	second, err := client.GetMCP(context.Background(), remoteMCPRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := second.Args; !reflect.DeepEqual(got, []string{"original"}) {
+		t.Fatalf("second GetMCP() args = %v, want mutation-isolated definition", got)
+	}
+}
+
+func TestGetMCPReturnsCanceledContextWithoutRequest(t *testing.T) {
+	contents := mcpResourceBytes("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx"}`)
+	requests := 0
+	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		serveValidContent(t, w, r, remoteMCPRef, contents)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := client.GetMCP(ctx, remoteMCPRef)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetMCP() error = %v, want context.Canceled", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want canceled call rejected before network", requests)
+	}
+}
+
 func TestGetMCPRejectsInjectedTemporaryParentThroughSymlinkedAncestor(t *testing.T) {
-	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	contents := mcpResourceBytes("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx"}`)
 	var requests int
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -71,7 +155,7 @@ func TestGetMCPRejectsInjectedTemporaryParentThroughSymlinkedAncestor(t *testing
 }
 
 func TestGetMCPCanonicalizesSymlinkedSystemTempDirectory(t *testing.T) {
-	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	contents := mcpResourceBytes("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx"}`)
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
@@ -92,7 +176,7 @@ func TestGetMCPCanonicalizesSymlinkedSystemTempDirectory(t *testing.T) {
 }
 
 func TestGetMCPCleanupDetectsOwnedChildIdentityCorruption(t *testing.T) {
-	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	contents := mcpResourceBytes("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx"}`)
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
@@ -141,7 +225,7 @@ func TestGetMCPRejectsStrictJSONInvalidUnionAndPlainHTTP(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			contents := []byte(tt.body)
+			contents := mcpResourceBytes("filesystem", "v1.2.3", tt.body)
 			client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 				serveValidContent(t, w, r, remoteMCPRef, contents)
 			})
@@ -157,7 +241,7 @@ func TestGetMCPRejectsStrictJSONInvalidUnionAndPlainHTTP(t *testing.T) {
 }
 
 func TestGetMCPRejectsSymlinkTemporaryParentWithoutDeletingTarget(t *testing.T) {
-	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	contents := mcpResourceBytes("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx"}`)
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
@@ -188,7 +272,7 @@ func TestGetMCPRejectsSymlinkTemporaryParentWithoutDeletingTarget(t *testing.T) 
 }
 
 func TestGetMCPRejectsWritableInjectedTemporaryParentWithoutRequest(t *testing.T) {
-	contents := []byte(`{"transport":"stdio","command":"npx"}`)
+	contents := mcpResourceBytes("filesystem", "v1.2.3", `{"transport":"stdio","command":"npx"}`)
 	requests := 0
 	client := newContentClient(t, remoteMCPRef, contents, func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -206,4 +290,8 @@ func TestGetMCPRejectsWritableInjectedTemporaryParentWithoutRequest(t *testing.T
 	if requests != 0 {
 		t.Fatalf("requests = %d, want untrusted parent rejected before network", requests)
 	}
+}
+
+func mcpResourceBytes(name, version, definition string) []byte {
+	return []byte(`{"schema_version":1,"name":"` + name + `","version":"` + version + `","description":"Filesystem MCP server","definition":` + definition + `}`)
 }

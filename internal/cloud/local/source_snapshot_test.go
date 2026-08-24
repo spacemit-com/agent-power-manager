@@ -75,7 +75,7 @@ func TestDownloadPluginRequiresMarkerInDescriptorSnapshot(t *testing.T) {
 func TestGetMCPCancellationAfterCloneReturnsCanceled(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json")
-	writeTestFile(t, marker, `{"transport":"stdio","command":"npx","args":["`+string(bytes.Repeat([]byte("x"), 1<<20))+`"]}`)
+	writeTestFile(t, marker, `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"Demo MCP server","definition":{"transport":"stdio","command":"npx","args":["`+string(bytes.Repeat([]byte("x"), 1<<20))+`"]}}`)
 	client, err := New(root)
 	if err != nil {
 		t.Fatal(err)

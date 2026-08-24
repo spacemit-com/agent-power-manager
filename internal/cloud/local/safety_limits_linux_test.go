@@ -47,7 +47,7 @@ func TestAgentAndMCPAcceptExactTwentyMiBLimit(t *testing.T) {
 	agentPath := filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml")
 	writeRepeatedTextFile(t, agentPath, maxSingleSize)
 	mcpPath := filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json")
-	validJSON := []byte(`{"transport":"stdio","command":"npx"}`)
+	validJSON := []byte(`{"schema_version":1,"name":"demo","version":"v1.0.0","description":"Demo MCP server","definition":{"transport":"stdio","command":"npx"}}`)
 	mcpContents := append(validJSON, bytes.Repeat([]byte(" "), int(maxSingleSize)-len(validJSON))...)
 	writeTestBytes(t, mcpPath, mcpContents)
 	client, err := New(root)

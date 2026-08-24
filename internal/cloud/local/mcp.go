@@ -12,7 +12,7 @@ import (
 	"apm/internal/domain"
 )
 
-// GetMCP 直接读取精确版本的 MCP 定义，不写入 Cache 或 staging，读取前必须响应取消。
+// GetMCP 直接读取精确版本的完整 MCP 资源；文件内声明的身份必须与 ref 一致。
 func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.MCPServer{}, err
@@ -35,14 +35,17 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPSer
 	if err != nil {
 		return domain.MCPServer{}, err
 	}
-	server, err := decodeMCPServer(contents)
+	resource, err := domain.DecodeMCPResourceJSON(contents)
 	if err != nil {
-		return domain.MCPServer{}, fmt.Errorf("decode MCP definition %q: %w", markerPath, err)
+		return domain.MCPServer{}, unsafeContent("decode MCP resource %q: %v", markerPath, err)
+	}
+	if err := resource.ValidatePowerRef(ref); err != nil {
+		return domain.MCPServer{}, unsafeContent("validate MCP resource identity %q: %v", markerPath, err)
 	}
 	if c.afterMCPDecode != nil {
 		c.afterMCPDecode()
 	}
-	clone := server.Clone()
+	clone := resource.Definition.Clone()
 	if c.afterMCPClone != nil {
 		c.afterMCPClone()
 	}
@@ -50,8 +53,4 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPSer
 		return domain.MCPServer{}, err
 	}
 	return clone, nil
-}
-
-func decodeMCPServer(contents []byte) (domain.MCPServer, error) {
-	return domain.DecodeMCPServerJSON(contents)
 }

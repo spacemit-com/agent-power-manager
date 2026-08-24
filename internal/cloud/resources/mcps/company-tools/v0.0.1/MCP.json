@@ -1,1 +1,10 @@
-{"transport":"http","url":"https://mcp.example.com/mcp"}
+{
+  "schema_version": 1,
+  "name": "company-tools",
+  "version": "v0.0.1",
+  "description": "Company tools MCP server",
+  "definition": {
+    "transport": "http",
+    "url": "https://mcp.example.com/mcp"
+  }
+}

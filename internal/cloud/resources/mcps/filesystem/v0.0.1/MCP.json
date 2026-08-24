@@ -1,1 +1,11 @@
-{"transport":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem"]}
+{
+  "schema_version": 1,
+  "name": "filesystem",
+  "version": "v0.0.1",
+  "description": "Filesystem MCP server",
+  "definition": {
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+  }
+}
