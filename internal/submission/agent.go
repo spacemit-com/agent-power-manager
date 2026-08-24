@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"apm/internal/cloud/contentpolicy"
 	"apm/internal/domain"
@@ -17,19 +16,12 @@ func (agentSourceLoader) Load(ctx context.Context, path string) (source, error) 
 	if err := ctx.Err(); err != nil {
 		return source{}, err
 	}
-	info, err := os.Lstat(path)
+	raw, _, err := readPhysicalRegularFile(ctx, path, maxSingleFileSize)
 	if err != nil {
-		return source{}, fmt.Errorf("stat Agent source: %w", err)
+		return source{}, fmt.Errorf("read Agent source: %w", err)
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return source{}, fmt.Errorf("Agent source is not a physical regular file: %w", ErrInvalid)
-	}
-	if info.Size() <= 0 || info.Size() > maxSingleFileSize {
-		return source{}, fmt.Errorf("Agent source size %d is invalid: %w", info.Size(), ErrInvalid)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return source{}, err
+	if len(raw) == 0 {
+		return source{}, fmt.Errorf("Agent source size 0 is invalid: %w", ErrInvalid)
 	}
 	if contentpolicy.IsUnsafeText(raw) {
 		return source{}, fmt.Errorf("Agent source contains binary or archive content: %w", ErrInvalid)

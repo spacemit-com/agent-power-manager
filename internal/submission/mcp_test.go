@@ -3,6 +3,7 @@ package submission
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -74,6 +75,36 @@ func TestValidateMCPRejectsLegacySubmissionWrapper(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	writeTestFile(t, path, `{"name":"demo","version":"v1.0.0","description":"d","change_summary":"x","definition":{"transport":"stdio","command":"npx"}}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestValidateMCPRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	writeTestFile(t, target, validMCPResource)
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: link})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestValidateMCPRejectsHardLink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	writeTestFile(t, target, validMCPResource)
+	link := filepath.Join(dir, "link.json")
+	if err := os.Link(target, link); err != nil {
+		t.Skipf("hard link unsupported: %v", err)
+	}
+
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: link})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}

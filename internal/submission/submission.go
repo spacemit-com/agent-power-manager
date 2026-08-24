@@ -9,7 +9,10 @@ import (
 )
 
 // maxUploadSize 是 APC 的同步接收边界（20 MiB）；打包后在 Prepare 校验。
-const maxUploadSize = 20 << 20
+const (
+	maxUploadSize           = 20 << 20
+	maxPackedExpansionRatio = int64(100)
+)
 
 // Prepare 校验源并确定性构建各资源内容，计算 MD5 并组装 Content；
 // Agent 保留原始 YAML，其余类型执行确定性归档或 JCS 规范化，全程不写临时文件。
@@ -26,6 +29,11 @@ func Prepare(ctx context.Context, request Request) (Content, error) {
 	if err != nil {
 		return Content{}, err
 	}
+	if loaded.contentType == "application/gzip" {
+		if err := validatePackedExpansionRatio(loaded.validation.ContentSize, int64(len(data))); err != nil {
+			return Content{}, err
+		}
+	}
 	if len(data) > maxUploadSize {
 		return Content{}, fmt.Errorf("packed content size %d exceeds %d bytes: %w", len(data), maxUploadSize, ErrInvalid)
 	}
@@ -40,4 +48,16 @@ func Prepare(ctx context.Context, request Request) (Content, error) {
 		Bytes:       append([]byte(nil), data...),
 		MD5:         hex.EncodeToString(sum[:]),
 	}, nil
+}
+
+// validatePackedExpansionRatio 以商和余数比较解压倍率，避免 packedSize*100 溢出。
+func validatePackedExpansionRatio(sourceSize, packedSize int64) error {
+	if sourceSize < 0 || packedSize <= 0 {
+		return fmt.Errorf("invalid source or packed size for decompression ratio: %w", ErrInvalid)
+	}
+	quotient, remainder := sourceSize/packedSize, sourceSize%packedSize
+	if quotient > maxPackedExpansionRatio || quotient == maxPackedExpansionRatio && remainder > 0 {
+		return fmt.Errorf("source size %d exceeds %dx packed size %d decompression ratio: %w", sourceSize, maxPackedExpansionRatio, packedSize, ErrInvalid)
+	}
+	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"apm/internal/domain"
@@ -17,11 +18,11 @@ func (skillSourceLoader) Load(ctx context.Context, path string) (source, error) 
 	if err := ctx.Err(); err != nil {
 		return source{}, err
 	}
-	stats, err := validateSourceTree(path)
+	snapshot, err := captureSourceTree(ctx, path)
 	if err != nil {
 		return source{}, err
 	}
-	name, version, description, err := validateSkillContent(path)
+	name, version, description, err := validateSkillContent(snapshot, "")
 	if err != nil {
 		return source{}, err
 	}
@@ -31,21 +32,21 @@ func (skillSourceLoader) Load(ctx context.Context, path string) (source, error) 
 	return source{
 		validation: Validation{
 			Type: domain.PowerTypeSkill, Name: name, Version: version, Description: description,
-			FileCount: stats.fileCount, ContentSize: stats.totalSize,
+			FileCount: snapshot.stats.fileCount, ContentSize: snapshot.stats.totalSize,
 		},
 		contentType: "application/gzip",
-		build:       func() ([]byte, error) { return BuildTarGz(path) },
+		build:       snapshot.build,
 	}, nil
 }
 
 // validateSkillContent 校验资源根下 SKILL.md 与 skill-card.md 的完整格式，
 // 返回 frontmatter 中的 name、version 与 description。独立 Skill 与内嵌 Plugin Skill 共用。
-func validateSkillContent(root string) (name, version, description string, err error) {
-	skillMD, err := readRootRegularFile(root, "SKILL.md")
+func validateSkillContent(snapshot sourceTreeSnapshot, root string) (name, version, description string, err error) {
+	skillMD, err := snapshot.regularFile(filepath.ToSlash(filepath.Join(root, "SKILL.md")))
 	if err != nil {
 		return "", "", "", err
 	}
-	cardMD, err := readRootRegularFile(root, "skill-card.md")
+	cardMD, err := snapshot.regularFile(filepath.ToSlash(filepath.Join(root, "skill-card.md")))
 	if err != nil {
 		return "", "", "", err
 	}
@@ -116,19 +117,21 @@ func isNonEmptyStringScalar(node *yaml.Node) bool {
 	return node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!str" && strings.TrimSpace(node.Value) != ""
 }
 
-// extractFrontmatter 提取首字节起、以独立行 "---" 或 "..." 结束的 frontmatter 块。
+// extractFrontmatter 提取首字节起的 frontmatter；起始标记只允许精确 "---"、
+// 可选水平空白以及 LF/CRLF，避免把同行 YAML 内容误当作合法标记。
 func extractFrontmatter(contents []byte) ([]byte, error) {
-	if !bytes.HasPrefix(contents, []byte("---")) {
+	lineEnd := bytes.IndexByte(contents, '\n')
+	if lineEnd < 0 {
 		return nil, fmt.Errorf("must start with YAML frontmatter at first byte: %w", ErrInvalid)
 	}
-	rest := contents[len("---"):]
-	rest = bytes.TrimLeft(rest, " \t")
-	if len(rest) > 0 && rest[0] == '\r' {
-		rest = rest[1:]
+	opener := contents[:lineEnd]
+	if len(opener) > 0 && opener[len(opener)-1] == '\r' {
+		opener = opener[:len(opener)-1]
 	}
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
+	if !bytes.HasPrefix(opener, []byte("---")) || len(bytes.Trim(opener[len("---"):], " \t")) != 0 {
+		return nil, fmt.Errorf("must start with YAML frontmatter at first byte: %w", ErrInvalid)
 	}
+	rest := contents[lineEnd+1:]
 	lineStart := 0
 	for lineStart <= len(rest) {
 		lineEnd := bytes.IndexByte(rest[lineStart:], '\n')

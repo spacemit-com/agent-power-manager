@@ -3,8 +3,10 @@ package submission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"apm/internal/domain"
@@ -136,6 +138,30 @@ func TestValidateSkillRejectsFrontmatterNotAtStart(t *testing.T) {
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestValidateSkillRejectsFrontmatterMarkerWithInlineContent(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "SKILL.md"), "---name: demo\nversion: \"v1.0.0\"\ndescription: does things\n---\n")
+	writeTestFile(t, filepath.Join(dir, "skill-card.md"), validSkillCardMarkdown)
+
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestValidateSkillAcceptsFrontmatterMarkerWhitespaceAndLineEndings(t *testing.T) {
+	for _, opener := range []string{"---\n", "--- \t\n", "---\r\n", "--- \t\r\n"} {
+		t.Run(strings.ReplaceAll(fmt.Sprintf("%q", opener), "\\", "_"), func(t *testing.T) {
+			dir := t.TempDir()
+			writeTestFile(t, filepath.Join(dir, "SKILL.md"), opener+"name: demo\nversion: \"v1.0.0\"\ndescription: does things\n---\n")
+			writeTestFile(t, filepath.Join(dir, "skill-card.md"), validSkillCardMarkdown)
+			if _, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir}); err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
 	}
 }
 

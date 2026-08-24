@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,6 +41,38 @@ func TestPrepareSkillProducesDeterministicGzip(t *testing.T) {
 		t.Fatalf("identity = %#v", first)
 	}
 	verifyMD5(t, first.Bytes, first.MD5)
+}
+
+func TestPrepareSkillRejectsPackedExpansionAboveLimit(t *testing.T) {
+	dir := t.TempDir()
+	writeValidSkill(t, dir)
+	writeTestFile(t, filepath.Join(dir, "highly-compressible.txt"), strings.Repeat("a", 1<<20))
+
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir, Message: "first"})
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "decompression ratio") {
+		t.Fatalf("Prepare() error = %v, want decompression-ratio ErrInvalid", err)
+	}
+}
+
+func TestValidatePackedExpansionRatioBoundaries(t *testing.T) {
+	tests := []struct {
+		name        string
+		sourceSize  int64
+		packedSize  int64
+		wantInvalid bool
+	}{
+		{name: "exactly one hundred", sourceSize: 10_000, packedSize: 100},
+		{name: "above one hundred", sourceSize: 10_001, packedSize: 100, wantInvalid: true},
+		{name: "large values do not overflow", sourceSize: math.MaxInt64, packedSize: math.MaxInt64},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePackedExpansionRatio(tt.sourceSize, tt.packedSize)
+			if gotInvalid := errors.Is(err, ErrInvalid); gotInvalid != tt.wantInvalid {
+				t.Fatalf("validatePackedExpansionRatio(%d, %d) error = %v, invalid=%t want %t", tt.sourceSize, tt.packedSize, err, gotInvalid, tt.wantInvalid)
+			}
+		})
+	}
 }
 
 func TestPrepareMCPProducesCanonicalJSON(t *testing.T) {

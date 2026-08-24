@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,5 +60,20 @@ func TestAgentSourceBuildReturnsDefensiveCopies(t *testing.T) {
 	}
 	if string(second) != validAgentYAML {
 		t.Fatalf("second build() = %q, want original raw YAML", second)
+	}
+}
+
+func TestValidateAgentRejectsHardLink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.yaml")
+	writeTestFile(t, target, validAgentYAML)
+	link := filepath.Join(dir, "link.yaml")
+	if err := os.Link(target, link); err != nil {
+		t.Skipf("hard link unsupported: %v", err)
+	}
+
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: link})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
 }

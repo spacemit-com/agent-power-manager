@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"apm/internal/domain"
 )
@@ -15,7 +14,7 @@ func (mcpSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	if err := ctx.Err(); err != nil {
 		return source{}, err
 	}
-	resource, raw, err := readMCPResource(path)
+	resource, raw, err := readMCPResource(ctx, path)
 	if err != nil {
 		return source{}, err
 	}
@@ -32,18 +31,8 @@ func (mcpSourceLoader) Load(ctx context.Context, path string) (source, error) {
 }
 
 // readMCPResource 读取并严格解析单个完整 MCP v1 资源；拒绝未知字段、重复键与尾随值。
-func readMCPResource(path string) (domain.MCPResource, []byte, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return domain.MCPResource{}, nil, fmt.Errorf("read MCP file: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return domain.MCPResource{}, nil, fmt.Errorf("MCP path %q is not a regular file: %w", path, ErrInvalid)
-	}
-	if info.Size() > maxSingleFileSize {
-		return domain.MCPResource{}, nil, fmt.Errorf("MCP file exceeds %d bytes: %w", maxSingleFileSize, ErrInvalid)
-	}
-	raw, err := os.ReadFile(path)
+func readMCPResource(ctx context.Context, path string) (domain.MCPResource, []byte, error) {
+	raw, _, err := readPhysicalRegularFile(ctx, path, maxSingleFileSize)
 	if err != nil {
 		return domain.MCPResource{}, nil, fmt.Errorf("read MCP file: %w", err)
 	}

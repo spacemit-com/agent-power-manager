@@ -1,11 +1,12 @@
 package submission
 
 import (
+	"archive/tar"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -53,33 +54,46 @@ type sourceStats struct {
 	totalSize int64
 }
 
-// readRootRegularFile 读取资源根下的普通文件，缺失或非常规文件均报错。
-func readRootRegularFile(root, name string) ([]byte, error) {
-	path := filepath.Join(root, name)
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, fmt.Errorf("required file %q is missing: %w", name, ErrInvalid)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("required file %q is not a regular file: %w", name, ErrInvalid)
-	}
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return contents, nil
+type sourceTreeSnapshot struct {
+	entries []archiveEntry
+	files   map[string][]byte
+	stats   sourceStats
 }
 
-// validateSourceTree 对资源根目录执行物理树安全、内容安全与阈值校验，
-// 返回文件数与总大小（预计内容大小）。
-func validateSourceTree(root string) (sourceStats, error) {
-	if err := pluginartifact.ValidatePhysicalTree(root); err != nil {
-		return sourceStats{}, fmt.Errorf("validate source tree: %w", errors.Join(ErrInvalid, err))
+func (snapshot sourceTreeSnapshot) regularFile(relative string) ([]byte, error) {
+	canonical := path.Clean(filepath.ToSlash(relative))
+	contents, ok := snapshot.files[canonical]
+	if !ok {
+		return nil, fmt.Errorf("required file %q is missing: %w", relative, ErrInvalid)
 	}
-	var stats sourceStats
+	return append([]byte(nil), contents...), nil
+}
+
+func (snapshot sourceTreeSnapshot) build() ([]byte, error) {
+	return buildTarGz(snapshot.entries)
+}
+
+// validateSourceTree 保留目录安全校验入口；Loader 使用 captureSourceTree 同时保留不可变快照。
+func validateSourceTree(root string) (sourceStats, error) {
+	snapshot, err := captureSourceTree(context.Background(), root)
+	if err != nil {
+		return sourceStats{}, err
+	}
+	return snapshot.stats, nil
+}
+
+// captureSourceTree 在同一次物理校验读取中固定路径、mode 与正文；后续打包不得重读源目录。
+func captureSourceTree(ctx context.Context, root string) (sourceTreeSnapshot, error) {
+	if err := pluginartifact.ValidatePhysicalTree(root); err != nil {
+		return sourceTreeSnapshot{}, fmt.Errorf("validate source tree: %w", errors.Join(ErrInvalid, err))
+	}
+	snapshot := sourceTreeSnapshot{files: make(map[string][]byte)}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
@@ -97,36 +111,31 @@ func validateSourceTree(root string) (sourceStats, error) {
 			return fmt.Errorf("path %q exceeds max depth %d: %w", slashed, maxDirectoryDepth, ErrInvalid)
 		}
 		if entry.IsDir() {
+			snapshot.entries = append(snapshot.entries, archiveEntry{name: slashed + "/", mode: 0o755, typeflag: tar.TypeDir})
 			return nil
 		}
-		// 物理树校验已保证此处为普通文件。
-		stats.fileCount++
-		if stats.fileCount > maxFileCount {
+		snapshot.stats.fileCount++
+		if snapshot.stats.fileCount > maxFileCount {
 			return fmt.Errorf("file count exceeds %d: %w", maxFileCount, ErrInvalid)
 		}
-		info, err := entry.Info()
+		contents, mode, err := readPhysicalRegularFile(ctx, path, maxSingleFileSize)
 		if err != nil {
 			return err
 		}
-		size := info.Size()
-		if size > maxSingleFileSize {
-			return fmt.Errorf("file %q exceeds single-file limit %d bytes: %w", slashed, maxSingleFileSize, ErrInvalid)
-		}
-		stats.totalSize += size
-		if stats.totalSize > maxSourceTotalSize {
+		snapshot.stats.totalSize += int64(len(contents))
+		if snapshot.stats.totalSize > maxSourceTotalSize {
 			return fmt.Errorf("source total size exceeds %d bytes: %w", maxSourceTotalSize, ErrInvalid)
-		}
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			return err
 		}
 		if contentpolicy.IsUnsafeText(contents) {
 			return fmt.Errorf("file %q contains binary or archive content: %w", slashed, ErrInvalid)
 		}
+		body := append([]byte(nil), contents...)
+		snapshot.files[slashed] = body
+		snapshot.entries = append(snapshot.entries, archiveEntry{name: slashed, mode: archiveFileMode(mode), typeflag: tar.TypeReg, body: body})
 		return nil
 	})
 	if err != nil {
-		return sourceStats{}, err
+		return sourceTreeSnapshot{}, err
 	}
-	return stats, nil
+	return snapshot, nil
 }

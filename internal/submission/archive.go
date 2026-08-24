@@ -19,6 +19,13 @@ func BuildTarGz(root string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return buildTarGz(entries)
+}
+
+// buildTarGz 只消费调用方已经固定的条目快照，不再访问源路径。
+func buildTarGz(entries []archiveEntry) ([]byte, error) {
+	entries = append([]archiveEntry(nil), entries...)
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	gz.Header.ModTime = time.Time{}
@@ -87,11 +94,7 @@ func collectEntries(root string) ([]archiveEntry, error) {
 			if err != nil {
 				return err
 			}
-			mode := int64(info.Mode().Perm() & 0o755)
-			if mode&0o111 == 0 {
-				mode = 0o644
-			}
-			entries = append(entries, archiveEntry{name: name, mode: mode, typeflag: tar.TypeReg, body: body})
+			entries = append(entries, archiveEntry{name: name, mode: archiveFileMode(info.Mode()), typeflag: tar.TypeReg, body: body})
 		default:
 			return fmt.Errorf("unsupported entry type %s: %s", d.Type(), name)
 		}
@@ -102,4 +105,12 @@ func collectEntries(root string) ([]archiveEntry, error) {
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
 	return entries, nil
+}
+
+func archiveFileMode(mode fs.FileMode) int64 {
+	normalized := int64(mode.Perm() & 0o755)
+	if normalized&0o111 == 0 {
+		normalized = 0o644
+	}
+	return normalized
 }

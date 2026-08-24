@@ -64,3 +64,40 @@ func TestValidatePluginRejectsBadEmbeddedSkill(t *testing.T) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
 }
+
+func TestValidatePluginRejectsPathsOutsideRawSchema(t *testing.T) {
+	tests := []struct {
+		name     string
+		relative string
+		content  string
+	}{
+		{name: "extra root payload", relative: "README.md", content: "unexpected\n"},
+		{name: "native agent manifest", relative: ".codex-plugin/plugin.json", content: `{}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeValidPlugin(t, dir)
+			writeTestFile(t, filepath.Join(dir, filepath.FromSlash(tt.relative)), tt.content)
+
+			_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir})
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}
+
+func TestValidatePluginRejectsDuplicateEmbeddedSkillNames(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "apc-plugin.json"), `{"schema_version":1,"name":"code-review","version":"v1.0.0","description":"code review helpers","skills":["skills/reviewer","skills/writer"]}`)
+	for _, relative := range []string{"skills/reviewer", "skills/writer"} {
+		writeTestFile(t, filepath.Join(dir, relative, "SKILL.md"), validSkillMarkdown)
+		writeTestFile(t, filepath.Join(dir, relative, "skill-card.md"), validSkillCardMarkdown)
+	}
+
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
