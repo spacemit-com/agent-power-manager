@@ -5,9 +5,9 @@
 ## Introduction
 
 - 项目名称：Agent Power Manager，简称 APM
-- 交付目标：面向多 Agent，统一管理 Skill、Plugin、MCP 等 Power，提供能力发现、分发、安装和配置治理，并通过 Adapter 适配不同目标 Agent 的本地命令行工具。
+- 交付目标：面向多 Agent，统一管理 Skill、Plugin、MCP、Agent 等 Power，提供能力发现、分发、安装和配置治理，并通过 Adapter 适配不同目标 Agent 的本地命令行工具。
 - 代码工程：`apm`之下，`ivory-tower`仅作为文档归档目录。
-- 当前状态：Search、List、Install、Uninstall 和 Fix 已通过独立 lifecycle 端口接线；Bibit、Codex、Claude Code 与 Hermes Agent 均支持 Skill、MCP 与 Plugin，Bibit 还支持专属 Agent Power（[Feature 019](features/019-agent-power/spec.md) 与 [ADR-015](adr/ADR-015-agent-power-bibit.md)）。Cloud Client 已通过显式 `ProviderRegistry` 支持 Local canonical fixture 与 Remote APC（[ADR-016](adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）；Plugin 以 `apc-plugin.json` 为权威并由 APM 派生 Agent 原生配置（[ADR-017](adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)）。journal 正式格式见 [ADR-011](adr/ADR-011-reset-journal-schema-before-release.md)。Submission 已提供 `validate`、`submit`、`submission get|list`：离线完整校验、确定性打包与 JCS 规范化、统一上传与本人提交查询，凭据经 `APC_API_KEY` 环境变量注入（[Feature 021](features/021-submission-validate/spec.md) 与 [ADR-018](adr/ADR-018-submission-and-local-validation.md)）。
+- 当前状态：Search、List、Install、Uninstall 和 Fix 已通过独立 lifecycle 端口接线；Bibit、Codex、Claude Code 与 Hermes Agent 均支持 Skill、MCP 与 Plugin，Bibit 还支持专属 Agent Power（[Feature 019](features/019-agent-power/spec.md) 与 [ADR-015](adr/ADR-015-agent-power-bibit.md)）。Cloud Client 已通过显式 `ProviderRegistry` 支持 Local canonical fixture 与 Remote APC（[ADR-016](adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）；Plugin 以 `apc-plugin.json` 为权威并由 APM 派生 Agent 原生配置（[ADR-017](adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)）。journal 正式格式见 [ADR-011](adr/ADR-011-reset-journal-schema-before-release.md)。Submission 已提供 `validate`、`submit`、`submission get|list`，覆盖 Skill、Plugin、MCP 与 Agent 四类 Power：离线完整校验、确定性打包（Skill/Plugin tar.gz）、MCP JCS 规范化与 Agent 原始 `agent.yaml` 原样字节上传、统一上传与本人提交查询，凭据经 `APC_API_KEY` 环境变量注入（[Feature 021](features/021-submission-validate/spec.md)、[Feature 022](features/022-agent-submission/spec.md)、[ADR-018](adr/ADR-018-submission-and-local-validation.md) 与 [ADR-019](adr/ADR-019-align-agent-submission-lifecycle.md)，云端契约见 APC ADR-001）。
 - 最小业务上下文：用户通过APM从云服务发现所需 Power，APM根据目标Agent将通用Power格式适配并安装到对应目录。
 
 Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行时。
@@ -29,14 +29,14 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
     - Skill、Agent、MCP 与 Plugin 共用唯一 `transactions/active.json`（Agent 复用 `filesystem` driver，target 为文件路径）。schema v1 shared envelope 以 `filesystem`/`agent-cli`/`plugin` driver 区分互斥载荷；其他格式返回 `ErrInvalidJournal` 并原样保留。
     - 实现类似apt的文件锁，保证软件执行安全。
     - 缓存下载的Power。
-    - `validate <path> --type skill|plugin|mcp [--version ...] [--json]` 完全离线校验 Skill/Plugin/MCP 的格式、元数据、物理树与阈值，输出解析结果与修复建议；`--json` 提供机器输出。
-    - `submit <path> --type ... [--version ...] --change-summary ...` 复用 validate 规则，校验通过后确定性打包（Skill/Plugin tar.gz）或 JCS 规范化（MCP）、计算 MD5 并上传；每次逻辑提交生成 UUID 幂等键，收到 202 后立即输出 submission_id/status。
+    - `validate <path> --type skill|plugin|mcp|agent [--version ...] [--json]` 完全离线校验 Skill/Plugin/MCP/Agent 的格式、元数据、物理树与阈值，输出解析结果与修复建议；`--json` 提供机器输出。Agent 输入为单个原始 `agent.yaml`，name/version/description 分别来自 `agent.id`/`agent.version`/`agent.description`，`--type agent` 不接受 `--version` 覆盖。
+    - `submit <path> --type ... [--version ...] --change-summary ...` 复用 validate 规则，校验通过后确定性打包（Skill/Plugin tar.gz）、JCS 规范化（MCP）或原样字节（Agent `application/yaml`）、计算 MD5 并上传；每次逻辑提交生成 UUID 幂等键，按 APC 响应输出 `outcome: accepted`（首次 `202` 受理）或 `outcome: replayed`（`200` 幂等重放），`409 ALREADY_PUBLISHED` 作为错误返回而不伪造新 Submission ID。
     - `submission get <id>` 展示状态、公开校验错误、公开评审意见与 content availability；`submission list [--status ...] [--type ...] [--name ...] [--limit ...]` 按筛选条件读取本人提交并保持服务端状态原样。
     - submit 与 submission get/list 经 `APC_API_KEY`/`APC_BASE_URL` 环境变量配置凭据与地址；缺 Key 报错且不打印完整 Key。
     - 可增添的Agent Power Adapters。
     - 已安装Power记录。
 - 不包含：
-    - 替代目标 Agent 的运行时，或定义目标 Agent 如何执行已安装的 Skill、Plugin、MCP 配置和 Agent 指令。
+    - 替代目标 Agent 的运行时，或定义目标 Agent 如何执行已安装的 Skill、Plugin、MCP、Agent 配置和指令。
     - APC 服务端、数据库、对象存储、发布管线、工单网站或内网审批接口的实现；本 MVP 只消费 APC 的提交与查询接口。
 
 ## Architecture Snapshot
@@ -44,15 +44,15 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 - 系统边界与外部依赖：Agent Power Manager 位于 APC/开发 fixture、能力使用方与目标 Agent 之间；Remote Provider 通过 APC 匿名只读 HTTP API 获取 Published Catalog 与精确版本内容，Local Provider 读取开发 fixture。目标 Agent 自身的运行时位于 Agent Power Manager 边界之外。
 - 模块边界与职责：
     - Composition Root：`cmd/apm/cloud.go` 的 `newCloudClient` 直接 import `internal/cloud/local` 与 `internal/cloud/remote`，每次把两者的构造 closure 注册到实例级 registry，再依据环境只 `Open` 一个 provider。Registry 保持中立，只按 ID 选择 factory 并返回 `cloud.Client`，不依赖具体 provider。Install 将同一个 Client 注入 lifecycle、Cache 与 Plugin Resource；Fix composition 不包含 Cloud。
-    - Cloud Client：`internal/cloud.Client` 由 `Catalog`、`SkillSource`、`PluginSource`、`MCPSource`、`AgentSource` 与 `Submission` 六个小端口组成。`List` 返回四类全部精确版本，`Resolve` 把 latest/精确查询收敛为精确 `PowerRef`；provider 只验证和写调用方私有目标，不解释 APM cache、staging、manifest 或 journal。
+    - Cloud Client：`internal/cloud.Client` 由 `Catalog`、`SkillSource`、`PluginSource`、`MCPSource`、`AgentSource` 与 `Submission` 六个小端口组成。`List` 返回四类全部精确版本，`Resolve` 把 latest/精确查询收敛为精确 `PowerRef`；provider 只验证和写调用方私有目标，不解释 APM cache、staging、manifest 或 journal。`Submission.Submit` 返回统一 `domain.SubmissionResult{Outcome, SubmissionID, Status, StatusURL}`：Remote 把 `202` 受理映射为 `accepted`、`200` 幂等重放映射为 `replayed`、`409 ALREADY_PUBLISHED` 映射为 `cloud.ErrAlreadyPublished`（同时满足 `cloud.ErrSubmissionConflict`），Local 的 `Submit`/`GetSubmission`/`ListSubmissions` 对全部类型返回 `cloud.ErrSubmissionUnsupported`。
     - Provider Registry：`internal/cloud.ProviderRegistry` 是显式实例，不使用 package `init()` 或全局可变注册表，也不 import Local/Remote；它只保存 factory、选择 ID、构造并返回 `cloud.Client`。Local 与 Remote 都实现完整 `cloud.Client`，由 composition root 静态链接在单一二进制中；配置、网络或协议错误都不尝试另一 factory。
     - Local Provider：`internal/cloud/local` 从绝对 canonical fixture 根读取 `skills/`、`plugins/`、`mcps/`、`agents/`，复制物理目录/文件或严格解码 MCP；拒绝 symlink、hardlink、特殊节点、路径逃逸、重叠和非空目标。
     - Remote Provider：`internal/cloud/remote` 消费 APC 只读 HTTP API，遍历固定 snapshot 的 cursor 页，执行 latest/exact metadata 查询，验证 HTTP content type、size、MD5 后才解包或解码；Skill/Plugin 使用受限安全归档，Agent 保留原始 YAML 字节，MCP 返回严格领域对象。Linux/macOS 支持完整目录与文件发布；FreeBSD 支持 descriptor-relative staging、Agent 文件发布和 MCP，但 Skill/Plugin 目录发布返回 `ENOTSUP`；Windows/其它平台的 content 操作 fail closed。composition root 注入两分钟整体 HTTP timeout，更短的 context deadline 优先；Remote 的匿名只读接口不携带 API Key，仅 Submission 上传与查询经 `APC_API_KEY` 注入 Bearer 凭据；不自动重试、不跨 origin redirect。
     - 核心生命周期：提供独立的 Search、List、Install、Uninstall、Fix、Validate、Submit 与 Submission（get/list）用例。Search/List 返回结构化结果且不渲染业务输出；三种只读查询只无锁检查 journal，Fix/Install/Uninstall 才在 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md) 定义的边界内锁定并恢复。
     - 配置模型：通过无状态 Repository 维护每个 Agent 按 Skill、Agent、Plugin、MCP 分组的 Power 安装清单。
-    - Cache Manager：`internal/cache` 通过包内 `Source` 小接口依赖同一个 Cloud Client；`PrepareSkill`/`PrepareAgent` 负责 cache hit 复验、唯一临时目标、下载、marker 复验、按精确版本原子发布和公共 staging。Cloud provider 不直接写 `apm.powerCache`。
+    - Cache Manager：`internal/cache` 通过包内 `Source` 小接口依赖同一个 Cloud Client；`PrepareSkill`/`PrepareAgent` 负责 cache hit 复验、唯一临时目标、下载、marker 复验、按精确版本原子发布和公共 staging。Agent 首次下载与缓存命中都会经 `domain.DecodeAgentConfigYAML` + `ValidatePowerRef` 校验 `agent.yaml` 的 id/version 与请求 `PowerRef` 一致，损坏或身份不匹配时 fail closed（保留精确缓存目录，不删除、不回源覆盖）。Cloud provider 不直接写 `apm.powerCache`。
     - Plugin Resource：`internal/pluginresource` 独占 canonical APC Plugin 下载、`cache/plugins/<name>/<version>` 共享不可变 artifact、Codex/Claude 两份单条目本地 marketplace 和通用 filesystem staging。它通过 `internal/pluginartifact` 严格解析 `apc-plugin.json` 的 Skill 闭集，先确定性生成 Codex、Claude、Hermes 原生配置，再让 marketplace builder 读取并复验 Codex/Claude 原生 manifest 后生成两份 marketplace；Transaction recovery 共用同一中立只读 Validator，但不调用 Plugin Resource。
-    - Adapter Registry：按 Agent 分别提供 `ResolveSkill`、`ResolveAgent`、`ResolveMCP`、`ResolvePlugin`；其中 `ResolveAgent` 仅 Bibit，对应 `<bibit根>/agents/<agent.id>/agent.yaml` 单文件发布。Codex/Claude Plugin Adapter 管理本地 marketplace；Hermes/Bibit Plugin Adapter 管理逻辑名目录，其中 Hermes 通过 CLI enable/disable，Bibit 不执行 Plugin CLI。Bibit MCP 使用独立 Adapter；MCP/Plugin 都不追加安装后的 list 验证。
+    - Adapter Registry：按 Agent 分别提供 `ResolveSkill`、`ResolveAgent`、`ResolveMCP`、`ResolvePlugin`；其中 `ResolveAgent` 仅 Bibit，对应 `<bibit根>/agents/<agent.id>/agent.yaml` 单文件发布。`AgentAdapter` 增加只读 `ValidateArtifact(domain.PowerRef, string) error`，供 staging/target/backup/quarantine 身份校验；`bibitAgentAdapter.Install` 在发布最终目标前重新解析并校验 staging 的 `agent.yaml`。Codex/Claude Plugin Adapter 管理本地 marketplace；Hermes/Bibit Plugin Adapter 管理逻辑名目录，其中 Hermes 通过 CLI enable/disable，Bibit 不执行 Plugin CLI。Bibit MCP 使用独立 Adapter；MCP/Plugin 都不追加安装后的 list 验证。
     - CLI：提供入口，校验并解析命令参数；Search、List、Install、Uninstall、Fix、Validate、Submit 与 Submission 通过八个独立 factory 创建专属端口。CLI 渲染结构化结果；Fix 没有 stdout 业务结果，Validate 支持 `--json` 机器输出。
 - 数据与接口：每个 Agent 单独维护一份固定 `skills`、`agents`、`plugins`、`mcps` 分组的 JSON 安装清单，条目统一为精确 `vMAJOR.MINOR.PATCH` 的 `PowerRef`。Config Repository 在 `List/Find/Set/Remove` 内封装完整 manifest 验证、读取和原子读改写；同一 Type/Name 重复合法，Find 取第一条而 Remove 清除全部，非法历史版本不会迁移或清理，详见 [ADR-007](adr/ADR-007-use-stateless-config-repository.md)。用户侧 CLI 语法详见 [ADR-002](adr/ADR-002-cli-agent-and-power-type-as-flags.md)：Search 没有 Agent 维度；默认 List 禁止显式 `--agent`，installed List 必须提供 Agent。本地 Power 操作中，`--agent` 的具体值必须存在于按 [ADR-004](adr/ADR-004-discover-installed-agents-before-local-operations.md) 排序的快照，`all` 对快照中的全部 Agent 执行。Search 与两种 List 都在业务前无锁 Inspect，合法活动 journal 提示 `apm fix`，损坏 journal Warn 后继续；Fix/Install/Uninstall 才锁内 Recover，见 [ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)。Cloud `List(ctx)` 返回四类带版本的全部 `PowerRef`；`Resolve(ctx, ref)` 对 latest 或指定版本返回精确引用。Skill/Plugin destination 是调用方私有目录，Agent destination 是调用方私有 `agent.yaml`，MCP 是无文件 cache 的领域对象。
 
@@ -71,6 +71,8 @@ Install 与 Uninstall 分别以独立 factory 和生命周期端口接线，不�
 Registry 仅以 profile 根存在且为目录判断 Agent 已安装；`--agent=all` 按 Agent ID 字典序使用当前快照。Bibit 的接口与路径约束见 [Feature 018](features/018-bibit-agent/spec.md)，Plugin 的当前 canonical/派生边界见 [ADR-017](adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
 Agent Power 仅 Bibit 支持（[Feature 019](features/019-agent-power/spec.md) 与 [ADR-015](adr/ADR-015-agent-power-bibit.md)）：Local canonical fixture 为 `agents/<name>/<version>/agent.yaml`，Remote exact content 为 `application/yaml` 原始字节；Cache 的 `PrepareAgent` 将其按精确版本发布到 `cache/agents/<name>/<version>/agent.yaml` 并物化 staging，最终安装到 `<bibit根>/agents/<agent.id>/agent.yaml`（单文件、原样字节，本地不版本化）。`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`，`list --installed` 省略 `--agent` 时默认 `bibit`，`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`；显式 `--agent bibit` 允许，其它值（含 `all`）报错。
+
+Agent 内容身份闭环（[ADR-019](adr/ADR-019-align-agent-submission-lifecycle.md)）：`internal/domain` 的 `DecodeAgentConfigYAML`/`Validate`/`ValidatePowerRef` 是唯一权威解析与最小校验入口，submission、cache、Adapter 与 recovery 复用同一套规则。身份校验沿四层加固——domain parser → cache（首次下载与命中的 `PrepareAgent` 身份校验）→ adapter（`bibitAgentAdapter` 发布前 `ValidateArtifact`）→ recovery（filesystem 事务在写入 manifest 或恢复 target/backup/quarantine 前经 `AgentAdapterResolver` 校验）；任何一层身份不匹配或缓存损坏均 fail closed 并保留现场。
 
 ### Plugin 当前安装与卸载边界
 

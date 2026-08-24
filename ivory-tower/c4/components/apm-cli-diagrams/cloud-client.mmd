@@ -1,5 +1,5 @@
 classDiagram
-    note for CloudClient "internal/cloud.Client 组合五个能力端口；List/Resolve 与所有来源访问都接收 Context。provider 只写调用方私有目标，不拥有 Cache、staging、manifest 或 journal（ADR-016）"
+    note for CloudClient "internal/cloud.Client 组合六个能力端口；List/Resolve 与所有来源访问都接收 Context。provider 只写调用方私有目标，不拥有 Cache、staging、manifest 或 journal（ADR-016）；Submission.Submit 返回 domain.SubmissionResult（accepted/replayed）"
     class Catalog {
         <<interface>>
         +List(Context) (PowerRefs, error)
@@ -21,15 +21,29 @@ classDiagram
         <<interface>>
         +DownloadAgent(Context, PowerRef, destination) error
     }
+    class Submission {
+        <<interface>>
+        +Submit(Context, SubmissionRequest) (SubmissionResult, error)
+        +GetSubmission(Context, string) (Submission, error)
+        +ListSubmissions(Context, SubmissionListQuery) (SubmissionList, error)
+    }
     class CloudClient {
         <<interface: internal/cloud.Client>>
     }
+    class SubmissionResult {
+        +Outcome SubmissionOutcome
+        +SubmissionID string
+        +Status SubmissionStatus
+        +StatusURL string
+    }
+    note for SubmissionResult "accepted：StatusURL 非空；replayed：StatusURL 固定为空，用 SubmissionID 生成 apm submission get 提示"
 
     CloudClient --|> Catalog
     CloudClient --|> SkillSource
     CloudClient --|> PluginSource
     CloudClient --|> MCPSource
     CloudClient --|> AgentSource
+    CloudClient --|> Submission
 
     class ProviderRegistry {
         <<internal/cloud.ProviderRegistry>>
@@ -70,6 +84,7 @@ classDiagram
     PluginSource --> CallerPrivateDirectory : writes apc-plugin.json and skills
     AgentSource --> CallerPrivateAgentFile : writes original YAML bytes
     MCPSource --> MCPServer : strict value, no file cache
+    Submission --> SubmissionResult : returns accepted (202) or replayed (200)
 
-    note for LocalClient "显式绝对 fixture 根；物理复制 skills/plugins/agents，严格解码 MCP；拒绝链接、特殊节点、路径逃逸、重叠与非空目标"
-    note for RemoteClient "APC HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、受限 archive、同源 redirect；无 retry/fallback。受信普通目录为 root/current-euid owner 且 mode&0022==0；root-owned sticky 目录只接受 current-euid 私有直接子目录，终点创建/发布使用 exclusive/no-replace。Linux/macOS 完整发布；FreeBSD 支持 staging、Agent、MCP，但 Skill/Plugin 目录发布返回 ENOTSUP；Windows/其它 content fail closed"
+    note for LocalClient "显式绝对 fixture 根；物理复制 skills/plugins/agents，严格解码 MCP；拒绝链接、特殊节点、路径逃逸、重叠与非空目标。Submission 三方法对全部类型返回 cloud.ErrSubmissionUnsupported（fail loud），只读无真实工单"
+    note for RemoteClient "APC HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、受限 archive、同源 redirect；无 retry/fallback。Submission 严格分流：202 受理→accepted，200 幂等重放→replayed，其它 2xx→ErrInvalidResponse，409 ALREADY_PUBLISHED→ErrAlreadyPublished（同时 ErrSubmissionConflict），RESOURCE_VERSION_CONFLICT→ErrSubmissionConflict。受信普通目录为 root/current-euid owner 且 mode&0022==0；root-owned sticky 目录只接受 current-euid 私有直接子目录，终点创建/发布使用 exclusive/no-replace。Linux/macOS 完整发布；FreeBSD 支持 staging、Agent、MCP，但 Skill/Plugin 目录发布返回 ENOTSUP；Windows/其它 content fail closed"

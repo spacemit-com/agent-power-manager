@@ -37,10 +37,11 @@ classDiagram
         +RegisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
         +UnregisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
     }
-    note for AgentAdapter "仅 Bibit 的 agent.yaml 单文件发布；TargetPath 为 <bibit根>/agents/<agent.id>/agent.yaml，Install 原样字节原子发布（ADR-015）"
+    note for AgentAdapter "仅 Bibit 的 agent.yaml 单文件发布；TargetPath 为 <bibit根>/agents/<agent.id>/agent.yaml，Install 原样字节原子发布（ADR-015）。ValidateArtifact 只读校验 staging/target/backup/quarantine 的 agent.yaml 身份与 ref 完全一致（ADR-019）"
     class AgentAdapter {
         <<interface>>
         +TargetPath(PowerRef) (string, error)
+        +ValidateArtifact(PowerRef, path) error
         +Install(PowerRef, staging) (AgentInstallResult, error)
     }
     class skillAdapter
@@ -76,3 +77,11 @@ classDiagram
     note for bibitPluginAdapter "BIANBU_AGENT_HOME（默认 ~/.bianbu-agent）；plugins/<name> 目录即状态，Add/Remove 不调用 Plugin CLI；消费 ADR-017 派生 artifact"
     bibitMCPAdapter ..|> MCPAdapter
     bibitPluginAdapter ..|> PluginAdapter
+
+    class DomainModel {
+        <<internal/domain>>
+        +DecodeAgentConfigYAML(raw []byte) (AgentConfig, error)
+        +ValidatePowerRef(PowerRef) error
+    }
+    note for bibitAgentAdapter "Install 发布前经 validateArtifactRaw 复用同一份原始字节：先 DecodeAgentConfigYAML + ValidatePowerRef 校验 staging 身份，再原子发布；ValidateArtifact 供 recovery 只读复验 target/backup/quarantine"
+    bibitAgentAdapter --> DomainModel : DecodeAgentConfigYAML + ValidatePowerRef (ValidateArtifact)

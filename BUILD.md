@@ -119,7 +119,43 @@ gofmt -w cmd internal
 ./apm list --type agent
 ./apm fix
 ./apm --verbose fix
+./apm validate ./skill-card-dir --type skill --version v0.1.0
+./apm validate ./plugin-dir --type plugin
+./apm validate ./mcp.json --type mcp
+./apm validate ./agent.yaml --type agent
+./apm submit ./skill-card-dir --type skill --version v0.1.0 --change-summary "首次发布"
+./apm submit ./plugin-dir --type plugin --change-summary "首次发布"
+./apm submit ./mcp.json --type mcp
+./apm submit ./agent.yaml --type agent --change-summary "首次发布"
+./apm submission get sub_123
+./apm submission list --type agent --limit 20
 ```
+
+### Validate、Submit 与 Submission
+
+`validate` 与 `submit` 覆盖 Skill、Plugin、MCP、Agent 四类 Power，复用同一套离线校验规则（[ADR-018](ivory-tower/adr/ADR-018-submission-and-local-validation.md) 与 [ADR-019](ivory-tower/adr/ADR-019-align-agent-submission-lifecycle.md)）：
+
+- Skill：原始目录，`SKILL.md` + `skill-card.md`；submit 必填 `--version` 与 `--change-summary`。
+- Plugin：原始目录，`apc-plugin.json` 权威；submit 必填 `--change-summary`。
+- MCP：单个完整 JSON 文件，definition 经 RFC 8785 JCS 规范化；change_summary 从文件读取。
+- Agent：单个原始 `agent.yaml`，不打包、不重序列化；name/version/description 分别来自 `agent.id`/`agent.version`/`agent.description`，`--type agent` 不接受 `--version` 覆盖，submit 必填 `--change-summary`。
+
+`validate` 完全离线，不读取 API Key、不访问网络。`submit` 校验通过后确定性打包（Skill/Plugin `application/gzip`）、JCS 规范化（MCP `application/json`）或原样字节（Agent `application/yaml`），计算 MD5 并经 `POST /api/v1/submissions` 上传；每次逻辑提交生成 UUID 幂等键。身份校验沿 domain parser → cache → adapter `ValidateArtifact` → recovery 四层加固（[ADR-019](ivory-tower/adr/ADR-019-align-agent-submission-lifecycle.md)）。
+
+`submit` 按 APC 响应输出统一 outcome：
+
+```text
+outcome: accepted|replayed
+submission_id: sub_...
+status: received|validating|...
+track: apm submission get sub_...
+```
+
+- `accepted` 对应 `202 Accepted`：首次受理，返回带非空 `status_url` 的 receipt（`submission_id`/`status`/`status_url`）。
+- `replayed` 对应 `200 OK`：同账号、同 `Idempotency-Key`、同请求的幂等重放，返回当前 Submission 详情，无 `status_url`，用 `submission_id` 生成 `apm submission get` 提示。
+- `409 ALREADY_PUBLISHED` 表示已发布同标识、同 MD5，作为错误返回 `cloud.ErrAlreadyPublished`（同时满足 `cloud.ErrSubmissionConflict`），CLI 不伪造新的 Submission ID；`409 RESOURCE_VERSION_CONFLICT` 映射通用 conflict。
+
+`accepted` 与 `replayed` 都不代表发布成功，只表示本次提交已被同步受理或已存在。Local provider 的 `Submit`/`GetSubmission`/`ListSubmissions` 对所有类型返回 `cloud.ErrSubmissionUnsupported`（fail loud），因此 validate/submit/submission 需指向 Remote APC（默认 provider）。
 
 Search 已实现：它按名称搜索 Cloud Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
 

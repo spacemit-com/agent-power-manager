@@ -3,10 +3,14 @@ flowchart TD
     Lock --> Recover[Recover：读取并校验唯一 transactions/active.json]
     Recover -->|无 journal| Debug[可选锁内 Debug]
     Recover -->|schema v1 shared envelope| Driver{driver}
-    Driver -->|filesystem| FS[filesystem Skill 恢复]
+    Driver -->|filesystem| FS[filesystem Skill/Agent 恢复]
     Driver -->|agent-cli| CLI[按 journal Agent ResolveMCP]
     Driver -->|plugin| Plugin[按 journal Agent ResolvePlugin]
-    FS --> Converge[按持久化 phase 提交或回滚]
+    FS --> FSType{journal.Power.Type}
+    FSType -->|skill| Converge
+    FSType -->|agent| AgentValidate[经 AgentAdapterResolver.ResolveAgent → ValidateArtifact：install commit 校验 target 匹配新 PowerRef，install rollback 校验 backup 匹配 previous PowerRef，uninstall rollback 校验 quarantine 匹配当前 PowerRef；uninstall commit 内容将被删除，无需业务身份校验]
+    AgentValidate -->|通过| Converge
+    AgentValidate -->|身份不匹配 / resolver 缺失或 nil| AgentFail[ErrIndeterminateState；保留 journal 与恢复材料，不改 manifest、不继续清理]
     CLI --> InspectMCP[Agent CLI Inspect 同名 MCP]
     InspectMCP --> Converge
     Plugin --> InspectPlugin[Adapter Inspect 实际名/marketplace；只使用 manifest 与已有 immutable artifact，不连接 Cloud 或 Plugin Resource Ensure]
@@ -20,5 +24,6 @@ flowchart TD
     Recover -->|其他格式或非法 driver/payload| Fail[ErrInvalidJournal；原样保留 journal]
     InspectMCP -->|CLI/输出不确定| Fail
     InspectPlugin -->|CLI/路径不确定| Fail
+    AgentFail --> Fail
     Converge -->|失败或不确定| Fail
     Fail --> ErrorRelease[Release 并阻止当前业务]

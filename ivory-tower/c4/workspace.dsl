@@ -1,4 +1,4 @@
-workspace "Agent Power Manager" "APM：面向多 Agent，统一管理 Skill、Plugin、MCP 等 Power 的发现、安装、卸载与配置治理，通过 Adapter 适配不同目标 Agent。" {
+workspace "Agent Power Manager" "APM：面向多 Agent，统一管理 Skill、Plugin、MCP、Agent 等 Power 的发现、安装、卸载、提交与配置治理，通过 Adapter 适配不同目标 Agent。" {
     !identifiers hierarchical
 
     model {
@@ -8,7 +8,7 @@ workspace "Agent Power Manager" "APM：面向多 Agent，统一管理 Skill、Pl
         cloudRegistry = softwareSystem "Power Resource Fixture" "开发阶段位于 internal/cloud/resources 的本地 Power 资源；用于模拟 Cloud list/get。"
         targetAgent = softwareSystem "Target Agent" "用户本地的目标 Agent（如 Claude Code、Cursor 等），拥有自身的 Skill/Plugin/MCP 加载与运行时；不在 APM 的系统边界内。"
 
-        apm = softwareSystem "Agent Power Manager" "统一管理 Skill、Plugin、MCP 等 Power 的发现、安装、卸载与配置治理，通过 Adapter 适配不同目标 Agent。" {
+        apm = softwareSystem "Agent Power Manager" "统一管理 Skill、Plugin、MCP、Agent 等 Power 的发现、安装、卸载、提交与配置治理，通过 Adapter 适配不同目标 Agent。" {
             !include containers/apm.dsl
         }
 

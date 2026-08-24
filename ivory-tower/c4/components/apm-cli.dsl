@@ -18,7 +18,14 @@ lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install�
         "fixLifecycle" "apm-cli-lifecycle-diagrams/fix.mmd"
     }
 }
-adapterRegistry = component "Adapter Registry" "管理 Bibit、Codex、Claude Code、Hermes 四个内置 Agent；分别 ResolveSkill、ResolveAgent、ResolveMCP、ResolvePlugin。Codex/Claude Plugin 使用 marketplace，Hermes/Bibit 使用 filesystem（ADR-015/017）。" "internal/adapter (Go)" {
+submission = component "Submission Validation" "internal/submission 对四类 Power 提供完全离线的 Validate 与 Prepare：Skill/Plugin 确定性 tar.gz、MCP JCS 规范化、Agent 单个原始 agent.yaml 原样字节（Content-Type application/yaml、MD5 针对原始字节）。" "internal/submission (Go)" {
+    properties {
+        "classDiagram" "apm-cli-diagrams/core-lifecycle.mmd"
+    }
+}
+domain = component "Domain Model" "internal/domain 是共享领域契约：DecodeAgentConfigYAML/Validate/ValidatePowerRef 是 Agent 稳定 schema 的唯一权威；SubmissionOutcome/SubmissionResult 承载 accepted/replayed 分流。" "internal/domain (Go)" {
+}
+adapterRegistry = component "Adapter Registry" "管理 Bibit、Codex、Claude Code、Hermes 四个内置 Agent；分别 ResolveSkill、ResolveAgent、ResolveMCP、ResolvePlugin。AgentAdapter 增加只读 ValidateArtifact 身份校验。Codex/Claude Plugin 使用 marketplace，Hermes/Bibit 使用 filesystem（ADR-015/017/019）。" "internal/adapter (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/adapter-registry.mmd"
     }
@@ -40,7 +47,7 @@ cacheManager = component "Cache Manager" "internal/cache 通过 Source 注入同
 }
 cloudComposition = component "Cloud Composition" "cmd/apm.newCloudClient 直接 import local|remote，每次把两者的 factory closure 注册到 registry，按环境只打开一个 provider；默认 remote，禁止 fallback（ADR-016）。" "cmd/apm/cloud.go (Go)"
 providerRegistry = component "Provider Registry" "internal/cloud.ProviderRegistry 为中立的实例级显式注册表；只保存 factory、按 ID 选择并返回 Client，拒绝空、重复、未知 provider 及 nil/typed-nil Client。" "internal/cloud (Go)"
-cloudClient = component "Cloud Client Ports" "internal/cloud.Client 组合 Catalog、SkillSource、PluginSource、MCPSource、AgentSource；目录 destination 必须不存在或为空物理目录，Agent 文件必须不存在；provider 不拥有 APM cache/staging。" "internal/cloud (Go)" {
+cloudClient = component "Cloud Client Ports" "internal/cloud.Client 组合 Catalog、SkillSource、PluginSource、MCPSource、AgentSource 与 Submission 六个端口；目录 destination 必须不存在或为空物理目录，Agent 文件必须不存在；provider 不拥有 APM cache/staging。Submission.Submit 返回 domain.SubmissionResult（accepted/replayed），Local 对全部类型返回 ErrSubmissionUnsupported。" "internal/cloud (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cloud-client.mmd"
     }
@@ -85,7 +92,10 @@ lifecycle -> cacheManager "Skill/Agent Install：PrepareSkill/PrepareAgent 返�
 lifecycle -> cloudClient "Search/List/Install List/Resolve；Install MCP GetMCP；Uninstall 仅 target present MCP 精确 GetMCP"
 lifecycle -> pluginResource "Plugin Ensure / Lookup / StageFilesystem；返回的 Artifact 再由调用方 MarketplaceFor(agent)"
 lifecycle -> transactionManager "Install/Uninstall/Fix 的可恢复事务"
+lifecycle -> submission "Validate/Submit 对四类 Power 调用 Validate/Prepare；Submit 结果再经 cloud.Submit 上传"
+submission -> domain "Agent 原始 YAML 严格解析与身份校验（DecodeAgentConfigYAML/Validate/ValidatePowerRef）"
 cacheManager -> cloudClient "Source.DownloadSkill/DownloadAgent 写入 Cache 私有目标"
+cacheManager -> domain "PrepareAgent 首次下载与缓存命中均校验 Agent 身份（DecodeAgentConfigYAML + ValidatePowerRef）"
 pluginResource -> cloudClient "DownloadPlugin(ctx, ref, destination) 到临时 canonical Plugin 叶子"
 pluginResource -> rawPluginDestination "创建并控制空的 canonical destination"
 cloudClient -> rawPluginDestination "只写 apc-plugin.json + skills，不生成 Agent 配置/marketplace"
@@ -94,7 +104,8 @@ pluginResource -> pluginArtifactValidator "严格解析 canonical，构建后与
 pluginResource -> nativeManifestGenerator "先从复验后的 canonical manifest 生成 Codex、Claude、Hermes 原生 manifest"
 pluginResource -> codexMarketplaceBuilder "随后读取并校验已生成的 Codex 原生 manifest，仅构建 Codex 单条目 marketplace"
 pluginResource -> claudeMarketplaceBuilder "再读取并校验已生成的 Claude 原生 manifest，仅构建 Claude 单条目 marketplace"
-transactionManager -> adapterRegistry "Plugin marketplace/Plugin 与 filesystem 变更"
+transactionManager -> adapterRegistry "Plugin marketplace/Plugin 与 filesystem 变更；Agent recovery 经 AgentAdapterResolver 校验 target/backup/quarantine"
+adapterRegistry -> domain "AgentAdapter.ValidateArtifact 只读身份校验（DecodeAgentConfigYAML + ValidatePowerRef）"
 transactionManager -> journalStore "create/update/delete schema v1 journal"
 transactionManager -> configModel "commit/rollback manifest Set/Remove"
 transactionManager -> pluginArtifactValidator "recovery 仅复验固定方向实际需要的 target/previous artifact"

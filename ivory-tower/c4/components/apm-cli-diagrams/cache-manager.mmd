@@ -18,16 +18,23 @@ classDiagram
     class CloudClient {
         <<internal/cloud.Client>>
     }
+    class DomainModel {
+        <<internal/domain>>
+        +DecodeAgentConfigYAML(raw []byte) (AgentConfig, error)
+        +ValidatePowerRef(PowerRef) error
+    }
     class VersionedPowerCache {
         <<cache/skills or cache/agents/name/version>>
     }
     class PublicStaging {
         <<staging/skills or staging/agents/name>>
     }
+    note for FilesystemCache "Agent：cachedAgent 在首次下载后与缓存命中时都严格解析 agent.yaml 并校验 id/version 与请求 PowerRef 一致；解析失败或身份不匹配 fail closed，保留精确缓存目录，不删除、不回源覆盖，错误包含缓存路径与 PowerRef"
 
     FilesystemCache ..|> PowerCache
     FilesystemCache --> CacheSource : injected source
     CloudClient ..|> CacheSource
+    FilesystemCache --> DomainModel : Agent hit/miss 均经 DecodeAgentConfigYAML + ValidatePowerRef
     FilesystemCache --> VersionedPowerCache : validate and publish immutable version
     FilesystemCache --> PublicStaging : atomically replace candidate
 

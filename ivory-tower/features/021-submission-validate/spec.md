@@ -2,6 +2,8 @@
 
 > 状态：设计已确认，待实现。重大决策将记录在 ADR-018（实现时创建）。上游契约见相邻 APC 仓库的 `project-overview.md` 与 `project-overview-apm.md`。
 
+> 扩展说明：Agent Submission 由 [Feature 022](../022-agent-submission/spec.md) 与 [ADR-019](../../adr/ADR-019-align-agent-submission-lifecycle.md) 扩展，使 `--type agent` 进入与 Skill/Plugin/MCP 相同的统一 Submission 管线。本文主体保留历史的三类范围（Skill、Plugin、MCP），其中的「三类」措辞仅描述本 feature 落定时的范围，不作为当前四类能力的权威描述。
+
 ## 背景
 
 APC 定义了资源提交（Submission）工作流，以及 APM/APC 的校验职责边界。本 feature 在 APC 无实体（仅以设计约束 APM）的前提下，实现 APM 侧的提交能力：离线完整校验、确定性打包、统一 Submission 上传、本人 Submission 查询，以及 Cloud Client 的 Submission 接口。

@@ -17,8 +17,11 @@ flowchart TD
     Type -->|Agent| AgentResolve[ResolveAgent + Config Find]
     AgentResolve --> AgentSame{same manifest version?}
     AgentSame -->|yes| Unchanged
-    AgentSame -->|no| AgentCache[Cache PrepareAgent；hit 复验，miss 时私有 agent.yaml DownloadAgent 后原子发布 cache/staging]
-    AgentCache --> AgentTx[filesystem InstallAgent transaction]
+    AgentSame -->|no| AgentCache[Cache PrepareAgent；hit/miss 均经 domain DecodeAgentConfigYAML + ValidatePowerRef 校验身份，miss 时私有 agent.yaml DownloadAgent 后原子发布 cache/staging]
+    AgentCache -->|身份不匹配或损坏| AgentCacheFail[fail closed；保留精确缓存目录，不删除、不回源覆盖]
+    AgentCache -->|通过| AgentValidate[bibitAgentAdapter 发布前 ValidateArtifact 校验 staging 身份]
+    AgentValidate -->|身份不匹配| AgentAdapterFail[fail closed；不发布目标]
+    AgentValidate -->|通过| AgentTx[filesystem InstallAgent transaction；原样字节原子发布]
     AgentTx --> FSJournal
 
     Type -->|MCP| MCPResolve[ResolveMCP + Config Find]
@@ -74,5 +77,7 @@ flowchart TD
     Outcome --> Agent
     Fail --> Batch[fail-fast + remaining unexecuted]
     PluginFail --> Batch
+    AgentCacheFail --> Batch
+    AgentAdapterFail --> Batch
     Agent -->|done| Release[Release then render]
     Batch --> Release

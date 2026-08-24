@@ -78,6 +78,39 @@ classDiagram
         +Uninstall(...)
     }
 
+    note for ValidateLifecycle "完全离线，不读 API Key、不访问网络"
+    class ValidateLifecycle {
+        <<interface>>
+        +Validate(Context, Flags, []string) (ValidateResult, error)
+    }
+    note for SubmitLifecycle "Prepare 后生成 UUID 幂等键，再 cloud.Submit；输出 outcome accepted/replayed"
+    class SubmitLifecycle {
+        <<interface>>
+        +Submit(Context, Flags, []string) (SubmitResult, error)
+    }
+    note for SubmissionQueryLifecycle "submission get/list 查询"
+    class SubmissionQueryLifecycle {
+        <<interface>>
+        +Get(Context, string) (SubmissionQueryResult, error)
+        +List(Context, Flags) (SubmissionQueryResult, error)
+    }
+    class validateService {
+        +Validate(...)
+    }
+    class submitService {
+        +Submit(...)
+    }
+    class submissionQueryService {
+        +Get(...)
+        +List(...)
+    }
+    note for SubmissionPackage "internal/submission：Validate/Prepare 复用同一套四类规则。Agent 输入为单个原始 agent.yaml，不打包、不重序列化；name/version/description 来自 agent.id/agent.version/agent.description；--type agent 不接受 --version；Prepare 复用 Validate 后的同一份原始字节（Content-Type application/yaml、MD5 针对原始字节）"
+    class SubmissionPackage {
+        <<internal/submission>>
+        +Validate(Context, Request) (Validation, error)
+        +Prepare(Context, Request) (Content, error)
+    }
+
     class AdapterRegistry {
         <<interface>>
         +ResolveSkill(AgentID) (Adapter, error)
@@ -180,6 +213,9 @@ classDiagram
         +DownloadAgent(Context, PowerRef, destination) error
         +GetMCP(Context, PowerRef) (MCPServer, error)
         +DownloadPlugin(Context, PowerRef, destination) error
+        +Submit(Context, SubmissionRequest) (SubmissionResult, error)
+        +GetSubmission(Context, string) (Submission, error)
+        +ListSubmissions(Context, SubmissionListQuery) (SubmissionList, error)
     }
     class VersionSelector {
         <<interface>>
@@ -208,7 +244,7 @@ classDiagram
     installService --> InstallBatchError : successful Release only
     installService --> Locker : one lock interval
     installService --> TransactionManager : Recover / InstallSkill / InstallAgent / InstallMCP / InstallPlugin
-    installService --> CloudClient : List / Resolve / GetMCP; Cache and Plugin Resource consume sources
+    installService --> CloudClient : List / Resolve / GetMCP, Cache and Plugin Resource consume sources
     installService --> PowerCache : Skill PrepareSkill / Agent PrepareAgent only
     installService --> PluginResourceManager : Plugin Ensure / Lookup / StageFilesystem
     installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveAgent / ResolveMCP / ResolvePlugin
@@ -224,6 +260,14 @@ classDiagram
     uninstallService --> ConfigRepository : List
     uninstallService --> CloudClient : MCP GetMCP only when present
     uninstallService --> PluginResourceManager : Plugin Lookup only, never Cloud
+
+    validateService ..|> ValidateLifecycle
+    submitService ..|> SubmitLifecycle
+    submissionQueryService ..|> SubmissionQueryLifecycle
+    validateService --> SubmissionPackage : Validate
+    submitService --> SubmissionPackage : Prepare
+    submitService --> CloudClient : Submit
+    submissionQueryService --> CloudClient : GetSubmission / ListSubmissions
 
     AdapterRegistry --> Adapter : resolves
     AdapterRegistry --> AgentAdapter : resolves

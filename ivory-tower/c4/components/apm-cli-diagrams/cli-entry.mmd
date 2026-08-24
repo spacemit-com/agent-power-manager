@@ -1,5 +1,5 @@
 classDiagram
-    note for Flags "search/list/install/uninstall/fix 分别解析自己的参数；fix 只接受全局 verbose，不接收位置参数"
+    note for Flags "search/list/install/uninstall/fix/validate/submit/submission 分别解析自己的参数；fix 只接受全局 verbose，不接收位置参数。validate/submit 的 --type 接受 skill|plugin|mcp|agent，submit 携带必填 --change-summary；--type agent 不接受 --version（版本来自 agent.yaml）"
     class Flags {
         +Agent string
         +Type string
@@ -7,6 +7,9 @@ classDiagram
         +Version string
         +Keyword string
         +Installed bool
+        +ChangeSummary string
+        +Status string
+        +Limit int
     }
 
     class CLIEntry {
@@ -53,6 +56,53 @@ classDiagram
     class FixLifecycle {
         <<interface>>
         +Fix(Context) error
+    }
+
+    class ValidateLifecycleFactory {
+        <<function>>
+        +Create() (ValidateLifecycle, error)
+    }
+    class SubmitLifecycleFactory {
+        <<function>>
+        +Create() (SubmitLifecycle, error)
+    }
+    class SubmissionQueryLifecycleFactory {
+        <<function>>
+        +Create() (SubmissionQueryLifecycle, error)
+    }
+
+    class ValidateLifecycle {
+        <<interface>>
+        +Validate(Context, Flags, []string) (ValidateResult, error)
+    }
+    class SubmitLifecycle {
+        <<interface>>
+        +Submit(Context, Flags, []string) (SubmitResult, error)
+    }
+    class SubmissionQueryLifecycle {
+        <<interface>>
+        +Get(Context, string) (SubmissionQueryResult, error)
+        +List(Context, Flags) (SubmissionQueryResult, error)
+    }
+
+    class ValidateResult {
+        +Type string
+        +Name string
+        +Version string
+        +Description string
+        +FileCount int
+        +ContentSize int64
+        +Warnings []string
+    }
+    note for SubmitResult "outcome 为 accepted（202 首次受理）或 replayed（200 幂等重放）；StatusURL 不渲染到 submit 行，accepted 用 submission_id 生成 track 提示"
+    class SubmitResult {
+        +Outcome string
+        +SubmissionID string
+        +Status string
+    }
+    class SubmissionQueryResult {
+        +Detail *Submission
+        +Summaries []SubmissionSummary
     }
 
     class SearchResult {
@@ -110,6 +160,19 @@ classDiagram
         <<package>>
         -renderUninstall(writer, UninstallResult) error
     }
+    class validateRenderer {
+        <<package>>
+        -renderValidate(writer, ValidateResult) error
+    }
+    note for submitRenderer "成功输出 outcome/submission_id/status/track；accepted 与 replayed 都不是发布成功，ALREADY_PUBLISHED 是错误返回"
+    class submitRenderer {
+        <<package>>
+        -renderSubmit(writer, SubmitResult) error
+    }
+    class submissionRenderer {
+        <<package>>
+        -renderSubmission(writer, SubmissionQueryResult) error
+    }
 
     CLIEntry --> Flags : parses
     CLIEntry --> SearchLifecycleFactory : creates after logging setup
@@ -117,17 +180,26 @@ classDiagram
     CLIEntry --> InstallLifecycleFactory : creates after logging setup
     CLIEntry --> UninstallLifecycleFactory : creates after logging setup
     CLIEntry --> FixLifecycleFactory : creates after logging setup
+    CLIEntry --> ValidateLifecycleFactory : creates (no Cloud dependency)
+    CLIEntry --> SubmitLifecycleFactory : creates after logging setup
+    CLIEntry --> SubmissionQueryLifecycleFactory : creates after logging setup
     SearchLifecycleFactory --> SearchLifecycle : returns
     ListLifecycleFactory --> ListLifecycle : returns
     InstallLifecycleFactory --> InstallLifecycle : returns
     UninstallLifecycleFactory --> UninstallLifecycle : returns
     FixLifecycleFactory --> FixLifecycle : returns
+    ValidateLifecycleFactory --> ValidateLifecycle : returns
+    SubmitLifecycleFactory --> SubmitLifecycle : returns
+    SubmissionQueryLifecycleFactory --> SubmissionQueryLifecycle : returns
 
     CLIEntry --> SearchLifecycle : invokes
     CLIEntry --> ListLifecycle : invokes
     CLIEntry --> InstallLifecycle : invokes
     CLIEntry --> UninstallLifecycle : invokes
-    CLIEntry --> FixLifecycle : invokes; no stdout result
+    CLIEntry --> FixLifecycle : invokes, no stdout result
+    CLIEntry --> ValidateLifecycle : invokes
+    CLIEntry --> SubmitLifecycle : invokes
+    CLIEntry --> SubmissionQueryLifecycle : invokes
     SearchLifecycle --> SearchResult : returns
     ListLifecycle --> ListResult : returns
     ListLifecycle --> PartialListError : may return with result
@@ -135,12 +207,21 @@ classDiagram
     InstallLifecycle --> InstallBatchError : successful Release only
     UninstallLifecycle --> UninstallResult : returns
     UninstallLifecycle --> UninstallBatchError : successful Release only
+    ValidateLifecycle --> ValidateResult : returns
+    SubmitLifecycle --> SubmitResult : returns
+    SubmissionQueryLifecycle --> SubmissionQueryResult : returns
 
     CLIEntry --> searchRenderer : invokes
     CLIEntry --> listRenderer : invokes
     CLIEntry --> installRenderer : invokes
     CLIEntry --> uninstallRenderer : invokes
+    CLIEntry --> validateRenderer : invokes
+    CLIEntry --> submitRenderer : invokes
+    CLIEntry --> submissionRenderer : invokes
     searchRenderer --> SearchResult : renders stdout
     listRenderer --> ListResult : renders stdout
     installRenderer --> InstallResult : renders stdout
     uninstallRenderer --> UninstallResult : renders stdout
+    validateRenderer --> ValidateResult : renders stdout (--json machine output)
+    submitRenderer --> SubmitResult : renders stdout
+    submissionRenderer --> SubmissionQueryResult : renders stdout
