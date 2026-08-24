@@ -2,6 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"testing"
 
 	"apm/internal/domain"
 )
@@ -34,4 +37,17 @@ func (c *recordingSubmissionClient) GetSubmission(_ context.Context, id string) 
 func (c *recordingSubmissionClient) ListSubmissions(_ context.Context, query domain.SubmissionListQuery) (domain.SubmissionList, error) {
 	c.listCalls = append(c.listCalls, query)
 	return c.list, c.listErr
+}
+
+// lifecycleAgentYAML 是 submit 生命周期测试共用的最小合法 agent.yaml。
+const lifecycleAgentYAML = "schema_version: 1\nagent:\n  id: demo-agent\n  version: v1.2.3\n  description: Demo agent\n"
+
+// writeLifecycleAgent 写入 agent.yaml 并返回其路径。
+func writeLifecycleAgent(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "agent.yaml")
+	if err := os.WriteFile(path, []byte(lifecycleAgentYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

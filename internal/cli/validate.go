@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -17,6 +18,9 @@ func newValidateCommand(newLifecycle ValidateLifecycleFactory) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := requireSubmissionType(flags); err != nil {
+				return err
+			}
+			if err := rejectAgentVersionOverride(flags); err != nil {
 				return err
 			}
 			logParsedCommand(command, flags, args)
@@ -43,14 +47,22 @@ func newValidateCommand(newLifecycle ValidateLifecycleFactory) *cobra.Command {
 	return command
 }
 
-// requireSubmissionType 限定提交类命令的 --type 只能是 skill/plugin/mcp。
+// requireSubmissionType 限定提交类命令的 --type 只能是 skill/plugin/mcp/agent。
 func requireSubmissionType(flags Flags) error {
 	switch flags.Type {
-	case "skill", "plugin", "mcp":
+	case "skill", "plugin", "mcp", "agent":
 		return nil
 	default:
-		return fmt.Errorf("--type must be skill, plugin, or mcp, got %q", flags.Type)
+		return fmt.Errorf("--type must be skill, plugin, mcp, or agent, got %q", flags.Type)
 	}
+}
+
+// rejectAgentVersionOverride 拒绝 --type agent 携带非空 --version；Agent 版本只来自 agent.yaml。
+func rejectAgentVersionOverride(flags Flags) error {
+	if flags.Type == "agent" && strings.TrimSpace(flags.Version) != "" {
+		return errors.New("--version is not allowed for agent; version comes from agent.yaml")
+	}
+	return nil
 }
 
 func renderValidate(writer io.Writer, result ValidateResult, asJSON bool) error {

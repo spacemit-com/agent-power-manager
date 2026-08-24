@@ -12,7 +12,7 @@ import (
 func TestValidateRequiresSubmissionType(t *testing.T) {
 	for _, args := range [][]string{
 		{"validate", "dir"},
-		{"validate", "dir", "--type=agent"},
+		{"validate", "dir", "--type=widget"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -20,13 +20,34 @@ func TestValidateRequiresSubmissionType(t *testing.T) {
 			entry := newSubmissionEntry(t, &stdout, &stderr, func() (cli.ValidateLifecycle, error) { return lifecycle, nil }, unexpectedSubmit(t), unexpectedSubmission(t))
 
 			err := entry.Execute(args)
-			if err == nil || !strings.Contains(err.Error(), "--type must be skill, plugin, or mcp") {
+			if err == nil || !strings.Contains(err.Error(), "--type must be skill, plugin, mcp, or agent") {
 				t.Fatalf("Execute(%q) error = %v", args, err)
 			}
 			if lifecycle.calls != 0 {
 				t.Fatalf("factory calls = %d, want 0 (validation precedes factory)", lifecycle.calls)
 			}
 		})
+	}
+}
+
+func TestValidateAllowsAgentAndRejectsVersionOverride(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingValidateLifecycle{result: cli.ValidateResult{Type: "agent", Name: "demo", Version: "v1.0.0", Description: "demo", FileCount: 1, ContentSize: 10}}
+	entry := newSubmissionEntry(t, &stdout, &stderr, func() (cli.ValidateLifecycle, error) { return lifecycle, nil }, unexpectedSubmit(t), unexpectedSubmission(t))
+	if err := entry.Execute([]string{"validate", "agent.yaml", "--type=agent"}); err != nil {
+		t.Fatalf("Execute(validate agent) error = %v", err)
+	}
+	if lifecycle.calls != 1 || lifecycle.flags.Type != "agent" {
+		t.Fatalf("lifecycle = %+v", lifecycle)
+	}
+
+	lifecycle.calls = 0
+	err := entry.Execute([]string{"validate", "agent.yaml", "--type=agent", "--version=v1.0.0"})
+	if err == nil || !strings.Contains(err.Error(), "--version") {
+		t.Fatalf("version override error = %v", err)
+	}
+	if lifecycle.calls != 0 {
+		t.Fatalf("lifecycle calls after invalid flags = %d", lifecycle.calls)
 	}
 }
 

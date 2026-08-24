@@ -59,12 +59,20 @@ func validateSubmitFlags(flags Flags) error {
 		if strings.TrimSpace(flags.ChangeSummary) == "" {
 			return errors.New("--change-summary is required for plugin submit")
 		}
+	case "agent":
+		if strings.TrimSpace(flags.Version) != "" {
+			return errors.New("--version is not allowed for agent submit; version comes from agent.yaml")
+		}
+		if strings.TrimSpace(flags.ChangeSummary) == "" {
+			return errors.New("--change-summary is required for agent submit")
+		}
 	}
 	return nil
 }
 
 func renderSubmit(writer io.Writer, result SubmitResult) error {
 	lines := []string{
+		"outcome: " + result.Outcome,
 		"submission_id: " + result.SubmissionID,
 		"status: " + result.Status,
 		"track: apm submission get " + result.SubmissionID,

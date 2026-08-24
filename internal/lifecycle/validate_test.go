@@ -48,3 +48,22 @@ func TestValidateForwardsInvalidContent(t *testing.T) {
 		t.Fatal("Validate() error = nil, want error for empty source")
 	}
 }
+
+func TestValidateAgentOfflineMapsResult(t *testing.T) {
+	service, err := NewValidate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeLifecycleAgent(t, t.TempDir())
+
+	result, err := service.Validate(context.Background(), cli.Flags{Type: "agent"}, []string{path})
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if result.Type != string(domain.PowerTypeAgent) || result.Name != "demo-agent" || result.Version != "v1.2.3" || result.Description != "Demo agent" {
+		t.Fatalf("Validate() = %#v", result)
+	}
+	if result.FileCount != 1 || result.ContentSize != int64(len(lifecycleAgentYAML)) {
+		t.Fatalf("Validate() file count/size = %d/%d", result.FileCount, result.ContentSize)
+	}
+}

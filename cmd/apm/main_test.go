@@ -261,6 +261,17 @@ func TestDefaultLifecycleFactoriesConstructWithMCPRecoveryResolver(t *testing.T)
 	}
 }
 
+func TestNewValidateLifecycleConstructsOffline(t *testing.T) {
+	clearCloudEnvironment(t)
+	service, err := newValidateLifecycle()
+	if err != nil {
+		t.Fatalf("newValidateLifecycle() error = %v", err)
+	}
+	if service == nil {
+		t.Fatal("newValidateLifecycle() = nil, want service")
+	}
+}
+
 func TestNewFixLifecycleSucceedsWithoutActiveJournal(t *testing.T) {
 	t.Setenv("APM_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

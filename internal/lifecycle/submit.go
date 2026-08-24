@@ -42,7 +42,7 @@ func (s *SubmitService) Submit(ctx context.Context, flags cli.Flags, args []stri
 	if err != nil {
 		return cli.SubmitResult{}, err
 	}
-	receipt, err := s.cloud.Submit(ctx, domain.SubmissionRequest{
+	result, err := s.cloud.Submit(ctx, domain.SubmissionRequest{
 		Type:           content.Type,
 		Name:           content.Name,
 		Version:        content.Version,
@@ -56,7 +56,7 @@ func (s *SubmitService) Submit(ctx context.Context, flags cli.Flags, args []stri
 	if err != nil {
 		return cli.SubmitResult{}, err
 	}
-	return cli.SubmitResult{SubmissionID: receipt.SubmissionID, Status: string(receipt.Status)}, nil
+	return cli.SubmitResult{Outcome: string(result.Outcome), SubmissionID: result.SubmissionID, Status: string(result.Status)}, nil
 }
 
 // newIdempotencyKey 生成 RFC 4122 UUID v4 字符串，作为每次逻辑提交的幂等键。

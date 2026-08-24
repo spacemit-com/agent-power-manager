@@ -2,8 +2,9 @@ package cli
 
 import "context"
 
-// SubmitResult 表示 CLI 可直接渲染的提交结果。
+// SubmitResult 表示 CLI 可直接渲染的提交结果；Outcome 区分首次受理与幂等重放。
 type SubmitResult struct {
+	Outcome      string `json:"outcome"`
 	SubmissionID string `json:"submission_id"`
 	Status       string `json:"status"`
 }
