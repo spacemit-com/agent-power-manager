@@ -39,6 +39,11 @@ func (r failFastInspectionAdapterResolver) ResolvePlugin(domain.AgentID) (adapte
 	return nil, nil
 }
 
+func (r failFastInspectionAdapterResolver) ResolveAgent(domain.AgentID) (adapter.AgentAdapter, error) {
+	r.t.Fatal("Inspect() resolved an Agent Adapter")
+	return nil, nil
+}
+
 func failFastInspectionFileOps(t *testing.T) fileOps {
 	t.Helper()
 	fail := func(operation string) {

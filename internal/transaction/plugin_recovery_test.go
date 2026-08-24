@@ -722,3 +722,6 @@ func (r *recordingPluginResolver) ResolvePlugin(agent domain.AgentID) (adapter.P
 	*r.events = append(*r.events, "resolver:"+string(agent))
 	return r.plugin, nil
 }
+func (*recordingPluginResolver) ResolveAgent(domain.AgentID) (adapter.AgentAdapter, error) {
+	return nil, nil
+}

@@ -117,6 +117,10 @@ func (r *marketplaceRecoveryResolver) ResolvePlugin(agent domain.AgentID) (adapt
 	return r.adapter, r.err
 }
 
+func (*marketplaceRecoveryResolver) ResolveAgent(domain.AgentID) (adapter.AgentAdapter, error) {
+	return nil, nil
+}
+
 type marketplaceRecoveryFixture struct {
 	t              *testing.T
 	events         []string

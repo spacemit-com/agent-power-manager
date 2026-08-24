@@ -30,7 +30,7 @@ func (s *Service) Recover(ctx context.Context) (RecoveryResult, error) {
 	}
 	switch journal.Driver {
 	case DriverFilesystem:
-		err = s.recoverSkill(ctx, journal, &result)
+		err = s.recoverFilesystem(ctx, journal, &result)
 	case DriverAgentCLI:
 		err = s.recoverMCP(ctx, journal, &result)
 	case DriverPlugin:

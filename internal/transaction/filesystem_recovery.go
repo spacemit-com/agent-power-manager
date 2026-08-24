@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"apm/internal/domain"
 )
 
-// recoverSkill 根据文件系统事实固定恢复方向，并收敛 Skill 事务。
-func (s *Service) recoverSkill(ctx context.Context, journal Journal, result *RecoveryResult) error {
+// recoverFilesystem 根据文件系统事实固定恢复方向，并收敛文件型事务。
+func (s *Service) recoverFilesystem(ctx context.Context, journal Journal, result *RecoveryResult) error {
 	state, err := inspectPathState(journal)
 	if err != nil {
 		return err
@@ -41,6 +43,19 @@ func (s *Service) recoverSkill(ctx context.Context, journal Journal, result *Rec
 // recoverInstallRollback 按固定回滚方向恢复安装事务。
 func (s *Service) recoverInstallRollback(ctx context.Context, journal Journal, state PathState, result *RecoveryResult) error {
 	filesystem := journal.Filesystem
+	if state.BackupExists {
+		if state.TargetExists {
+			return fmt.Errorf("install target and backup both exist during rollback: %w", ErrIndeterminateState)
+		}
+		if journal.Power.Type == domain.PowerTypeAgent {
+			if journal.Previous == nil {
+				return fmt.Errorf("install rollback backup %q has no previous power: %w", filesystem.BackupPath, ErrIndeterminateState)
+			}
+			if err := s.validateAgentRecoveryArtifact(journal, *journal.Previous, filesystem.BackupPath); err != nil {
+				return err
+			}
+		}
+	}
 	if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 		return err
 	}
@@ -48,9 +63,6 @@ func (s *Service) recoverInstallRollback(ctx context.Context, journal Journal, s
 		return err
 	}
 	if state.BackupExists {
-		if state.TargetExists {
-			return fmt.Errorf("install target and backup both exist during rollback: %w", ErrIndeterminateState)
-		}
 		if err := s.files.rename(filesystem.BackupPath, filesystem.TargetPath); err != nil {
 			return fmt.Errorf("restore install backup %q to %q: %w", filesystem.BackupPath, filesystem.TargetPath, err)
 		}
@@ -70,6 +82,9 @@ func (s *Service) recoverInstallCommit(ctx context.Context, journal Journal, sta
 	filesystem := journal.Filesystem
 	if !state.TargetExists {
 		return fmt.Errorf("committed install target %q is missing: %w", filesystem.TargetPath, ErrIndeterminateState)
+	}
+	if err := s.validateAgentRecoveryArtifact(journal, journal.Power, filesystem.TargetPath); err != nil {
+		return err
 	}
 	if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
 		return err
@@ -108,6 +123,14 @@ func (s *Service) recoverInstallCommit(ctx context.Context, journal Journal, sta
 // recoverUninstallRollback 按固定回滚方向恢复卸载事务。
 func (s *Service) recoverUninstallRollback(ctx context.Context, journal Journal, state PathState, result *RecoveryResult) error {
 	filesystem := journal.Filesystem
+	if state.QuarantineExists {
+		if state.TargetExists {
+			return fmt.Errorf("uninstall target and quarantine both exist during rollback: %w", ErrIndeterminateState)
+		}
+		if err := s.validateAgentRecoveryArtifact(journal, journal.Power, filesystem.QuarantinePath); err != nil {
+			return err
+		}
+	}
 	if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
 		return err
 	}
@@ -115,9 +138,6 @@ func (s *Service) recoverUninstallRollback(ctx context.Context, journal Journal,
 		return err
 	}
 	if state.QuarantineExists {
-		if state.TargetExists {
-			return fmt.Errorf("uninstall target and quarantine both exist during rollback: %w", ErrIndeterminateState)
-		}
 		if err := s.files.rename(filesystem.QuarantinePath, filesystem.TargetPath); err != nil {
 			return fmt.Errorf("restore uninstall quarantine %q to %q: %w", filesystem.QuarantinePath, filesystem.TargetPath, err)
 		}
@@ -190,6 +210,25 @@ func (s *Service) validateRecoveryArtifacts(journal Journal) error {
 		case info.Mode()&os.ModeSymlink != 0 || !info.IsDir():
 			return fmt.Errorf("recovery artifact directory %q is not physical: %w", path, ErrUnsafePath)
 		}
+	}
+	return nil
+}
+
+// validateAgentRecoveryArtifact 在写入清单或改名/删除之前，校验即将成为本地已安装事实的
+// Agent 恢复材料身份与 ref 完全一致；非 Agent 类型直接放行。
+func (s *Service) validateAgentRecoveryArtifact(journal Journal, ref domain.PowerRef, path string) error {
+	if journal.Power.Type != domain.PowerTypeAgent {
+		return nil
+	}
+	if isNilInterface(s.agentAdapters) {
+		return fmt.Errorf("resolve Agent recovery adapter: %w", ErrIndeterminateState)
+	}
+	resolved, err := s.agentAdapters.ResolveAgent(journal.Agent)
+	if err != nil || isNilInterface(resolved) {
+		return errors.Join(fmt.Errorf("resolve Agent recovery adapter for %q: %w", journal.Agent, err), ErrIndeterminateState)
+	}
+	if err := resolved.ValidateArtifact(ref, path); err != nil {
+		return errors.Join(fmt.Errorf("validate Agent recovery artifact %+v at %q: %w", ref, path, err), ErrIndeterminateState)
 	}
 	return nil
 }

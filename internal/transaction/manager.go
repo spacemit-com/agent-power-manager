@@ -34,10 +34,16 @@ type PluginAdapterResolver interface {
 	ResolvePlugin(domain.AgentID) (adapter.PluginAdapter, error)
 }
 
+// AgentAdapterResolver 根据 journal 中的 Agent 动态解析恢复所需的文件型 Agent Adapter。
+type AgentAdapterResolver interface {
+	ResolveAgent(domain.AgentID) (adapter.AgentAdapter, error)
+}
+
 // AdapterResolver 组合 NewManager 恢复所有 CLI 类型所需的解析能力。
 type AdapterResolver interface {
 	MCPAdapterResolver
 	PluginAdapterResolver
+	AgentAdapterResolver
 }
 
 // SkillInstallRequest 描述单个 Agent 的已解析文件型 Skill 安装事务输入。
@@ -136,6 +142,7 @@ type Service struct {
 	journals       JournalStore
 	mcpAdapters    MCPAdapterResolver
 	pluginAdapters PluginAdapterResolver
+	agentAdapters  AgentAdapterResolver
 	files          fileOps
 	newID          func() (string, error)
 }
@@ -152,6 +159,9 @@ func newService(manifests ManifestWriter, journals JournalStore, mcpAdapters ...
 		service.mcpAdapters = mcpAdapters[0]
 		if resolver, ok := mcpAdapters[0].(PluginAdapterResolver); ok {
 			service.pluginAdapters = resolver
+		}
+		if resolver, ok := mcpAdapters[0].(AgentAdapterResolver); ok {
+			service.agentAdapters = resolver
 		}
 	}
 	return service
