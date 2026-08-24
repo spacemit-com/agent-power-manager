@@ -89,6 +89,36 @@ func TestPrepareRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestPrepareAgentRequiresChangeSummary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	writeTestFile(t, path, validAgentYAML)
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Prepare() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestPrepareAgentWhitespaceChangesMD5(t *testing.T) {
+	dir := t.TempDir()
+	raw1 := []byte("schema_version: 1\nagent:\n  id: demo\n  version: v1.0.0\n  description: demo\n")
+	raw2 := []byte("schema_version: 1\nagent:\n  id: demo\n  version: v1.0.0\n  description: demo\n\n")
+	writeTestFile(t, filepath.Join(dir, "a.yaml"), string(raw1))
+	writeTestFile(t, filepath.Join(dir, "b.yaml"), string(raw2))
+	first, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: filepath.Join(dir, "a.yaml"), ChangeSummary: "first"})
+	if err != nil {
+		t.Fatalf("Prepare(a) error = %v", err)
+	}
+	second, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: filepath.Join(dir, "b.yaml"), ChangeSummary: "first"})
+	if err != nil {
+		t.Fatalf("Prepare(b) error = %v", err)
+	}
+	if first.MD5 == second.MD5 {
+		t.Fatalf("MD5 identical for whitespace-differing YAML: %q", first.MD5)
+	}
+	verifyMD5(t, first.Bytes, first.MD5)
+	verifyMD5(t, second.Bytes, second.MD5)
+}
+
 func verifyMD5(t *testing.T, data []byte, got string) {
 	t.Helper()
 	sum := md5.Sum(data)

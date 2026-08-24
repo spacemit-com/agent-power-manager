@@ -17,6 +17,25 @@ const maxUploadSize = 20 << 20
 // 计算 MD5 并组装 Content；全程内存内，不写临时文件。
 func Prepare(ctx context.Context, request Request) (Content, error) {
 	switch request.Type {
+	case domain.PowerTypeAgent:
+		if strings.TrimSpace(request.ChangeSummary) == "" {
+			return Content{}, fmt.Errorf("agent submit requires --change-summary: %w", ErrInvalid)
+		}
+		source, err := validateAgentSource(ctx, request)
+		if err != nil {
+			return Content{}, err
+		}
+		sum := md5.Sum(source.raw)
+		return Content{
+			Type:          source.validation.Type,
+			Name:          source.validation.Name,
+			Version:       source.validation.Version,
+			Description:   source.validation.Description,
+			ChangeSummary: source.validation.ChangeSummary,
+			ContentType:   "application/yaml",
+			Bytes:         source.raw,
+			MD5:           hex.EncodeToString(sum[:]),
+		}, nil
 	case domain.PowerTypeSkill:
 		if strings.TrimSpace(request.Version) == "" {
 			return Content{}, fmt.Errorf("skill submit requires --version: %w", ErrInvalid)

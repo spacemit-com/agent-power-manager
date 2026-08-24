@@ -37,6 +37,12 @@ func Validate(ctx context.Context, request Request) (Validation, error) {
 		return validatePlugin(ctx, request)
 	case domain.PowerTypeMCP:
 		return validateMCP(ctx, request)
+	case domain.PowerTypeAgent:
+		source, err := validateAgentSource(ctx, request)
+		if err != nil {
+			return Validation{}, err
+		}
+		return source.validation, nil
 	default:
 		return Validation{}, fmt.Errorf("unsupported type %q: %w", request.Type, ErrInvalid)
 	}
