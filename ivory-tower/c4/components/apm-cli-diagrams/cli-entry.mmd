@@ -1,5 +1,5 @@
 classDiagram
-    note for Flags "search/list/install/uninstall/fix/validate/submit/submission 分别解析自己的参数；fix 只接受全局 verbose，不接收位置参数。validate/submit 的 --type 接受 skill|plugin|mcp|agent；validate 不接收 version/message，submit 只额外接收统一必填 --message；submission list 只接收 active status/type/name 与 output，无分页参数"
+    note for Flags "字段精确镜像 internal/cli.Flags。search/list/install/uninstall/fix/validate/submit/submission 分别解析自己的参数；validate 不接收 version/message，submit 只额外接收统一必填 --message；submission list 只接收 active status/type/name 与 output，无分页参数。Limit 是保留的通用字段，不绑定 submission list"
     class Flags {
         +Agent string
         +Type string
@@ -7,7 +7,9 @@ classDiagram
         +Version string
         +Keyword string
         +Installed bool
-        +ChangeSummary string
+        +Message string
+        +Output string
+        +JSON bool
         +Status string
         +Limit int
     }
