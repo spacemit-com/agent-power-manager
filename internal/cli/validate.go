@@ -14,7 +14,7 @@ func newValidateCommand(newLifecycle ValidateLifecycleFactory) *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
 		Use:   "validate <path>",
-		Short: "Validate a skill, plugin, or MCP source",
+		Short: "Validate a skill, plugin, MCP, or agent source",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := requireSubmissionType(flags); err != nil {
@@ -42,7 +42,7 @@ func newValidateCommand(newLifecycle ValidateLifecycleFactory) *cobra.Command {
 		},
 	}
 	bindTypeFlag(command, &flags)
-	command.Flags().StringVar(&flags.Version, "version", "", "skill version vMAJOR.MINOR.PATCH")
+	command.Flags().StringVar(&flags.Version, "version", "", "version vMAJOR.MINOR.PATCH (skill only; agent forbids, plugin/mcp read from source)")
 	command.Flags().BoolVar(&flags.JSON, "json", false, "machine-readable JSON output")
 	return command
 }

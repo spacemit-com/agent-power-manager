@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"apm/internal/adapter"
@@ -470,6 +471,9 @@ func TestAgentRecoveryTypedNilAdapterFailsClosed(t *testing.T) {
 	result, err := fixture.freshService().Recover(context.Background())
 	if !errors.Is(err, ErrIndeterminateState) {
 		t.Fatalf("Recover() error = %v, want ErrIndeterminateState", err)
+	}
+	if strings.Contains(err.Error(), "%!w(<nil>)") {
+		t.Fatalf("Recover() error = %v, must not render %%!w(<nil>)", err)
 	}
 	if result.Recovered {
 		t.Fatalf("Recover() recovered = %+v", result)

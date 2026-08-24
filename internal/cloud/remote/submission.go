@@ -152,7 +152,7 @@ func submissionContentType(powerType domain.PowerType) string {
 	}
 }
 
-// readSubmissionJSON 校验响应 Content-Type、限制并读取 2xx JSON 响应体、严格解码（拒绝重复键与未知字段）。
+// readSubmissionJSON 校验响应 Content-Type、限制并读取 2xx JSON 响应体、严格解码（拒绝重复键与尾随值，忽略未知响应字段以保持前向兼容）。
 func readSubmissionJSON(ctx context.Context, response *http.Response, target any) error {
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
@@ -165,7 +165,7 @@ func readSubmissionJSON(ctx context.Context, response *http.Response, target any
 	if len(payload) > maxJSONResponse {
 		return fmt.Errorf("remote submission response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
 	}
-	if err := jsonstrict.Decode(payload, target, true); err != nil {
+	if err := jsonstrict.Decode(payload, target, false); err != nil {
 		return fmt.Errorf("decode remote submission response: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	return nil

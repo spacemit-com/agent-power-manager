@@ -224,8 +224,11 @@ func (s *Service) validateAgentRecoveryArtifact(journal Journal, ref domain.Powe
 		return fmt.Errorf("resolve Agent recovery adapter: %w", ErrIndeterminateState)
 	}
 	resolved, err := s.agentAdapters.ResolveAgent(journal.Agent)
-	if err != nil || isNilInterface(resolved) {
+	if err != nil {
 		return errors.Join(fmt.Errorf("resolve Agent recovery adapter for %q: %w", journal.Agent, err), ErrIndeterminateState)
+	}
+	if isNilInterface(resolved) {
+		return errors.Join(fmt.Errorf("resolve Agent recovery adapter for %q: nil adapter", journal.Agent), ErrIndeterminateState)
 	}
 	if err := resolved.ValidateArtifact(ref, path); err != nil {
 		return errors.Join(fmt.Errorf("validate Agent recovery artifact %+v at %q: %w", ref, path, err), ErrIndeterminateState)

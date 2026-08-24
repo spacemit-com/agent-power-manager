@@ -150,6 +150,45 @@ func TestSubmitReturnsReplayedResult(t *testing.T) {
 	}
 }
 
+func TestSubmitAcceptsUnknownResponseFields(t *testing.T) {
+	t.Run("202 receipt with extra field", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/s","future_field":true}`))
+		}))
+		defer server.Close()
+		client := newTestSubmissionClient(t, server)
+		got, err := client.Submit(context.Background(), domain.SubmissionRequest{
+			Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+		})
+		if err != nil {
+			t.Fatalf("Submit() error = %v", err)
+		}
+		if got.Outcome != domain.SubmissionAccepted {
+			t.Fatalf("Submit() = %+v, want accepted", got)
+		}
+	})
+	t.Run("200 submission with extra field", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"published","content_available":true,"validation_errors":[],"review_comment":"","published_version":"v1.0.0","future_field":true}`))
+		}))
+		defer server.Close()
+		client := newTestSubmissionClient(t, server)
+		got, err := client.Submit(context.Background(), domain.SubmissionRequest{
+			Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+		})
+		if err != nil {
+			t.Fatalf("Submit() error = %v", err)
+		}
+		if got.Outcome != domain.SubmissionReplayed {
+			t.Fatalf("Submit() = %+v, want replayed", got)
+		}
+	})
+}
+
 func TestSubmitRejectsOther2xxStatus(t *testing.T) {
 	for _, status := range []int{http.StatusCreated, http.StatusNoContent, http.StatusPartialContent} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
@@ -170,31 +209,23 @@ func TestSubmitRejectsOther2xxStatus(t *testing.T) {
 	}
 }
 
+// TestSubmitRejectsShapeMismatch 验证客户端严格按 HTTP 状态分流，不按字段形状猜测语义：
+// 202 必须携带 receipt 的 status_url，Submission 形状（缺少 status_url）被拒绝。
+// 200 方向现在按契约忽略未知响应字段（见 TestSubmitAcceptsUnknownResponseFields），
+// 因此不再把「200 携带 receipt 形状 body」当作形状不匹配而拒绝。
 func TestSubmitRejectsShapeMismatch(t *testing.T) {
-	tests := []struct {
-		name   string
-		status int
-		body   string
-	}{
-		{name: "200 with receipt body", status: http.StatusOK, body: `{"submission_id":"sub_1","status":"received","status_url":"/s"}`},
-		{name: "202 with submission body", status: http.StatusAccepted, body: `{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","content_available":true}`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tt.status)
-				_, _ = w.Write([]byte(tt.body))
-			}))
-			defer server.Close()
-			client := newTestSubmissionClient(t, server)
-			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-				Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
-			})
-			if !errors.Is(err, cloud.ErrInvalidResponse) {
-				t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
-			}
-		})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","content_available":true}`))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+		Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+	})
+	if !errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
 	}
 }
 

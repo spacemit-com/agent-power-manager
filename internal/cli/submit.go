@@ -13,7 +13,7 @@ func newSubmitCommand(newLifecycle SubmitLifecycleFactory) *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
 		Use:   "submit <path>",
-		Short: "Submit a skill, plugin, or MCP to APC",
+		Short: "Submit a skill, plugin, MCP, or agent to APC",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := validateSubmitFlags(flags); err != nil {
@@ -38,7 +38,7 @@ func newSubmitCommand(newLifecycle SubmitLifecycleFactory) *cobra.Command {
 		},
 	}
 	bindTypeFlag(command, &flags)
-	command.Flags().StringVar(&flags.Version, "version", "", "skill version vMAJOR.MINOR.PATCH")
+	command.Flags().StringVar(&flags.Version, "version", "", "version vMAJOR.MINOR.PATCH (skill only; agent forbids, plugin/mcp read from source)")
 	command.Flags().StringVar(&flags.ChangeSummary, "change-summary", "", "what changed in this submission")
 	return command
 }
