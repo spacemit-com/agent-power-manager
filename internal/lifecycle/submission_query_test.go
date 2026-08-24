@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"apm/internal/cli"
@@ -48,7 +49,7 @@ func TestSubmissionQueryListMapsFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := service.List(context.Background(), cli.Flags{Type: "skill", Status: "received", Name: "demo", Limit: 10})
+	result, err := service.List(context.Background(), cli.Flags{Type: "skill", Status: "review_pending", Name: "demo"})
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -59,8 +60,13 @@ func TestSubmissionQueryListMapsFilters(t *testing.T) {
 		t.Fatalf("ListSubmissions calls = %d, want 1", len(client.listCalls))
 	}
 	query := client.listCalls[0]
-	if query.Type != domain.PowerTypeSkill || query.Status != domain.SubmissionReceived || query.Name != "demo" || query.Limit != 10 {
-		t.Fatalf("ListSubmissions query = %#v", query)
+	wantQuery := domain.SubmissionListQuery{
+		Status: domain.SubmissionReviewPending,
+		Type:   domain.PowerTypeSkill,
+		Name:   "demo",
+	}
+	if !reflect.DeepEqual(query, wantQuery) {
+		t.Fatalf("ListSubmissions query = %#v, want %#v", query, wantQuery)
 	}
 }
 

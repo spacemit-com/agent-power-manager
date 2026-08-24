@@ -1273,7 +1273,7 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 		digest := md5.Sum(resource.content)
 		writeLifecycleJSON(writer, map[string]any{
 			"type": ref.Type, "name": ref.Name, "version": ref.Version,
-			"description": "lifecycle fixture", "change_summary": "fixture",
+			"description": "lifecycle fixture", "message": "fixture",
 			"content_type": resource.contentType, "content_size": len(resource.content),
 			"content_md5": fmt.Sprintf("%x", digest), "published_at": "2026-08-01T00:00:00Z",
 			"status": "published", "yanked_at": "", "yank_reason": "",

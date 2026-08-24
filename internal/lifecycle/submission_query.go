@@ -39,7 +39,6 @@ func (s *SubmissionQueryService) List(ctx context.Context, flags cli.Flags) (cli
 		Status: domain.SubmissionStatus(flags.Status),
 		Type:   domain.PowerType(flags.Type),
 		Name:   flags.Name,
-		Limit:  flags.Limit,
 	})
 	if err != nil {
 		return cli.SubmissionQueryResult{}, err
