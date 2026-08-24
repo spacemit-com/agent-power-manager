@@ -11,8 +11,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"strconv"
+	"net/url"
 	"strings"
+	"time"
 
 	"apm/internal/cloud"
 	"apm/internal/domain"
@@ -20,6 +21,8 @@ import (
 )
 
 var _ cloud.Submission = (*Client)(nil)
+
+const maxActiveSubmissions = 20
 
 // submissionMetadataDTO 是 multipart 中 metadata part 的传输类型。
 type submissionMetadataDTO struct {
@@ -49,18 +52,43 @@ type submissionDTO struct {
 	PublishedVersion string                  `json:"published_version"`
 }
 
+type submissionDetailDTO struct {
+	SubmissionID     *string               `json:"submission_id"`
+	Type             *domain.PowerType     `json:"type"`
+	Name             *string               `json:"name"`
+	Version          *string               `json:"version"`
+	Description      *string               `json:"description"`
+	Message          *string               `json:"message"`
+	Status           *string               `json:"status"`
+	CreatedAt        *string               `json:"created_at"`
+	UpdatedAt        *string               `json:"updated_at"`
+	ContentAvailable *bool                 `json:"content_available"`
+	ValidationErrors *[]string             `json:"validation_errors"`
+	ReviewComment    *string               `json:"review_comment"`
+	PublishedVersion *string               `json:"published_version"`
+	Timeline         *[]submissionEventDTO `json:"timeline"`
+}
+
+type submissionEventDTO struct {
+	EventID    *string `json:"event_id"`
+	EventType  *string `json:"event_type"`
+	StatusFrom *string `json:"status_from"`
+	StatusTo   *string `json:"status_to"`
+	Timestamp  *string `json:"timestamp"`
+	Message    *string `json:"message"`
+}
+
 type submissionSummaryDTO struct {
-	SubmissionID string           `json:"submission_id"`
-	Type         domain.PowerType `json:"type"`
-	Name         string           `json:"name"`
-	Version      string           `json:"version"`
-	Status       string           `json:"status"`
-	CreatedAt    string           `json:"created_at"`
+	SubmissionID *string           `json:"submission_id"`
+	Type         *domain.PowerType `json:"type"`
+	Name         *string           `json:"name"`
+	Version      *string           `json:"version"`
+	Status       *string           `json:"status"`
+	CreatedAt    *string           `json:"created_at"`
 }
 
 type submissionListDTO struct {
-	Items      []submissionSummaryDTO `json:"items"`
-	NextCursor string                 `json:"next_cursor"`
+	Items []submissionSummaryDTO `json:"items"`
 }
 
 // Submit 在网络请求前校验并规范化必填 Message，随后上传 multipart 并区分 202 接收与 200 幂等重放；
@@ -214,6 +242,35 @@ func decodeSubmission(ctx context.Context, response *http.Response) (submissionD
 	return dto, nil
 }
 
+// getSubmissionJSON 仅为 Submission 查询附加 Bearer；匿名资源读取继续使用 getJSON，避免凭据扩散。
+func (c *Client) getSubmissionJSON(ctx context.Context, endpoint *url.URL, target any) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("query remote submission: %w", err)
+	}
+	if c.apiKey == "" {
+		return fmt.Errorf("query remote submission requires API key: %w", cloud.ErrAuth)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return fmt.Errorf("create remote submission query: %w", err)
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("query remote submission: %w", ctxErr)
+		}
+		return fmt.Errorf("query remote submission: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return c.classifySubmissionError(ctx, response)
+	}
+	return readSubmissionJSON(ctx, response, target)
+}
+
 // GetSubmission 读取一次提交详情；响应身份必须与请求 id 一致。
 func (c *Client) GetSubmission(ctx context.Context, submissionID string) (domain.Submission, error) {
 	if err := ctx.Err(); err != nil {
@@ -222,31 +279,59 @@ func (c *Client) GetSubmission(ctx context.Context, submissionID string) (domain
 	if submissionID == "" {
 		return domain.Submission{}, fmt.Errorf("get remote submission with empty id: %w", cloud.ErrNotFound)
 	}
-	var dto submissionDTO
-	if err := c.getJSON(ctx, c.endpoint("api", "v1", "submissions", submissionID), &dto); err != nil {
+	var dto submissionDetailDTO
+	if err := c.getSubmissionJSON(ctx, c.endpoint("api", "v1", "submissions", submissionID), &dto); err != nil {
 		return domain.Submission{}, fmt.Errorf("get remote submission: %w", err)
 	}
-	status, err := parseSubmissionStatus(string(dto.Status))
+	identity, err := validateSubmissionIdentity(dto.SubmissionID, dto.Type, dto.Name, dto.Version)
+	if err != nil {
+		return domain.Submission{}, fmt.Errorf("get remote submission has invalid identity: %w", err)
+	}
+	if identity.SubmissionID != submissionID {
+		return domain.Submission{}, fmt.Errorf("remote submission identity does not match request: %w", cloud.ErrInvalidResponse)
+	}
+	if dto.Status == nil {
+		return domain.Submission{}, fmt.Errorf("get remote submission has missing status: %w", cloud.ErrInvalidResponse)
+	}
+	status, err := parseSubmissionStatus(*dto.Status)
 	if err != nil {
 		return domain.Submission{}, fmt.Errorf("get remote submission has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
-	if dto.SubmissionID != submissionID {
-		return domain.Submission{}, fmt.Errorf("remote submission identity does not match request: %w", cloud.ErrInvalidResponse)
+	if !presentNonEmpty(dto.Description) || !presentNonEmpty(dto.Message) {
+		return domain.Submission{}, fmt.Errorf("get remote submission has missing description or message: %w", cloud.ErrInvalidResponse)
+	}
+	if _, err := parseRequiredSubmissionTimestamp(dto.CreatedAt); err != nil {
+		return domain.Submission{}, fmt.Errorf("get remote submission has invalid created_at: %w", err)
+	}
+	if _, err := parseRequiredSubmissionTimestamp(dto.UpdatedAt); err != nil {
+		return domain.Submission{}, fmt.Errorf("get remote submission has invalid updated_at: %w", err)
+	}
+	if dto.ContentAvailable == nil || dto.ValidationErrors == nil || dto.ReviewComment == nil || dto.PublishedVersion == nil || dto.Timeline == nil {
+		return domain.Submission{}, fmt.Errorf("get remote submission has missing detail fields: %w", cloud.ErrInvalidResponse)
+	}
+	timeline, err := validateSubmissionTimeline(*dto.Timeline)
+	if err != nil {
+		return domain.Submission{}, err
 	}
 	return domain.Submission{
-		SubmissionID:     dto.SubmissionID,
-		Type:             dto.Type,
-		Name:             dto.Name,
-		Version:          dto.Version,
+		SubmissionID:     identity.SubmissionID,
+		Type:             identity.Ref.Type,
+		Name:             identity.Ref.Name,
+		Version:          identity.Ref.Version,
+		Description:      *dto.Description,
+		Message:          *dto.Message,
 		Status:           status,
-		ContentAvailable: dto.ContentAvailable,
-		ValidationErrors: dto.ValidationErrors,
-		ReviewComment:    dto.ReviewComment,
-		PublishedVersion: dto.PublishedVersion,
+		CreatedAt:        *dto.CreatedAt,
+		UpdatedAt:        *dto.UpdatedAt,
+		ContentAvailable: *dto.ContentAvailable,
+		ValidationErrors: append([]string{}, (*dto.ValidationErrors)...),
+		ReviewComment:    *dto.ReviewComment,
+		PublishedVersion: *dto.PublishedVersion,
+		Timeline:         timeline,
 	}, nil
 }
 
-// ListSubmissions 按 status/type/name 筛选并以 cursor 分页读取提交列表。
+// ListSubmissions 按 status/type/name 读取当前凭据名下至多二十条活动提交，不接受分页参数。
 func (c *Client) ListSubmissions(ctx context.Context, query domain.SubmissionListQuery) (domain.SubmissionList, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.SubmissionList{}, fmt.Errorf("list remote submissions: %w", err)
@@ -262,37 +347,128 @@ func (c *Client) ListSubmissions(ctx context.Context, query domain.SubmissionLis
 	if query.Name != "" {
 		values.Set("name", query.Name)
 	}
-	if query.Cursor != "" {
-		values.Set("cursor", query.Cursor)
-	}
-	if query.Limit > 0 {
-		values.Set("limit", strconv.Itoa(query.Limit))
-	}
 	endpoint.RawQuery = values.Encode()
 
 	var dto submissionListDTO
-	if err := c.getJSON(ctx, endpoint, &dto); err != nil {
+	if err := c.getSubmissionJSON(ctx, endpoint, &dto); err != nil {
 		return domain.SubmissionList{}, fmt.Errorf("list remote submissions: %w", err)
 	}
-	if dto.Items == nil {
-		return domain.SubmissionList{}, fmt.Errorf("list remote submissions with missing items: %w", cloud.ErrInvalidResponse)
+	if dto.Items == nil || len(dto.Items) > maxActiveSubmissions {
+		return domain.SubmissionList{}, fmt.Errorf("list remote submissions has missing or excessive items: %w", cloud.ErrInvalidResponse)
 	}
 	items := make([]domain.SubmissionSummary, 0, len(dto.Items))
-	for _, item := range dto.Items {
-		status, err := parseSubmissionStatus(item.Status)
+	seenIDs := make(map[string]struct{}, len(dto.Items))
+	var previousCreated time.Time
+	for index, item := range dto.Items {
+		identity, err := validateSubmissionIdentity(item.SubmissionID, item.Type, item.Name, item.Version)
+		if err != nil {
+			return domain.SubmissionList{}, fmt.Errorf("list remote submissions has invalid identity: %w", err)
+		}
+		if _, duplicate := seenIDs[identity.SubmissionID]; duplicate {
+			return domain.SubmissionList{}, fmt.Errorf("list remote submissions repeats submission_id %q: %w", identity.SubmissionID, cloud.ErrInvalidResponse)
+		}
+		seenIDs[identity.SubmissionID] = struct{}{}
+		if item.Status == nil {
+			return domain.SubmissionList{}, fmt.Errorf("list remote submissions has missing status: %w", cloud.ErrInvalidResponse)
+		}
+		status, err := parseSubmissionStatus(*item.Status)
 		if err != nil {
 			return domain.SubmissionList{}, fmt.Errorf("list remote submissions has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
 		}
+		if !domain.IsActiveSubmissionStatus(status) {
+			return domain.SubmissionList{}, fmt.Errorf("list remote submissions contains terminal status %q: %w", status, cloud.ErrInvalidResponse)
+		}
+		if query.Status != "" && status != query.Status || query.Type != "" && identity.Ref.Type != query.Type || query.Name != "" && identity.Ref.Name != query.Name {
+			return domain.SubmissionList{}, fmt.Errorf("list remote submissions item does not match filters: %w", cloud.ErrInvalidResponse)
+		}
+		createdAt, err := parseRequiredSubmissionTimestamp(item.CreatedAt)
+		if err != nil {
+			return domain.SubmissionList{}, fmt.Errorf("list remote submissions has invalid created_at: %w", err)
+		}
+		if index > 0 && previousCreated.Before(createdAt) {
+			return domain.SubmissionList{}, fmt.Errorf("list remote submissions is not in descending created_at order: %w", cloud.ErrInvalidResponse)
+		}
+		previousCreated = createdAt
 		items = append(items, domain.SubmissionSummary{
-			SubmissionID: item.SubmissionID,
-			Type:         item.Type,
-			Name:         item.Name,
-			Version:      item.Version,
+			SubmissionID: identity.SubmissionID,
+			Type:         identity.Ref.Type,
+			Name:         identity.Ref.Name,
+			Version:      identity.Ref.Version,
 			Status:       status,
-			CreatedAt:    item.CreatedAt,
+			CreatedAt:    *item.CreatedAt,
 		})
 	}
-	return domain.SubmissionList{Items: items, NextCursor: dto.NextCursor}, nil
+	return domain.SubmissionList{Items: items}, nil
+}
+
+type validatedSubmissionIdentity struct {
+	SubmissionID string
+	Ref          domain.PowerRef
+}
+
+func validateSubmissionIdentity(submissionID *string, powerType *domain.PowerType, name, version *string) (validatedSubmissionIdentity, error) {
+	if !presentNonEmpty(submissionID) || powerType == nil || name == nil || version == nil {
+		return validatedSubmissionIdentity{}, fmt.Errorf("submission identity is incomplete: %w", cloud.ErrInvalidResponse)
+	}
+	ref, _, err := validatePowerIdentity(*powerType, *name, *version)
+	if err != nil {
+		return validatedSubmissionIdentity{}, err
+	}
+	return validatedSubmissionIdentity{SubmissionID: *submissionID, Ref: ref}, nil
+}
+
+func presentNonEmpty(value *string) bool {
+	return value != nil && strings.TrimSpace(*value) != ""
+}
+
+func parseRequiredSubmissionTimestamp(value *string) (time.Time, error) {
+	if value == nil {
+		return time.Time{}, fmt.Errorf("timestamp is missing: %w", cloud.ErrInvalidResponse)
+	}
+	parsed, err := time.Parse(time.RFC3339, *value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("timestamp %q is not RFC3339: %w", *value, errors.Join(cloud.ErrInvalidResponse, err))
+	}
+	return parsed, nil
+}
+
+func validateSubmissionTimeline(dto []submissionEventDTO) ([]domain.SubmissionEvent, error) {
+	timeline := make([]domain.SubmissionEvent, 0, len(dto))
+	var previousTimestamp time.Time
+	for index, item := range dto {
+		if !presentNonEmpty(item.EventID) || !presentNonEmpty(item.EventType) || item.StatusFrom == nil || item.StatusTo == nil || !presentNonEmpty(item.Message) {
+			return nil, fmt.Errorf("remote submission timeline event is incomplete: %w", cloud.ErrInvalidResponse)
+		}
+		var statusFrom domain.SubmissionStatus
+		if *item.StatusFrom != "" {
+			parsed, err := parseSubmissionStatus(*item.StatusFrom)
+			if err != nil {
+				return nil, fmt.Errorf("remote submission timeline has invalid status_from: %w", errors.Join(cloud.ErrInvalidResponse, err))
+			}
+			statusFrom = parsed
+		}
+		statusTo, err := parseSubmissionStatus(*item.StatusTo)
+		if err != nil {
+			return nil, fmt.Errorf("remote submission timeline has invalid status_to: %w", errors.Join(cloud.ErrInvalidResponse, err))
+		}
+		timestamp, err := parseRequiredSubmissionTimestamp(item.Timestamp)
+		if err != nil {
+			return nil, fmt.Errorf("remote submission timeline has invalid timestamp: %w", err)
+		}
+		if index > 0 && previousTimestamp.After(timestamp) {
+			return nil, fmt.Errorf("remote submission timeline is not in ascending timestamp order: %w", cloud.ErrInvalidResponse)
+		}
+		previousTimestamp = timestamp
+		timeline = append(timeline, domain.SubmissionEvent{
+			EventID:    *item.EventID,
+			EventType:  *item.EventType,
+			StatusFrom: statusFrom,
+			StatusTo:   statusTo,
+			Timestamp:  *item.Timestamp,
+			Message:    *item.Message,
+		})
+	}
+	return timeline, nil
 }
 
 // writeMultipartPart 写一个具名 part 并显式声明 Content-Type。
@@ -325,9 +501,15 @@ func (c *Client) classifySubmissionError(ctx context.Context, response *http.Res
 	case http.StatusUnauthorized, http.StatusForbidden:
 		sentinel = cloud.ErrAuth
 	case http.StatusConflict:
-		if hasProblem && decoded.Code == "ALREADY_PUBLISHED" {
-			sentinel = errors.Join(cloud.ErrAlreadyPublished, cloud.ErrSubmissionConflict)
-		} else {
+		if hasProblem {
+			switch decoded.Code {
+			case "ALREADY_PUBLISHED":
+				sentinel = errors.Join(cloud.ErrAlreadyPublished, cloud.ErrSubmissionConflict)
+			case "TOO_MANY_ACTIVE_SUBMISSIONS":
+				sentinel = errors.Join(cloud.ErrTooManyActiveSubmissions, cloud.ErrSubmissionConflict)
+			}
+		}
+		if sentinel == nil {
 			sentinel = cloud.ErrSubmissionConflict
 		}
 	case http.StatusServiceUnavailable:

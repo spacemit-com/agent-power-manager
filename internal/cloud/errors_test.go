@@ -52,3 +52,13 @@ func TestCloudErrorSentinelsClassifyWrappedErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestTooManyActiveSubmissionsCanJoinSubmissionConflict(t *testing.T) {
+	err := errors.Join(cloud.ErrTooManyActiveSubmissions, cloud.ErrSubmissionConflict)
+	if !errors.Is(err, cloud.ErrTooManyActiveSubmissions) || !errors.Is(err, cloud.ErrSubmissionConflict) {
+		t.Fatalf("joined error = %v", err)
+	}
+	if errors.Is(err, cloud.ErrAlreadyPublished) {
+		t.Fatalf("joined error = %v, must not match ErrAlreadyPublished", err)
+	}
+}

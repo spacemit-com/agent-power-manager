@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -20,7 +21,12 @@ import (
 
 func newTestSubmissionClient(t *testing.T, server *httptest.Server) *Client {
 	t.Helper()
-	client, err := NewWithAPIKey(server.URL, &http.Client{Timeout: 5 * time.Second}, "key")
+	return newTestSubmissionClientWithKey(t, server, "key")
+}
+
+func newTestSubmissionClientWithKey(t *testing.T, server *httptest.Server, apiKey string) *Client {
+	t.Helper()
+	client, err := NewWithAPIKey(server.URL, &http.Client{Timeout: 5 * time.Second}, apiKey)
 	if err != nil {
 		t.Fatalf("NewWithAPIKey() error = %v", err)
 	}
@@ -422,6 +428,28 @@ func TestSubmitMaps409AlreadyPublished(t *testing.T) {
 	}
 }
 
+func TestSubmitMaps409TooManyActiveSubmissions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"status":409,"code":"TOO_MANY_ACTIVE_SUBMISSIONS","trace_id":"tr_quota"}`))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+	})
+	if !errors.Is(err, cloud.ErrTooManyActiveSubmissions) || !errors.Is(err, cloud.ErrSubmissionConflict) {
+		t.Fatalf("Submit() error = %v, want both ErrTooManyActiveSubmissions and ErrSubmissionConflict", err)
+	}
+	if errors.Is(err, cloud.ErrAlreadyPublished) {
+		t.Fatalf("Submit() error = %v, must not match ErrAlreadyPublished", err)
+	}
+	if !strings.Contains(err.Error(), "TOO_MANY_ACTIVE_SUBMISSIONS") || !strings.Contains(err.Error(), "tr_quota") {
+		t.Fatalf("Submit() error = %v, want problem code/trace_id context", err)
+	}
+}
+
 func TestSubmitMaps503(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json")
@@ -438,10 +466,331 @@ func TestSubmitMaps503(t *testing.T) {
 	}
 }
 
-func TestGetSubmission(t *testing.T) {
+const validSubmissionDetailJSON = `{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","description":"does things","message":"first release","status":"review_pending","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:02:00Z","content_available":true,"validation_errors":["missing card"],"review_comment":"","published_version":"","timeline":[{"event_id":"evt_1","event_type":"submission_received","status_from":"","status_to":"received","timestamp":"2026-08-24T10:00:00Z","message":"submission received"},{"event_id":"evt_2","event_type":"review_requested","status_from":"received","status_to":"review_pending","timestamp":"2026-08-24T10:02:00Z","message":"review requested"}]}`
+
+func TestGetSubmissionUsesBearerAndReturnsFullDetail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api/v1/submissions/sub_1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.EscapedPath())
+		}
+		if authorization := r.Header.Get("Authorization"); authorization != "Bearer official-key" {
+			t.Fatalf("Authorization = %q, want Bearer official-key", authorization)
+		}
+		if accept := r.Header.Get("Accept"); accept != "application/json" {
+			t.Fatalf("Accept = %q, want application/json", accept)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(validSubmissionDetailJSON))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClientWithKey(t, server, "official-key")
+	got, err := client.GetSubmission(context.Background(), "sub_1")
+	if err != nil {
+		t.Fatalf("GetSubmission() error = %v", err)
+	}
+	if got.SubmissionID != "sub_1" || got.Type != domain.PowerTypeSkill || got.Name != "demo" || got.Version != "v1.0.0" ||
+		got.Description != "does things" || got.Message != "first release" || got.Status != domain.SubmissionReviewPending ||
+		got.CreatedAt != "2026-08-24T10:00:00Z" || got.UpdatedAt != "2026-08-24T10:02:00Z" || !got.ContentAvailable ||
+		got.ReviewComment != "" || got.PublishedVersion != "" {
+		t.Fatalf("GetSubmission() = %+v", got)
+	}
+	if len(got.ValidationErrors) != 1 || got.ValidationErrors[0] != "missing card" {
+		t.Fatalf("ValidationErrors = %#v", got.ValidationErrors)
+	}
+	if len(got.Timeline) != 2 || got.Timeline[0] != (domain.SubmissionEvent{
+		EventID: "evt_1", EventType: "submission_received", StatusTo: domain.SubmissionReceived,
+		Timestamp: "2026-08-24T10:00:00Z", Message: "submission received",
+	}) || got.Timeline[1].StatusFrom != domain.SubmissionReceived || got.Timeline[1].StatusTo != domain.SubmissionReviewPending {
+		t.Fatalf("Timeline = %#v", got.Timeline)
+	}
+}
+
+func TestListSubmissionsUsesBearerAndBoundedFilters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api/v1/submissions" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.EscapedPath())
+		}
+		if authorization := r.Header.Get("Authorization"); authorization != "Bearer official-key" {
+			t.Fatalf("Authorization = %q, want Bearer official-key", authorization)
+		}
+		if accept := r.Header.Get("Accept"); accept != "application/json" {
+			t.Fatalf("Accept = %q, want application/json", accept)
+		}
+		if r.URL.RawQuery != "name=demo&status=review_pending&type=skill" {
+			t.Fatalf("RawQuery = %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"review_pending","created_at":"2026-08-24T10:00:00Z"}]}`))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClientWithKey(t, server, "official-key")
+	got, err := client.ListSubmissions(context.Background(), domain.SubmissionListQuery{
+		Status: domain.SubmissionReviewPending,
+		Type:   domain.PowerTypeSkill,
+		Name:   "demo",
+	})
+	if err != nil || len(got.Items) != 1 {
+		t.Fatalf("ListSubmissions() = %+v, %v", got, err)
+	}
+	if got.Items[0] != (domain.SubmissionSummary{
+		SubmissionID: "sub_1", Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0",
+		Status: domain.SubmissionReviewPending, CreatedAt: "2026-08-24T10:00:00Z",
+	}) {
+		t.Fatalf("ListSubmissions() item = %+v", got.Items[0])
+	}
+}
+
+func TestSubmissionQueryRequiresAPIKeyBeforeTransport(t *testing.T) {
+	requests := 0
+	httpClient := &http.Client{
+		Timeout: time.Second,
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return nil, errors.New("transport must not be called")
+		}),
+	}
+	client, err := New("https://apc.example.com", httpClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GetSubmission(context.Background(), "sub_1"); !errors.Is(err, cloud.ErrAuth) {
+		t.Fatalf("GetSubmission() error = %v, want ErrAuth", err)
+	}
+	if _, err := client.ListSubmissions(context.Background(), domain.SubmissionListQuery{}); !errors.Is(err, cloud.ErrAuth) {
+		t.Fatalf("ListSubmissions() error = %v, want ErrAuth", err)
+	}
+	if requests != 0 {
+		t.Fatalf("transport requests = %d, want 0", requests)
+	}
+}
+
+func TestSubmissionQueryPreservesCancellationIdentity(t *testing.T) {
+	tests := []struct {
+		name      string
+		transport roundTripFunc
+		want      error
+	}{
+		{
+			name: "transport cancellation",
+			transport: func(*http.Request) (*http.Response, error) {
+				return nil, context.Canceled
+			},
+			want: context.Canceled,
+		},
+		{
+			name: "response read deadline",
+			transport: func(*http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       submissionErrorBody{err: context.DeadlineExceeded},
+				}, nil
+			},
+			want: context.DeadlineExceeded,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, err := NewWithAPIKey("https://apc.example.com", &http.Client{Timeout: time.Second, Transport: tt.transport}, "key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.GetSubmission(context.Background(), "sub_1"); !errors.Is(err, tt.want) || errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("GetSubmission() error = %v, want only %v identity", err, tt.want)
+			}
+			if _, err := client.ListSubmissions(context.Background(), domain.SubmissionListQuery{}); !errors.Is(err, tt.want) || errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("ListSubmissions() error = %v, want only %v identity", err, tt.want)
+			}
+		})
+	}
+}
+
+type submissionErrorBody struct {
+	err error
+}
+
+func (body submissionErrorBody) Read([]byte) (int, error) {
+	return 0, body.err
+}
+
+func (submissionErrorBody) Close() error {
+	return nil
+}
+
+func TestAnonymousCatalogNeverReceivesSubmissionBearer(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.EscapedPath())
+		if authorization := r.Header.Get("Authorization"); authorization != "" {
+			t.Fatalf("%s Authorization = %q, want empty", r.URL.EscapedPath(), authorization)
+		}
+		if r.URL.EscapedPath() == "/api/v1/resources" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"snapshot_updated_at":"2026-08-24T10:00:00Z","items":[],"next_cursor":""}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	client := newTestSubmissionClientWithKey(t, server, "official-key")
+	if _, err := client.List(context.Background()); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ref := domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}
+	if _, err := client.Resolve(context.Background(), ref); !errors.Is(err, cloud.ErrNotFound) {
+		t.Fatalf("Resolve() error = %v, want ErrNotFound", err)
+	}
+	if _, err := client.GetMCP(context.Background(), ref); !errors.Is(err, cloud.ErrNotFound) {
+		t.Fatalf("GetMCP() error = %v, want ErrNotFound", err)
+	}
+	if len(paths) != 3 {
+		t.Fatalf("anonymous resource request paths = %v, want 3 requests", paths)
+	}
+}
+
+func TestListSubmissionsRejectsInvalidResponses(t *testing.T) {
+	twentyOneItems := make([]string, 21)
+	for index := range twentyOneItems {
+		twentyOneItems[index] = fmt.Sprintf(
+			`{"submission_id":"sub_%02d","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"%s"}`,
+			index, time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC).Add(-time.Duration(index)*time.Minute).Format(time.RFC3339),
+		)
+	}
+	tests := []struct {
+		name  string
+		query domain.SubmissionListQuery
+		body  string
+	}{
+		{name: "more than twenty", body: `{"items":[` + strings.Join(twentyOneItems, ",") + `]}`},
+		{name: "terminal status", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"published","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "duplicate id", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"},{"submission_id":"sub_1","type":"mcp","name":"tools","version":"v1.0.0","status":"validating","created_at":"2026-08-24T09:00:00Z"}]}`},
+		{name: "status filter mismatch", query: domain.SubmissionListQuery{Status: domain.SubmissionReviewPending}, body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "type filter mismatch", query: domain.SubmissionListQuery{Type: domain.PowerTypeMCP}, body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "name filter mismatch", query: domain.SubmissionListQuery{Name: "other"}, body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "invalid timestamp", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"yesterday"}]}`},
+		{name: "increasing created at", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T09:00:00Z"},{"submission_id":"sub_2","type":"skill","name":"demo","version":"v1.0.1","status":"validating","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "missing items", body: `{}`},
+		{name: "duplicate JSON key", body: `{"items":[],"items":[]}`},
+		{name: "trailing JSON value", body: `{"items":[]} {}`},
+		{name: "empty id", body: `{"items":[{"submission_id":"","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "unknown type", body: `{"items":[{"submission_id":"sub_1","type":"workflow","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "noncanonical name", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"Demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "noncanonical version", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			client := newTestSubmissionClient(t, server)
+			if _, err := client.ListSubmissions(context.Background(), tt.query); !errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("ListSubmissions() error = %v, want ErrInvalidResponse", err)
+			}
+		})
+	}
+}
+
+func TestListSubmissionsAcceptsActiveStatusesAndForwardFields(t *testing.T) {
+	for _, status := range []domain.SubmissionStatus{
+		domain.SubmissionReceived,
+		domain.SubmissionValidating,
+		domain.SubmissionReviewPending,
+		domain.SubmissionApproved,
+		domain.SubmissionPublishing,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			body := fmt.Sprintf(`{"items":[{"submission_id":"sub_1","type":"agent","name":"demo","version":"v1.0.0","status":%q,"created_at":"2026-08-24T10:00:00Z","future_item":true}],"future_page":{"value":1}}`, status)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			client := newTestSubmissionClient(t, server)
+			got, err := client.ListSubmissions(context.Background(), domain.SubmissionListQuery{})
+			if err != nil || len(got.Items) != 1 || got.Items[0].Status != status {
+				t.Fatalf("ListSubmissions() = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestListSubmissionsAcceptsTwentyItemsWithEqualCreatedAt(t *testing.T) {
+	items := make([]string, 20)
+	for index := range items {
+		items[index] = fmt.Sprintf(
+			`{"submission_id":"sub_%02d","type":"plugin","name":"demo","version":"v1.0.0","status":"approved","created_at":"2026-08-24T10:00:00Z"}`,
+			index,
+		)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"review_pending","content_available":true,"validation_errors":["missing card"],"review_comment":"","published_version":""}`))
+		_, _ = w.Write([]byte(`{"items":[` + strings.Join(items, ",") + `]}`))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+	got, err := client.ListSubmissions(context.Background(), domain.SubmissionListQuery{})
+	if err != nil || len(got.Items) != 20 {
+		t.Fatalf("ListSubmissions() = %+v, %v", got, err)
+	}
+}
+
+func TestGetSubmissionRejectsInvalidResponses(t *testing.T) {
+	timeline := `[{"event_id":"evt_1","event_type":"submission_received","status_from":"","status_to":"received","timestamp":"2026-08-24T10:00:00Z","message":"submission received"},{"event_id":"evt_2","event_type":"review_requested","status_from":"received","status_to":"review_pending","timestamp":"2026-08-24T10:02:00Z","message":"review requested"}]`
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing description", body: strings.Replace(validSubmissionDetailJSON, `"description":"does things",`, "", 1)},
+		{name: "empty description", body: strings.Replace(validSubmissionDetailJSON, `"description":"does things"`, `"description":""`, 1)},
+		{name: "missing message", body: strings.Replace(validSubmissionDetailJSON, `"message":"first release",`, "", 1)},
+		{name: "empty message", body: strings.Replace(validSubmissionDetailJSON, `"message":"first release"`, `"message":""`, 1)},
+		{name: "missing created at", body: strings.Replace(validSubmissionDetailJSON, `"created_at":"2026-08-24T10:00:00Z",`, "", 1)},
+		{name: "missing updated at", body: strings.Replace(validSubmissionDetailJSON, `"updated_at":"2026-08-24T10:02:00Z",`, "", 1)},
+		{name: "missing timeline", body: strings.Replace(validSubmissionDetailJSON, `,"timeline":`+timeline, "", 1)},
+		{name: "missing identity type", body: strings.Replace(validSubmissionDetailJSON, `"type":"skill",`, "", 1)},
+		{name: "missing status", body: strings.Replace(validSubmissionDetailJSON, `"status":"review_pending",`, "", 1)},
+		{name: "response id mismatch", body: strings.Replace(validSubmissionDetailJSON, `"submission_id":"sub_1"`, `"submission_id":"sub_other"`, 1)},
+		{name: "invalid identity", body: strings.Replace(validSubmissionDetailJSON, `"version":"v1.0.0"`, `"version":"latest"`, 1)},
+		{name: "unknown status", body: strings.Replace(validSubmissionDetailJSON, `"status":"review_pending"`, `"status":"waiting"`, 1)},
+		{name: "invalid detail timestamp", body: strings.Replace(validSubmissionDetailJSON, `"updated_at":"2026-08-24T10:02:00Z"`, `"updated_at":"soon"`, 1)},
+		{name: "decreasing timeline", body: strings.Replace(validSubmissionDetailJSON, `"timestamp":"2026-08-24T10:02:00Z"`, `"timestamp":"2026-08-24T09:59:00Z"`, 1)},
+		{name: "unknown status from", body: strings.Replace(validSubmissionDetailJSON, `"status_from":"received"`, `"status_from":"waiting"`, 1)},
+		{name: "missing status from", body: strings.Replace(validSubmissionDetailJSON, `"status_from":"",`, "", 1)},
+		{name: "empty status to", body: strings.Replace(validSubmissionDetailJSON, `"status_to":"received"`, `"status_to":""`, 1)},
+		{name: "empty event id", body: strings.Replace(validSubmissionDetailJSON, `"event_id":"evt_1"`, `"event_id":""`, 1)},
+		{name: "missing event type", body: strings.Replace(validSubmissionDetailJSON, `,"event_type":"submission_received"`, "", 1)},
+		{name: "empty event message", body: strings.Replace(validSubmissionDetailJSON, `"message":"submission received"`, `"message":""`, 1)},
+		{name: "missing event message", body: strings.Replace(validSubmissionDetailJSON, `,"message":"submission received"`, "", 1)},
+		{name: "missing event timestamp", body: strings.Replace(validSubmissionDetailJSON, `,"timestamp":"2026-08-24T10:00:00Z"`, "", 1)},
+		{name: "missing content available", body: strings.Replace(validSubmissionDetailJSON, `"content_available":true,`, "", 1)},
+		{name: "missing validation errors", body: strings.Replace(validSubmissionDetailJSON, `"validation_errors":["missing card"],`, "", 1)},
+		{name: "missing review comment", body: strings.Replace(validSubmissionDetailJSON, `"review_comment":"",`, "", 1)},
+		{name: "missing published version", body: strings.Replace(validSubmissionDetailJSON, `"published_version":"",`, "", 1)},
+		{name: "duplicate nested key", body: strings.Replace(validSubmissionDetailJSON, `"event_id":"evt_1"`, `"event_id":"evt_1","event_id":"shadow"`, 1)},
+		{name: "trailing JSON value", body: validSubmissionDetailJSON + ` []`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			client := newTestSubmissionClient(t, server)
+			if _, err := client.GetSubmission(context.Background(), "sub_1"); !errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("GetSubmission() error = %v, want ErrInvalidResponse", err)
+			}
+		})
+	}
+}
+
+func TestGetSubmissionAcceptsPresentZeroValuesAndUnknownFields(t *testing.T) {
+	body := `{"submission_id":"sub_1","type":"mcp","name":"demo","version":"v1.0.0","description":"does things","message":"first release","status":"published","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:02:00Z","content_available":false,"validation_errors":[],"review_comment":"","published_version":"","timeline":[{"event_id":"evt_1","event_type":"published","status_from":"publishing","status_to":"published","timestamp":"2026-08-24T10:00:00Z","message":"published","future_event":true},{"event_id":"evt_2","event_type":"catalog_updated","status_from":"published","status_to":"published","timestamp":"2026-08-24T10:00:00Z","message":"catalog updated"}],"future_detail":{"enabled":true}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
 	}))
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
@@ -449,33 +798,24 @@ func TestGetSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSubmission() error = %v", err)
 	}
-	if got.SubmissionID != "sub_1" || got.Name != "demo" || got.Status != domain.SubmissionReviewPending {
-		t.Fatalf("GetSubmission() = %+v", got)
-	}
-	if len(got.ValidationErrors) != 1 || got.ValidationErrors[0] != "missing card" {
-		t.Fatalf("ValidationErrors = %#v", got.ValidationErrors)
+	if got.ContentAvailable || got.ValidationErrors == nil || got.Timeline == nil || len(got.ValidationErrors) != 0 || len(got.Timeline) != 2 {
+		t.Fatalf("GetSubmission() present zero values = %+v", got)
 	}
 }
 
-func TestListSubmissions(t *testing.T) {
-	var gotQuery string
+func TestGetSubmissionMapsCrossAccountNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2024-01-01T00:00:00Z"}],"next_cursor":"next"}`))
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"status":404,"code":"NOT_FOUND","trace_id":"tr_hidden"}`))
 	}))
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
-	got, err := client.ListSubmissions(context.Background(), domain.SubmissionListQuery{Status: domain.SubmissionReceived, Type: domain.PowerTypeSkill, Name: "demo", Limit: 10})
-	if err != nil {
-		t.Fatalf("ListSubmissions() error = %v", err)
+	_, err := client.GetSubmission(context.Background(), "sub_other_account")
+	if !errors.Is(err, cloud.ErrNotFound) || errors.Is(err, cloud.ErrAuth) {
+		t.Fatalf("GetSubmission() error = %v, want only ErrNotFound", err)
 	}
-	if len(got.Items) != 1 || got.Items[0].SubmissionID != "sub_1" || got.NextCursor != "next" {
-		t.Fatalf("ListSubmissions() = %+v", got)
-	}
-	for _, want := range []string{"status=received", "type=skill", "name=demo", "limit=10"} {
-		if !strings.Contains(gotQuery, want) {
-			t.Fatalf("query %q missing %q", gotQuery, want)
-		}
+	if !strings.Contains(err.Error(), "NOT_FOUND") || !strings.Contains(err.Error(), "tr_hidden") {
+		t.Fatalf("GetSubmission() error = %v, want safe problem context", err)
 	}
 }
