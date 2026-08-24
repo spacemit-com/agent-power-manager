@@ -26,6 +26,7 @@ APM（Feature 023）：
 - `993a796 docs(c4): align cli flags diagram`
 - `c546650 fix(submission): freeze validated source content`
 - `6f59f36 fix(submission): validate replay and quota errors`
+- `7ee75ba fix(submission): validate plugin snapshot closure`
 
 APC（文档契约，未添加 APC Changelog）：
 - `da453e7 docs(submission): bound authenticated active queries`
