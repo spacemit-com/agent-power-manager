@@ -29,6 +29,7 @@ import (
 )
 
 const canonicalSnapshotTime = "2026-08-01T00:00:00Z"
+const canonicalSubmissionAPIKey = "contract-key"
 
 type canonicalRemoteResource struct {
 	ref         domain.PowerRef
@@ -41,6 +42,8 @@ type canonicalRemoteServer struct {
 	resources          []canonicalRemoteResource
 	mu                 sync.Mutex
 	protocolViolations []string
+	submissions        []recordedSubmission
+	tooManyActive      bool
 }
 
 func newCanonicalRemoteServer(t *testing.T, root string) *canonicalRemoteServer {
@@ -165,11 +168,15 @@ func deterministicArchive(t *testing.T, root string) []byte {
 }
 
 func (fixture *canonicalRemoteServer) serveHTTP(writer http.ResponseWriter, request *http.Request) {
+	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	if len(segments) >= 3 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "submissions" {
+		fixture.serveSubmissionAPI(writer, request, segments)
+		return
+	}
 	if request.Method != http.MethodGet {
 		fixture.rejectProtocol(writer, request, "method = %q, want GET", request.Method)
 		return
 	}
-	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 	if len(segments) == 3 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "resources" {
 		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources"}, "application/json", true) {
 			return
@@ -264,6 +271,10 @@ func (fixture *canonicalRemoteServer) requireRequest(writer http.ResponseWriter,
 	acceptValues := request.Header.Values("Accept")
 	if len(acceptValues) != 1 || acceptValues[0] != accept {
 		fixture.rejectProtocol(writer, request, "Accept = %q, want exactly %q", acceptValues, accept)
+		return false
+	}
+	if authorization := request.Header.Values("Authorization"); len(authorization) != 0 {
+		fixture.rejectProtocol(writer, request, "resource Authorization = %q, want absent", authorization)
 		return false
 	}
 	if list {
@@ -410,7 +421,7 @@ func (resource canonicalRemoteResource) metadata(exact bool) map[string]any {
 	digest := md5.Sum(resource.content)
 	metadata := map[string]any{
 		"type": resource.ref.Type, "name": resource.ref.Name, "version": resource.ref.Version,
-		"description": "canonical test fixture", "change_summary": "fixture",
+		"description": "canonical test fixture", "message": "publish canonical fixture",
 		"content_type": resource.contentType, "content_size": len(resource.content),
 		"content_md5": hex.EncodeToString(digest[:]), "published_at": canonicalSnapshotTime,
 	}
@@ -422,41 +433,50 @@ func (resource canonicalRemoteResource) metadata(exact bool) map[string]any {
 	return metadata
 }
 
-func writeCanonicalJSON(writer http.ResponseWriter, value any) {
-	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(writer).Encode(value)
+// serveSubmissionAPI 模拟提交、本人活动列表与详情三个 APC v1 端点，并严格校验
+// Bearer、无分页查询及提交幂等键，避免跨层测试被宽松 fake 掩盖。
+func (fixture *canonicalRemoteServer) serveSubmissionAPI(writer http.ResponseWriter, request *http.Request, segments []string) {
+	if authorization := request.Header.Values("Authorization"); len(authorization) != 1 || authorization[0] != "Bearer "+canonicalSubmissionAPIKey {
+		fixture.rejectProtocol(writer, request, "Authorization = %q, want exactly one contract Bearer", authorization)
+		return
+	}
+	if values := request.Header.Values("Accept"); len(values) != 1 || values[0] != "application/json" {
+		fixture.rejectProtocol(writer, request, "Accept = %q, want exactly application/json", values)
+		return
+	}
+	if request.URL.RawQuery != "" || request.URL.ForceQuery {
+		fixture.rejectProtocol(writer, request, "submission query = %q, want none", request.URL.RawQuery)
+		return
+	}
+	switch {
+	case len(segments) == 3 && request.Method == http.MethodPost:
+		fixture.serveSubmissionCreate(writer, request)
+	case len(segments) == 3 && request.Method == http.MethodGet:
+		fixture.serveSubmissionList(writer)
+	case len(segments) == 4 && request.Method == http.MethodGet && segments[3] == "sub_active":
+		fixture.serveSubmissionDetail(writer)
+	default:
+		fixture.rejectProtocol(writer, request, "unknown submission endpoint")
+	}
 }
 
-// agentSubmissionServer 记录收到的 multipart 提交请求（metadata 与 content part），
-// 并返回固定状态码与响应体，供跨层 Agent 提交契约测试复用。
-type agentSubmissionServer struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	status int
-	body   string
-	got    []recordedAgentSubmission
-}
-
-type recordedAgentSubmission struct {
-	metadata    map[string]any
-	contentType string
-	content     []byte
-	parseErr    error
-}
-
-func newAgentSubmissionServer(t *testing.T, status int, body string) *agentSubmissionServer {
-	t.Helper()
-	fixture := &agentSubmissionServer{status: status, body: body}
-	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
-	t.Cleanup(fixture.server.Close)
-	return fixture
-}
-
-func (fixture *agentSubmissionServer) serveHTTP(writer http.ResponseWriter, request *http.Request) {
-	metadata, contentType, content, parseErr := readAgentSubmissionParts(request)
+func (fixture *canonicalRemoteServer) serveSubmissionCreate(writer http.ResponseWriter, request *http.Request) {
+	if strings.TrimSpace(request.Header.Get("Idempotency-Key")) == "" {
+		fixture.rejectProtocol(writer, request, "Idempotency-Key is empty")
+		return
+	}
 	fixture.mu.Lock()
-	fixture.got = append(fixture.got, recordedAgentSubmission{
+	tooManyActive := fixture.tooManyActive
+	fixture.mu.Unlock()
+	if tooManyActive {
+		writer.Header().Set("Content-Type", "application/problem+json")
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{"status":409,"code":"TOO_MANY_ACTIVE_SUBMISSIONS","trace_id":"tr_contract_quota"}`))
+		return
+	}
+	metadata, contentType, content, parseErr := readCanonicalSubmissionParts(request)
+	fixture.mu.Lock()
+	fixture.submissions = append(fixture.submissions, recordedSubmission{
 		metadata: metadata, contentType: contentType, content: content, parseErr: parseErr,
 	})
 	fixture.mu.Unlock()
@@ -464,14 +484,71 @@ func (fixture *agentSubmissionServer) serveHTTP(writer http.ResponseWriter, requ
 		http.Error(writer, "invalid submission", http.StatusBadRequest)
 		return
 	}
+	submissionID := "sub_" + fmt.Sprint(metadata["type"])
 	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(fixture.status)
-	_, _ = writer.Write([]byte(fixture.body))
+	writer.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(writer).Encode(map[string]any{
+		"submission_id": submissionID,
+		"status":        "received",
+		"status_url":    "/api/v1/submissions/" + submissionID,
+	})
 }
 
-// readAgentSubmissionParts 解析 multipart 提交请求，返回 metadata JSON map、content part 的
+func (fixture *canonicalRemoteServer) serveSubmissionList(writer http.ResponseWriter) {
+	writeCanonicalJSON(writer, map[string]any{"items": []map[string]any{{
+		"submission_id": "sub_active",
+		"type":          "skill",
+		"name":          "contract-skill",
+		"version":       "v1.2.3",
+		"status":        "review_pending",
+		"created_at":    "2026-08-25T10:00:00Z",
+	}}})
+}
+
+func (fixture *canonicalRemoteServer) serveSubmissionDetail(writer http.ResponseWriter) {
+	writeCanonicalJSON(writer, map[string]any{
+		"submission_id":     "sub_active",
+		"type":              "skill",
+		"name":              "contract-skill",
+		"version":           "v1.2.3",
+		"description":       "Cross-layer Skill",
+		"message":           "publish skill",
+		"status":            "review_pending",
+		"created_at":        "2026-08-25T10:00:00Z",
+		"updated_at":        "2026-08-25T10:01:00Z",
+		"content_available": true,
+		"validation_errors": []string{},
+		"review_comment":    "",
+		"published_version": "",
+		"timeline": []map[string]any{
+			{
+				"event_id": "evt_received", "event_type": "status_changed", "status_from": "", "status_to": "received",
+				"timestamp": "2026-08-25T10:00:00Z", "message": "submission received",
+			},
+			{
+				"event_id": "evt_review", "event_type": "status_changed", "status_from": "received", "status_to": "review_pending",
+				"timestamp": "2026-08-25T10:01:00Z", "message": "review requested",
+			},
+		},
+	})
+}
+
+func writeCanonicalJSON(writer http.ResponseWriter, value any) {
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(writer).Encode(value)
+}
+
+type recordedSubmission struct {
+	metadata    map[string]any
+	contentType string
+	content     []byte
+	parseErr    error
+}
+
+// readCanonicalSubmissionParts 解析 multipart 提交请求，返回 metadata JSON map、content part 的
 // Content-Type 与原始字节；该函数运行在服务器 goroutine，因此只返回错误而非调用 t.Fatal。
-func readAgentSubmissionParts(request *http.Request) (map[string]any, string, []byte, error) {
+func readCanonicalSubmissionParts(request *http.Request) (map[string]any, string, []byte, error) {
 	mediaType, parameters, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err != nil || mediaType != "multipart/form-data" {
 		return nil, "", nil, fmt.Errorf("Content-Type = %q: %v", request.Header.Get("Content-Type"), err)
@@ -505,33 +582,27 @@ func readAgentSubmissionParts(request *http.Request) (map[string]any, string, []
 	return metadata, contentType, content, nil
 }
 
-// assertReceivedAgentSubmission 断言恰好收到一次提交，且其元数据身份、content part 媒体类型与原始
-// agent.yaml 字节完全一致。
-func (fixture *agentSubmissionServer) assertReceivedAgentSubmission(t *testing.T, want domain.PowerType, name, version, description, changeSummary string, raw []byte) {
+func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, want domain.PowerType, name, version, description, message, contentType string) {
 	t.Helper()
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
-	if len(fixture.got) != 1 {
-		t.Fatalf("submissions received = %d, want 1", len(fixture.got))
+	if len(fixture.submissions) == 0 {
+		t.Fatal("submissions received = 0, want at least 1")
 	}
-	got := fixture.got[0]
+	got := fixture.submissions[len(fixture.submissions)-1]
 	if got.parseErr != nil {
 		t.Fatalf("submission parse error: %v", got.parseErr)
 	}
-	wantMD5 := md5.Sum(raw)
-	if got.metadata["type"] != string(want) ||
-		got.metadata["name"] != name ||
-		got.metadata["version"] != version ||
-		got.metadata["description"] != description ||
-		got.metadata["change_summary"] != changeSummary ||
-		got.metadata["content_md5"] != hex.EncodeToString(wantMD5[:]) {
-		t.Fatalf("metadata = %#v, want type=%q name=%q version=%q description=%q change_summary=%q content_md5=%q",
-			got.metadata, want, name, version, description, changeSummary, hex.EncodeToString(wantMD5[:]))
+	if got.metadata["type"] != string(want) || got.metadata["name"] != name ||
+		got.metadata["version"] != version || got.metadata["description"] != description ||
+		got.metadata["message"] != message {
+		t.Fatalf("metadata = %#v, want %s/%s@%s description=%q message=%q", got.metadata, want, name, version, description, message)
 	}
-	if got.contentType != "application/yaml" {
-		t.Fatalf("content part Content-Type = %q, want application/yaml", got.contentType)
+	if got.contentType != contentType || len(got.content) == 0 {
+		t.Fatalf("content = type %q size %d, want %q and non-empty", got.contentType, len(got.content), contentType)
 	}
-	if !bytes.Equal(got.content, raw) {
-		t.Fatalf("content part bytes = %q, want exact raw agent.yaml %q", got.content, raw)
+	wantMD5 := md5.Sum(got.content)
+	if got.metadata["content_md5"] != hex.EncodeToString(wantMD5[:]) {
+		t.Fatalf("metadata content_md5 = %v, want %q", got.metadata["content_md5"], hex.EncodeToString(wantMD5[:]))
 	}
 }

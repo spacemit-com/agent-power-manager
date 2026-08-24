@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,16 +27,26 @@ func clearCloudEnvironment(t *testing.T) {
 }
 
 func TestNewSubmitLifecycleRequiresAPIKey(t *testing.T) {
-	clearCloudEnvironment(t)
-	if _, err := newSubmitLifecycle(); err == nil {
-		t.Fatal("newSubmitLifecycle() error = nil, want error when APC_API_KEY missing")
+	for _, apiKey := range []string{"", " \t\n"} {
+		t.Run(fmt.Sprintf("key_%q", apiKey), func(t *testing.T) {
+			clearCloudEnvironment(t)
+			t.Setenv("APC_API_KEY", apiKey)
+			if _, err := newSubmitLifecycle(); err == nil {
+				t.Fatal("newSubmitLifecycle() error = nil, want error when APC_API_KEY blank")
+			}
+		})
 	}
 }
 
 func TestNewSubmissionQueryLifecycleRequiresAPIKey(t *testing.T) {
-	clearCloudEnvironment(t)
-	if _, err := newSubmissionQueryLifecycle(); err == nil {
-		t.Fatal("newSubmissionQueryLifecycle() error = nil, want error when APC_API_KEY missing")
+	for _, apiKey := range []string{"", " \t\n"} {
+		t.Run(fmt.Sprintf("key_%q", apiKey), func(t *testing.T) {
+			clearCloudEnvironment(t)
+			t.Setenv("APC_API_KEY", apiKey)
+			if _, err := newSubmissionQueryLifecycle(); err == nil {
+				t.Fatal("newSubmissionQueryLifecycle() error = nil, want error when APC_API_KEY blank")
+			}
+		})
 	}
 }
 
@@ -88,6 +99,9 @@ func TestNewCloudClientUsesRemoteBaseURLOverride(t *testing.T) {
 	var requestPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestPath = r.URL.RequestURI()
+		if authorization := r.Header.Values("Authorization"); len(authorization) != 0 {
+			t.Errorf("anonymous catalog Authorization = %q, want absent", authorization)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"snapshot_updated_at":"2026-08-21T00:00:00Z","items":[],"next_cursor":""}`))
 	}))

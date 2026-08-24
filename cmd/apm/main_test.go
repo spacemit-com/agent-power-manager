@@ -261,6 +261,36 @@ func TestDefaultLifecycleFactoriesConstructWithMCPRecoveryResolver(t *testing.T)
 	}
 }
 
+func TestAnonymousRemoteSearchListAndInstallLifecyclesConstruct(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	changeToRepositoryRoot(t)
+	clearCloudEnvironment(t)
+	// 未选中的 Local 根故意无效，证明三个匿名 lifecycle 都惰性选择无 Key 的 Remote Client。
+	t.Setenv("APM_CLOUD_LOCAL_ROOT", "relative/resources")
+
+	factories := []struct {
+		name string
+		open func() (any, error)
+	}{
+		{name: "search", open: func() (any, error) { return newSearchLifecycle() }},
+		{name: "list", open: func() (any, error) { return newListLifecycle() }},
+		{name: "install", open: func() (any, error) { return newInstallLifecycle() }},
+	}
+	for _, factory := range factories {
+		t.Run(factory.name, func(t *testing.T) {
+			got, err := factory.open()
+			if err != nil || got == nil {
+				t.Fatalf("factory = %T, %v, want non-nil anonymous Remote lifecycle", got, err)
+			}
+		})
+	}
+}
+
 func TestNewValidateLifecycleConstructsOffline(t *testing.T) {
 	clearCloudEnvironment(t)
 	service, err := newValidateLifecycle()

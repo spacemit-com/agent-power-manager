@@ -1,7 +1,6 @@
 package cloud_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,7 +21,6 @@ import (
 	"apm/internal/cloud/remote"
 	"apm/internal/domain"
 	"apm/internal/lifecycle"
-	"apm/internal/submission"
 	"github.com/Masterminds/semver/v3"
 )
 
@@ -611,84 +609,209 @@ func privateTestDir(t *testing.T) string {
 	return directory
 }
 
-// TestRemoteAgentSubmissionContract 通过真实 Remote Client、fake HTTP server 与生命周期 Submit 服务，
-// 证明原始 agent.yaml 被离线校验后按字节原样发布：服务端收到精确身份与 raw content part，
-// 且 202 受理与 200 幂等重放分别驱动 CLI 到 accepted/replayed 结果。
-func TestRemoteAgentSubmissionContract(t *testing.T) {
+// TestRemoteSubmissionAndMCPContract 通过真实 Remote Client、fake APC 与生命周期服务，
+// 复验四类资源的提交身份、本人提交查询、活动配额错误以及完整 MCP 资源解包边界。
+func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 	root, err := filepath.Abs("resources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixturePath := filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0", "agent.yaml")
-	raw := readCanonicalFile(t, fixturePath)
-	const changeSummary = "e2e agent submission"
-
-	validation, err := submission.Validate(context.Background(), submission.Request{
-		Type: domain.PowerTypeAgent, Path: fixturePath, ChangeSummary: changeSummary,
-	})
+	sourceRoot := t.TempDir()
+	skillRoot := filepath.Join(sourceRoot, "contract-skill")
+	writeContractSourceFile(t, filepath.Join(skillRoot, "SKILL.md"), "---\nname: contract-skill\nversion: \"v1.2.3\"\ndescription: Cross-layer Skill\n---\n# Contract Skill\n")
+	writeContractSourceFile(t, filepath.Join(skillRoot, "skill-card.md"), contractSkillCard)
+	pluginRoot := filepath.Join(sourceRoot, "contract-plugin")
+	writeContractSourceFile(t, filepath.Join(pluginRoot, "apc-plugin.json"), `{"schema_version":1,"name":"contract-plugin","version":"v2.0.0","description":"Cross-layer Plugin","skills":["skills/helper"]}`)
+	writeContractSourceFile(t, filepath.Join(pluginRoot, "skills", "helper", "SKILL.md"), "---\nname: helper\nversion: \"v1.0.0\"\ndescription: Embedded helper\n---\n# Helper\n")
+	writeContractSourceFile(t, filepath.Join(pluginRoot, "skills", "helper", "skill-card.md"), contractSkillCard)
+	server := newCanonicalRemoteServer(t, root)
+	client, err := remote.NewWithAPIKey(server.server.URL, &http.Client{Timeout: 5 * time.Second}, canonicalSubmissionAPIKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if validation.Name != "bianbu-agent-default" || validation.Version != "v1.0.0" || validation.Description == "" {
-		t.Fatalf("Validate() identity = name %q version %q description %q", validation.Name, validation.Version, validation.Description)
-	}
-
-	content, err := submission.Prepare(context.Background(), submission.Request{
-		Type: domain.PowerTypeAgent, Path: fixturePath, ChangeSummary: changeSummary,
-	})
+	submitService, err := lifecycle.NewSubmit(client)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if content.Type != domain.PowerTypeAgent || content.Name != validation.Name ||
-		content.Version != validation.Version || content.Description != validation.Description ||
-		content.ChangeSummary != changeSummary || content.ContentType != "application/yaml" ||
-		!bytes.Equal(content.Bytes, raw) || content.MD5 == "" {
-		t.Fatalf("Prepare() = %#v, want identity %+v with exact raw bytes", content, validation)
-	}
 
-	tests := []struct {
-		name    string
-		status  int
-		body    string
-		outcome string
-		state   domain.SubmissionStatus
+	submissions := []struct {
+		powerType   domain.PowerType
+		path        string
+		name        string
+		version     string
+		description string
+		contentType string
 	}{
 		{
-			name:    "accepted",
-			status:  http.StatusAccepted,
-			body:    `{"submission_id":"sub_new","status":"received","status_url":"/api/v1/submissions/sub_new"}`,
-			outcome: "accepted",
-			state:   domain.SubmissionReceived,
+			powerType: domain.PowerTypeSkill,
+			path:      skillRoot,
+			name:      "contract-skill", version: "v1.2.3",
+			description: "Cross-layer Skill", contentType: "application/gzip",
 		},
 		{
-			name:    "replayed",
-			status:  http.StatusOK,
-			body:    `{"submission_id":"sub_replay","type":"agent","name":"bianbu-agent-default","version":"v1.0.0","status":"published","content_available":true,"validation_errors":[],"review_comment":"","published_version":"v1.0.0"}`,
-			outcome: "replayed",
-			state:   domain.SubmissionPublished,
+			powerType: domain.PowerTypePlugin,
+			path:      pluginRoot,
+			name:      "contract-plugin", version: "v2.0.0",
+			description: "Cross-layer Plugin", contentType: "application/gzip",
+		},
+		{
+			powerType: domain.PowerTypeMCP,
+			path:      filepath.Join(root, "mcps", "filesystem", "v0.1.0", "MCP.json"),
+			name:      "filesystem", version: "v0.1.0",
+			description: "Filesystem MCP server with a workspace root", contentType: "application/json",
+		},
+		{
+			powerType: domain.PowerTypeAgent,
+			path:      filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0", "agent.yaml"),
+			name:      "bianbu-agent-default", version: "v1.0.0",
+			description: "Project-local Bianbu agent", contentType: "application/yaml",
 		},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			server := newAgentSubmissionServer(t, test.status, test.body)
-			client, err := remote.NewWithAPIKey(server.server.URL, &http.Client{Timeout: 5 * time.Second}, "key")
-			if err != nil {
-				t.Fatal(err)
-			}
-			submitService, err := lifecycle.NewSubmit(client)
-			if err != nil {
-				t.Fatal(err)
-			}
+	for _, test := range submissions {
+		t.Run("submit_"+string(test.powerType), func(t *testing.T) {
+			message := "publish " + string(test.powerType)
 			result, err := submitService.Submit(context.Background(), cli.Flags{
-				Type: "agent", ChangeSummary: changeSummary,
-			}, []string{fixturePath})
+				Type: string(test.powerType), Message: "  " + message + "  ",
+			}, []string{test.path})
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			if result.Outcome != test.outcome || result.Status != string(test.state) {
-				t.Fatalf("Submit() = %#v, want outcome %q status %q", result, test.outcome, test.state)
+			if result.Outcome != string(domain.SubmissionAccepted) || result.SubmissionID != "sub_"+string(test.powerType) || result.Status != string(domain.SubmissionReceived) {
+				t.Fatalf("Submit() = %#v, want accepted/received", result)
 			}
-			server.assertReceivedAgentSubmission(t, content.Type, content.Name, content.Version, content.Description, changeSummary, raw)
+			server.assertReceivedSubmission(t, test.powerType, test.name, test.version, test.description, message, test.contentType)
 		})
+	}
+
+	queryService, err := lifecycle.NewSubmissionQuery(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := queryService.List(context.Background(), cli.Flags{})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(listed.Summaries) != 1 || listed.Summaries[0] != (domain.SubmissionSummary{
+		SubmissionID: "sub_active", Type: domain.PowerTypeSkill, Name: "contract-skill", Version: "v1.2.3",
+		Status: domain.SubmissionReviewPending, CreatedAt: "2026-08-25T10:00:00Z",
+	}) {
+		t.Fatalf("List() = %#v, want one active contract-skill submission", listed)
+	}
+	detail, err := queryService.Get(context.Background(), "sub_active")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	wantDetail := domain.Submission{
+		SubmissionID: "sub_active", Type: domain.PowerTypeSkill, Name: "contract-skill", Version: "v1.2.3",
+		Description: "Cross-layer Skill", Message: "publish skill", Status: domain.SubmissionReviewPending,
+		CreatedAt: "2026-08-25T10:00:00Z", UpdatedAt: "2026-08-25T10:01:00Z", ContentAvailable: true,
+		ValidationErrors: []string{}, ReviewComment: "", PublishedVersion: "",
+		Timeline: []domain.SubmissionEvent{
+			{
+				EventID: "evt_received", EventType: "status_changed", StatusFrom: "", StatusTo: domain.SubmissionReceived,
+				Timestamp: "2026-08-25T10:00:00Z", Message: "submission received",
+			},
+			{
+				EventID: "evt_review", EventType: "status_changed", StatusFrom: domain.SubmissionReceived, StatusTo: domain.SubmissionReviewPending,
+				Timestamp: "2026-08-25T10:01:00Z", Message: "review requested",
+			},
+		},
+	}
+	if detail.Detail == nil || !reflect.DeepEqual(*detail.Detail, wantDetail) {
+		t.Fatalf("Get() = %#v, want full detail %#v", detail, wantDetail)
+	}
+
+	server.mu.Lock()
+	server.tooManyActive = true
+	server.mu.Unlock()
+	_, err = submitService.Submit(context.Background(), cli.Flags{
+		Type: "agent", Message: "quota probe",
+	}, []string{filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0", "agent.yaml")})
+	if !errors.Is(err, cloud.ErrTooManyActiveSubmissions) || !errors.Is(err, cloud.ErrSubmissionConflict) ||
+		!strings.Contains(err.Error(), "TOO_MANY_ACTIVE_SUBMISSIONS") {
+		t.Fatalf("Submit() quota error = %v, want typed TOO_MANY_ACTIVE_SUBMISSIONS conflict", err)
+	}
+
+	mcp, err := client.GetMCP(context.Background(), domain.PowerRef{
+		Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v0.1.0",
+	})
+	if err != nil {
+		t.Fatalf("GetMCP() error = %v", err)
+	}
+	wantMCP := domain.MCPServer{
+		Transport: domain.MCPTransportStdio,
+		Command:   "npx",
+		Args:      []string{"-y", "@modelcontextprotocol/server-filesystem", "/workspace"},
+	}
+	if !reflect.DeepEqual(mcp, wantMCP) {
+		t.Fatalf("GetMCP() = %#v, want only definition %#v", mcp, wantMCP)
+	}
+}
+
+const contractSkillCard = `# Skill Card: Contract Fixture
+
+## Capability
+Cross-layer contract verification.
+
+## Use Cases
+Exercise submission composition.
+
+## Inputs and Outputs
+Input source files and output a submission.
+
+## Dependencies
+None.
+
+## Limitations
+Test fixture only.
+
+## Maintainer
+Owner: APM tests
+Contact: tests@example.com
+`
+
+func writeContractSourceFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBundledMCPResourcesUseCanonicalV1Schema(t *testing.T) {
+	root := filepath.Join("resources", "mcps")
+	count := 0
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || entry.Name() != "MCP.json" {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(filepath.ToSlash(relative), "/")
+		if len(parts) != 3 || parts[2] != "MCP.json" {
+			return fmt.Errorf("bundled MCP path %q is not <name>/<version>/MCP.json", relative)
+		}
+		resource, err := domain.DecodeMCPResourceJSON(readCanonicalFile(t, path))
+		if err != nil {
+			return fmt.Errorf("decode bundled MCP %q: %w", relative, err)
+		}
+		if resource.Name != parts[0] || resource.Version != parts[1] {
+			return fmt.Errorf("bundled MCP %q declares %s@%s", relative, resource.Name, resource.Version)
+		}
+		count++
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count == 0 {
+		t.Fatal("bundled MCP fixture walk found no MCP.json files")
 	}
 }
