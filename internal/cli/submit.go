@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"apm/internal/cloud"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +34,9 @@ func newSubmitCommand(newLifecycle SubmitLifecycleFactory) *cobra.Command {
 			}
 			result, err := service.Submit(command.Context(), flags, args)
 			if err != nil {
+				if errors.Is(err, cloud.ErrTooManyActiveSubmissions) {
+					return fmt.Errorf("too many active submissions; run `apm submission list` before retrying: %w", err)
+				}
 				return err
 			}
 			return renderSubmit(command.OutOrStdout(), result)

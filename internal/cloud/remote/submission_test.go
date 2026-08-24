@@ -168,12 +168,13 @@ func TestSubmitReturnsSameContentReplayedResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","description":"does things","message":"first","status":"review_pending","content_available":true,"validation_errors":[],"review_comment":"","published_version":""}`))
+		_, _ = w.Write([]byte(validSubmissionDetailJSON))
 	}))
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Message: "first", ContentType: "application/gzip", Content: []byte("x"),
+		Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
+		Message: "first release", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
@@ -207,12 +208,14 @@ func TestSubmitAcceptsUnknownResponseFields(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"published","content_available":true,"validation_errors":[],"review_comment":"","published_version":"v1.0.0","future_field":true}`))
+			body := strings.TrimSuffix(validSubmissionDetailJSON, "}") + `,"future_field":true}`
+			_, _ = w.Write([]byte(body))
 		}))
 		defer server.Close()
 		client := newTestSubmissionClient(t, server)
 		got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-			Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+			Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
+			Message: "first release", ContentType: "application/gzip", Content: []byte("x"),
 		})
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
@@ -245,8 +248,7 @@ func TestSubmitRejectsOther2xxStatus(t *testing.T) {
 
 // TestSubmitRejectsShapeMismatch 验证客户端严格按 HTTP 状态分流，不按字段形状猜测语义：
 // 202 必须携带 receipt 的 status_url，Submission 形状（缺少 status_url）被拒绝。
-// 200 方向现在按契约忽略未知响应字段（见 TestSubmitAcceptsUnknownResponseFields），
-// 因此不再把「200 携带 receipt 形状 body」当作形状不匹配而拒绝。
+// 200 必须是完整 Submission 详情，其必填字段和 timeline 负例由 TestSubmitRejectsInvalidReplayDetail 覆盖。
 func TestSubmitRejectsShapeMismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -272,6 +274,7 @@ func TestSubmitRejectsMalformedAcceptedResponse(t *testing.T) {
 		{name: "wrong content type", contentType: "text/plain", body: `{"submission_id":"sub_1","status":"received","status_url":"/s"}`},
 		{name: "duplicate key", contentType: "application/json", body: `{"submission_id":"sub_1","submission_id":"sub_2","status":"received","status_url":"/s"}`},
 		{name: "unknown status", contentType: "application/json", body: `{"submission_id":"sub_1","status":"weird","status_url":"/s"}`},
+		{name: "non-received status", contentType: "application/json", body: `{"submission_id":"sub_1","status":"validating","status_url":"/s"}`},
 		{name: "empty id", contentType: "application/json", body: `{"submission_id":"","status":"received","status_url":"/s"}`},
 		{name: "empty status url", contentType: "application/json", body: `{"submission_id":"sub_1","status":"received","status_url":""}`},
 	}
@@ -468,6 +471,44 @@ func TestSubmitMaps503(t *testing.T) {
 }
 
 const validSubmissionDetailJSON = `{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","description":"does things","message":"first release","status":"review_pending","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:02:00Z","content_available":true,"validation_errors":["missing card"],"review_comment":"","published_version":"","timeline":[{"event_id":"evt_1","event_type":"submission_received","status_from":"","status_to":"received","timestamp":"2026-08-24T10:00:00Z","message":"submission received"},{"event_id":"evt_2","event_type":"review_requested","status_from":"received","status_to":"review_pending","timestamp":"2026-08-24T10:02:00Z","message":"review requested"}]}`
+
+func TestSubmitRejectsInvalidReplayDetail(t *testing.T) {
+	timeline := `,"timeline":[{"event_id":"evt_1","event_type":"submission_received","status_from":"","status_to":"received","timestamp":"2026-08-24T10:00:00Z","message":"submission received"},{"event_id":"evt_2","event_type":"review_requested","status_from":"received","status_to":"review_pending","timestamp":"2026-08-24T10:02:00Z","message":"review requested"}]`
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing description", body: strings.Replace(validSubmissionDetailJSON, `"description":"does things",`, "", 1)},
+		{name: "missing message", body: strings.Replace(validSubmissionDetailJSON, `"message":"first release",`, "", 1)},
+		{name: "missing created at", body: strings.Replace(validSubmissionDetailJSON, `"created_at":"2026-08-24T10:00:00Z",`, "", 1)},
+		{name: "missing updated at", body: strings.Replace(validSubmissionDetailJSON, `"updated_at":"2026-08-24T10:02:00Z",`, "", 1)},
+		{name: "missing timeline", body: strings.Replace(validSubmissionDetailJSON, timeline, "", 1)},
+		{name: "missing validation errors", body: strings.Replace(validSubmissionDetailJSON, `"validation_errors":["missing card"],`, "", 1)},
+		{name: "decreasing timeline", body: strings.Replace(validSubmissionDetailJSON, `"timestamp":"2026-08-24T10:02:00Z"`, `"timestamp":"2026-08-24T09:59:00Z"`, 1)},
+		{name: "type drift", body: strings.Replace(validSubmissionDetailJSON, `"type":"skill"`, `"type":"mcp"`, 1)},
+		{name: "name drift", body: strings.Replace(validSubmissionDetailJSON, `"name":"demo"`, `"name":"shadow"`, 1)},
+		{name: "version drift", body: strings.Replace(validSubmissionDetailJSON, `"version":"v1.0.0"`, `"version":"v1.0.1"`, 1)},
+		{name: "description drift", body: strings.Replace(validSubmissionDetailJSON, `"description":"does things"`, `"description":"changed"`, 1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			client := newTestSubmissionClient(t, server)
+			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+				Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
+				Message: "first release", ContentType: "application/gzip", Content: []byte("x"),
+			})
+			if !errors.Is(err, cloud.ErrInvalidResponse) {
+				t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
+			}
+		})
+	}
+}
 
 func TestGetSubmissionUsesBearerAndReturnsFullDetail(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

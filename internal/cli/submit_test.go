@@ -2,10 +2,12 @@ package cli_test
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
 	"apm/internal/cli"
+	"apm/internal/cloud"
 )
 
 func TestSubmitRequiresType(t *testing.T) {
@@ -100,5 +102,19 @@ func TestSubmitMCPPassesMessage(t *testing.T) {
 	}
 	if lifecycle.flags.Message != "update" {
 		t.Fatalf("message = %q, want update", lifecycle.flags.Message)
+	}
+}
+
+func TestSubmitQuotaErrorGuidesListAndPreservesSentinel(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingSubmitLifecycle{err: cloud.ErrTooManyActiveSubmissions}
+	entry := newSubmissionEntry(t, &stdout, &stderr, unexpectedValidate(t), func() (cli.SubmitLifecycle, error) { return lifecycle, nil }, unexpectedSubmission(t))
+
+	err := entry.Execute([]string{"submit", "dir", "--type=skill", "--message=first"})
+	if !errors.Is(err, cloud.ErrTooManyActiveSubmissions) {
+		t.Fatalf("Execute(submit) error = %v, want ErrTooManyActiveSubmissions", err)
+	}
+	if !strings.Contains(err.Error(), "apm submission list") {
+		t.Fatalf("Execute(submit) error = %v, want list guidance", err)
 	}
 }

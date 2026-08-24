@@ -40,18 +40,6 @@ type submissionReceiptDTO struct {
 	StatusURL    string                  `json:"status_url"`
 }
 
-type submissionDTO struct {
-	SubmissionID     string                  `json:"submission_id"`
-	Type             domain.PowerType        `json:"type"`
-	Name             string                  `json:"name"`
-	Version          string                  `json:"version"`
-	Status           domain.SubmissionStatus `json:"status"`
-	ContentAvailable bool                    `json:"content_available"`
-	ValidationErrors []string                `json:"validation_errors"`
-	ReviewComment    string                  `json:"review_comment"`
-	PublishedVersion string                  `json:"published_version"`
-}
-
 type submissionDetailDTO struct {
 	SubmissionID     *string               `json:"submission_id"`
 	Type             *domain.PowerType     `json:"type"`
@@ -159,9 +147,12 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 		}
 		return domain.SubmissionResult{Outcome: domain.SubmissionAccepted, SubmissionID: receipt.SubmissionID, Status: receipt.Status, StatusURL: receipt.StatusURL}, nil
 	case http.StatusOK:
-		replay, err := decodeSubmission(ctx, response)
+		replay, err := decodeSubmissionDetail(ctx, response)
 		if err != nil {
 			return domain.SubmissionResult{}, err
+		}
+		if replay.Type != request.Type || replay.Name != request.Name || replay.Version != request.Version || replay.Description != request.Description {
+			return domain.SubmissionResult{}, fmt.Errorf("remote replayed submission identity does not match request: %w", cloud.ErrInvalidResponse)
 		}
 		return domain.SubmissionResult{Outcome: domain.SubmissionReplayed, SubmissionID: replay.SubmissionID, Status: replay.Status}, nil
 	default:
@@ -221,25 +212,20 @@ func decodeSubmissionReceipt(ctx context.Context, response *http.Response) (subm
 	if receipt.StatusURL == "" {
 		return submissionReceiptDTO{}, fmt.Errorf("remote submission receipt has empty status_url: %w", cloud.ErrInvalidResponse)
 	}
+	if status != domain.SubmissionReceived {
+		return submissionReceiptDTO{}, fmt.Errorf("remote submission receipt status is %q, want received: %w", status, cloud.ErrInvalidResponse)
+	}
 	receipt.Status = status
 	return receipt, nil
 }
 
-// decodeSubmission 解码 200 的完整 Submission 详情；身份与状态必须合法。
-func decodeSubmission(ctx context.Context, response *http.Response) (submissionDTO, error) {
-	var dto submissionDTO
+// decodeSubmissionDetail 与 get 共用完整详情 decoder，确保 200 replay 不绕过字段和 timeline 约束。
+func decodeSubmissionDetail(ctx context.Context, response *http.Response) (domain.Submission, error) {
+	var dto submissionDetailDTO
 	if err := readSubmissionJSON(ctx, response, &dto); err != nil {
-		return submissionDTO{}, err
+		return domain.Submission{}, err
 	}
-	status, err := parseSubmissionStatus(string(dto.Status))
-	if err != nil {
-		return submissionDTO{}, fmt.Errorf("remote submission has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
-	}
-	if dto.SubmissionID == "" {
-		return submissionDTO{}, fmt.Errorf("remote submission has empty submission_id: %w", cloud.ErrInvalidResponse)
-	}
-	dto.Status = status
-	return dto, nil
+	return validateSubmissionDetail(dto)
 }
 
 // getSubmissionJSON 仅为 Submission 查询附加 Bearer；匿名资源读取继续使用 getJSON，避免凭据扩散。
@@ -283,31 +269,40 @@ func (c *Client) GetSubmission(ctx context.Context, submissionID string) (domain
 	if err := c.getSubmissionJSON(ctx, c.endpoint("api", "v1", "submissions", submissionID), &dto); err != nil {
 		return domain.Submission{}, fmt.Errorf("get remote submission: %w", err)
 	}
-	identity, err := validateSubmissionIdentity(dto.SubmissionID, dto.Type, dto.Name, dto.Version)
+	detail, err := validateSubmissionDetail(dto)
 	if err != nil {
-		return domain.Submission{}, fmt.Errorf("get remote submission has invalid identity: %w", err)
+		return domain.Submission{}, fmt.Errorf("get remote submission: %w", err)
 	}
-	if identity.SubmissionID != submissionID {
+	if detail.SubmissionID != submissionID {
 		return domain.Submission{}, fmt.Errorf("remote submission identity does not match request: %w", cloud.ErrInvalidResponse)
 	}
+	return detail, nil
+}
+
+// validateSubmissionDetail 将 presence-sensitive DTO 转为领域详情，并统一验证 get/replay 的完整契约。
+func validateSubmissionDetail(dto submissionDetailDTO) (domain.Submission, error) {
+	identity, err := validateSubmissionIdentity(dto.SubmissionID, dto.Type, dto.Name, dto.Version)
+	if err != nil {
+		return domain.Submission{}, fmt.Errorf("remote submission has invalid identity: %w", err)
+	}
 	if dto.Status == nil {
-		return domain.Submission{}, fmt.Errorf("get remote submission has missing status: %w", cloud.ErrInvalidResponse)
+		return domain.Submission{}, fmt.Errorf("remote submission has missing status: %w", cloud.ErrInvalidResponse)
 	}
 	status, err := parseSubmissionStatus(*dto.Status)
 	if err != nil {
-		return domain.Submission{}, fmt.Errorf("get remote submission has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
+		return domain.Submission{}, fmt.Errorf("remote submission has invalid status: %w", errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	if !presentNonEmpty(dto.Description) || !presentNonEmpty(dto.Message) {
-		return domain.Submission{}, fmt.Errorf("get remote submission has missing description or message: %w", cloud.ErrInvalidResponse)
+		return domain.Submission{}, fmt.Errorf("remote submission has missing description or message: %w", cloud.ErrInvalidResponse)
 	}
 	if _, err := parseRequiredSubmissionTimestamp(dto.CreatedAt); err != nil {
-		return domain.Submission{}, fmt.Errorf("get remote submission has invalid created_at: %w", err)
+		return domain.Submission{}, fmt.Errorf("remote submission has invalid created_at: %w", err)
 	}
 	if _, err := parseRequiredSubmissionTimestamp(dto.UpdatedAt); err != nil {
-		return domain.Submission{}, fmt.Errorf("get remote submission has invalid updated_at: %w", err)
+		return domain.Submission{}, fmt.Errorf("remote submission has invalid updated_at: %w", err)
 	}
 	if dto.ContentAvailable == nil || dto.ValidationErrors == nil || dto.ReviewComment == nil || dto.PublishedVersion == nil || dto.Timeline == nil {
-		return domain.Submission{}, fmt.Errorf("get remote submission has missing detail fields: %w", cloud.ErrInvalidResponse)
+		return domain.Submission{}, fmt.Errorf("remote submission has missing detail fields: %w", cloud.ErrInvalidResponse)
 	}
 	timeline, err := validateSubmissionTimeline(*dto.Timeline)
 	if err != nil {
