@@ -258,6 +258,77 @@ func TestRemoteFixRecoversFilesystemJournalAfterServerClose(t *testing.T) {
 	assertPathsWithinRoot(t, harness.root, journalPath, manifestPath, target, txDir)
 }
 
+func TestFixIntegrationAgentIdentityMismatchFailsClosedThenConverges(t *testing.T) {
+	harness := newIsolatedMCPHarness(t, domain.AgentBibit)
+	ref := domain.PowerRef{Name: "demo-agent", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	agentAdapter, err := harness.registry.ResolveAgent(domain.AgentBibit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := agentAdapter.TargetPath(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id := "00112233445566778899aabbccddeeff"
+	staging, err := paths.StagingPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	txDir := filepath.Join(filepath.Dir(target), ".apm-transactions", id)
+	journal := transaction.Journal{
+		SchemaVersion: 1, TransactionID: id, Driver: transaction.DriverFilesystem,
+		Operation: transaction.OperationInstall, Phase: transaction.PhasePublishing,
+		Agent: domain.AgentBibit, Power: ref,
+		Filesystem: &transaction.FilesystemJournalPayload{
+			StagingRoot: staging, TargetPath: target, TransactionDir: txDir,
+			BackupPath: filepath.Join(txDir, "backup"),
+		},
+	}
+
+	const wrongYAML = "schema_version: 1\nagent:\n  id: other-agent\n  version: v9.9.9\n  description: wrong identity\n"
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte(wrongYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journalPath := writeIntegrationJournal(t, journal)
+	originalJournal := readJournalBytes(t, journalPath)
+
+	recoverer := &countingRecoverer{Recoverer: harnessTransactions(t, harness)}
+	err = newIntegrationFixer(t, recoverer).Fix(context.Background())
+	if !errors.Is(err, transaction.ErrIndeterminateState) || !errors.Is(err, transaction.ErrRecoveryFailed) {
+		t.Fatalf("Fix() error = %v, want ErrIndeterminateState and ErrRecoveryFailed", err)
+	}
+	if recoverer.calls != 1 {
+		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
+	}
+	assertJournalBytes(t, journalPath, originalJournal)
+	assertFileContents(t, target, wrongYAML)
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || found {
+		t.Fatalf("manifest after failed Fix = %+v, found=%v err=%v, want absent", got, found, err)
+	}
+
+	const legalYAML = "schema_version: 1\nagent:\n  id: demo-agent\n  version: v1.0.0\n  description: Demo agent\n"
+	if err := os.WriteFile(target, []byte(legalYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := newIntegrationFixer(t, harnessTransactions(t, harness)).Fix(context.Background()); err != nil {
+		t.Fatalf("second Fix() error = %v", err)
+	}
+	assertJournalAbsent(t, journalPath)
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got != ref {
+		t.Fatalf("recovered manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
+	}
+	assertFileContents(t, target, legalYAML)
+	manifestPath, err := paths.ManifestPath(domain.AgentBibit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPathsWithinRoot(t, harness.root, journalPath, manifestPath, target, txDir)
+}
+
 func harnessTransactions(t *testing.T, harness *isolatedMCPHarness) *transaction.Service {
 	t.Helper()
 	transactions, err := transaction.NewManager(harness.repository, harness.registry)

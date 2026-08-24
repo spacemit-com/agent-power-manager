@@ -1,6 +1,7 @@
 package cloud_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,10 +16,13 @@ import (
 	"testing"
 	"time"
 
+	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/cloud/local"
 	"apm/internal/cloud/remote"
 	"apm/internal/domain"
+	"apm/internal/lifecycle"
+	"apm/internal/submission"
 	"github.com/Masterminds/semver/v3"
 )
 
@@ -605,4 +609,86 @@ func privateTestDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return directory
+}
+
+// TestRemoteAgentSubmissionContract 通过真实 Remote Client、fake HTTP server 与生命周期 Submit 服务，
+// 证明原始 agent.yaml 被离线校验后按字节原样发布：服务端收到精确身份与 raw content part，
+// 且 202 受理与 200 幂等重放分别驱动 CLI 到 accepted/replayed 结果。
+func TestRemoteAgentSubmissionContract(t *testing.T) {
+	root, err := filepath.Abs("resources")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixturePath := filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0", "agent.yaml")
+	raw := readCanonicalFile(t, fixturePath)
+	const changeSummary = "e2e agent submission"
+
+	validation, err := submission.Validate(context.Background(), submission.Request{
+		Type: domain.PowerTypeAgent, Path: fixturePath, ChangeSummary: changeSummary,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validation.Name != "bianbu-agent-default" || validation.Version != "v1.0.0" || validation.Description == "" {
+		t.Fatalf("Validate() identity = name %q version %q description %q", validation.Name, validation.Version, validation.Description)
+	}
+
+	content, err := submission.Prepare(context.Background(), submission.Request{
+		Type: domain.PowerTypeAgent, Path: fixturePath, ChangeSummary: changeSummary,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content.Type != domain.PowerTypeAgent || content.Name != validation.Name ||
+		content.Version != validation.Version || content.Description != validation.Description ||
+		content.ChangeSummary != changeSummary || content.ContentType != "application/yaml" ||
+		!bytes.Equal(content.Bytes, raw) || content.MD5 == "" {
+		t.Fatalf("Prepare() = %#v, want identity %+v with exact raw bytes", content, validation)
+	}
+
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		outcome string
+		state   domain.SubmissionStatus
+	}{
+		{
+			name:    "accepted",
+			status:  http.StatusAccepted,
+			body:    `{"submission_id":"sub_new","status":"received","status_url":"/api/v1/submissions/sub_new"}`,
+			outcome: "accepted",
+			state:   domain.SubmissionReceived,
+		},
+		{
+			name:    "replayed",
+			status:  http.StatusOK,
+			body:    `{"submission_id":"sub_replay","type":"agent","name":"bianbu-agent-default","version":"v1.0.0","status":"published","content_available":true,"validation_errors":[],"review_comment":"","published_version":"v1.0.0"}`,
+			outcome: "replayed",
+			state:   domain.SubmissionPublished,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := newAgentSubmissionServer(t, test.status, test.body)
+			client, err := remote.NewWithAPIKey(server.server.URL, &http.Client{Timeout: 5 * time.Second}, "key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			submitService, err := lifecycle.NewSubmit(client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := submitService.Submit(context.Background(), cli.Flags{
+				Type: "agent", ChangeSummary: changeSummary,
+			}, []string{fixturePath})
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			if result.Outcome != test.outcome || result.Status != string(test.state) {
+				t.Fatalf("Submit() = %#v, want outcome %q status %q", result, test.outcome, test.state)
+			}
+			server.assertReceivedAgentSubmission(t, content.Type, content.Name, content.Version, content.Description, changeSummary, raw)
+		})
+	}
 }

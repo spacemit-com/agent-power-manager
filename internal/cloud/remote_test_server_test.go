@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -424,4 +426,112 @@ func writeCanonicalJSON(writer http.ResponseWriter, value any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(writer).Encode(value)
+}
+
+// agentSubmissionServer 记录收到的 multipart 提交请求（metadata 与 content part），
+// 并返回固定状态码与响应体，供跨层 Agent 提交契约测试复用。
+type agentSubmissionServer struct {
+	server *httptest.Server
+	mu     sync.Mutex
+	status int
+	body   string
+	got    []recordedAgentSubmission
+}
+
+type recordedAgentSubmission struct {
+	metadata    map[string]any
+	contentType string
+	content     []byte
+	parseErr    error
+}
+
+func newAgentSubmissionServer(t *testing.T, status int, body string) *agentSubmissionServer {
+	t.Helper()
+	fixture := &agentSubmissionServer{status: status, body: body}
+	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
+	t.Cleanup(fixture.server.Close)
+	return fixture
+}
+
+func (fixture *agentSubmissionServer) serveHTTP(writer http.ResponseWriter, request *http.Request) {
+	metadata, contentType, content, parseErr := readAgentSubmissionParts(request)
+	fixture.mu.Lock()
+	fixture.got = append(fixture.got, recordedAgentSubmission{
+		metadata: metadata, contentType: contentType, content: content, parseErr: parseErr,
+	})
+	fixture.mu.Unlock()
+	if parseErr != nil {
+		http.Error(writer, "invalid submission", http.StatusBadRequest)
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(fixture.status)
+	_, _ = writer.Write([]byte(fixture.body))
+}
+
+// readAgentSubmissionParts 解析 multipart 提交请求，返回 metadata JSON map、content part 的
+// Content-Type 与原始字节；该函数运行在服务器 goroutine，因此只返回错误而非调用 t.Fatal。
+func readAgentSubmissionParts(request *http.Request) (map[string]any, string, []byte, error) {
+	mediaType, parameters, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/form-data" {
+		return nil, "", nil, fmt.Errorf("Content-Type = %q: %v", request.Header.Get("Content-Type"), err)
+	}
+	reader := multipart.NewReader(request.Body, parameters["boundary"])
+	var metadata map[string]any
+	var contentType string
+	var content []byte
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("read multipart part: %w", err)
+		}
+		body, err := io.ReadAll(part)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("read %q part: %w", part.FormName(), err)
+		}
+		switch part.FormName() {
+		case "metadata":
+			if err := json.Unmarshal(body, &metadata); err != nil {
+				return nil, "", nil, fmt.Errorf("decode metadata part: %w", err)
+			}
+		case "content":
+			contentType = part.Header.Get("Content-Type")
+			content = body
+		}
+	}
+	return metadata, contentType, content, nil
+}
+
+// assertReceivedAgentSubmission 断言恰好收到一次提交，且其元数据身份、content part 媒体类型与原始
+// agent.yaml 字节完全一致。
+func (fixture *agentSubmissionServer) assertReceivedAgentSubmission(t *testing.T, want domain.PowerType, name, version, description, changeSummary string, raw []byte) {
+	t.Helper()
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	if len(fixture.got) != 1 {
+		t.Fatalf("submissions received = %d, want 1", len(fixture.got))
+	}
+	got := fixture.got[0]
+	if got.parseErr != nil {
+		t.Fatalf("submission parse error: %v", got.parseErr)
+	}
+	wantMD5 := md5.Sum(raw)
+	if got.metadata["type"] != string(want) ||
+		got.metadata["name"] != name ||
+		got.metadata["version"] != version ||
+		got.metadata["description"] != description ||
+		got.metadata["change_summary"] != changeSummary ||
+		got.metadata["content_md5"] != hex.EncodeToString(wantMD5[:]) {
+		t.Fatalf("metadata = %#v, want type=%q name=%q version=%q description=%q change_summary=%q content_md5=%q",
+			got.metadata, want, name, version, description, changeSummary, hex.EncodeToString(wantMD5[:]))
+	}
+	if got.contentType != "application/yaml" {
+		t.Fatalf("content part Content-Type = %q, want application/yaml", got.contentType)
+	}
+	if !bytes.Equal(got.content, raw) {
+		t.Fatalf("content part bytes = %q, want exact raw agent.yaml %q", got.content, raw)
+	}
 }
