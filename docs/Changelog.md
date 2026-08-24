@@ -2,6 +2,35 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-24
+
+分类：新增功能
+
+用户需求：让 Agent 作为第四种 Power 进入与 Skill、Plugin、MCP 相同的 Submission 与治理流程，实现 validate、submit 与 Submission 生命周期对齐：`apm validate` 与 `apm submit` 支持 `--type agent`；Agent Submission 输入为单个原始 `agent.yaml`（不打包、不重序列化），name、version、description 分别来自 `agent.id`、`agent.version`、`agent.description`，change summary 来自必填 CLI 参数；Remote Cloud Client 支持 Agent multipart 并严格区分首次受理与幂等重放，Local Cloud Client 保持只读。同时补齐 Agent 安装内容与 `PowerRef` 的身份闭环，并让 APM `Submit` 正确表达 APC 的 `202` 首次受理与 `200` 幂等重放语义。客户端决策记录于 ADR-019，APC 业务治理决策记录于相邻 APC 仓库的 ADR-001。
+
+相关提交：
+
+APM（Feature 022）：
+- `7e2e9a2 docs(design): specify agent submission lifecycle`
+- `306102e docs(plan): detail agent submission implementation`
+- `65b2f72 feat(domain): validate agent submission identity`
+- `5242815 feat(submission): prepare raw agent yaml`
+- `1d4a776 feat(domain): model submission outcomes`
+- `d5f34d4 feat(cloud): submit agent resources remotely`
+- `a65b161 feat(cli): validate and submit agent resources`
+- `bc9782f fix(cache): verify exact agent identity`
+- `37f14b3 feat(adapter): verify agent artifacts`
+- `1739003 fix(transaction): validate agent recovery identity`
+- `5655c5a test(agent): verify submission lifecycle parity`
+- `0d7d402 docs(agent): document submission lifecycle parity`
+
+APC（APC 仓库，Feature 022 对应）：
+- `85d9148 docs(agent): define submission and publication contract`
+
+解决方案或完成结果：Agent 复用现有统一管线 `submission.Validate`、`submission.Prepare`、`cloud.Submission` 与 `/api/v1/submissions`，不新增 `SubmitAgent`、Agent 专属 endpoint 或平行状态机；类型专属规则集中在 `internal/submission/agent.go`。Agent Submission 输入为单个原始 `agent.yaml` 字节，不打包、不重序列化；name、version、description 来自 `agent.id`、`agent.version`、`agent.description`，change summary 由必填 `--change-summary` 提供，禁止 `--version`。validate、submit、缓存、Bibit Adapter 与 Agent 恢复复用同一套最小稳定 YAML 解析和身份校验规则，形成 domain → cache → adapter → recovery 的身份闭环：cache 精确校验 Agent 身份，adapter 校验 Agent 制品，transaction 校验 Agent 恢复身份。Remote Cloud Client 支持 Agent multipart，`202` 首次受理映射为 accepted、`200` 幂等重放映射为 replayed、`409 ALREADY_PUBLISHED` 映射为 `ErrAlreadyPublished`（不伪造新的 Submission ID）、`409 RESOURCE_VERSION_CONFLICT` 区分同标识同版本不同 MD5；Local Cloud Client 保持只读（`Submit` 返回 `ErrSubmissionUnsupported`）。APM/APC 设计文档、C4 与 APC HTTP 接口规范已同步，ADR-019（APM 客户端决策）与 APC ADR-001（业务治理）记录相关决策。
+
+验证结果或限制：全量门禁全部通过：gofmt、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、隔离临时目录构建 `go build -o <tmp>/apm ./cmd/apm` 与 `test -x`、`git diff --check`；docs/Structurizr/Mermaid 文档验证通过。行为与隔离扫描确认无真实 Agent CLI/home 使用、无残留临时目录、无旧签名或三类限制（仅历史/已否决措辞保留在 ADR-001 与 Feature 021 设计文档中，均显式标注为被取代）。刻意未实现 Submission 查询增强（cursor、创建时间筛选、详情 timeline）。
+
 ## 2026-08-21
 
 分类：新增功能
