@@ -40,7 +40,7 @@ func (s *recordingSource) DownloadAgent(_ context.Context, _ domain.PowerRef, de
 	if s.agentErr != nil {
 		return s.agentErr
 	}
-	return os.WriteFile(destination, []byte("schema_version: 1\n"), 0o644)
+	return os.WriteFile(destination, []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n"), 0o644)
 }
 
 func newTestFilesystemCache(t *testing.T, source cache.Source) *cache.FilesystemCache {

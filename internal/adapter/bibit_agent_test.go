@@ -53,7 +53,7 @@ func TestBibitAgentAdapterTargetPath(t *testing.T) {
 func TestBibitAgentAdapterInstallsYAMLVerbatim(t *testing.T) {
 	root, staging := newBibitAgentFixture(t, true)
 	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	raw := []byte("schema_version: 1\nagent:\n  id: bianbu-agent-default\n  version: v1.0.0\n  name: X\n")
+	raw := []byte("schema_version: 1\nagent:\n  id: bianbu-agent-default\n  version: v1.0.0\n  description: demo\n  name: X\n")
 	writeAgentStaging(t, staging, ref.Name, raw)
 
 	a := newBibitAgentAdapter(agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: ".bianbu-agent"})
