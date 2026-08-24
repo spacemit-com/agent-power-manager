@@ -32,6 +32,23 @@ type MCPServer struct {
 	URL       string       `json:"url,omitempty"`
 }
 
+// MCPResource 表示 MCP 资源文件的完整 v1 内容；身份字段必须与引用完全一致。
+type MCPResource struct {
+	SchemaVersion int       `json:"schema_version"`
+	Name          string    `json:"name"`
+	Version       string    `json:"version"`
+	Description   string    `json:"description"`
+	Definition    MCPServer `json:"definition"`
+}
+
+type mcpResourceWire struct {
+	SchemaVersion int             `json:"schema_version"`
+	Name          string          `json:"name"`
+	Version       string          `json:"version"`
+	Description   string          `json:"description"`
+	Definition    json.RawMessage `json:"definition"`
+}
+
 type presentJSONValue[T any] struct {
 	value   T
 	present bool
@@ -82,6 +99,32 @@ func DecodeMCPServerJSON(contents []byte) (MCPServer, error) {
 	return server, nil
 }
 
+// DecodeMCPResourceJSON 严格解码闭合的 MCP v1 资源，并递归校验其启动定义。
+func DecodeMCPResourceJSON(contents []byte) (MCPResource, error) {
+	var wire mcpResourceWire
+	if err := jsonstrict.Decode(contents, &wire, true); err != nil {
+		return MCPResource{}, err
+	}
+	if len(wire.Definition) == 0 || bytes.Equal(bytes.TrimSpace(wire.Definition), []byte("null")) {
+		return MCPResource{}, fmt.Errorf("MCP resource definition is required")
+	}
+	definition, err := DecodeMCPServerJSON(wire.Definition)
+	if err != nil {
+		return MCPResource{}, fmt.Errorf("decode MCP resource definition: %w", err)
+	}
+	resource := MCPResource{
+		SchemaVersion: wire.SchemaVersion,
+		Name:          wire.Name,
+		Version:       wire.Version,
+		Description:   wire.Description,
+		Definition:    definition,
+	}
+	if err := resource.Validate(); err != nil {
+		return MCPResource{}, err
+	}
+	return resource, nil
+}
+
 // Validate 校验 MCP 启动定义的判别联合，不清洗或改写原始值。
 func (server MCPServer) Validate() error {
 	switch server.Transport {
@@ -99,6 +142,34 @@ func (server MCPServer) Validate() error {
 		}
 	default:
 		return fmt.Errorf("transport %q: %w", server.Transport, ErrInvalidMCPServer)
+	}
+	return nil
+}
+
+// Validate 校验 MCP v1 资源的身份、描述与启动定义，不补全或改写文件字段。
+func (resource MCPResource) Validate() error {
+	if resource.SchemaVersion != 1 {
+		return fmt.Errorf("MCP resource schema version %d is unsupported", resource.SchemaVersion)
+	}
+	if !IsCanonicalPowerName(resource.Name) {
+		return fmt.Errorf("MCP resource name %q is not canonical", resource.Name)
+	}
+	if _, err := CanonicalPowerVersion(resource.Version); err != nil {
+		return fmt.Errorf("MCP resource version: %w", err)
+	}
+	if strings.TrimSpace(resource.Description) == "" {
+		return errors.New("MCP resource description must not be blank")
+	}
+	if err := resource.Definition.Validate(); err != nil {
+		return fmt.Errorf("MCP resource definition: %w", err)
+	}
+	return nil
+}
+
+// ValidatePowerRef 校验 MCP 资源身份与调用方引用完全匹配，避免目录或调用参数覆盖资源声明。
+func (resource MCPResource) ValidatePowerRef(ref PowerRef) error {
+	if ref != (PowerRef{Type: PowerTypeMCP, Name: resource.Name, Version: resource.Version}) {
+		return fmt.Errorf("MCP resource identity does not match %s/%s@%s", ref.Type, ref.Name, ref.Version)
 	}
 	return nil
 }

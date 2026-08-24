@@ -95,3 +95,67 @@ func TestMCPServerCloneDoesNotShareArguments(t *testing.T) {
 		t.Fatalf("Clone() shared Args storage with source: %#v", source)
 	}
 }
+
+func TestDecodeMCPResourceJSONValidatesCanonicalResource(t *testing.T) {
+	raw := []byte(`{"schema_version":1,"name":"filesystem","version":"v1.0.0","description":"files","definition":{"transport":"stdio","command":"npx","args":["-y","pkg"]}}`)
+	got, err := domain.DecodeMCPResourceJSON(raw)
+	if err != nil {
+		t.Fatalf("DecodeMCPResourceJSON() error = %v", err)
+	}
+	if got.Name != "filesystem" || got.Version != "v1.0.0" || got.Definition.Command != "npx" {
+		t.Fatalf("DecodeMCPResourceJSON() = %+v", got)
+	}
+}
+
+func TestDecodeMCPResourceJSONRejectsOldAndOpenShapes(t *testing.T) {
+	cases := []string{
+		`{"transport":"stdio","command":"npx"}`,
+		`{"schema_version":1,"name":"demo","name":"shadow","version":"v1.0.0","description":"d","definition":{"transport":"stdio","command":"npx"}}`,
+		`{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":{"transport":"stdio","command":"npx"},"extra":true}`,
+	}
+	for _, raw := range cases {
+		if _, err := domain.DecodeMCPResourceJSON([]byte(raw)); err == nil {
+			t.Fatalf("DecodeMCPResourceJSON() accepted %s", raw)
+		}
+	}
+}
+
+func TestMCPResourceValidateRejectsInvalidIdentityAndDefinition(t *testing.T) {
+	validDefinition := `{"transport":"stdio","command":"npx"}`
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{name: "unsupported schema version", raw: `{"schema_version":2,"name":"demo","version":"v1.0.0","description":"d","definition":` + validDefinition + `}`},
+		{name: "noncanonical name", raw: `{"schema_version":1,"name":"Demo","version":"v1.0.0","description":"d","definition":` + validDefinition + `}`},
+		{name: "noncanonical version", raw: `{"schema_version":1,"name":"demo","version":"1.0.0","description":"d","definition":` + validDefinition + `}`},
+		{name: "blank description", raw: `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"  ","definition":` + validDefinition + `}`},
+		{name: "stdio without command", raw: `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":{"transport":"stdio"}}`},
+		{name: "http with stdio field", raw: `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":{"transport":"http","url":"https://mcp.example.com/mcp","args":[]}}`},
+		{name: "null definition", raw: `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":null}`},
+		{name: "tail JSON", raw: `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":` + validDefinition + `} {}`},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := domain.DecodeMCPResourceJSON([]byte(tt.raw)); err == nil {
+				t.Fatalf("DecodeMCPResourceJSON() accepted invalid resource %s", tt.raw)
+			}
+		})
+	}
+}
+
+func TestMCPResourceValidatePowerRefRequiresExactIdentity(t *testing.T) {
+	resource := domain.MCPResource{Name: "filesystem", Version: "v1.0.0"}
+	if err := resource.ValidatePowerRef(domain.PowerRef{Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v1.0.0"}); err != nil {
+		t.Fatalf("ValidatePowerRef() error = %v", err)
+	}
+	if err := resource.ValidatePowerRef(domain.PowerRef{Type: domain.PowerTypeSkill, Name: "filesystem", Version: "v1.0.0"}); err == nil {
+		t.Fatal("ValidatePowerRef() accepted a different type")
+	}
+	if err := resource.ValidatePowerRef(domain.PowerRef{Type: domain.PowerTypeMCP, Name: "other", Version: "v1.0.0"}); err == nil {
+		t.Fatal("ValidatePowerRef() accepted a different name")
+	}
+	if err := resource.ValidatePowerRef(domain.PowerRef{Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v1.0.1"}); err == nil {
+		t.Fatal("ValidatePowerRef() accepted a different version")
+	}
+}

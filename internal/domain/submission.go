@@ -30,11 +30,21 @@ type SubmissionRequest struct {
 	Name           string
 	Version        string
 	Description    string
-	ChangeSummary  string
+	Message        string
 	ContentType    string // "application/gzip"、"application/json" 或 "application/yaml"
 	Content        []byte
 	ContentMD5     string
 	IdempotencyKey string
+}
+
+// IsActiveSubmissionStatus 仅识别 APC 配额和查询契约定义的活动提交状态。
+func IsActiveSubmissionStatus(status SubmissionStatus) bool {
+	switch status {
+	case SubmissionReceived, SubmissionValidating, SubmissionReviewPending, SubmissionApproved, SubmissionPublishing:
+		return true
+	default:
+		return false
+	}
 }
 
 // SubmissionOutcome 表示一次提交请求的最终处理结果类别，用于区分新创建的提交与幂等重放的提交。
@@ -62,11 +72,26 @@ type Submission struct {
 	Type             PowerType
 	Name             string
 	Version          string
+	Description      string
+	Message          string
 	Status           SubmissionStatus
+	CreatedAt        string
+	UpdatedAt        string
 	ContentAvailable bool
 	ValidationErrors []string
 	ReviewComment    string
 	PublishedVersion string
+	Timeline         []SubmissionEvent
+}
+
+// SubmissionEvent 表示 APC 原样返回的一次状态演进事件，时间线顺序由服务端保证。
+type SubmissionEvent struct {
+	EventID    string
+	EventType  string
+	StatusFrom SubmissionStatus
+	StatusTo   SubmissionStatus
+	Timestamp  string
+	Message    string
 }
 
 // SubmissionSummary 表示提交列表中的一条摘要。
@@ -79,17 +104,14 @@ type SubmissionSummary struct {
 	CreatedAt    string
 }
 
-// SubmissionListQuery 表示提交列表的筛选与分页条件。
+// SubmissionListQuery 表示当前 API Key 名下活动提交的筛选条件，不支持分页。
 type SubmissionListQuery struct {
 	Status SubmissionStatus
 	Type   PowerType
 	Name   string
-	Cursor string
-	Limit  int
 }
 
-// SubmissionList 表示提交列表结果与下一页游标。
+// SubmissionList 表示至多二十条活动提交的列表结果。
 type SubmissionList struct {
-	Items      []SubmissionSummary
-	NextCursor string
+	Items []SubmissionSummary
 }
