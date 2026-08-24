@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
+	"strings"
 
 	"apm/internal/cloud"
 	"apm/internal/domain"
@@ -62,7 +63,8 @@ type submissionListDTO struct {
 	NextCursor string                 `json:"next_cursor"`
 }
 
-// Submit 上传 multipart 提交并区分 202 接收与 200 幂等重放；不自动重试，中断由服务端 Idempotency-Key 去重。
+// Submit 在网络请求前校验并规范化必填 Message，随后上传 multipart 并区分 202 接收与 200 幂等重放；
+// 不自动重试，中断由服务端 Idempotency-Key 去重。
 func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (domain.SubmissionResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.SubmissionResult{}, fmt.Errorf("submit remote resource: %w", err)
@@ -74,12 +76,16 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 	if expectedContentType == "" || request.ContentType != expectedContentType {
 		return domain.SubmissionResult{}, fmt.Errorf("submit remote resource type %q requires content type %q, got %q", request.Type, expectedContentType, request.ContentType)
 	}
+	message := strings.TrimSpace(request.Message)
+	if message == "" {
+		return domain.SubmissionResult{}, errors.New("submit remote resource message is required")
+	}
 	metadata, err := json.Marshal(submissionMetadataDTO{
 		Type:        request.Type,
 		Name:        request.Name,
 		Version:     request.Version,
 		Description: request.Description,
-		Message:     request.Message,
+		Message:     message,
 		ContentMD5:  request.ContentMD5,
 	})
 	if err != nil {

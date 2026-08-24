@@ -118,7 +118,7 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
 		Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0",
-		Description: "does things", Message: "first",
+		Description: "does things", Message: "  first  ",
 		ContentType: "application/gzip", Content: []byte("bytes"), ContentMD5: "md5", IdempotencyKey: "k",
 	})
 	if err != nil {
@@ -133,6 +133,27 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 	}
 	if gotIdem != "k" {
 		t.Fatalf("Idempotency-Key = %q", gotIdem)
+	}
+}
+
+func TestSubmitRejectsMissingOrBlankMessageBeforeRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+
+	for _, message := range []string{"", " \t\n"} {
+		_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+			Type: domain.PowerTypeSkill, Message: message, ContentType: "application/gzip", Content: []byte("x"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "message is required") {
+			t.Fatalf("Submit(message=%q) error = %v, want required-message error", message, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("server requests = %d, want 0", requests)
 	}
 }
 
@@ -166,7 +187,7 @@ func TestSubmitAcceptsUnknownResponseFields(t *testing.T) {
 		defer server.Close()
 		client := newTestSubmissionClient(t, server)
 		got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-			Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+			Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 		})
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
@@ -184,7 +205,7 @@ func TestSubmitAcceptsUnknownResponseFields(t *testing.T) {
 		defer server.Close()
 		client := newTestSubmissionClient(t, server)
 		got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-			Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+			Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 		})
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
@@ -206,7 +227,7 @@ func TestSubmitRejectsOther2xxStatus(t *testing.T) {
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
 			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-				Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+				Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 			})
 			if !errors.Is(err, cloud.ErrInvalidResponse) {
 				t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
@@ -228,7 +249,7 @@ func TestSubmitRejectsShapeMismatch(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrInvalidResponse) {
 		t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
@@ -257,7 +278,7 @@ func TestSubmitRejectsMalformedAcceptedResponse(t *testing.T) {
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
 			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-				Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+				Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 			})
 			if !errors.Is(err, cloud.ErrInvalidResponse) {
 				t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
@@ -277,11 +298,11 @@ func TestSubmitRejectsContentTypeMismatchBeforeRequest(t *testing.T) {
 		name    string
 		request domain.SubmissionRequest
 	}{
-		{name: "unknown type", request: domain.SubmissionRequest{Type: domain.PowerType("workflow"), ContentType: "application/gzip", Content: []byte("x")}},
-		{name: "skill with yaml", request: domain.SubmissionRequest{Type: domain.PowerTypeSkill, ContentType: "application/yaml", Content: []byte("x")}},
-		{name: "plugin with json", request: domain.SubmissionRequest{Type: domain.PowerTypePlugin, ContentType: "application/json", Content: []byte("x")}},
-		{name: "mcp with gzip", request: domain.SubmissionRequest{Type: domain.PowerTypeMCP, ContentType: "application/gzip", Content: []byte("x")}},
-		{name: "agent with gzip", request: domain.SubmissionRequest{Type: domain.PowerTypeAgent, ContentType: "application/gzip", Content: []byte("x")}},
+		{name: "unknown type", request: domain.SubmissionRequest{Type: domain.PowerType("workflow"), Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
+		{name: "skill with yaml", request: domain.SubmissionRequest{Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
+		{name: "plugin with json", request: domain.SubmissionRequest{Type: domain.PowerTypePlugin, Message: "fixture", ContentType: "application/json", Content: []byte("x")}},
+		{name: "mcp with gzip", request: domain.SubmissionRequest{Type: domain.PowerTypeMCP, Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
+		{name: "agent with gzip", request: domain.SubmissionRequest{Type: domain.PowerTypeAgent, Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -319,7 +340,7 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
 			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-				Type: tt.requestType, ContentType: tt.contentType, Content: []byte("x"),
+				Type: tt.requestType, Message: "fixture", ContentType: tt.contentType, Content: []byte("x"),
 				ContentMD5: "x", IdempotencyKey: "k",
 			})
 			if err != nil {
@@ -353,7 +374,7 @@ func TestSubmitMaps401(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrAuth) {
 		t.Fatalf("Submit() error = %v, want ErrAuth", err)
@@ -372,7 +393,7 @@ func TestSubmitMaps409(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrSubmissionConflict) {
 		t.Fatalf("Submit() error = %v, want ErrSubmissionConflict", err)
@@ -391,7 +412,7 @@ func TestSubmitMaps409AlreadyPublished(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrAlreadyPublished) || !errors.Is(err, cloud.ErrSubmissionConflict) {
 		t.Fatalf("Submit() error = %v, want both ErrAlreadyPublished and ErrSubmissionConflict", err)
@@ -410,7 +431,7 @@ func TestSubmitMaps503(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrUnavailable) {
 		t.Fatalf("Submit() error = %v, want ErrUnavailable", err)
