@@ -4,6 +4,8 @@
 - Date：2026-08-22
 - Decision Makers：APM maintainers
 
+> 局部取代说明：本文保留 Feature 021 落定时的历史决策；其中资源元数据来源、CLI version/message、MCP content 与 Submission 查询部分已由 [ADR-020](ADR-020-source-owned-submission-metadata.md) 和 [Feature 023](../features/023-submission-resource-metadata-query/spec.md) 取代，当前实现与接口以二者为准。
+
 ## Context
 
 APC 定义了资源提交（Submission）工作流与校验职责边界，但 APC 无实体，仅以设计约束 APM。APM 需要在提交前离线完成 Skill、Plugin、MCP 的完整格式校验，对 Skill/Plugin 做确定性打包、对 MCP 做确定性 JSON 规范化，再统一上传并查询本人提交。若校验规则只在服务端存在，用户会在上传后很久才看到格式错误，编辑器和 CI 也无法复用。

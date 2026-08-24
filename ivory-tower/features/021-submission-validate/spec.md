@@ -1,5 +1,7 @@
 # Submission 与本地校验设计规格
 
+> 局部取代说明：本文保留 Feature 021 的历史设计；其中资源元数据来源、CLI version/message、MCP content 与 Submission 查询部分已由 [Feature 023](../023-submission-resource-metadata-query/spec.md) 和 [ADR-020](../../adr/ADR-020-source-owned-submission-metadata.md) 取代，当前实现与接口以二者为准。
+
 > 状态：设计已确认，待实现。重大决策将记录在 ADR-018（实现时创建）。上游契约见相邻 APC 仓库的 `project-overview.md` 与 `project-overview-apm.md`。
 
 > 扩展说明：Agent Submission 由 [Feature 022](../022-agent-submission/spec.md) 与 [ADR-019](../../adr/ADR-019-align-agent-submission-lifecycle.md) 扩展，使 `--type agent` 进入与 Skill/Plugin/MCP 相同的统一 Submission 管线。本文主体保留历史的三类范围（Skill、Plugin、MCP），其中的「三类」措辞仅描述本 feature 落定时的范围，不作为当前四类能力的权威描述。

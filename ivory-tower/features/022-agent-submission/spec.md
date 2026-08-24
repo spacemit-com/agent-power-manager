@@ -1,5 +1,7 @@
 # Agent Submission 与 Lifecycle 对齐设计规格
 
+> 局部取代说明：本文保留 Feature 022 的历史设计；其中资源元数据来源、CLI version/message、MCP content 与 Submission 查询部分已由 [Feature 023](../023-submission-resource-metadata-query/spec.md) 和 [ADR-020](../../adr/ADR-020-source-owned-submission-metadata.md) 取代，当前实现与接口以二者为准。
+
 > 状态：设计已确认，待实施计划。APM 的客户端决策将在 ADR-019 记录；APC 的业务治理决策将在相邻 APC 仓库的 ADR-001 记录。
 >
 > 本文扩展 [Feature 021](../021-submission-validate/spec.md) 与 [ADR-018](../../adr/ADR-018-submission-and-local-validation.md)，不改写其历史设计。APC 权威业务与 HTTP 契约位于相邻 `../apc` 仓库的 `ivory-tower/project-overview.md`、`ivory-tower/project-overview-apm.md` 与 `docs/APC-API.md`。

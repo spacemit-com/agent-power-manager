@@ -37,6 +37,39 @@ classDiagram
         +StatusURL string
     }
     note for SubmissionResult "accepted：StatusURL 非空；replayed：StatusURL 固定为空，用 SubmissionID 生成 apm submission get 提示"
+    class SubmissionRequest {
+        +Type PowerType
+        +Name string
+        +Version string
+        +Description string
+        +Message string
+        +ContentType string
+        +ContentMD5 string
+    }
+    class SubmissionListQuery {
+        +Status SubmissionStatus
+        +Type PowerType
+        +Name string
+    }
+    note for SubmissionListQuery "仅筛选当前 API Key 账号的 active Submission；无 limit、cursor 或时间范围，结果最多 20 条"
+    class SubmissionDetail {
+        <<domain.Submission>>
+        +SubmissionID string
+        +Description string
+        +Message string
+        +Status SubmissionStatus
+        +CreatedAt string
+        +UpdatedAt string
+        +Timeline []SubmissionEvent
+    }
+    class SubmissionEvent {
+        +EventID string
+        +EventType string
+        +StatusFrom SubmissionStatus
+        +StatusTo SubmissionStatus
+        +Timestamp string
+        +Message string
+    }
 
     CloudClient --|> Catalog
     CloudClient --|> SkillSource
@@ -67,6 +100,15 @@ classDiagram
         +URL string
         +Validate() error
     }
+    class MCPResource {
+        +SchemaVersion int
+        +Name string
+        +Version string
+        +Description string
+        +Definition MCPServer
+        +ValidatePowerRef(PowerRef) error
+    }
+    note for MCPResource "Local/Remote/Submission 读取完整 v1 MCP.json；content 为完整资源的 JCS JSON，definition 仅在校验身份后返回调用方"
     class CallerPrivateDirectory {
         <<absent or empty physical Skill/Plugin destination>>
     }
@@ -83,8 +125,14 @@ classDiagram
     SkillSource --> CallerPrivateDirectory : writes verified tree
     PluginSource --> CallerPrivateDirectory : writes apc-plugin.json and skills
     AgentSource --> CallerPrivateAgentFile : writes original YAML bytes
-    MCPSource --> MCPServer : strict value, no file cache
+    MCPSource --> MCPResource : decodes full v1 content
+    MCPResource *-- MCPServer : Definition
+    MCPSource --> MCPServer : returns validated Definition, no file cache
+    Submission --> SubmissionRequest : Submit carries Message outside content
     Submission --> SubmissionResult : returns accepted (202) or replayed (200)
+    Submission --> SubmissionListQuery : active-only authenticated filter
+    Submission --> SubmissionDetail : Get returns complete detail
+    SubmissionDetail *-- SubmissionEvent : ordered Timeline
 
-    note for LocalClient "显式绝对 fixture 根；物理复制 skills/plugins/agents，严格解码 MCP；拒绝链接、特殊节点、路径逃逸、重叠与非空目标。Submission 三方法对全部类型返回 cloud.ErrSubmissionUnsupported（fail loud），只读无真实工单"
-    note for RemoteClient "APC HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、受限 archive、同源 redirect；无 retry/fallback。Submission 严格分流：202 受理→accepted，200 幂等重放→replayed，其它 2xx→ErrInvalidResponse，409 ALREADY_PUBLISHED→ErrAlreadyPublished（同时 ErrSubmissionConflict），RESOURCE_VERSION_CONFLICT→ErrSubmissionConflict。受信普通目录为 root/current-euid owner 且 mode&0022==0；root-owned sticky 目录只接受 current-euid 私有直接子目录，终点创建/发布使用 exclusive/no-replace。Linux/macOS 完整发布；FreeBSD 支持 staging、Agent、MCP，但 Skill/Plugin 目录发布返回 ENOTSUP；Windows/其它 content fail closed"
+    note for LocalClient "显式绝对 fixture 根；物理复制 skills/plugins/agents，严格解码完整 MCPResource 并校验 PowerRef；拒绝链接、特殊节点、路径逃逸、重叠与非空目标。Submission 三方法对全部类型返回 cloud.ErrSubmissionUnsupported（fail loud），只读无真实工单"
+    note for RemoteClient "匿名 APC 资源 HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、完整 MCPResource、受限 archive、同源 redirect；无 retry/fallback。Submission 使用独立 Bearer 认证请求：list 仅 active status/type/name、最多 20 条且无分页；get 返回 Message 与有序 SubmissionEvent。Submit 严格分流 202 accepted、200 replayed、409 ALREADY_PUBLISHED/RESOURCE_VERSION_CONFLICT；受信目录和跨平台发布保持 fail closed"

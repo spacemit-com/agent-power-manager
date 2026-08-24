@@ -119,28 +119,22 @@ gofmt -w cmd internal
 ./apm list --type agent
 ./apm fix
 ./apm --verbose fix
-./apm validate ./skill-card-dir --type skill --version v0.1.0
-./apm validate ./plugin-dir --type plugin
-./apm validate ./mcp.json --type mcp
-./apm validate ./agent.yaml --type agent
-./apm submit ./skill-card-dir --type skill --version v0.1.0 --change-summary "首次发布"
-./apm submit ./plugin-dir --type plugin --change-summary "首次发布"
-./apm submit ./mcp.json --type mcp
-./apm submit ./agent.yaml --type agent --change-summary "首次发布"
-./apm submission get sub_123
-./apm submission list --type agent --limit 20
+apm validate <path> --type <skill|plugin|mcp|agent> [--json]
+apm submit <path> --type <skill|plugin|mcp|agent> --message "本次提交说明"
+apm submission list [--status <active-status>] [--type <skill|plugin|mcp|agent>] [--name <canonical-name>] [--output text|json]
+apm submission get <submission-id> [--output text|json]
 ```
 
 ### Validate、Submit 与 Submission
 
-`validate` 与 `submit` 覆盖 Skill、Plugin、MCP、Agent 四类 Power，复用同一套离线校验规则（[ADR-018](ivory-tower/adr/ADR-018-submission-and-local-validation.md) 与 [ADR-019](ivory-tower/adr/ADR-019-align-agent-submission-lifecycle.md)）：
+`validate` 与 `submit` 覆盖 Skill、Plugin、MCP、Agent 四类 Power，通过统一 Source Loader 复用同一套离线校验规则；当前契约由 [ADR-020](ivory-tower/adr/ADR-020-source-owned-submission-metadata.md) 与 [Feature 023](ivory-tower/features/023-submission-resource-metadata-query/spec.md) 定义：
 
-- Skill：原始目录，`SKILL.md` + `skill-card.md`；submit 必填 `--version` 与 `--change-summary`。
-- Plugin：原始目录，`apc-plugin.json` 权威；submit 必填 `--change-summary`。
-- MCP：单个完整 JSON 文件，definition 经 RFC 8785 JCS 规范化；change_summary 从文件读取。
-- Agent：单个原始 `agent.yaml`，不打包、不重序列化；name/version/description 分别来自 `agent.id`/`agent.version`/`agent.description`，`--type agent` 不接受 `--version` 覆盖，submit 必填 `--change-summary`。
+- Skill：原始目录，身份和描述来自 `SKILL.md` frontmatter，content 是确定性 tar.gz。
+- Plugin：原始目录，身份和描述来自 `apc-plugin.json`，content 是确定性 tar.gz。
+- MCP：单个完整 v1 `MCP.json`，包含 `schema_version/name/version/description/definition`，完整资源经 RFC 8785 JCS 规范化。
+- Agent：单个原始 `agent.yaml`，不打包、不重序列化；身份和描述分别来自 `agent.id`/`agent.version`/`agent.description`。
 
-`validate` 完全离线，不读取 API Key、不访问网络。`submit` 校验通过后确定性打包（Skill/Plugin `application/gzip`）、JCS 规范化（MCP `application/json`）或原样字节（Agent `application/yaml`），计算 MD5 并经 `POST /api/v1/submissions` 上传；每次逻辑提交生成 UUID 幂等键。身份校验沿 domain parser → cache → adapter `ValidateArtifact` → recovery 四层加固（[ADR-019](ivory-tower/adr/ADR-019-align-agent-submission-lifecycle.md)）。
+`validate` 完全离线，只接收 path、type 与可选 JSON 输出，也不读取 API Key、访问网络。`submit` 对四类 Power 统一要求 trim 后非空的 `--message`；校验通过后构造 content、计算原始字节 MD5 并经 `POST /api/v1/submissions` 上传，每次逻辑提交生成 UUID 幂等键。message 属于 Submission，不写入 Power content，也不参与 MD5。身份校验沿 domain parser → cache → adapter `ValidateArtifact` → recovery 四层加固。
 
 `submit` 按 APC 响应输出统一 outcome：
 
@@ -156,6 +150,8 @@ track: apm submission get sub_...
 - `409 ALREADY_PUBLISHED` 表示已发布同标识、同 MD5，作为错误返回 `cloud.ErrAlreadyPublished`（同时满足 `cloud.ErrSubmissionConflict`），CLI 不伪造新的 Submission ID；`409 RESOURCE_VERSION_CONFLICT` 映射通用 conflict。
 
 `accepted` 与 `replayed` 都不代表发布成功，只表示本次提交已被同步受理或已存在。Local provider 的 `Submit`/`GetSubmission`/`ListSubmissions` 对所有类型返回 `cloud.ErrSubmissionUnsupported`（fail loud），因此 validate/submit/submission 需指向 Remote APC（默认 provider）。
+
+`submission list` 和 `submission get` 使用 `Authorization: Bearer <official-api-key>` 的独立认证请求，不向匿名资源接口泄露 Key。list 只返回当前 Key 所属账号按创建时间倒序的 active Submission（`received`、`validating`、`review_pending`、`approved`、`publishing`），最多 20 条，只接受 status/type/name 筛选，不提供分页或时间范围参数。get 展示 description、message、时间戳和原样 timeline；终态记录只能通过已知 ID 获取。
 
 Search 已实现：它按名称搜索 Cloud Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
 
