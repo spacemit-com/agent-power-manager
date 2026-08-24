@@ -2,92 +2,54 @@ package submission
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"apm/internal/domain"
-	"apm/internal/utils/jsonstrict"
 )
 
-type mcpSubmission struct {
-	Name          string
-	Version       string
-	Description   string
-	ChangeSummary string
-	Definition    json.RawMessage
-}
+type mcpSourceLoader struct{}
 
-type mcpSubmissionWire struct {
-	Name          string
-	Version       string
-	Description   string
-	ChangeSummary string `json:"change_summary"`
-	Definition    json.RawMessage
-}
-
-func validateMCP(ctx context.Context, request Request) (Validation, error) {
+func (mcpSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	if err := ctx.Err(); err != nil {
-		return Validation{}, err
+		return source{}, err
 	}
-	submission, err := readMCPSubmission(request.Path)
+	resource, raw, err := readMCPResource(path)
 	if err != nil {
-		return Validation{}, err
+		return source{}, err
 	}
-	if err := validateCommonMetadata(submission.Name, submission.Version, submission.Description); err != nil {
-		return Validation{}, err
-	}
-	if strings.TrimSpace(submission.ChangeSummary) == "" {
-		return Validation{}, fmt.Errorf("MCP change_summary is empty: %w", ErrInvalid)
-	}
-	if _, err := domain.DecodeMCPServerJSON(submission.Definition); err != nil {
-		return Validation{}, fmt.Errorf("decode MCP definition: %w", errors.Join(ErrInvalid, err))
-	}
-	canonical, err := CanonicalizeJSON(submission.Definition)
-	if err != nil {
-		return Validation{}, err
-	}
-	return Validation{
-		Type:          domain.PowerTypeMCP,
-		Name:          submission.Name,
-		Version:       submission.Version,
-		Description:   submission.Description,
-		ChangeSummary: submission.ChangeSummary,
-		FileCount:     1,
-		ContentSize:   int64(len(canonical)),
+	return source{
+		validation: Validation{
+			Type: domain.PowerTypeMCP, Name: resource.Name, Version: resource.Version,
+			Description: resource.Description, FileCount: 1, ContentSize: int64(len(raw)),
+		},
+		contentType: "application/json",
+		build: func() ([]byte, error) {
+			return CanonicalizeJSON(raw)
+		},
 	}, nil
 }
 
-// readMCPSubmission 读取并严格解析单个 MCP JSON 文件；拒绝未知字段、重复键与尾随值。
-func readMCPSubmission(path string) (mcpSubmission, error) {
+// readMCPResource 读取并严格解析单个完整 MCP v1 资源；拒绝未知字段、重复键与尾随值。
+func readMCPResource(path string) (domain.MCPResource, []byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return mcpSubmission{}, fmt.Errorf("read MCP file: %w", err)
+		return domain.MCPResource{}, nil, fmt.Errorf("read MCP file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return mcpSubmission{}, fmt.Errorf("MCP path %q is not a regular file: %w", path, ErrInvalid)
+		return domain.MCPResource{}, nil, fmt.Errorf("MCP path %q is not a regular file: %w", path, ErrInvalid)
 	}
 	if info.Size() > maxSingleFileSize {
-		return mcpSubmission{}, fmt.Errorf("MCP file exceeds %d bytes: %w", maxSingleFileSize, ErrInvalid)
+		return domain.MCPResource{}, nil, fmt.Errorf("MCP file exceeds %d bytes: %w", maxSingleFileSize, ErrInvalid)
 	}
-	contents, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		return mcpSubmission{}, fmt.Errorf("read MCP file: %w", err)
+		return domain.MCPResource{}, nil, fmt.Errorf("read MCP file: %w", err)
 	}
-	var wire mcpSubmissionWire
-	if err := jsonstrict.Decode(contents, &wire, true); err != nil {
-		return mcpSubmission{}, fmt.Errorf("decode MCP submission: %w", errors.Join(ErrInvalid, err))
+	resource, err := domain.DecodeMCPResourceJSON(raw)
+	if err != nil {
+		return domain.MCPResource{}, nil, fmt.Errorf("decode MCP resource: %w", errors.Join(ErrInvalid, err))
 	}
-	if len(wire.Definition) == 0 {
-		return mcpSubmission{}, fmt.Errorf("MCP definition is missing: %w", ErrInvalid)
-	}
-	return mcpSubmission{
-		Name:          wire.Name,
-		Version:       wire.Version,
-		Description:   wire.Description,
-		ChangeSummary: wire.ChangeSummary,
-		Definition:    wire.Definition,
-	}, nil
+	return resource, append([]byte(nil), raw...), nil
 }

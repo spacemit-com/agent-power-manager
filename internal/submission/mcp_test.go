@@ -9,21 +9,18 @@ import (
 	"apm/internal/domain"
 )
 
-const validMCPSubmission = `{"name":"demo","version":"v1.0.0","description":"demo mcp","change_summary":"first","definition":{"transport":"stdio","command":"npx","args":["-y","@foo/mcp"]}}`
+const validMCPResource = `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo mcp","definition":{"transport":"stdio","command":"npx","args":["-y","@foo/mcp"]}}`
 
 func TestValidateMCP(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, validMCPSubmission)
+	writeTestFile(t, path, validMCPResource)
 	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
 	if got.Type != domain.PowerTypeMCP || got.Name != "demo" || got.Version != "v1.0.0" || got.Description != "demo mcp" {
 		t.Fatalf("Validate() = %#v", got)
-	}
-	if got.ChangeSummary != "first" {
-		t.Fatalf("ChangeSummary = %q", got.ChangeSummary)
 	}
 	if got.FileCount != 1 {
 		t.Fatalf("FileCount = %d, want 1", got.FileCount)
@@ -36,7 +33,7 @@ func TestValidateMCP(t *testing.T) {
 func TestValidateMCPRejectsSecretField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, `{"name":"demo","version":"v1.0.0","description":"d","change_summary":"x","definition":{"transport":"stdio","command":"npx","env":{"TOKEN":"secret"}}}`)
+	writeTestFile(t, path, `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":{"transport":"stdio","command":"npx","env":{"TOKEN":"secret"}}}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -46,7 +43,7 @@ func TestValidateMCPRejectsSecretField(t *testing.T) {
 func TestValidateMCPRejectsMissingDefinition(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, `{"name":"demo","version":"v1.0.0","description":"d","change_summary":"x"}`)
+	writeTestFile(t, path, `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d"}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -56,7 +53,7 @@ func TestValidateMCPRejectsMissingDefinition(t *testing.T) {
 func TestValidateMCPRejectsUnknownOuterField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, `{"name":"demo","version":"v1.0.0","description":"d","change_summary":"x","definition":{"transport":"stdio","command":"npx"},"extra":1}`)
+	writeTestFile(t, path, `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":{"transport":"stdio","command":"npx"},"extra":1}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -66,7 +63,16 @@ func TestValidateMCPRejectsUnknownOuterField(t *testing.T) {
 func TestValidateMCPRejectsNonCanonicalVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, `{"name":"demo","version":"1.0.0","description":"d","change_summary":"x","definition":{"transport":"stdio","command":"npx"}}`)
+	writeTestFile(t, path, `{"schema_version":1,"name":"demo","version":"1.0.0","description":"d","definition":{"transport":"stdio","command":"npx"}}`)
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestValidateMCPRejectsLegacySubmissionWrapper(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	writeTestFile(t, path, `{"name":"demo","version":"v1.0.0","description":"d","change_summary":"x","definition":{"transport":"stdio","command":"npx"}}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)

@@ -160,14 +160,6 @@ func TestValidateAgentRejectsOversizedFile(t *testing.T) {
 	}
 }
 
-func TestValidateAgentRejectsVersionFlag(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "missing.yaml")
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path, Version: "v1.0.0"})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
-	}
-}
-
 func TestValidateAgentHonorsCancelledContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	writeTestFile(t, path, validAgentYAML)
@@ -176,5 +168,33 @@ func TestValidateAgentHonorsCancelledContext(t *testing.T) {
 	_, err := Validate(ctx, Request{Type: domain.PowerTypeAgent, Path: path})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Validate() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestValidateAllTypesDoNotRequireMessage(t *testing.T) {
+	skillDir := t.TempDir()
+	writeValidSkill(t, skillDir)
+	pluginDir := t.TempDir()
+	writeValidPlugin(t, pluginDir)
+	mcpPath := filepath.Join(t.TempDir(), "mcp.json")
+	writeTestFile(t, mcpPath, validMCPResource)
+	agentPath := filepath.Join(t.TempDir(), "agent.yaml")
+	writeTestFile(t, agentPath, validAgentYAML)
+
+	for _, test := range []struct {
+		name      string
+		powerType domain.PowerType
+		path      string
+	}{
+		{name: "skill", powerType: domain.PowerTypeSkill, path: skillDir},
+		{name: "plugin", powerType: domain.PowerTypePlugin, path: pluginDir},
+		{name: "mcp", powerType: domain.PowerTypeMCP, path: mcpPath},
+		{name: "agent", powerType: domain.PowerTypeAgent, path: agentPath},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := Validate(context.Background(), Request{Type: test.powerType, Path: test.path}); err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
 	}
 }

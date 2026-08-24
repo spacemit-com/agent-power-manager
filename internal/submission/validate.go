@@ -24,28 +24,14 @@ const (
 	maxPathLength      = 255
 )
 
-// Validate 校验 Skill/Plugin/MCP 源并返回解析出的身份与统计信息。
+// Validate 校验 Skill/Plugin/MCP/Agent 源并返回解析出的身份与统计信息。
 // 完全离线，不读取 API Key，也不访问网络。
 func Validate(ctx context.Context, request Request) (Validation, error) {
-	if err := ctx.Err(); err != nil {
+	loaded, err := loadSource(ctx, request.Type, request.Path)
+	if err != nil {
 		return Validation{}, err
 	}
-	switch request.Type {
-	case domain.PowerTypeSkill:
-		return validateSkill(ctx, request)
-	case domain.PowerTypePlugin:
-		return validatePlugin(ctx, request)
-	case domain.PowerTypeMCP:
-		return validateMCP(ctx, request)
-	case domain.PowerTypeAgent:
-		source, err := validateAgentSource(ctx, request)
-		if err != nil {
-			return Validation{}, err
-		}
-		return source.validation, nil
-	default:
-		return Validation{}, fmt.Errorf("unsupported type %q: %w", request.Type, ErrInvalid)
-	}
+	return loaded.validation, nil
 }
 
 // validateCommonMetadata 校验三类共用的元数据规则。

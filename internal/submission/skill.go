@@ -11,98 +11,105 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-func validateSkill(ctx context.Context, request Request) (Validation, error) {
+type skillSourceLoader struct{}
+
+func (skillSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	if err := ctx.Err(); err != nil {
-		return Validation{}, err
+		return source{}, err
 	}
-	if request.Version != "" {
-		if _, err := domain.CanonicalPowerVersion(request.Version); err != nil {
-			return Validation{}, fmt.Errorf("skill version: %w", errors.Join(ErrInvalid, err))
-		}
-	}
-	stats, err := validateSourceTree(request.Path)
+	stats, err := validateSourceTree(path)
 	if err != nil {
-		return Validation{}, err
+		return source{}, err
 	}
-	name, description, err := validateSkillContent(request.Path)
+	name, version, description, err := validateSkillContent(path)
 	if err != nil {
-		return Validation{}, err
+		return source{}, err
 	}
-	return Validation{
-		Type:          domain.PowerTypeSkill,
-		Name:          name,
-		Version:       request.Version,
-		Description:   description,
-		ChangeSummary: request.ChangeSummary,
-		FileCount:     stats.fileCount,
-		ContentSize:   stats.totalSize,
+	if err := validateCommonMetadata(name, version, description); err != nil {
+		return source{}, err
+	}
+	return source{
+		validation: Validation{
+			Type: domain.PowerTypeSkill, Name: name, Version: version, Description: description,
+			FileCount: stats.fileCount, ContentSize: stats.totalSize,
+		},
+		contentType: "application/gzip",
+		build:       func() ([]byte, error) { return BuildTarGz(path) },
 	}, nil
 }
 
 // validateSkillContent 校验资源根下 SKILL.md 与 skill-card.md 的完整格式，
-// 返回 frontmatter 中的 name 与 description。独立 Skill 与内嵌 Plugin Skill 共用。
-func validateSkillContent(root string) (name, description string, err error) {
+// 返回 frontmatter 中的 name、version 与 description。独立 Skill 与内嵌 Plugin Skill 共用。
+func validateSkillContent(root string) (name, version, description string, err error) {
 	skillMD, err := readRootRegularFile(root, "SKILL.md")
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	cardMD, err := readRootRegularFile(root, "skill-card.md")
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	name, description, err = parseSkillFrontmatter(skillMD)
+	name, version, description, err = parseSkillFrontmatter(skillMD)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if err := validateSkillCard(cardMD); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return name, description, nil
+	return name, version, description, nil
 }
 
 // parseSkillFrontmatter 解析 SKILL.md 首字节起的 YAML frontmatter，
-// 要求 mapping、无重复键、name/description 为非空字符串。
-func parseSkillFrontmatter(contents []byte) (name, description string, err error) {
+// 要求 mapping、无重复键，且 name/version/description 均为非空字符串。
+func parseSkillFrontmatter(contents []byte) (name, version, description string, err error) {
 	block, err := extractFrontmatter(contents)
 	if err != nil {
-		return "", "", fmt.Errorf("SKILL.md %w", err)
+		return "", "", "", fmt.Errorf("SKILL.md %w", err)
 	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(block, &document); err != nil {
-		return "", "", fmt.Errorf("decode SKILL.md frontmatter: %w", errors.Join(ErrInvalid, err))
+		return "", "", "", fmt.Errorf("decode SKILL.md frontmatter: %w", errors.Join(ErrInvalid, err))
 	}
 	node := &document
 	if node.Kind == yaml.DocumentNode {
 		if len(node.Content) == 0 {
-			return "", "", fmt.Errorf("SKILL.md frontmatter must be a mapping: %w", ErrInvalid)
+			return "", "", "", fmt.Errorf("SKILL.md frontmatter must be a mapping: %w", ErrInvalid)
 		}
 		node = node.Content[0]
 	}
 	if node.Kind != yaml.MappingNode {
-		return "", "", fmt.Errorf("SKILL.md frontmatter must be a mapping: %w", ErrInvalid)
+		return "", "", "", fmt.Errorf("SKILL.md frontmatter must be a mapping: %w", ErrInvalid)
 	}
 	seen := make(map[string]struct{}, len(node.Content)/2)
-	var nameNode, descriptionNode *yaml.Node
+	var nameNode, versionNode, descriptionNode *yaml.Node
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i].Value
 		if _, duplicate := seen[key]; duplicate {
-			return "", "", fmt.Errorf("SKILL.md frontmatter has duplicate key %q: %w", key, ErrInvalid)
+			return "", "", "", fmt.Errorf("SKILL.md frontmatter has duplicate key %q: %w", key, ErrInvalid)
 		}
 		seen[key] = struct{}{}
 		switch key {
 		case "name":
 			nameNode = node.Content[i+1]
+		case "version":
+			versionNode = node.Content[i+1]
 		case "description":
 			descriptionNode = node.Content[i+1]
 		}
 	}
 	if !isNonEmptyStringScalar(nameNode) {
-		return "", "", fmt.Errorf("SKILL.md frontmatter requires non-empty string name: %w", ErrInvalid)
+		return "", "", "", fmt.Errorf("SKILL.md frontmatter requires non-empty string name: %w", ErrInvalid)
+	}
+	if !isNonEmptyStringScalar(versionNode) {
+		return "", "", "", fmt.Errorf("SKILL.md frontmatter requires non-empty string version: %w", ErrInvalid)
+	}
+	if _, err := domain.CanonicalPowerVersion(versionNode.Value); err != nil {
+		return "", "", "", fmt.Errorf("SKILL.md frontmatter version: %w", errors.Join(ErrInvalid, err))
 	}
 	if !isNonEmptyStringScalar(descriptionNode) {
-		return "", "", fmt.Errorf("SKILL.md frontmatter requires non-empty string description: %w", ErrInvalid)
+		return "", "", "", fmt.Errorf("SKILL.md frontmatter requires non-empty string description: %w", ErrInvalid)
 	}
-	return nameNode.Value, descriptionNode.Value, nil
+	return nameNode.Value, versionNode.Value, descriptionNode.Value, nil
 }
 
 func isNonEmptyStringScalar(node *yaml.Node) bool {

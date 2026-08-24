@@ -31,12 +31,33 @@ func TestPrepareAgentPreservesRawYAML(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path, ChangeSummary: "first"})
+	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path, Message: "first"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := md5.Sum(raw)
 	if !bytes.Equal(got.Bytes, raw) || got.ContentType != "application/yaml" || got.MD5 != hex.EncodeToString(sum[:]) {
 		t.Fatalf("Prepare() = type=%q md5=%q bytes=%q", got.ContentType, got.MD5, got.Bytes)
+	}
+}
+
+func TestAgentSourceBuildReturnsDefensiveCopies(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	writeTestFile(t, path, validAgentYAML)
+	loaded, err := (agentSourceLoader{}).Load(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	first, err := loaded.build()
+	if err != nil {
+		t.Fatalf("first build() error = %v", err)
+	}
+	first[0] = '#'
+	second, err := loaded.build()
+	if err != nil {
+		t.Fatalf("second build() error = %v", err)
+	}
+	if string(second) != validAgentYAML {
+		t.Fatalf("second build() = %q, want original raw YAML", second)
 	}
 }

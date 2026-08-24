@@ -11,37 +11,38 @@ import (
 	"apm/internal/utils/jsonstrict"
 )
 
-func validatePlugin(ctx context.Context, request Request) (Validation, error) {
+type pluginSourceLoader struct{}
+
+func (pluginSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	if err := ctx.Err(); err != nil {
-		return Validation{}, err
+		return source{}, err
 	}
-	stats, err := validateSourceTree(request.Path)
+	stats, err := validateSourceTree(path)
 	if err != nil {
-		return Validation{}, err
+		return source{}, err
 	}
-	identity, err := readPluginIdentity(request.Path)
+	identity, err := readPluginIdentity(path)
 	if err != nil {
-		return Validation{}, err
+		return source{}, err
 	}
 	ref := domain.PowerRef{Type: domain.PowerTypePlugin, Name: identity.Name, Version: identity.Version}
-	manifest, err := pluginartifact.LoadAPCPluginManifest(ref, request.Path)
+	manifest, err := pluginartifact.LoadAPCPluginManifest(ref, path)
 	if err != nil {
-		return Validation{}, fmt.Errorf("validate plugin artifact: %w", errors.Join(ErrInvalid, err))
+		return source{}, fmt.Errorf("validate plugin artifact: %w", errors.Join(ErrInvalid, err))
 	}
 	for _, skillPath := range manifest.Skills {
-		skillRoot := filepath.Join(request.Path, filepath.FromSlash(skillPath))
-		if _, _, err := validateSkillContent(skillRoot); err != nil {
-			return Validation{}, fmt.Errorf("validate plugin skill %q: %w", skillPath, err)
+		skillRoot := filepath.Join(path, filepath.FromSlash(skillPath))
+		if _, _, _, err := validateSkillContent(skillRoot); err != nil {
+			return source{}, fmt.Errorf("validate plugin skill %q: %w", skillPath, err)
 		}
 	}
-	return Validation{
-		Type:          domain.PowerTypePlugin,
-		Name:          identity.Name,
-		Version:       identity.Version,
-		Description:   identity.Description,
-		ChangeSummary: request.ChangeSummary,
-		FileCount:     stats.fileCount,
-		ContentSize:   stats.totalSize,
+	return source{
+		validation: Validation{
+			Type: domain.PowerTypePlugin, Name: identity.Name, Version: identity.Version,
+			Description: identity.Description, FileCount: stats.fileCount, ContentSize: stats.totalSize,
+		},
+		contentType: "application/gzip",
+		build:       func() ([]byte, error) { return BuildTarGz(path) },
 	}, nil
 }
 

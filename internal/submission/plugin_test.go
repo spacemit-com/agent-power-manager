@@ -22,9 +22,8 @@ func TestValidatePlugin(t *testing.T) {
 	dir := t.TempDir()
 	writeValidPlugin(t, dir)
 	got, err := Validate(context.Background(), Request{
-		Type:          domain.PowerTypePlugin,
-		Path:          dir,
-		ChangeSummary: "add reviewer",
+		Type: domain.PowerTypePlugin,
+		Path: dir,
 	})
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
@@ -37,7 +36,7 @@ func TestValidatePlugin(t *testing.T) {
 	}
 }
 
-func TestValidatePluginAllowsMissingChangeSummary(t *testing.T) {
+func TestValidatePluginDoesNotRequireMessage(t *testing.T) {
 	dir := t.TempDir()
 	writeValidPlugin(t, dir)
 	if _, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir}); err != nil {
@@ -49,7 +48,7 @@ func TestValidatePluginRejectsMissingManifest(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "skills", "reviewer", "SKILL.md"), validSkillMarkdown)
 	writeTestFile(t, filepath.Join(dir, "skills", "reviewer", "skill-card.md"), validSkillCardMarkdown)
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir, ChangeSummary: "x"})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -60,7 +59,7 @@ func TestValidatePluginRejectsBadEmbeddedSkill(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "apc-plugin.json"), validPluginManifest)
 	writeTestFile(t, filepath.Join(dir, "skills", "reviewer", "SKILL.md"), validSkillMarkdown)
 	// 缺少 skill-card.md。
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir, ChangeSummary: "x"})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
