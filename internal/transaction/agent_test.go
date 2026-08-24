@@ -49,6 +49,9 @@ type agentValidationAdapter struct{}
 func (a *agentValidationAdapter) TargetPath(domain.PowerRef) (string, error) {
 	return "/tmp/agent.yaml", nil
 }
+func (a *agentValidationAdapter) ValidateArtifact(domain.PowerRef, string) error {
+	return nil
+}
 func (a *agentValidationAdapter) Install(domain.PowerRef, string) (adapter.AgentInstallResult, error) {
 	return adapter.AgentInstallResult{Published: true}, nil
 }

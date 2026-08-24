@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"go.yaml.in/yaml/v3"
-
 	"apm/internal/domain"
 )
 
@@ -42,6 +40,37 @@ func (a *bibitAgentAdapter) TargetPath(ref domain.PowerRef) (string, error) {
 	return filepath.Join(root, "agents", ref.Name, "agent.yaml"), nil
 }
 
+// ValidateArtifact 只读校验 artifact 的 agent.yaml 身份与 ref 完全一致；
+// 拒绝非普通文件或符号链接，不发布或改写任何文件。
+func (a *bibitAgentAdapter) ValidateArtifact(ref domain.PowerRef, path string) error {
+	_, err := a.validateArtifactRaw(ref, path)
+	return err
+}
+
+// validateArtifactRaw 读取并校验 agent.yaml，返回通过校验的原始字节；
+// Install 复用这份字节发布，避免校验后再次读取到不同内容。
+func (a *bibitAgentAdapter) validateArtifactRaw(ref domain.PowerRef, path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat Agent artifact %q: %w", path, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("Agent artifact %q is not physical: %w", path, ErrInvalidAgent)
+	}
+	raw, err := a.readFile(path)
+	if err != nil {
+		return nil, err
+	}
+	config, err := domain.DecodeAgentConfigYAML(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := config.ValidatePowerRef(ref); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // Install 从公共 staging 读取并校验 agent.yaml，再原子发布单文件到 Bibit agents 目录。
 func (a *bibitAgentAdapter) Install(ref domain.PowerRef, staging string) (result AgentInstallResult, resultErr error) {
 	stagingRoot, err := validateStagingIdentity(staging)
@@ -67,15 +96,8 @@ func (a *bibitAgentAdapter) Install(ref domain.PowerRef, staging string) (result
 	}
 
 	source := filepath.Join(stagingRoot, "agents", ref.Name, "agent.yaml")
-	raw, err := a.readFile(source)
+	raw, err := a.validateArtifactRaw(ref, source)
 	if err != nil {
-		return result, a.installError(ref, "read", source, err)
-	}
-	var config domain.AgentConfig
-	if err := yaml.Unmarshal(raw, &config); err != nil {
-		return result, a.installError(ref, "parse", source, fmt.Errorf("%w: %v", ErrInvalidAgent, err))
-	}
-	if err := config.Validate(); err != nil {
 		return result, a.installError(ref, "validation", source, err)
 	}
 

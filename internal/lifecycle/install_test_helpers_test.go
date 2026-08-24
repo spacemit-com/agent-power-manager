@@ -360,6 +360,8 @@ type installFakeAgentAdapter struct{}
 
 func (installFakeAgentAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
 
+func (installFakeAgentAdapter) ValidateArtifact(domain.PowerRef, string) error { return nil }
+
 func (installFakeAgentAdapter) Install(domain.PowerRef, string) (adapter.AgentInstallResult, error) {
 	return adapter.AgentInstallResult{Published: true}, nil
 }

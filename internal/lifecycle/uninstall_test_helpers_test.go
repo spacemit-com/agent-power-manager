@@ -210,6 +210,8 @@ type uninstallFakeAgentAdapter struct{}
 
 func (uninstallFakeAgentAdapter) TargetPath(domain.PowerRef) (string, error) { return "/target", nil }
 
+func (uninstallFakeAgentAdapter) ValidateArtifact(domain.PowerRef, string) error { return nil }
+
 func (uninstallFakeAgentAdapter) Install(domain.PowerRef, string) (adapter.AgentInstallResult, error) {
 	return adapter.AgentInstallResult{Published: true}, nil
 }

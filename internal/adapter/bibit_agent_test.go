@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -79,5 +80,37 @@ func TestBibitAgentAdapterRejectsInvalidYAML(t *testing.T) {
 	a := newBibitAgentAdapter(agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: ".bianbu-agent"})
 	if _, err := a.Install(ref, staging); err == nil {
 		t.Fatal("Install() error = nil, want validation error")
+	}
+}
+
+func TestBibitAgentValidateArtifactRequiresExactIdentity(t *testing.T) {
+	root, _ := newBibitAgentFixture(t, true)
+	path := filepath.Join(root, "candidate.yaml")
+	raw := []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newBibitAgentAdapter(agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: ".bianbu-agent"})
+	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	if err := a.ValidateArtifact(ref, path); err != nil {
+		t.Fatalf("ValidateArtifact() error = %v", err)
+	}
+	mismatch := ref
+	mismatch.Version = "v2.0.0"
+	if err := a.ValidateArtifact(mismatch, path); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("mismatch error = %v", err)
+	}
+}
+
+func TestBibitAgentInstallRejectsStagingIdentityMismatchWithoutPublishing(t *testing.T) {
+	root, staging := newBibitAgentFixture(t, true)
+	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	writeAgentStaging(t, staging, ref.Name, []byte("schema_version: 1\nagent: {id: demo, version: v2.0.0, description: demo}\n"))
+	a := newBibitAgentAdapter(agentProfile{id: domain.AgentBibit, homeEnv: "BIANBU_AGENT_HOME", defaultRoot: ".bianbu-agent"})
+	if result, err := a.Install(ref, staging); err == nil || result.Published {
+		t.Fatalf("Install() = %+v, %v", result, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "agents", "demo", "agent.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists: %v", err)
 	}
 }
