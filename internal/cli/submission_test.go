@@ -186,6 +186,28 @@ func TestSubmissionJSONOutputUsesExplicitSnakeCaseContracts(t *testing.T) {
 			t.Fatalf("decoded = %#v, want only items", decoded)
 		}
 	})
+
+	t.Run("get empty validation errors", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		detail := submissionDetailFixture()
+		detail.ValidationErrors = []string{}
+		entry := newSubmissionEntry(t, &stdout, &stderr, unexpectedValidate(t), unexpectedSubmit(t), func() (cli.SubmissionQueryLifecycle, error) {
+			return &recordingSubmissionLifecycle{result: cli.SubmissionQueryResult{Detail: &detail}}, nil
+		})
+
+		if err := entry.Execute([]string{"submission", "get", "sub_1", "--output=json"}); err != nil {
+			t.Fatalf("Execute(submission get --output=json) error = %v", err)
+		}
+		var decoded struct {
+			ValidationErrors []string `json:"validation_errors"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+			t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+		}
+		if decoded.ValidationErrors == nil || len(decoded.ValidationErrors) != 0 {
+			t.Fatalf("validation_errors = %#v, want non-nil empty array", decoded.ValidationErrors)
+		}
+	})
 }
 
 func submissionDetailFixture() domain.Submission {

@@ -98,7 +98,7 @@ func newSubmissionDetailOutput(detail domain.Submission) submissionDetailOutput 
 		CreatedAt:        detail.CreatedAt,
 		UpdatedAt:        detail.UpdatedAt,
 		ContentAvailable: detail.ContentAvailable,
-		ValidationErrors: append([]string(nil), detail.ValidationErrors...),
+		ValidationErrors: append([]string{}, detail.ValidationErrors...),
 		ReviewComment:    detail.ReviewComment,
 		PublishedVersion: detail.PublishedVersion,
 		Timeline:         timeline,
