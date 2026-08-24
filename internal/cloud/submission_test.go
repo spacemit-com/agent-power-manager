@@ -34,6 +34,13 @@ func TestSubmissionErrorsAreDistinct(t *testing.T) {
 	}
 }
 
+func TestAlreadyPublishedCanJoinSubmissionConflict(t *testing.T) {
+	err := errors.Join(ErrAlreadyPublished, ErrSubmissionConflict)
+	if !errors.Is(err, ErrAlreadyPublished) || !errors.Is(err, ErrSubmissionConflict) {
+		t.Fatalf("joined error = %v", err)
+	}
+}
+
 func TestSubmissionStubPropagatesError(t *testing.T) {
 	stub := stubSubmission{err: ErrSubmissionUnsupported}
 	if _, err := stub.Submit(context.Background(), domain.SubmissionRequest{}); !errors.Is(err, ErrSubmissionUnsupported) {

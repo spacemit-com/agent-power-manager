@@ -19,6 +19,8 @@ var (
 	ErrSubmissionUnsupported = errors.New("cloud submission unsupported")
 	// ErrSubmissionConflict 表示提交与活动申请、版本或审批状态冲突。
 	ErrSubmissionConflict = errors.New("cloud submission conflict")
+	// ErrAlreadyPublished 表示相同资源版本和内容已发布，不会创建 Submission。
+	ErrAlreadyPublished = errors.New("cloud power already published")
 	// ErrAuth 表示 API Key 无效或无权操作。
 	ErrAuth = errors.New("cloud authentication failure")
 	// ErrUnavailable 表示依赖服务（官网认证等）不可用。

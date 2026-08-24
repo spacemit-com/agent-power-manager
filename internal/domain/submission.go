@@ -44,6 +44,25 @@ type SubmissionReceipt struct {
 	StatusURL    string
 }
 
+// SubmissionOutcome 表示一次提交请求的最终处理结果类别，用于区分新创建的提交与幂等重放的提交。
+type SubmissionOutcome string
+
+const (
+	// SubmissionAccepted 表示提交已被接收，并创建了新的 Submission。
+	SubmissionAccepted SubmissionOutcome = "accepted"
+	// SubmissionReplayed 表示请求被幂等重放，返回的是已存在的 Submission。
+	SubmissionReplayed SubmissionOutcome = "replayed"
+)
+
+// SubmissionResult 表示提交请求的统一结果，同时承载处理结果类别与对应的 Submission 标识；
+// Outcome 必须与 Status 语义一致（如 accepted 对应已接收、replayed 对应已存在）。
+type SubmissionResult struct {
+	Outcome      SubmissionOutcome
+	SubmissionID string
+	Status       SubmissionStatus
+	StatusURL    string
+}
+
 // Submission 表示一次提交的详情，供 submission get 展示。
 type Submission struct {
 	SubmissionID     string

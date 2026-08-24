@@ -21,6 +21,12 @@ func TestSubmissionStatusConstantsAreStable(t *testing.T) {
 	}
 }
 
+func TestSubmissionOutcomeConstantsAreStable(t *testing.T) {
+	if SubmissionAccepted != "accepted" || SubmissionReplayed != "replayed" {
+		t.Fatalf("outcomes = %q/%q", SubmissionAccepted, SubmissionReplayed)
+	}
+}
+
 func TestSubmissionRequestPreservesFields(t *testing.T) {
 	request := SubmissionRequest{
 		Type:           PowerTypeSkill,
