@@ -18,7 +18,11 @@ func (stagingFailureSource) DownloadSkill(_ context.Context, ref domain.PowerRef
 }
 
 func (stagingFailureSource) DownloadAgent(_ context.Context, ref domain.PowerRef, destination string) error {
-	return os.WriteFile(destination, []byte("agent-"+ref.Version), 0o644)
+	return os.WriteFile(destination, []byte(stagingAgentYAML(ref)), 0o644)
+}
+
+func stagingAgentYAML(ref domain.PowerRef) string {
+	return "schema_version: 1\nagent: {id: " + ref.Name + ", version: " + ref.Version + ", description: demo}\n"
 }
 
 func newInternalFilesystemCache(t *testing.T) *FilesystemCache {
@@ -55,8 +59,9 @@ func TestPrepareAgentStagingFailureRetainsPreviousStaging(t *testing.T) {
 	if _, err := store.PrepareAgent(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"}); err == nil {
 		t.Fatal("PrepareAgent() error = nil, want staging read error")
 	}
-	if got, err := os.ReadFile(filepath.Join(store.stagingPath, "agents", "demo", "agent.yaml")); err != nil || string(got) != "agent-v1.0.0" {
-		t.Fatalf("previous staging = %q, %v, want agent-v1.0.0", got, err)
+	want := stagingAgentYAML(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"})
+	if got, err := os.ReadFile(filepath.Join(store.stagingPath, "agents", "demo", "agent.yaml")); err != nil || string(got) != want {
+		t.Fatalf("previous staging = %q, %v, want %q", got, err, want)
 	}
 }
 
@@ -86,8 +91,9 @@ func TestPrepareAgentReturnsCleanupFailureAfterAtomicPublication(t *testing.T) {
 	if !errors.Is(err, cleanupErr) || !strings.Contains(err.Error(), "clean staging candidate") {
 		t.Fatalf("PrepareAgent() error = %v, want stable cleanup context", err)
 	}
-	if got, readErr := os.ReadFile(filepath.Join(staging, "agents", "demo", "agent.yaml")); readErr != nil || string(got) != "agent-v2.0.0" {
-		t.Fatalf("new staging = %q, %v, want agent-v2.0.0", got, readErr)
+	want := stagingAgentYAML(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"})
+	if got, readErr := os.ReadFile(filepath.Join(staging, "agents", "demo", "agent.yaml")); readErr != nil || string(got) != want {
+		t.Fatalf("new staging = %q, %v, want %q", got, readErr, want)
 	}
 }
 

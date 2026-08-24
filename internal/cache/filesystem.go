@@ -104,7 +104,7 @@ func (c *FilesystemCache) PrepareAgent(ctx context.Context, ref domain.PowerRef)
 	lock := c.lockFor(final)
 	lock.Lock()
 	defer lock.Unlock()
-	if hit, err := cachedAgent(final); err != nil {
+	if hit, err := cachedAgent(final, ref); err != nil {
 		return "", err
 	} else if !hit {
 		if err := c.downloadAgent(ctx, ref, final); err != nil {
@@ -181,7 +181,7 @@ func (c *FilesystemCache) downloadAgent(ctx context.Context, ref domain.PowerRef
 	if err := c.source.DownloadAgent(ctx, ref, destination); err != nil {
 		return fmt.Errorf("download Agent %+v: %w", ref, err)
 	}
-	if hit, err := cachedAgent(temporary); err != nil || !hit {
+	if hit, err := cachedAgent(temporary, ref); err != nil || !hit {
 		if err != nil {
 			return err
 		}
@@ -231,7 +231,10 @@ func cachedSkill(root string) (bool, error) {
 	return true, nil
 }
 
-func cachedAgent(root string) (bool, error) {
+// cachedAgent 报告 root 是否为身份与 ref 完全一致的已发布 Agent 版本。
+// 先保留现有物理目录/marker 检查，再严格解析 agent.yaml 并校验其 id/version 与 ref 一致；
+// 解析或身份不匹配时返回错误，由调用方 fail closed，绝不删除或覆盖现有缓存。
+func cachedAgent(root string, ref domain.PowerRef) (bool, error) {
 	info, err := os.Lstat(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -252,6 +255,17 @@ func cachedAgent(root string) (bool, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return false, fmt.Errorf("Agent cache marker %q is not a physical regular file", marker)
+	}
+	raw, err := os.ReadFile(marker)
+	if err != nil {
+		return false, fmt.Errorf("read Agent cache %q: %w", marker, err)
+	}
+	config, err := domain.DecodeAgentConfigYAML(raw)
+	if err != nil {
+		return false, fmt.Errorf("validate Agent cache %q for %+v: %w", root, ref, err)
+	}
+	if err := config.ValidatePowerRef(ref); err != nil {
+		return false, fmt.Errorf("validate Agent cache identity %q for %+v: %w", root, ref, err)
 	}
 	return true, nil
 }

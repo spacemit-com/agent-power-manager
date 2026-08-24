@@ -1,6 +1,7 @@
 package cache_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -13,12 +14,13 @@ import (
 )
 
 type recordingSource struct {
-	mu           sync.Mutex
-	skillCalls   int
-	agentCalls   int
-	skillErr     error
-	agentErr     error
-	destinations []string
+	mu            sync.Mutex
+	skillCalls    int
+	agentCalls    int
+	skillErr      error
+	agentErr      error
+	agentContents []byte
+	destinations  []string
 }
 
 func (s *recordingSource) DownloadSkill(_ context.Context, _ domain.PowerRef, destination string) error {
@@ -40,7 +42,11 @@ func (s *recordingSource) DownloadAgent(_ context.Context, _ domain.PowerRef, de
 	if s.agentErr != nil {
 		return s.agentErr
 	}
-	return os.WriteFile(destination, []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n"), 0o644)
+	contents := s.agentContents
+	if len(contents) == 0 {
+		contents = []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n")
+	}
+	return os.WriteFile(destination, contents, 0o644)
 }
 
 func newTestFilesystemCache(t *testing.T, source cache.Source) *cache.FilesystemCache {
@@ -125,7 +131,7 @@ func TestPrepareSkillFailureCleansOnlyCallTemporaryDirectory(t *testing.T) {
 
 func TestPrepareSourcesReceivePrivateCacheTemporaryTargets(t *testing.T) {
 	_, cacheHome := setCacheEnvironment(t)
-	source := &recordingSource{}
+	source := &recordingSource{agentContents: []byte("schema_version: 1\nagent: {id: agent, version: v1.0.0, description: agent}\n")}
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
@@ -205,5 +211,129 @@ func TestNewFilesystemRejectsTypedNilSource(t *testing.T) {
 	var source *recordingSource
 	if store, err := cache.NewFilesystem(source); store != nil || err == nil {
 		t.Fatalf("NewFilesystem() = (%v, %v), want nil/error", store, err)
+	}
+}
+
+func TestPrepareAgentRejectsDownloadedIdentityBeforeCachePublication(t *testing.T) {
+	source := &recordingSource{agentContents: []byte("schema_version: 1\nagent: {id: other, version: v1.0.0, description: other}\n")}
+	_, cacheHome := setCacheEnvironment(t)
+	store, err := cache.NewFilesystem(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	if _, err := store.PrepareAgent(context.Background(), ref); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	}
+	if _, err := os.Lstat(filepath.Join(cacheHome, "apm", "agents", "demo", "v1.0.0")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("published invalid cache: %v", err)
+	}
+}
+
+func TestPrepareAgentKeepsInvalidCacheAndDoesNotCallCloud(t *testing.T) {
+	source := &recordingSource{}
+	_, cacheHome := setCacheEnvironment(t)
+	store, err := cache.NewFilesystem(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := filepath.Join(cacheHome, "apm", "agents", "demo", "v1.0.0", "agent.yaml")
+	if err := os.MkdirAll(filepath.Dir(cached), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("schema_version: 1\nagent: {id: demo, version: v2.0.0, description: demo}\n")
+	if err := os.WriteFile(cached, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	if _, err := store.PrepareAgent(context.Background(), ref); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	}
+	got, err := os.ReadFile(cached)
+	if err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("preserved cache = %q, %v", got, err)
+	}
+	if source.agentCalls != 0 {
+		t.Fatalf("agent calls = %d, want 0", source.agentCalls)
+	}
+}
+
+func TestPrepareAgentRejectsMalformedCachedYAMLWithoutCloudCall(t *testing.T) {
+	source := &recordingSource{}
+	_, cacheHome := setCacheEnvironment(t)
+	store, err := cache.NewFilesystem(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := filepath.Join(cacheHome, "apm", "agents", "demo", "v1.0.0", "agent.yaml")
+	if err := os.MkdirAll(filepath.Dir(cached), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("schema_version: [\n")
+	if err := os.WriteFile(cached, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	if _, err := store.PrepareAgent(context.Background(), ref); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	}
+	got, err := os.ReadFile(cached)
+	if err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("preserved cache = %q, %v", got, err)
+	}
+	if source.agentCalls != 0 {
+		t.Fatalf("agent calls = %d, want 0", source.agentCalls)
+	}
+}
+
+func TestPrepareAgentRejectsCachedAgentMissingDescription(t *testing.T) {
+	source := &recordingSource{}
+	_, cacheHome := setCacheEnvironment(t)
+	store, err := cache.NewFilesystem(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := filepath.Join(cacheHome, "apm", "agents", "demo", "v1.0.0", "agent.yaml")
+	if err := os.MkdirAll(filepath.Dir(cached), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0}\n")
+	if err := os.WriteFile(cached, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	if _, err := store.PrepareAgent(context.Background(), ref); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	}
+	if source.agentCalls != 0 {
+		t.Fatalf("agent calls = %d, want 0", source.agentCalls)
+	}
+}
+
+func TestPrepareAgentUsesValidCachedIdentityWithoutCloudCall(t *testing.T) {
+	source := &recordingSource{}
+	_, cacheHome := setCacheEnvironment(t)
+	store, err := cache.NewFilesystem(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := filepath.Join(cacheHome, "apm", "agents", "demo", "v1.0.0", "agent.yaml")
+	if err := os.MkdirAll(filepath.Dir(cached), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n")
+	if err := os.WriteFile(cached, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	staging, err := store.PrepareAgent(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(staging, "agents", "demo", "agent.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if source.agentCalls != 0 {
+		t.Fatalf("agent calls = %d, want 0", source.agentCalls)
 	}
 }
