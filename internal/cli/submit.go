@@ -19,6 +19,7 @@ func newSubmitCommand(newLifecycle SubmitLifecycleFactory) *cobra.Command {
 			if err := validateSubmitFlags(flags); err != nil {
 				return err
 			}
+			flags.Message = strings.TrimSpace(flags.Message)
 			logParsedCommand(command, flags, args)
 			if newLifecycle == nil {
 				return errors.New("submit lifecycle factory is required")
@@ -38,8 +39,7 @@ func newSubmitCommand(newLifecycle SubmitLifecycleFactory) *cobra.Command {
 		},
 	}
 	bindTypeFlag(command, &flags)
-	command.Flags().StringVar(&flags.Version, "version", "", "version vMAJOR.MINOR.PATCH (skill only; agent forbids, plugin/mcp read from source)")
-	command.Flags().StringVar(&flags.ChangeSummary, "change-summary", "", "what changed in this submission")
+	command.Flags().StringVar(&flags.Message, "message", "", "describe this submission")
 	return command
 }
 
@@ -47,25 +47,8 @@ func validateSubmitFlags(flags Flags) error {
 	if err := requireSubmissionType(flags); err != nil {
 		return err
 	}
-	switch flags.Type {
-	case "skill":
-		if strings.TrimSpace(flags.Version) == "" {
-			return errors.New("--version is required for skill submit")
-		}
-		if strings.TrimSpace(flags.ChangeSummary) == "" {
-			return errors.New("--change-summary is required for skill submit")
-		}
-	case "plugin":
-		if strings.TrimSpace(flags.ChangeSummary) == "" {
-			return errors.New("--change-summary is required for plugin submit")
-		}
-	case "agent":
-		if strings.TrimSpace(flags.Version) != "" {
-			return errors.New("--version is not allowed for agent submit; version comes from agent.yaml")
-		}
-		if strings.TrimSpace(flags.ChangeSummary) == "" {
-			return errors.New("--change-summary is required for agent submit")
-		}
+	if strings.TrimSpace(flags.Message) == "" {
+		return errors.New("--message is required")
 	}
 	return nil
 }

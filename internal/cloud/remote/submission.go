@@ -22,12 +22,12 @@ var _ cloud.Submission = (*Client)(nil)
 
 // submissionMetadataDTO 是 multipart 中 metadata part 的传输类型。
 type submissionMetadataDTO struct {
-	Type          domain.PowerType `json:"type"`
-	Name          string           `json:"name"`
-	Version       string           `json:"version"`
-	Description   string           `json:"description"`
-	ChangeSummary string           `json:"change_summary"`
-	ContentMD5    string           `json:"content_md5"`
+	Type        domain.PowerType `json:"type"`
+	Name        string           `json:"name"`
+	Version     string           `json:"version"`
+	Description string           `json:"description"`
+	Message     string           `json:"message"`
+	ContentMD5  string           `json:"content_md5"`
 }
 
 type submissionReceiptDTO struct {
@@ -75,12 +75,12 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 		return domain.SubmissionResult{}, fmt.Errorf("submit remote resource type %q requires content type %q, got %q", request.Type, expectedContentType, request.ContentType)
 	}
 	metadata, err := json.Marshal(submissionMetadataDTO{
-		Type:          request.Type,
-		Name:          request.Name,
-		Version:       request.Version,
-		Description:   request.Description,
-		ChangeSummary: request.ChangeSummary,
-		ContentMD5:    request.ContentMD5,
+		Type:        request.Type,
+		Name:        request.Name,
+		Version:     request.Version,
+		Description: request.Description,
+		Message:     request.Message,
+		ContentMD5:  request.ContentMD5,
 	})
 	if err != nil {
 		return domain.SubmissionResult{}, fmt.Errorf("encode remote submission metadata: %w", err)

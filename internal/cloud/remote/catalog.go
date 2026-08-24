@@ -20,15 +20,15 @@ type catalogPageDTO struct {
 }
 
 type resourceMetadataDTO struct {
-	Type          domain.PowerType `json:"type"`
-	Name          string           `json:"name"`
-	Version       string           `json:"version"`
-	Description   string           `json:"description"`
-	ChangeSummary string           `json:"change_summary"`
-	ContentType   string           `json:"content_type"`
-	ContentSize   *int64           `json:"content_size"`
-	ContentMD5    string           `json:"content_md5"`
-	PublishedAt   string           `json:"published_at"`
+	Type        domain.PowerType `json:"type"`
+	Name        string           `json:"name"`
+	Version     string           `json:"version"`
+	Description string           `json:"description"`
+	Message     string           `json:"message"`
+	ContentType string           `json:"content_type"`
+	ContentSize *int64           `json:"content_size"`
+	ContentMD5  string           `json:"content_md5"`
+	PublishedAt string           `json:"published_at"`
 }
 
 // List 遍历同一 APC 快照的全部 cursor 页，并按类型、名称和 SemVer 升序返回精确版本。
@@ -104,6 +104,9 @@ func validateResourceMetadata(metadata resourceMetadataDTO) (domain.PowerRef, *s
 	ref, version, err := validatePowerIdentity(metadata.Type, metadata.Name, metadata.Version)
 	if err != nil {
 		return domain.PowerRef{}, nil, err
+	}
+	if strings.TrimSpace(metadata.Message) == "" {
+		return domain.PowerRef{}, nil, fmt.Errorf("resource %s/%s/%s has empty message: %w", ref.Type, ref.Name, ref.Version, cloud.ErrInvalidResponse)
 	}
 	if metadata.ContentSize == nil || *metadata.ContentSize < 0 {
 		return domain.PowerRef{}, nil, fmt.Errorf("resource %s/%s/%s has invalid content size: %w", ref.Type, ref.Name, ref.Version, cloud.ErrInvalidResponse)

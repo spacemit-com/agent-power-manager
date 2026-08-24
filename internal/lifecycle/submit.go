@@ -30,10 +30,9 @@ var _ cli.SubmitLifecycle = (*SubmitService)(nil)
 // Submit 先离线校验与确定性打包，再生成 Idempotency-Key 并上传。
 func (s *SubmitService) Submit(ctx context.Context, flags cli.Flags, args []string) (cli.SubmitResult, error) {
 	content, err := submission.Prepare(ctx, submission.Request{
-		Type:          domain.PowerType(flags.Type),
-		Path:          args[0],
-		Version:       flags.Version,
-		ChangeSummary: flags.ChangeSummary,
+		Type:    domain.PowerType(flags.Type),
+		Path:    args[0],
+		Message: flags.Message,
 	})
 	if err != nil {
 		return cli.SubmitResult{}, err
@@ -47,7 +46,7 @@ func (s *SubmitService) Submit(ctx context.Context, flags cli.Flags, args []stri
 		Name:           content.Name,
 		Version:        content.Version,
 		Description:    content.Description,
-		ChangeSummary:  content.ChangeSummary,
+		Message:        content.Message,
 		ContentType:    content.ContentType,
 		Content:        content.Bytes,
 		ContentMD5:     content.MD5,

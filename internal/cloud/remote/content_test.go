@@ -215,7 +215,7 @@ func TestDownloadVerifiedContentClassifiesContentLengthSentinels(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			metadata := fmt.Sprintf(`{"type":"agent","name":"demo-agent","version":"v1.2.3","description":"","change_summary":"","content_type":"application/yaml","content_size":%d,"content_md5":"%s","published_at":"%s","status":"published"}`, len(contents), md5Hex(contents), testPublished)
+			metadata := fmt.Sprintf(`{"type":"agent","name":"demo-agent","version":"v1.2.3","description":"demo","message":"fixture","content_type":"application/yaml","content_size":%d,"content_md5":"%s","published_at":"%s","status":"published"}`, len(contents), md5Hex(contents), testPublished)
 			client, err := New("https://apc.example.com", &http.Client{
 				Timeout: time.Second,
 				Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -306,7 +306,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 
 	t.Run("content transport", func(t *testing.T) {
 		transportErr := errors.New("content transport failed")
-		metadata := fmt.Sprintf(`{"type":"agent","name":"demo-agent","version":"v1.2.3","description":"","change_summary":"","content_type":"application/yaml","content_size":1,"content_md5":"%s","published_at":"%s","status":"published"}`, md5Hex([]byte("x")), testPublished)
+		metadata := fmt.Sprintf(`{"type":"agent","name":"demo-agent","version":"v1.2.3","description":"demo","message":"fixture","content_type":"application/yaml","content_size":1,"content_md5":"%s","published_at":"%s","status":"published"}`, md5Hex([]byte("x")), testPublished)
 		client, err := New("https://apc.example.com", &http.Client{
 			Timeout: time.Second,
 			Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

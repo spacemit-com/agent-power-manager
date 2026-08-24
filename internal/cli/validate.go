@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -18,9 +17,6 @@ func newValidateCommand(newLifecycle ValidateLifecycleFactory) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := requireSubmissionType(flags); err != nil {
-				return err
-			}
-			if err := rejectAgentVersionOverride(flags); err != nil {
 				return err
 			}
 			logParsedCommand(command, flags, args)
@@ -42,7 +38,6 @@ func newValidateCommand(newLifecycle ValidateLifecycleFactory) *cobra.Command {
 		},
 	}
 	bindTypeFlag(command, &flags)
-	command.Flags().StringVar(&flags.Version, "version", "", "version vMAJOR.MINOR.PATCH (skill only; agent forbids, plugin/mcp read from source)")
 	command.Flags().BoolVar(&flags.JSON, "json", false, "machine-readable JSON output")
 	return command
 }
@@ -55,14 +50,6 @@ func requireSubmissionType(flags Flags) error {
 	default:
 		return fmt.Errorf("--type must be skill, plugin, mcp, or agent, got %q", flags.Type)
 	}
-}
-
-// rejectAgentVersionOverride 拒绝 --type agent 携带非空 --version；Agent 版本只来自 agent.yaml。
-func rejectAgentVersionOverride(flags Flags) error {
-	if flags.Type == "agent" && strings.TrimSpace(flags.Version) != "" {
-		return errors.New("--version is not allowed for agent; version comes from agent.yaml")
-	}
-	return nil
 }
 
 func renderValidate(writer io.Writer, result ValidateResult, asJSON bool) error {

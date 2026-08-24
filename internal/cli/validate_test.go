@@ -30,7 +30,7 @@ func TestValidateRequiresSubmissionType(t *testing.T) {
 	}
 }
 
-func TestValidateAllowsAgentAndRejectsVersionOverride(t *testing.T) {
+func TestValidateAllowsAgentWithoutVersionOverride(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	lifecycle := &recordingValidateLifecycle{result: cli.ValidateResult{Type: "agent", Name: "demo", Version: "v1.0.0", Description: "demo", FileCount: 1, ContentSize: 10}}
 	entry := newSubmissionEntry(t, &stdout, &stderr, func() (cli.ValidateLifecycle, error) { return lifecycle, nil }, unexpectedSubmit(t), unexpectedSubmission(t))
@@ -40,15 +40,6 @@ func TestValidateAllowsAgentAndRejectsVersionOverride(t *testing.T) {
 	if lifecycle.calls != 1 || lifecycle.flags.Type != "agent" {
 		t.Fatalf("lifecycle = %+v", lifecycle)
 	}
-
-	lifecycle.calls = 0
-	err := entry.Execute([]string{"validate", "agent.yaml", "--type=agent", "--version=v1.0.0"})
-	if err == nil || !strings.Contains(err.Error(), "--version") {
-		t.Fatalf("version override error = %v", err)
-	}
-	if lifecycle.calls != 0 {
-		t.Fatalf("lifecycle calls after invalid flags = %d", lifecycle.calls)
-	}
 }
 
 func TestValidateInvokesLifecycle(t *testing.T) {
@@ -56,13 +47,13 @@ func TestValidateInvokesLifecycle(t *testing.T) {
 	lifecycle := &recordingValidateLifecycle{result: cli.ValidateResult{Type: "skill", Name: "demo", Description: "does things", FileCount: 2, ContentSize: 100}}
 	entry := newSubmissionEntry(t, &stdout, &stderr, func() (cli.ValidateLifecycle, error) { return lifecycle, nil }, unexpectedSubmit(t), unexpectedSubmission(t))
 
-	if err := entry.Execute([]string{"validate", "dir", "--type=skill", "--version=v1.0.0"}); err != nil {
+	if err := entry.Execute([]string{"validate", "dir", "--type=skill"}); err != nil {
 		t.Fatalf("Execute(validate) error = %v", err)
 	}
 	if lifecycle.calls != 1 {
 		t.Fatalf("factory calls = %d, want 1", lifecycle.calls)
 	}
-	if lifecycle.flags.Type != "skill" || lifecycle.flags.Version != "v1.0.0" {
+	if lifecycle.flags.Type != "skill" || lifecycle.flags.Version != "" {
 		t.Fatalf("flags = %#v", lifecycle.flags)
 	}
 	if len(lifecycle.args) != 1 || lifecycle.args[0] != "dir" {

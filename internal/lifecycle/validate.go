@@ -21,9 +21,8 @@ var _ cli.ValidateLifecycle = (*ValidateService)(nil)
 // Validate 对指定路径执行离线完整校验，不读取 API Key、不访问网络。
 func (s *ValidateService) Validate(ctx context.Context, flags cli.Flags, args []string) (cli.ValidateResult, error) {
 	validation, err := submission.Validate(ctx, submission.Request{
-		Type:    domain.PowerType(flags.Type),
-		Path:    args[0],
-		Version: flags.Version,
+		Type: domain.PowerType(flags.Type),
+		Path: args[0],
 	})
 	if err != nil {
 		return cli.ValidateResult{}, err

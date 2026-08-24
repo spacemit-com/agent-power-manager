@@ -181,7 +181,7 @@ func TestCatalogSuccessRequiresApplicationJSONContentType(t *testing.T) {
 		},
 		{
 			name: "exact",
-			body: `{"type":"skill","name":"demo","version":"v1.0.0","description":"demo","change_summary":"initial","content_type":"application/gzip","content_size":0,"content_md5":"d41d8cd98f00b204e9800998ecf8427e","published_at":"2026-08-01T00:00:00Z","status":"published","yanked_at":"","yank_reason":""}`,
+			body: `{"type":"skill","name":"demo","version":"v1.0.0","description":"demo","message":"initial","content_type":"application/gzip","content_size":0,"content_md5":"d41d8cd98f00b204e9800998ecf8427e","published_at":"2026-08-01T00:00:00Z","status":"published","yanked_at":"","yank_reason":""}`,
 			run: func(ctx context.Context, client *Client) error {
 				_, err := client.Resolve(ctx, ref)
 				return err

@@ -65,8 +65,11 @@ func TestSubmitAgentUsesRawYAMLPart(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metadata, contentType, content := readSubmissionParts(t, r)
 		if metadata["type"] != "agent" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
-			metadata["description"] != "demo" || metadata["change_summary"] != "first" || metadata["content_md5"] != md5Hex(raw) {
+			metadata["description"] != "demo" || metadata["message"] != "first" || metadata["content_md5"] != md5Hex(raw) {
 			t.Fatalf("metadata = %#v", metadata)
+		}
+		if _, legacy := metadata["change_summary"]; legacy {
+			t.Fatalf("metadata contains legacy change_summary: %#v", metadata)
 		}
 		if contentType != "application/yaml" || !bytes.Equal(content, raw) {
 			t.Fatalf("content type/bytes = %q/%q", contentType, content)
@@ -79,7 +82,7 @@ func TestSubmitAgentUsesRawYAMLPart(t *testing.T) {
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
 		Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0", Description: "demo",
-		ChangeSummary: "first", ContentType: "application/yaml", Content: raw,
+		Message: "first", ContentType: "application/yaml", Content: raw,
 		ContentMD5: md5Hex(raw), IdempotencyKey: "7d7e6d70-13ec-4cd5-9ad6-37e49e861ac2",
 	})
 	if err != nil || got.Outcome != domain.SubmissionAccepted {
@@ -97,8 +100,11 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 		gotIdem = r.Header.Get("Idempotency-Key")
 		metadata, contentType, content := readSubmissionParts(t, r)
 		if metadata["type"] != "skill" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
-			metadata["description"] != "does things" || metadata["change_summary"] != "first" || metadata["content_md5"] != "md5" {
+			metadata["description"] != "does things" || metadata["message"] != "first" || metadata["content_md5"] != "md5" {
 			t.Fatalf("metadata = %#v", metadata)
+		}
+		if _, legacy := metadata["change_summary"]; legacy {
+			t.Fatalf("metadata contains legacy change_summary: %#v", metadata)
 		}
 		if contentType != "application/gzip" || string(content) != "bytes" {
 			t.Fatalf("content type/bytes = %q/%q", contentType, content)
@@ -112,7 +118,7 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
 		Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0",
-		Description: "does things", ChangeSummary: "first",
+		Description: "does things", Message: "first",
 		ContentType: "application/gzip", Content: []byte("bytes"), ContentMD5: "md5", IdempotencyKey: "k",
 	})
 	if err != nil {
@@ -130,22 +136,22 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 	}
 }
 
-func TestSubmitReturnsReplayedResult(t *testing.T) {
+func TestSubmitReturnsSameContentReplayedResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"published","content_available":true,"validation_errors":[],"review_comment":"","published_version":"v1.0.0"}`))
+		_, _ = w.Write([]byte(`{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","description":"does things","message":"first","status":"review_pending","content_available":true,"validation_errors":[],"review_comment":"","published_version":""}`))
 	}))
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, ContentType: "application/gzip", Content: []byte("x"),
+		Type: domain.PowerTypeSkill, Message: "first", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	if got.Outcome != domain.SubmissionReplayed || got.SubmissionID != "sub_1" ||
-		got.Status != domain.SubmissionPublished || got.StatusURL != "" {
+		got.Status != domain.SubmissionReviewPending || got.StatusURL != "" {
 		t.Fatalf("Submit() = %+v", got)
 	}
 }

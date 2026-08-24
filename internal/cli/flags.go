@@ -11,16 +11,17 @@ var canonicalInstallVersion = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-
 
 // Flags 保存命令解析后的公共选项和位置参数。
 type Flags struct {
-	Agent         string
-	Type          string
-	Name          string
-	Version       string
-	Keyword       string
-	Installed     bool
-	ChangeSummary string
-	JSON          bool
-	Status        string
-	Limit         int
+	Agent     string
+	Type      string
+	Name      string
+	Version   string
+	Keyword   string
+	Installed bool
+	Message   string // Message 仅用于 submit，进入 lifecycle 前会去除首尾空白。
+	Output    string // Output 预留给查询命令绑定输出格式。
+	JSON      bool
+	Status    string
+	Limit     int
 }
 
 func validateCommon(flags Flags) error {

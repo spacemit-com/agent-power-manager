@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"apm/internal/cli"
@@ -28,9 +30,9 @@ func TestSubmitPreparesAndUploads(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeLifecycleSkill(t, dir)
+	writeVersionedLifecycleSkill(t, dir)
 
-	result, err := service.Submit(context.Background(), cli.Flags{Type: "skill", Version: "v1.0.0", ChangeSummary: "first release"}, []string{dir})
+	result, err := service.Submit(context.Background(), cli.Flags{Type: "skill", Version: "v9.9.9", Message: "  first release  "}, []string{dir})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -41,7 +43,7 @@ func TestSubmitPreparesAndUploads(t *testing.T) {
 		t.Fatalf("cloud Submit calls = %d, want 1", len(client.submitCalls))
 	}
 	request := client.submitCalls[0]
-	if request.Type != domain.PowerTypeSkill || request.Name != "demo" || request.Version != "v1.0.0" || request.ChangeSummary != "first release" {
+	if request.Type != domain.PowerTypeSkill || request.Name != "demo" || request.Version != "v1.0.0" || request.Message != "first release" {
 		t.Fatalf("SubmissionRequest = %#v", request)
 	}
 	if request.ContentType == "" || request.ContentMD5 == "" || request.IdempotencyKey == "" || len(request.Content) == 0 {
@@ -57,29 +59,38 @@ func TestSubmitForwardsCloudError(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeLifecycleSkill(t, dir)
+	writeVersionedLifecycleSkill(t, dir)
 
-	_, err = service.Submit(context.Background(), cli.Flags{Type: "skill", Version: "v1.0.0", ChangeSummary: "x"}, []string{dir})
+	_, err = service.Submit(context.Background(), cli.Flags{Type: "skill", Message: "x"}, []string{dir})
 	if !errors.Is(err, uploadErr) {
 		t.Fatalf("Submit() error = %v, want %v", err, uploadErr)
 	}
 }
 
-func TestSubmitRejectsMissingVersionBeforeUpload(t *testing.T) {
+func TestSubmitRejectsMissingMessageBeforeUpload(t *testing.T) {
 	client := &recordingSubmissionClient{}
 	service, err := NewSubmit(client)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeLifecycleSkill(t, dir)
+	writeVersionedLifecycleSkill(t, dir)
 
-	_, err = service.Submit(context.Background(), cli.Flags{Type: "skill", ChangeSummary: "x"}, []string{dir})
+	_, err = service.Submit(context.Background(), cli.Flags{Type: "skill"}, []string{dir})
 	if err == nil {
-		t.Fatal("Submit() error = nil, want error for missing version")
+		t.Fatal("Submit() error = nil, want error for missing message")
 	}
 	if len(client.submitCalls) != 0 {
 		t.Fatalf("cloud Submit calls = %d, want 0 (validation precedes upload)", len(client.submitCalls))
+	}
+}
+
+func writeVersionedLifecycleSkill(t *testing.T, dir string) {
+	t.Helper()
+	writeLifecycleSkill(t, dir)
+	contents := "---\nname: demo\nversion: \"v1.0.0\"\ndescription: does things\n---\n# Demo Skill\n\nDetails here.\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -93,7 +104,7 @@ func TestSubmitAgentMapsAcceptedOutcome(t *testing.T) {
 	}
 	path := writeLifecycleAgent(t, t.TempDir())
 
-	result, err := service.Submit(context.Background(), cli.Flags{Type: "agent", ChangeSummary: "first release"}, []string{path})
+	result, err := service.Submit(context.Background(), cli.Flags{Type: "agent", Message: "first release"}, []string{path})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -104,7 +115,7 @@ func TestSubmitAgentMapsAcceptedOutcome(t *testing.T) {
 		t.Fatalf("cloud Submit calls = %d, want 1", len(client.submitCalls))
 	}
 	request := client.submitCalls[0]
-	if request.Type != domain.PowerTypeAgent || request.Name != "demo-agent" || request.Version != "v1.2.3" || request.ChangeSummary != "first release" || request.ContentType != "application/yaml" {
+	if request.Type != domain.PowerTypeAgent || request.Name != "demo-agent" || request.Version != "v1.2.3" || request.Message != "first release" || request.ContentType != "application/yaml" {
 		t.Fatalf("SubmissionRequest = %#v", request)
 	}
 	if !bytes.Equal(request.Content, []byte(lifecycleAgentYAML)) || request.ContentMD5 == "" || request.IdempotencyKey == "" {
@@ -122,7 +133,7 @@ func TestSubmitAgentMapsReplayedOutcome(t *testing.T) {
 	}
 	path := writeLifecycleAgent(t, t.TempDir())
 
-	result, err := service.Submit(context.Background(), cli.Flags{Type: "agent", ChangeSummary: "first release"}, []string{path})
+	result, err := service.Submit(context.Background(), cli.Flags{Type: "agent", Message: "first release"}, []string{path})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -131,7 +142,7 @@ func TestSubmitAgentMapsReplayedOutcome(t *testing.T) {
 	}
 }
 
-func TestSubmitAgentRejectsVersionOverrideBeforeUpload(t *testing.T) {
+func TestSubmitAgentIgnoresVersionOverrideAtLifecycleBoundary(t *testing.T) {
 	client := &recordingSubmissionClient{}
 	service, err := NewSubmit(client)
 	if err != nil {
@@ -139,11 +150,11 @@ func TestSubmitAgentRejectsVersionOverrideBeforeUpload(t *testing.T) {
 	}
 	path := writeLifecycleAgent(t, t.TempDir())
 
-	_, err = service.Submit(context.Background(), cli.Flags{Type: "agent", Version: "v1.0.0", ChangeSummary: "x"}, []string{path})
-	if err == nil {
-		t.Fatal("Submit() error = nil, want error for agent version override")
+	_, err = service.Submit(context.Background(), cli.Flags{Type: "agent", Version: "v9.9.9", Message: "x"}, []string{path})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
 	}
-	if len(client.submitCalls) != 0 {
-		t.Fatalf("cloud Submit calls = %d, want 0 (validation precedes upload)", len(client.submitCalls))
+	if len(client.submitCalls) != 1 || client.submitCalls[0].Version != "v1.2.3" {
+		t.Fatalf("cloud Submit calls = %#v, want source-owned version v1.2.3", client.submitCalls)
 	}
 }

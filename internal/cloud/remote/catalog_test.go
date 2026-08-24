@@ -143,6 +143,8 @@ func TestListRejectsMalformedCatalogData(t *testing.T) {
 		{name: "uppercase name", mutate: func(item map[string]any) { item["name"] = "Demo" }},
 		{name: "invalid version", mutate: func(item map[string]any) { item["version"] = "1.0.0" }},
 		{name: "prerelease version", mutate: func(item map[string]any) { item["version"] = "v1.0.0-rc.1" }},
+		{name: "missing message", mutate: func(item map[string]any) { delete(item, "message") }},
+		{name: "blank message", mutate: func(item map[string]any) { item["message"] = " \t\n" }},
 		{name: "uppercase MD5", mutate: func(item map[string]any) { item["content_md5"] = strings.ToUpper(testMD5) }},
 		{name: "negative size", mutate: func(item map[string]any) { item["content_size"] = -1 }},
 		{name: "wrong content type", mutate: func(item map[string]any) { item["content_type"] = "application/json" }},
@@ -279,7 +281,7 @@ func TestListRejectsTrailingJSON(t *testing.T) {
 func TestListRejectsDuplicateKeysInResponseDTO(t *testing.T) {
 	t.Parallel()
 
-	const body = `{"snapshot_updated_at":"2026-08-18T09:30:12.123456Z","items":[{"type":"skill","name":"demo","name":"shadow","version":"v1.0.0","description":"Description","change_summary":"Change summary","content_type":"application/gzip","content_size":42,"content_md5":"8c7dd922ad47494fc02c388e12c00eac","published_at":"2026-08-18T09:30:12Z"}]}`
+	const body = `{"snapshot_updated_at":"2026-08-18T09:30:12.123456Z","items":[{"type":"skill","name":"demo","version":"v1.0.0","description":"Description","message":"First","message":"Second","content_type":"application/gzip","content_size":42,"content_md5":"8c7dd922ad47494fc02c388e12c00eac","published_at":"2026-08-18T09:30:12Z"}]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, body)
@@ -333,15 +335,15 @@ func validMetadata(powerType, name, version string) map[string]any {
 		"agent":  "application/yaml",
 	}[powerType]
 	return map[string]any{
-		"type":           powerType,
-		"name":           name,
-		"version":        version,
-		"description":    "Description",
-		"change_summary": "Change summary",
-		"content_type":   contentType,
-		"content_size":   42,
-		"content_md5":    testMD5,
-		"published_at":   testPublished,
+		"type":         powerType,
+		"name":         name,
+		"version":      version,
+		"description":  "Description",
+		"message":      "Submission message",
+		"content_type": contentType,
+		"content_size": 42,
+		"content_md5":  testMD5,
+		"published_at": testPublished,
 	}
 }
 

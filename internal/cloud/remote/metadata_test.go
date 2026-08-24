@@ -27,7 +27,7 @@ func TestResolveRejectsDuplicateKeysInLatestAndExactResponseDTOs(t *testing.T) {
 		{
 			name:  "exact",
 			query: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
-			body:  `{"type":"skill","name":"demo","version":"v1.0.0","description":"Description","change_summary":"Change summary","content_type":"application/gzip","content_size":42,"content_md5":"8c7dd922ad47494fc02c388e12c00eac","published_at":"2026-08-18T09:30:12Z","status":"published","status":"yanked"}`,
+			body:  `{"type":"skill","name":"demo","version":"v1.0.0","description":"Description","message":"First","message":"Second","content_type":"application/gzip","content_size":42,"content_md5":"8c7dd922ad47494fc02c388e12c00eac","published_at":"2026-08-18T09:30:12Z","status":"published"}`,
 		},
 	}
 	for _, tt := range tests {
@@ -42,6 +42,25 @@ func TestResolveRejectsDuplicateKeysInLatestAndExactResponseDTOs(t *testing.T) {
 				t.Fatalf("Resolve() error = %v, want duplicate-key ErrInvalidResponse", err)
 			}
 		})
+	}
+}
+
+func TestResolveExactRejectsLegacySummaryWithoutMessage(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		metadata := validMetadata("skill", "demo", "v1.0.0")
+		delete(metadata, "message")
+		metadata["change_summary"] = "legacy"
+		metadata["status"] = "published"
+		writeJSON(t, w, metadata)
+	}))
+	defer server.Close()
+	client := newRemoteTestClient(t, server.URL)
+
+	_, err := client.Resolve(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"})
+	if !errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("Resolve() error = %v, want legacy-only metadata rejected", err)
 	}
 }
 

@@ -24,9 +24,9 @@ func TestValidateOfflineMapsResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeLifecycleSkill(t, dir)
+	writeVersionedLifecycleSkill(t, dir)
 
-	result, err := service.Validate(context.Background(), cli.Flags{Type: "skill", Version: "v1.0.0"}, []string{dir})
+	result, err := service.Validate(context.Background(), cli.Flags{Type: "skill", Version: "v9.9.9"}, []string{dir})
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
