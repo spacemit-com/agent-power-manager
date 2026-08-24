@@ -11,6 +11,8 @@
 相关提交：
 
 APM（Feature 023）：
+- `396a708 docs(submission): design source-owned metadata queries`
+- `22417f5 docs(submission): plan resource metadata queries`
 - `44b8da1 feat(domain): define submission resource contracts`
 - `23c1fd1 refactor(submission): load identity from resources`
 - `3f90093 feat(cloud): consume self-describing MCP resources`
@@ -24,11 +26,12 @@ APM（Feature 023）：
 - `993a796 docs(c4): align cli flags diagram`
 
 APC（文档契约，未添加 APC Changelog）：
+- `da453e7 docs(submission): bound authenticated active queries`
 - `192214e docs(api): simplify authenticated submissions`
 
 解决方案或完成结果：`internal/submission` 新增仅在 Submission 边界内使用的统一 Source Loader：Skill 从 `SKILL.md` frontmatter、Plugin 从 `apc-plugin.json`、MCP 从 `MCP.json`、Agent 从 `agent.yaml` 获取 name/version/description，目录名和 CLI 不再覆盖身份。`validate` 只做完整离线校验，`submit` 对四类 Power 统一要求 trim 后非空的 `--message`；旧 `--version`、`--change-summary`、`change_summary` wire 字段与兼容别名已移除，message 不进入 Power content，也不参与 MD5。MCP 统一为严格的 `schema_version/name/version/description/definition` v1 完整资源；Submission 上传其 JCS 字节，Local/Remote 校验文件内身份与 `PowerRef` 完全一致后仅返回防御性复制的 definition。Remote Submission submit/get/list 使用独立 Bearer 路径，匿名 catalog/metadata/content 不携带 Key；list 仅发送 status/type/name，并严格校验 active-only、最多 20 条、倒序、筛选匹配、唯一 ID 和 RFC 3339 时间，get 校验完整详情与非递减 timeline；成功 JSON 拒绝重复 key、尾随值和缺失必填字段，同时忽略未知字段以保持前向兼容。`TOO_MANY_ACTIVE_SUBMISSIONS` 同时映射为专用错误和通用 Submission conflict；CLI 支持 text/json 列表与完整详情输出。Local Submission 保持只读并返回 `ErrSubmissionUnsupported`，认证、网络或协议错误不回退 Local、cache 或 snapshot。APM/APC 的 BUILD、Project Overview、ADR、Feature 历史取代说明、C4 和 APC HTTP API 文档已对齐；APC 仓库没有新增服务端、持久化、队列或运行时配置。
 
-验证结果或限制：完成前与 Changelog 提交后均以退出码 0 运行 `git diff --name-only --diff-filter=ACMRT "$(git merge-base main HEAD)"..HEAD -- '*.go' | xargs -r gofmt -w`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`build_dir="$(mktemp -d)"; go build -o "$build_dir/apm" ./cmd/apm; test -x "$build_dir/apm"; unlink "$build_dir/apm"; rmdir "$build_dir"; test ! -e "$build_dir"` 与 `git diff --check`。精确过期/安全扫描确认生产 Go/JSON 无 `ChangeSummary`/`change_summary`/`--change-summary`，Submission domain/Remote/CLI 无 cursor、时间范围或 `next_cursor`，全部内置 MCP 具备五个 v1 必填键，测试无真实 home 或 Agent CLI 访问；仅剩的旧字面量均是必要的 legacy rejection 测试。APC 的 5 个变更 Markdown 文件全部解析成功，23 个相对链接（含 2 个跨仓库链接）均可达，Structurizr workspace 校验通过，当前 Submission 契约无旧字段/分页描述，通用资源和内网工单 cursor 契约保持不变。本次不实现 APC 服务端与历史查询，不兼容旧 CLI/MCP/wire 格式，不新增取消、删除、重提、自动等待或审核操作；终态 Submission 仅能通过已知 ID get。
+验证结果或限制：完成前与 Changelog 提交后均以退出码 0 运行 `git diff --name-only --diff-filter=ACMRT "$(git merge-base main HEAD)"..HEAD -- '*.go' | xargs -r gofmt -w`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`build_dir="$(mktemp -d)"; go build -o "$build_dir/apm" ./cmd/apm; test -x "$build_dir/apm"; unlink "$build_dir/apm"; rmdir "$build_dir"; test ! -e "$build_dir"` 与 `git diff --check`。精确过期/安全扫描确认生产 Go/JSON 无 `ChangeSummary`/`change_summary`/`--change-summary`，Submission domain/Remote/CLI 无 cursor、时间范围或 `next_cursor`，全部内置 MCP 具备五个 v1 必填键，测试无真实 home 或 Agent CLI 访问；仅剩的旧字面量均是必要的 legacy rejection 测试。APC 的 5 个变更 Markdown 文件全部解析成功，20 个相对链接（含 2 个跨仓库链接）均可达，Structurizr workspace 校验通过，当前 Submission 契约无旧字段/分页描述，通用资源和内网工单 cursor 契约保持不变。本次不实现 APC 服务端与历史查询，不兼容旧 CLI/MCP/wire 格式，不新增取消、删除、重提、自动等待或审核操作；终态 Submission 仅能通过已知 ID get。
 
 ## 2026-08-24
 
