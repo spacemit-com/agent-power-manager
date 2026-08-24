@@ -1,10 +1,12 @@
 package submission
 
 import (
+	"archive/tar"
 	"context"
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"apm/internal/domain"
 	"apm/internal/pluginartifact"
@@ -38,6 +40,15 @@ func (pluginSourceLoader) Load(ctx context.Context, path string) (source, error)
 	}
 	if !reflect.DeepEqual(snapshotManifest, manifest) {
 		return source{}, fmt.Errorf("plugin manifest changed while loading: %w", ErrInvalid)
+	}
+	entries := make([]pluginartifact.RawPackageEntry, 0, len(snapshot.entries))
+	for _, entry := range snapshot.entries {
+		entries = append(entries, pluginartifact.RawPackageEntry{
+			Path: strings.TrimSuffix(entry.name, "/"), Directory: entry.typeflag == tar.TypeDir,
+		})
+	}
+	if err := pluginartifact.ValidateRawPackageEntries(snapshotManifest, entries); err != nil {
+		return source{}, fmt.Errorf("validate raw plugin snapshot: %w", errors.Join(ErrInvalid, err))
 	}
 	embeddedNames := make(map[string]string, len(manifest.Skills))
 	for _, skillPath := range manifest.Skills {

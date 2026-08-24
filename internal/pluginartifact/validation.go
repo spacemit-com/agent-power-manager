@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -140,6 +141,31 @@ func ValidateRawPackage(ref domain.PowerRef, pluginPath string) error {
 		return err
 	}
 	return validateRawClosedWorld(pluginPath, manifest)
+}
+
+// RawPackageEntry 描述已固定 Plugin 快照中的 canonical 相对路径及其目录属性。
+type RawPackageEntry struct {
+	Path      string
+	Directory bool
+}
+
+// ValidateRawPackageEntries 复用 raw package 闭集规则校验不可变快照路径。
+// 调用方必须先以 ValidateRawPackage 完成 manifest 身份、schema 与声明 Skill 校验。
+func ValidateRawPackageEntries(manifest APCPluginManifest, entries []RawPackageEntry) error {
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.Path == "" || entry.Path == "." || path.IsAbs(entry.Path) || strings.Contains(entry.Path, `\`) || path.Clean(entry.Path) != entry.Path {
+			return fmt.Errorf("Plugin artifact snapshot path %q is not canonical: %w", entry.Path, ErrInvalid)
+		}
+		if _, duplicate := seen[entry.Path]; duplicate {
+			return fmt.Errorf("Plugin artifact snapshot repeats path %q: %w", entry.Path, ErrInvalid)
+		}
+		seen[entry.Path] = struct{}{}
+		if !rawPackageEntryAllowed(manifest, entry.Path, entry.Directory) {
+			return fmt.Errorf("Plugin artifact contains path outside canonical schema %q: %w", entry.Path, ErrInvalid)
+		}
+	}
+	return nil
 }
 
 // ValidateShared 复验 canonical 子树、四份 Agent 派生文件及双 marketplace 的精确路径与完整语义。
@@ -282,21 +308,39 @@ func expectedHermesManifest(canonical APCPluginManifest) HermesPluginManifest {
 }
 
 func validateRawClosedWorld(root string, manifest APCPluginManifest) error {
-	declaredSkills := append([]string(nil), manifest.Skills...)
-	return validateRelativeClosedWorld(root, func(relative string, entry fs.DirEntry) bool {
-		switch relative {
-		case apcPluginManifestPath:
-			return !entry.IsDir()
-		case "skills":
-			return entry.IsDir()
+	entries := make([]RawPackageEntry, 0)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		for _, skillPath := range declaredSkills {
-			if relative == skillPath || strings.HasPrefix(relative, skillPath+"/") {
-				return true
-			}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
 		}
-		return false
+		if relative != "." {
+			entries = append(entries, RawPackageEntry{Path: filepath.ToSlash(relative), Directory: entry.IsDir()})
+		}
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return ValidateRawPackageEntries(manifest, entries)
+}
+
+func rawPackageEntryAllowed(manifest APCPluginManifest, relative string, directory bool) bool {
+	switch relative {
+	case apcPluginManifestPath:
+		return !directory
+	case "skills":
+		return directory
+	}
+	for _, skillPath := range manifest.Skills {
+		if relative == skillPath || strings.HasPrefix(relative, skillPath+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func validateSharedClosedWorld(root, logicalName string, manifest APCPluginManifest) error {

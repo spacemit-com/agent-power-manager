@@ -241,6 +241,24 @@ func TestAPCPluginRawPackageRejectsPathsOutsideDeclaredSkillWorld(t *testing.T) 
 	}
 }
 
+func TestAPCPluginRawPackageEntriesRejectSnapshotOutsideDeclaredSkillWorld(t *testing.T) {
+	manifest := pluginartifact.APCPluginManifest{Skills: []string{"skills/demo"}}
+	entries := []pluginartifact.RawPackageEntry{
+		{Path: "apc-plugin.json"},
+		{Path: "skills", Directory: true},
+		{Path: "skills/demo", Directory: true},
+		{Path: "skills/demo/SKILL.md"},
+		{Path: "skills/demo/skill-card.md"},
+	}
+	if err := pluginartifact.ValidateRawPackageEntries(manifest, entries); err != nil {
+		t.Fatalf("ValidateRawPackageEntries(valid snapshot) error = %v", err)
+	}
+	invalid := append(append([]pluginartifact.RawPackageEntry(nil), entries...), pluginartifact.RawPackageEntry{Path: "README.md"})
+	if err := pluginartifact.ValidateRawPackageEntries(manifest, invalid); !errors.Is(err, pluginartifact.ErrInvalid) {
+		t.Fatalf("ValidateRawPackageEntries() error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestAPCPluginRawPackageAllowsSupportingFilesBelowDeclaredSkills(t *testing.T) {
 	// 捕获错误变更：路径闭集错误限制声明 Skill 内部的合法支持文件或目录名称。
 	root, ref := writeCanonicalPlugin(t, validCanonicalManifest())
