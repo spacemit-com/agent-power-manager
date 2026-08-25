@@ -66,7 +66,7 @@ func (s *Service) installNewMCP(ctx context.Context, request MCPInstallRequest) 
 	if err := s.journals.Create(journal); err != nil {
 		return fmt.Errorf("create MCP install journal: %w", err)
 	}
-	result, addErr := request.Adapter.Add(ctx, request.Power, journal.AgentCLI.Server)
+	result, addErr := request.Adapter.Add(ctx, request.Power, *journal.AgentCLI.Server)
 	return s.finishMCPAdd(ctx, journal, request.Adapter, result, addErr)
 }
 
@@ -96,7 +96,7 @@ func (s *Service) updateMCP(ctx context.Context, request MCPInstallRequest) erro
 		return indeterminateMCPMutation(fmt.Sprintf("remove old MCP returned state %q", result.State), removeErr)
 	}
 
-	result, addErr := request.Adapter.Add(ctx, request.Power, journal.AgentCLI.Server)
+	result, addErr := request.Adapter.Add(ctx, request.Power, *journal.AgentCLI.Server)
 	return s.finishMCPAdd(ctx, journal, request.Adapter, result, addErr)
 }
 
@@ -183,7 +183,7 @@ func (s *Service) newMCPInstallJournal(request MCPInstallRequest, phase Phase) (
 		Power:         request.Power,
 		Previous:      clonePowerRef(request.Previous),
 		AgentCLI: &AgentCLIJournalPayload{
-			Server:         server,
+			Server:         &server,
 			PreviousServer: previousServer,
 		},
 	}, nil

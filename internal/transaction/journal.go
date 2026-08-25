@@ -68,9 +68,9 @@ type FilesystemJournalPayload struct {
 	QuarantinePath string `json:"quarantine_path,omitempty"`
 }
 
-// AgentCLIJournalPayload 保存 MCP CLI 事务恢复所需的新旧启动定义。
+// AgentCLIJournalPayload 保存 MCP 安装恢复所需的新旧启动定义；卸载载荷必须为空。
 type AgentCLIJournalPayload struct {
-	Server         domain.MCPServer  `json:"server"`
+	Server         *domain.MCPServer `json:"server,omitempty"`
 	PreviousServer *domain.MCPServer `json:"previous_server,omitempty"`
 }
 

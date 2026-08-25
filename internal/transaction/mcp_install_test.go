@@ -95,7 +95,8 @@ func TestMCPInstallFirstInstallOrderAndClonesServer(t *testing.T) {
 	if fixture.journals.found || fixture.manifests.setRef != fixture.request.Power {
 		t.Fatalf("journal found/set ref = %v/%+v", fixture.journals.found, fixture.manifests.setRef)
 	}
-	if fixture.journals.journal.Driver != DriverAgentCLI || !reflect.DeepEqual(fixture.journals.journal.AgentCLI.Server, wantServer) {
+	if fixture.journals.journal.Driver != DriverAgentCLI || fixture.journals.journal.AgentCLI.Server == nil ||
+		!reflect.DeepEqual(*fixture.journals.journal.AgentCLI.Server, wantServer) {
 		t.Fatalf("journal = %+v", fixture.journals.journal)
 	}
 	fixture.request.Server.URL = "https://mutated.example/mcp"

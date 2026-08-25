@@ -25,8 +25,6 @@ type uninstallFixture struct {
 	transactionMCPResults map[domain.AgentID]transaction.UninstallResult
 	mcpPresence           map[domain.AgentID]adapter.MCPPresence
 	mcpInspectErrors      map[domain.AgentID]error
-	mcpDefinitions        map[string]domain.MCPServer
-	mcpGetErrors          map[string]error
 	mcpRequests           []transaction.MCPUninstallRequest
 	pluginFact            adapter.PluginFact
 	pluginFacts           map[string]adapter.PluginFact
@@ -141,22 +139,17 @@ type uninstallFakeCloud struct {
 	fixture *uninstallFixture
 }
 
-func (*uninstallFakeCloud) List(context.Context) ([]domain.PowerRef, error) { return nil, nil }
+func (*uninstallFakeCloud) List(context.Context) ([]domain.PowerRef, error) {
+	panic("Uninstall must not list Cloud catalog")
+}
 func (*uninstallFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.PowerRef, error) {
-	return ref, nil
+	panic("Uninstall must not resolve Cloud catalog")
 }
 func (*uninstallFakeCloud) DownloadSkill(context.Context, domain.CatalogEntry, string) error {
-	return nil
+	panic("Uninstall must not download Cloud content")
 }
 func (*uninstallFakeCloud) GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error) {
-	panic("Uninstall must use the temporary GetMCPForUninstall compatibility boundary")
-}
-func (c *uninstallFakeCloud) GetMCPForUninstall(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
-	recordUninstallEvent(c.calls, c.fixture, "cloud:get-mcp:"+ref.Version)
-	if err := ctx.Err(); err != nil {
-		return domain.MCPServer{}, err
-	}
-	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
+	panic("Uninstall must not read MCP Cloud content")
 }
 
 func (*uninstallFakeCloud) DownloadPlugin(context.Context, domain.CatalogEntry, string) error {

@@ -43,9 +43,6 @@ func (*stubCloudClient) DownloadPlugin(context.Context, domain.CatalogEntry, str
 func (*stubCloudClient) GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*stubCloudClient) GetMCPForUninstall(context.Context, domain.PowerRef) (domain.MCPServer, error) {
-	return domain.MCPServer{}, nil
-}
 func (*stubCloudClient) DownloadAgent(context.Context, domain.CatalogEntry, string) error {
 	return nil
 }

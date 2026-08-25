@@ -13,7 +13,6 @@ import (
 )
 
 var _ cloud.MCPSource = (*Client)(nil)
-var _ cloud.MCPUninstallDefinitionSource = (*Client)(nil)
 
 // GetMCP 在私有临时目录中验证精确版本 MCP 资源；资源身份必须与 ref 一致。
 func (c *Client) GetMCP(ctx context.Context, entry domain.CatalogEntry) (server domain.MCPServer, resultErr error) {
@@ -66,20 +65,6 @@ func (c *Client) GetMCP(ctx context.Context, entry domain.CatalogEntry) (server 
 	}
 	server = resource.Definition.Clone()
 	return server, nil
-}
-
-// GetMCPForUninstall 临时保留 Task 8 前的按 Ref definition 获取；Install 禁止调用本方法。
-func (c *Client) GetMCPForUninstall(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
-	metadata, err := c.getExactMetadata(ctx, ref)
-	if err != nil {
-		return domain.MCPServer{}, err
-	}
-	entry := domain.CatalogEntry{
-		Ref: ref, Description: metadata.Description, Message: metadata.Message,
-		ContentType: metadata.ContentType, ContentSize: *metadata.ContentSize,
-		ContentMD5: metadata.ContentMD5, PublishedAt: metadata.PublishedAt, Tags: []string{},
-	}
-	return c.GetMCP(ctx, entry)
 }
 
 func (c *Client) createMCPTemporaryDirectory() (*pinnedDirectory, *ownedDirectory, error) {

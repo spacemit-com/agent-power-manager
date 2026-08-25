@@ -44,7 +44,6 @@ type mcpRecoveryFixture struct {
 func newMCPRecoveryFixture(t *testing.T, operation Operation, phase Phase, previous bool, presence adapter.MCPPresence) *mcpRecoveryFixture {
 	t.Helper()
 	fixture := &mcpRecoveryFixture{}
-	server := domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://new.example/mcp"}
 	fixture.journal = Journal{
 		SchemaVersion: 1,
 		TransactionID: "00112233445566778899aabbccddeeff",
@@ -53,7 +52,11 @@ func newMCPRecoveryFixture(t *testing.T, operation Operation, phase Phase, previ
 		Phase:         phase,
 		Agent:         domain.AgentClaudeCode,
 		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "2.0.0"},
-		AgentCLI:      &AgentCLIJournalPayload{Server: server},
+		AgentCLI:      &AgentCLIJournalPayload{},
+	}
+	if operation == OperationInstall {
+		server := domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://new.example/mcp"}
+		fixture.journal.AgentCLI.Server = &server
 	}
 	if previous {
 		old := domain.MCPServer{Transport: domain.MCPTransportStdio, Command: "old", Args: []string{"--serve"}}
@@ -119,9 +122,9 @@ func TestMCPRecoveryPhaseTable(t *testing.T) {
 			wantEvents:    []string{"resolver:claude-code", "adapter:inspect", "update:committing", "manifest:remove", "delete:journal"},
 		},
 		{
-			name: "uninstall remove present rolls back", operation: OperationUninstall, phase: PhaseRemoving, presence: adapter.MCPPresent,
-			wantDirection: RecoveryRollback,
-			wantEvents:    []string{"resolver:claude-code", "adapter:inspect", "update:rolling-back", "delete:journal"},
+			name: "uninstall remove present continues removal", operation: OperationUninstall, phase: PhaseRemoving, presence: adapter.MCPPresent,
+			wantDirection: RecoveryCommit,
+			wantEvents:    []string{"resolver:claude-code", "adapter:inspect", "adapter:remove", "update:committing", "manifest:remove", "delete:journal"},
 		},
 	}
 	for _, test := range tests {
@@ -138,27 +141,19 @@ func TestMCPRecoveryPhaseTable(t *testing.T) {
 	}
 }
 
-func TestMCPRecoveryCommittingDoesNotRequireCLI(t *testing.T) {
-	for _, operation := range []Operation{OperationInstall, OperationUninstall} {
-		t.Run(string(operation), func(t *testing.T) {
-			fixture := newMCPRecoveryFixture(t, operation, PhaseCommitting, false, adapter.MCPAbsent)
-			fixture.resolver.err = errors.New("CLI unavailable")
-			result, err := fixture.service.Recover(context.Background())
-			if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
-				t.Fatalf("Recover() = %+v, %v", result, err)
-			}
-			wantAction := RecoveryActionSetManifest
-			if operation == OperationUninstall {
-				wantAction = RecoveryActionRemoveManifest
-			}
-			if len(result.Actions) != 1 || result.Actions[0].Kind != wantAction || len(fixture.resolver.agents) != 0 {
-				t.Fatalf("actions/resolver = %+v/%v", result.Actions, fixture.resolver.agents)
-			}
-		})
+func TestMCPInstallRecoveryCommittingDoesNotRequireCLI(t *testing.T) {
+	fixture := newMCPRecoveryFixture(t, OperationInstall, PhaseCommitting, false, adapter.MCPAbsent)
+	fixture.resolver.err = errors.New("CLI unavailable")
+	result, err := fixture.service.Recover(context.Background())
+	if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
+		t.Fatalf("Recover() = %+v, %v", result, err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Kind != RecoveryActionSetManifest || len(fixture.resolver.agents) != 0 {
+		t.Fatalf("actions/resolver = %+v/%v", result.Actions, fixture.resolver.agents)
 	}
 }
 
-func TestMCPRecoveryRollingBackRestoresRequiredOldState(t *testing.T) {
+func TestMCPInstallRecoveryRollingBackRestoresRequiredOldState(t *testing.T) {
 	tests := []struct {
 		name      string
 		operation Operation
@@ -167,7 +162,6 @@ func TestMCPRecoveryRollingBackRestoresRequiredOldState(t *testing.T) {
 		wantWrite string
 	}{
 		{name: "update absent adds old", operation: OperationInstall, previous: true, presence: adapter.MCPAbsent, wantWrite: "adapter:add"},
-		{name: "uninstall absent adds removed", operation: OperationUninstall, presence: adapter.MCPAbsent, wantWrite: "adapter:add"},
 		{name: "first install present removes new", operation: OperationInstall, presence: adapter.MCPPresent, wantWrite: "adapter:remove"},
 	}
 	for _, test := range tests {
@@ -185,6 +179,109 @@ func TestMCPRecoveryRollingBackRestoresRequiredOldState(t *testing.T) {
 				t.Fatalf("events = %v, want %q", fixture.events, test.wantWrite)
 			}
 		})
+	}
+}
+
+func TestMCPUninstallRecoveryCrashWindowsConvergeToAbsent(t *testing.T) {
+	tests := []struct {
+		name       string
+		phase      Phase
+		presence   adapter.MCPPresence
+		wantEvents []string
+	}{
+		{
+			name: "before remove", phase: PhaseRemoving, presence: adapter.MCPPresent,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "adapter:remove", "update:committing", "manifest:remove", "delete:journal"},
+		},
+		{
+			name: "after applied remove before phase update", phase: PhaseRemoving, presence: adapter.MCPAbsent,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "update:committing", "manifest:remove", "delete:journal"},
+		},
+		{
+			name: "after rollback phase write", phase: PhaseRollingBack, presence: adapter.MCPPresent,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "update:removing", "adapter:remove", "update:committing", "manifest:remove", "delete:journal"},
+		},
+		{
+			name: "after phase update target present", phase: PhaseCommitting, presence: adapter.MCPPresent,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "adapter:remove", "manifest:remove", "delete:journal"},
+		},
+		{
+			name: "after phase update target absent", phase: PhaseCommitting, presence: adapter.MCPAbsent,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "manifest:remove", "delete:journal"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMCPRecoveryFixture(t, OperationUninstall, test.phase, false, test.presence)
+			result, err := fixture.service.Recover(context.Background())
+			if err != nil || !result.Recovered || result.Direction != RecoveryCommit || fixture.journals.found {
+				t.Fatalf("Recover() = %+v, %v, journal=%v", result, err, fixture.journals.found)
+			}
+			if !reflect.DeepEqual(fixture.events, test.wantEvents) {
+				t.Fatalf("events = %v, want %v", fixture.events, test.wantEvents)
+			}
+			if len(fixture.adapter.addServers) != 0 {
+				t.Fatalf("uninstall recovery called Add: %+v", fixture.adapter.addServers)
+			}
+		})
+	}
+}
+
+func TestMCPUninstallRecoveryRetriesManifestAndJournalCommitIdempotently(t *testing.T) {
+	for _, failure := range []string{"manifest", "delete"} {
+		t.Run(failure, func(t *testing.T) {
+			fixture := newMCPRecoveryFixture(t, OperationUninstall, PhaseCommitting, false, adapter.MCPAbsent)
+			cause := errors.New(failure + " failed")
+			if failure == "manifest" {
+				fixture.manifests.removeErr = cause
+			} else {
+				fixture.journals.fail["delete"] = cause
+			}
+			if _, err := fixture.service.Recover(context.Background()); !errors.Is(err, cause) || !fixture.journals.found {
+				t.Fatalf("first Recover() error/journal = %v/%v", err, fixture.journals.found)
+			}
+			fixture.manifests.removeErr = nil
+			delete(fixture.journals.fail, "delete")
+			fixture.events = nil
+			result, err := fixture.service.Recover(context.Background())
+			if err != nil || !result.Recovered || result.Direction != RecoveryCommit || fixture.journals.found {
+				t.Fatalf("second Recover() = %+v, %v, journal=%v", result, err, fixture.journals.found)
+			}
+			if want := []string{"resolver:claude-code", "adapter:inspect", "manifest:remove", "delete:journal"}; !reflect.DeepEqual(fixture.events, want) {
+				t.Fatalf("retry events = %v, want %v", fixture.events, want)
+			}
+		})
+	}
+}
+
+func TestMCPUninstallRecoveryUnknownRemoveKeepsRecoverableJournal(t *testing.T) {
+	fixture := newMCPRecoveryFixture(t, OperationUninstall, PhaseRemoving, false, adapter.MCPPresent)
+	fixture.adapter.removeAnswers = []mcpMutationAnswer{{
+		result: adapter.MCPMutationResult{State: adapter.MCPMutationUnknown}, err: errors.New("ambiguous remove"),
+	}}
+	result, err := fixture.service.Recover(context.Background())
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered ||
+		!fixture.journals.found || fixture.journals.journal.Phase != PhaseRemoving {
+		t.Fatalf("Recover() = %+v, %v, journal=%+v", result, err, fixture.journals.journal)
+	}
+	if len(fixture.adapter.addServers) != 0 {
+		t.Fatalf("unknown uninstall recovery called Add: %+v", fixture.adapter.addServers)
+	}
+}
+
+func TestMCPUninstallRecoveryCommittingPhaseWriteFailureCanRetry(t *testing.T) {
+	fixture := newMCPRecoveryFixture(t, OperationUninstall, PhaseRemoving, false, adapter.MCPPresent)
+	fixture.journals.fail["update:committing"] = errors.New("phase write failed")
+	if _, err := fixture.service.Recover(context.Background()); !errors.Is(err, fixture.journals.fail["update:committing"]) ||
+		!fixture.journals.found || fixture.journals.journal.Phase != PhaseRemoving {
+		t.Fatalf("first Recover() error/journal = %v/%+v", err, fixture.journals.journal)
+	}
+	delete(fixture.journals.fail, "update:committing")
+	fixture.adapter.presence = adapter.MCPAbsent
+	fixture.events = nil
+	result, err := fixture.service.Recover(context.Background())
+	if err != nil || !result.Recovered || result.Direction != RecoveryCommit || fixture.journals.found {
+		t.Fatalf("second Recover() = %+v, %v, journal=%v", result, err, fixture.journals.found)
 	}
 }
 

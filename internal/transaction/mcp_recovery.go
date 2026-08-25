@@ -9,7 +9,7 @@ import (
 
 // recoverMCP 只使用 journal 定义和目标 Agent CLI，将 agent-cli 事务收敛到固定方向。
 func (s *Service) recoverMCP(ctx context.Context, journal Journal, result *RecoveryResult) error {
-	if journal.Phase == PhaseCommitting {
+	if journal.Operation == OperationInstall && journal.Phase == PhaseCommitting {
 		result.Direction = RecoveryCommit
 		return s.commitRecoveredMCP(journal, result)
 	}
@@ -91,30 +91,37 @@ func (s *Service) commitRecoveredMCPInstall(journal Journal, result *RecoveryRes
 }
 
 func (s *Service) recoverMCPUninstall(ctx context.Context, journal Journal, presence adapter.MCPPresence, mcpAdapter adapter.MCPAdapter, result *RecoveryResult) error {
+	result.Direction = RecoveryCommit
 	switch journal.Phase {
-	case PhaseRemoving:
+	case PhaseRemoving, PhaseRollingBack, PhaseCommitting:
 		if presence == adapter.MCPAbsent {
-			result.Direction = RecoveryCommit
-			if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
-				return err
+			if journal.Phase != PhaseCommitting {
+				if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
+					return err
+				}
 			}
 			return s.commitRecoveredMCP(journal, result)
 		}
-		result.Direction = RecoveryRollback
-		if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
-			return err
+		if presence != adapter.MCPPresent {
+			return fmt.Errorf("MCP uninstall recovery presence %q: %w", presence, ErrIndeterminateState)
 		}
-		return s.deleteRecoveredJournal(journal)
-	case PhaseRollingBack:
-		result.Direction = RecoveryRollback
-		if presence == adapter.MCPAbsent {
-			mutation, err := mcpAdapter.Add(ctx, journal.Power, journal.AgentCLI.Server)
-			if err := requireAppliedRecoveryMutation("restore uninstalled MCP", mutation, err); err != nil {
+		committing := journal.Phase == PhaseCommitting
+		if !committing {
+			if err := s.persistRecoveryDirection(&journal, PhaseRemoving); err != nil {
 				return err
 			}
-			result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionAddMCP})
 		}
-		return s.deleteRecoveredJournal(journal)
+		mutation, err := mcpAdapter.Remove(ctx, journal.Power)
+		if err := requireAppliedRecoveryMutation("continue MCP uninstall", mutation, err); err != nil {
+			return err
+		}
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveMCP})
+		if !committing {
+			if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
+				return err
+			}
+		}
+		return s.commitRecoveredMCP(journal, result)
 	default:
 		return fmt.Errorf("MCP uninstall recovery phase %q: %w", journal.Phase, ErrIndeterminateState)
 	}

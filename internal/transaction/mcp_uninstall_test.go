@@ -1,7 +1,9 @@
 package transaction
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -33,11 +35,9 @@ func newMCPUninstallFixture(t *testing.T) *mcpUninstallFixture {
 	}
 	fixture.service = newService(fixture.manifests, fixture.journals)
 	fixture.service.newID = func() (string, error) { return "00112233445566778899aabbccddeeff", nil }
-	server := domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://old.example/mcp"}
 	fixture.request = MCPUninstallRequest{
 		Agent:   domain.AgentHermes,
 		Power:   domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "1.0.0"},
-		Server:  &server,
 		Adapter: fixture.adapter,
 	}
 	return fixture
@@ -52,6 +52,13 @@ func TestMCPUninstallPresentOrder(t *testing.T) {
 	if got := fixture.journals.journal.SchemaVersion; got != 1 {
 		t.Fatalf("journal schema = %d, want 1", got)
 	}
+	contents, err := json.Marshal(fixture.journals.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(contents, []byte(`"server"`)) || bytes.Contains(contents, []byte(`"previous_server"`)) {
+		t.Fatalf("uninstall journal persisted MCP definition: %s", contents)
+	}
 	want := []string{"adapter:inspect", "create:removing", "adapter:remove", "update:committing", "manifest:remove", "delete:journal"}
 	if !reflect.DeepEqual(fixture.events, want) {
 		t.Fatalf("events = %v, want %v", fixture.events, want)
@@ -65,7 +72,6 @@ func TestMCPUninstallPresentOrder(t *testing.T) {
 func TestMCPUninstallAbsentRemovesOnlyManifestEntry(t *testing.T) {
 	fixture := newMCPUninstallFixture(t)
 	fixture.adapter.presence = adapter.MCPAbsent
-	fixture.request.Server = nil
 	result, err := fixture.service.UninstallMCP(context.Background(), fixture.request)
 	if err != nil || !result.TargetMissing {
 		t.Fatalf("UninstallMCP() = %+v, %v", result, err)
@@ -77,6 +83,19 @@ func TestMCPUninstallAbsentRemovesOnlyManifestEntry(t *testing.T) {
 	want := []string{"adapter:inspect", "manifest:remove"}
 	if !reflect.DeepEqual(fixture.events, want) {
 		t.Fatalf("events = %v, want %v", fixture.events, want)
+	}
+}
+
+func TestMCPUninstallCommittingPhaseWriteFailureRetainsRemovingJournal(t *testing.T) {
+	fixture := newMCPUninstallFixture(t)
+	fixture.journals.fail["update:committing"] = errors.New("phase write failed")
+	_, err := fixture.service.UninstallMCP(context.Background(), fixture.request)
+	if !errors.Is(err, fixture.journals.fail["update:committing"]) || !fixture.journals.found ||
+		fixture.journals.journal.Phase != PhaseRemoving {
+		t.Fatalf("UninstallMCP() error/journal = %v/%+v", err, fixture.journals.journal)
+	}
+	if fixture.manifests.removed.Name != "" {
+		t.Fatalf("manifest removed before committing phase persisted: %+v", fixture.manifests.removed)
 	}
 }
 

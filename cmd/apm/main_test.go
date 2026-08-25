@@ -369,9 +369,6 @@ func (*recordingCloudClient) DownloadPlugin(context.Context, domain.CatalogEntry
 func (*recordingCloudClient) GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*recordingCloudClient) GetMCPForUninstall(context.Context, domain.PowerRef) (domain.MCPServer, error) {
-	return domain.MCPServer{}, nil
-}
 func (*recordingCloudClient) DownloadAgent(context.Context, domain.CatalogEntry, string) error {
 	return nil
 }

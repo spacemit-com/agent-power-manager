@@ -48,11 +48,6 @@ func validateMCPUninstallRequest(request MCPUninstallRequest) error {
 	if isNilInterface(request.Adapter) {
 		return fmt.Errorf("validate MCP uninstall request: nil adapter: %w", ErrInvalidRequest)
 	}
-	if request.Server != nil {
-		if err := request.Server.Validate(); err != nil {
-			return fmt.Errorf("validate MCP uninstall server: %v: %w", err, ErrInvalidRequest)
-		}
-	}
 	return nil
 }
 
@@ -61,11 +56,14 @@ func validateAgentCLIJournal(journal Journal, payload AgentCLIJournalPayload) er
 	if journal.Power.Type != domain.PowerTypeMCP {
 		return fmt.Errorf("agent-cli power type %q: %w", journal.Power.Type, ErrInvalidJournal)
 	}
-	if err := payload.Server.Validate(); err != nil {
-		return fmt.Errorf("agent-cli server: %v: %w", err, ErrInvalidJournal)
-	}
 	switch journal.Operation {
 	case OperationInstall:
+		if payload.Server == nil {
+			return fmt.Errorf("MCP install has no server definition: %w", ErrInvalidJournal)
+		}
+		if err := payload.Server.Validate(); err != nil {
+			return fmt.Errorf("agent-cli server: %v: %w", err, ErrInvalidJournal)
+		}
 		if !validMCPInstallPhase(journal.Phase) {
 			return fmt.Errorf("MCP install phase %q: %w", journal.Phase, ErrInvalidJournal)
 		}
@@ -88,8 +86,8 @@ func validateAgentCLIJournal(journal Journal, payload AgentCLIJournalPayload) er
 		if !validUninstallPhase(journal.Phase) {
 			return fmt.Errorf("MCP uninstall phase %q: %w", journal.Phase, ErrInvalidJournal)
 		}
-		if journal.Previous != nil || payload.PreviousServer != nil {
-			return fmt.Errorf("MCP uninstall contains previous state: %w", ErrInvalidJournal)
+		if journal.Previous != nil || payload.Server != nil || payload.PreviousServer != nil {
+			return fmt.Errorf("MCP uninstall contains definition or previous state: %w", ErrInvalidJournal)
 		}
 	default:
 		return fmt.Errorf("operation %q: %w", journal.Operation, ErrInvalidJournal)

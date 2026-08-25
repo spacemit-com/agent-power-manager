@@ -373,6 +373,59 @@ func TestValidateJournalAcceptsOnlyOneMatchingV1DriverPayload(t *testing.T) {
 	}
 }
 
+func TestAgentCLIJournalSchemaValidatesDefinitionsByOperation(t *testing.T) {
+	server := domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://new.example/mcp"}
+	base := Journal{
+		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverAgentCLI,
+		Operation: OperationInstall, Phase: PhaseAddingNew, Agent: domain.AgentCodex,
+		Power:    domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"},
+		AgentCLI: &AgentCLIJournalPayload{Server: &server},
+	}
+	if err := validateJournal(base); err != nil {
+		t.Fatalf("validate install journal with definition: %v", err)
+	}
+	missingInstallDefinition := base
+	missingInstallDefinition.AgentCLI = &AgentCLIJournalPayload{}
+	if err := validateJournal(missingInstallDefinition); !errors.Is(err, ErrInvalidJournal) {
+		t.Fatalf("install without definition error = %v, want ErrInvalidJournal", err)
+	}
+
+	uninstall := base
+	uninstall.Operation = OperationUninstall
+	uninstall.Phase = PhaseRemoving
+	uninstall.AgentCLI = &AgentCLIJournalPayload{}
+	if err := validateJournal(uninstall); err != nil {
+		t.Fatalf("validate definition-free uninstall journal: %v", err)
+	}
+	contents, err := json.Marshal(uninstall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(contents, []byte(`"server"`)) || bytes.Contains(contents, []byte(`"previous_server"`)) {
+		t.Fatalf("definition-free uninstall encoded definition fields: %s", contents)
+	}
+	if _, err := decodeJournal(contents); err != nil {
+		t.Fatalf("decode definition-free uninstall journal: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*Journal){
+		"server":          func(j *Journal) { j.AgentCLI = &AgentCLIJournalPayload{Server: &server} },
+		"previous server": func(j *Journal) { j.AgentCLI = &AgentCLIJournalPayload{PreviousServer: &server} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			journal := uninstall
+			mutate(&journal)
+			invalid, marshalErr := json.Marshal(journal)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if _, err := decodeJournal(invalid); !errors.Is(err, ErrInvalidJournal) {
+				t.Fatalf("decode uninstall with %s error = %v, want ErrInvalidJournal", name, err)
+			}
+		})
+	}
+}
+
 func legacyFlatJournalJSON(journal Journal) string {
 	return `{"schema_version":1,"transaction_id":"` + journal.TransactionID +
 		`","operation":"install","phase":"preparing","agent":"codex",` +

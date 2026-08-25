@@ -308,7 +308,7 @@ func testMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 		Phase:         transaction.PhaseAddingNew,
 		Agent:         agent,
 		Power:         ref,
-		AgentCLI:      &transaction.AgentCLIJournalPayload{Server: server},
+		AgentCLI:      &transaction.AgentCLIJournalPayload{Server: &server},
 	}
 	contents, err := json.Marshal(journal)
 	if err != nil {

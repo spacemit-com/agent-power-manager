@@ -20,9 +20,6 @@ func (*stubClient) DownloadPlugin(context.Context, domain.CatalogEntry, string) 
 func (*stubClient) GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*stubClient) GetMCPForUninstall(context.Context, domain.PowerRef) (domain.MCPServer, error) {
-	return domain.MCPServer{}, nil
-}
 func (*stubClient) DownloadAgent(context.Context, domain.CatalogEntry, string) error { return nil }
 func (*stubClient) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
 	return domain.SubmissionResult{}, nil

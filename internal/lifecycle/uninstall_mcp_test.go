@@ -14,11 +14,9 @@ import (
 	"apm/internal/transaction"
 )
 
-func TestUninstallMCPPresentGetsExactDefinitionAndCompletes(t *testing.T) {
+func TestUninstallMCPPresentUsesOnlyLocalStateAndTransaction(t *testing.T) {
 	var calls []string
-	server := domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://old.example/mcp"}
 	fixture := uninstallMCPFixture(adapter.MCPPresent)
-	fixture.mcpDefinitions = map[string]domain.MCPServer{"v1.2.3": server}
 	service := newUninstallService(t, &calls, fixture)
 
 	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "mcp", Name: "demo"})
@@ -27,7 +25,7 @@ func TestUninstallMCPPresentGetsExactDefinitionAndCompletes(t *testing.T) {
 	}
 	want := []string{
 		"acquire", "recover", "refresh", "config:codex", "resolve-mcp:codex", "mcp:inspect:codex",
-		"cloud:get-mcp:v1.2.3", "transaction:uninstall-mcp:codex", "release",
+		"transaction:uninstall-mcp:codex", "release",
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
@@ -35,7 +33,7 @@ func TestUninstallMCPPresentGetsExactDefinitionAndCompletes(t *testing.T) {
 	assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Power: powerPointer(uninstallMCPRef()), Outcome: cli.UninstallOutcomeCompleted}})
 }
 
-func TestUninstallMCPAbsentSkipsCloudAndWarns(t *testing.T) {
+func TestUninstallMCPAbsentUsesOnlyLocalStateAndWarns(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	uninstallTestLogger(t, &stdout, &stderr, false)
 	var calls []string
@@ -52,9 +50,6 @@ func TestUninstallMCPAbsentSkipsCloudAndWarns(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Power: powerPointer(uninstallMCPRef()), Outcome: cli.UninstallOutcomeCompleted}})
-	if containsEvent(calls, "cloud:get-mcp:v1.2.3") || len(fixture.mcpRequests) != 0 {
-		// fixture is copied into the service, so requests are asserted through the call log below.
-	}
 	want := []string{"acquire", "recover", "refresh", "config:codex", "resolve-mcp:codex", "mcp:inspect:codex", "transaction:uninstall-mcp:codex", "release"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
@@ -78,30 +73,16 @@ func TestUninstallMCPMissingManifestStopsBeforeAdapterCloudAndTransaction(t *tes
 }
 
 func TestUninstallMCPFailuresKeepFullRefAndStopBeforeTransaction(t *testing.T) {
-	tests := []struct {
-		name      string
-		configure func(*uninstallFixture, error)
-	}{
-		{name: "inspect", configure: func(f *uninstallFixture, cause error) {
-			f.mcpInspectErrors = map[domain.AgentID]error{domain.AgentCodex: cause}
-		}},
-		{name: "Cloud definition", configure: func(f *uninstallFixture, cause error) { f.mcpGetErrors = map[string]error{"v1.2.3": cause} }},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			cause := errors.New(test.name)
-			fixture := uninstallMCPFixture(adapter.MCPPresent)
-			fixture.mcpDefinitions = map[string]domain.MCPServer{"v1.2.3": {Transport: domain.MCPTransportHTTP, URL: "https://old.example/mcp"}}
-			test.configure(&fixture, cause)
-			var calls []string
-			service := newUninstallService(t, &calls, fixture)
-			result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "mcp", Name: "demo"})
-			assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Power: powerPointer(uninstallMCPRef()), Outcome: cli.UninstallOutcomeFailed}})
-			assertUninstallBatchError(t, err, domain.AgentCodex, cause)
-			if containsEvent(calls, "transaction:uninstall-mcp:codex") {
-				t.Fatalf("calls = %v, want no transaction", calls)
-			}
-		})
+	cause := errors.New("inspect")
+	fixture := uninstallMCPFixture(adapter.MCPPresent)
+	fixture.mcpInspectErrors = map[domain.AgentID]error{domain.AgentCodex: cause}
+	var calls []string
+	service := newUninstallService(t, &calls, fixture)
+	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "mcp", Name: "demo"})
+	assertUninstallItems(t, result, []cli.UninstallItem{{Agent: domain.AgentCodex, Power: powerPointer(uninstallMCPRef()), Outcome: cli.UninstallOutcomeFailed}})
+	assertUninstallBatchError(t, err, domain.AgentCodex, cause)
+	if containsEvent(calls, "transaction:uninstall-mcp:codex") {
+		t.Fatalf("calls = %v, want no transaction", calls)
 	}
 }
 

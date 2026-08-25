@@ -40,9 +40,6 @@ func (s *Service) UninstallMCP(ctx context.Context, request MCPUninstallRequest)
 	if presence != adapter.MCPPresent {
 		return result, fmt.Errorf("unexpected MCP presence %q: %w", presence, ErrIndeterminateState)
 	}
-	if request.Server == nil {
-		return result, fmt.Errorf("MCP uninstall requires server definition: %w", ErrInvalidRequest)
-	}
 	journal, err := s.newMCPUninstallJournal(request)
 	if err != nil {
 		return result, err
@@ -92,8 +89,6 @@ func (s *Service) newMCPUninstallJournal(request MCPUninstallRequest) (Journal, 
 		Phase:         PhaseRemoving,
 		Agent:         request.Agent,
 		Power:         request.Power,
-		AgentCLI: &AgentCLIJournalPayload{
-			Server: request.Server.Clone(),
-		},
+		AgentCLI:      &AgentCLIJournalPayload{},
 	}, nil
 }

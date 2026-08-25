@@ -88,11 +88,10 @@ type MCPInstallRequest struct {
 	Adapter        adapter.MCPAdapter
 }
 
-// MCPUninstallRequest 描述单个 Agent 的 MCP 卸载输入；Server 仅在 CLI 确认注册存在时必需。
+// MCPUninstallRequest 描述单个 Agent 的 MCP 卸载输入；卸载只依赖本地清单和目标 CLI 状态。
 type MCPUninstallRequest struct {
 	Agent   domain.AgentID
 	Power   domain.PowerRef
-	Server  *domain.MCPServer
 	Adapter adapter.MCPAdapter
 }
 

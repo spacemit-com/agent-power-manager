@@ -331,10 +331,6 @@ func (c *installFakeCloud) GetMCP(ctx context.Context, entry domain.CatalogEntry
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
-func (*installFakeCloud) GetMCPForUninstall(context.Context, domain.PowerRef) (domain.MCPServer, error) {
-	return domain.MCPServer{}, errors.New("Install lifecycle called MCP uninstall compatibility boundary")
-}
-
 func (c *installFakeCloud) DownloadPlugin(context.Context, domain.CatalogEntry, string) error {
 	*c.calls = append(*c.calls, "cloud:unexpected-download-plugin")
 	return errors.New("unexpected direct Plugin Cloud download")

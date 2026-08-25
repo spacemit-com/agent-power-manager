@@ -1655,7 +1655,7 @@ func TestRemoteLifecycleServerRejectsProtocolMutations(t *testing.T) {
 	}
 }
 
-func TestRemoteMCPUninstallUsesCloudOnlyForPresentTarget(t *testing.T) {
+func TestRemoteMCPUninstallMakesNoCloudRequests(t *testing.T) {
 	for _, targetPresent := range []bool{false, true} {
 		t.Run(strconv.FormatBool(targetPresent), func(t *testing.T) {
 			configureLifecycleTrustedTemp(t)
@@ -1675,18 +1675,8 @@ func TestRemoteMCPUninstallUsesCloudOnlyForPresentTarget(t *testing.T) {
 			if err != nil || len(removed.Items) != 1 || removed.Items[0].Outcome != cli.UninstallOutcomeCompleted {
 				t.Fatalf("Uninstall() = %+v, %v", removed, err)
 			}
-			if targetPresent {
-				if got := server.requestCountSuffix("/versions/v0.0.1"); got != 1 {
-					t.Fatalf("exact MCP metadata requests = %d, want 1", got)
-				}
-				if got := server.requestCountSuffix("/versions/v0.0.1/content"); got != 1 {
-					t.Fatalf("exact MCP content requests = %d, want 1", got)
-				}
-				if got := server.requestCount(); got != 2 {
-					t.Fatalf("GetMCP request sequence = %d HTTP requests, want metadata+content only", got)
-				}
-			} else if got := server.requestCount(); got != 0 {
-				t.Fatalf("absent-target MCP uninstall made %d Cloud requests, want 0", got)
+			if got := server.requestCount(); got != 0 {
+				t.Fatalf("MCP uninstall targetPresent=%v made %d Cloud requests, want 0", targetPresent, got)
 			}
 			harness.assertManagedMCP(domain.AgentBibit, "filesystem", "", false)
 			harness.assertMCPOnlyPathsAbsent()

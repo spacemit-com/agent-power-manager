@@ -9,7 +9,7 @@ import (
 	"apm/internal/transaction"
 )
 
-// uninstallMCP 先用目标 Agent CLI 确认状态，仅在注册存在时读取精确版本定义。
+// uninstallMCP 只用本地清单和目标 Agent CLI 状态卸载；不得访问 Cloud 或 catalog。
 func (s *UninstallService) uninstallMCP(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (transaction.UninstallResult, error) {
 	mcpAdapter, err := s.registry.ResolveMCP(agent)
 	if err != nil {
@@ -22,11 +22,6 @@ func (s *UninstallService) uninstallMCP(ctx context.Context, agent domain.AgentI
 	request := transaction.MCPUninstallRequest{Agent: agent, Power: ref, Adapter: mcpAdapter}
 	switch presence {
 	case adapter.MCPPresent:
-		server, err := s.cloud.GetMCPForUninstall(ctx, ref)
-		if err != nil {
-			return transaction.UninstallResult{}, fmt.Errorf("get MCP %+v from Cloud for uninstall: %w", ref, err)
-		}
-		request.Server = mcpServerPointer(server)
 	case adapter.MCPAbsent:
 	default:
 		return transaction.UninstallResult{}, fmt.Errorf("unexpected MCP presence %q: %w", presence, transaction.ErrIndeterminateState)

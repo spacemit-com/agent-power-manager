@@ -38,12 +38,6 @@ type MCPSource interface {
 	GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error)
 }
 
-// MCPUninstallDefinitionSource 是 Task 8 删除的临时兼容边界：仅现有 MCP uninstall
-// 可按已安装 Ref 读取回滚定义；Install 和其他内容路径禁止使用。
-type MCPUninstallDefinitionSource interface {
-	GetMCPForUninstall(context.Context, domain.PowerRef) (domain.MCPServer, error)
-}
-
 // AgentSource 使用已验证 CatalogEntry 下载精确版本 Agent；不得二次查询 metadata，destination 必须不存在。
 type AgentSource interface {
 	DownloadAgent(context.Context, domain.CatalogEntry, string) error
@@ -55,7 +49,6 @@ type Client interface {
 	SkillSource
 	PluginSource
 	MCPSource
-	MCPUninstallDefinitionSource
 	AgentSource
 	Submission
 }
