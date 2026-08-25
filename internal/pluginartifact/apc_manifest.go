@@ -23,13 +23,43 @@ type APCPluginManifest struct {
 	Skills        []string `json:"skills"`
 }
 
+// ValidateAPCPluginManifest 校验内存中的 APC Plugin v1 权威索引；
+// 本函数不访问文件系统，供已固定的 immutable snapshot 复用完整身份与声明语义。
+func ValidateAPCPluginManifest(ref domain.PowerRef, manifest APCPluginManifest) error {
+	logicalName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		return errors.Join(ErrInvalid, err)
+	}
+	if manifest.SchemaVersion != 1 {
+		return fmt.Errorf("APC Plugin schema_version %d, want 1: %w", manifest.SchemaVersion, ErrInvalid)
+	}
+	if manifest.Name != logicalName || manifest.Version != ref.Version {
+		return fmt.Errorf("APC Plugin identity %q@%q does not match %q@%q: %w", manifest.Name, manifest.Version, logicalName, ref.Version, ErrInvalid)
+	}
+	if strings.TrimSpace(manifest.Description) == "" {
+		return fmt.Errorf("APC Plugin description is empty: %w", ErrInvalid)
+	}
+	if len(manifest.Skills) == 0 {
+		return fmt.Errorf("APC Plugin skills is empty: %w", ErrInvalid)
+	}
+
+	declared := make(map[string]struct{}, len(manifest.Skills))
+	for _, skillPath := range manifest.Skills {
+		skillName, ok := canonicalAPCSkillName(skillPath)
+		if !ok {
+			return fmt.Errorf("APC Plugin skill path %q is not canonical skills/<name>: %w", skillPath, ErrInvalid)
+		}
+		if _, duplicate := declared[skillName]; duplicate {
+			return fmt.Errorf("APC Plugin skill path %q is duplicated: %w", skillPath, ErrInvalid)
+		}
+		declared[skillName] = struct{}{}
+	}
+	return nil
+}
+
 // LoadAPCPluginManifest 严格读取并复验精确 Plugin 身份及声明 Skill 闭集。
 // 调用方必须传入尚未发布或受 lifecycle 全局锁保护的物理 Plugin 根。
 func LoadAPCPluginManifest(ref domain.PowerRef, pluginPath string) (APCPluginManifest, error) {
-	logicalName, err := domain.PluginRuntimeName(ref)
-	if err != nil {
-		return APCPluginManifest{}, errors.Join(ErrInvalid, err)
-	}
 	if err := ValidatePhysicalTree(pluginPath); err != nil {
 		return APCPluginManifest{}, err
 	}
@@ -43,28 +73,12 @@ func LoadAPCPluginManifest(ref domain.PowerRef, pluginPath string) (APCPluginMan
 	if err := jsonstrict.Decode(contents, &manifest, true); err != nil {
 		return APCPluginManifest{}, fmt.Errorf("decode APC Plugin manifest %q: %w", manifestPath, errors.Join(ErrInvalid, err))
 	}
-	if manifest.SchemaVersion != 1 {
-		return APCPluginManifest{}, fmt.Errorf("APC Plugin schema_version %d, want 1: %w", manifest.SchemaVersion, ErrInvalid)
+	if err := ValidateAPCPluginManifest(ref, manifest); err != nil {
+		return APCPluginManifest{}, err
 	}
-	if manifest.Name != logicalName || manifest.Version != ref.Version {
-		return APCPluginManifest{}, fmt.Errorf("APC Plugin identity %q@%q does not match %q@%q: %w", manifest.Name, manifest.Version, logicalName, ref.Version, ErrInvalid)
-	}
-	if strings.TrimSpace(manifest.Description) == "" {
-		return APCPluginManifest{}, fmt.Errorf("APC Plugin description is empty: %w", ErrInvalid)
-	}
-	if len(manifest.Skills) == 0 {
-		return APCPluginManifest{}, fmt.Errorf("APC Plugin skills is empty: %w", ErrInvalid)
-	}
-
 	declared := make(map[string]struct{}, len(manifest.Skills))
 	for _, skillPath := range manifest.Skills {
-		skillName, ok := canonicalAPCSkillName(skillPath)
-		if !ok {
-			return APCPluginManifest{}, fmt.Errorf("APC Plugin skill path %q is not canonical skills/<name>: %w", skillPath, ErrInvalid)
-		}
-		if _, duplicate := declared[skillName]; duplicate {
-			return APCPluginManifest{}, fmt.Errorf("APC Plugin skill path %q is duplicated: %w", skillPath, ErrInvalid)
-		}
+		skillName, _ := canonicalAPCSkillName(skillPath)
 		declared[skillName] = struct{}{}
 	}
 	if err := validateDeclaredSkillWorld(pluginPath, declared); err != nil {

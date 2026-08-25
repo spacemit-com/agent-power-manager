@@ -47,6 +47,39 @@ func TestAPCPluginManifestLoadsExactCanonicalSchema(t *testing.T) {
 	}
 }
 
+func TestValidateAPCPluginManifestValueUsesAuthoritativeSemanticsWithoutIO(t *testing.T) {
+	ref := canonicalPluginRef()
+	valid := pluginartifact.APCPluginManifest{
+		SchemaVersion: 1,
+		Name:          ref.Name,
+		Version:       ref.Version,
+		Description:   "Canonical demo",
+		Skills:        []string{"skills/demo"},
+	}
+	if err := pluginartifact.ValidateAPCPluginManifest(ref, valid); err != nil {
+		t.Fatalf("ValidateAPCPluginManifest(valid) error = %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*pluginartifact.APCPluginManifest)
+	}{
+		{name: "nil skills", mutate: func(manifest *pluginartifact.APCPluginManifest) { manifest.Skills = nil }},
+		{name: "duplicate declaration", mutate: func(manifest *pluginartifact.APCPluginManifest) {
+			manifest.Skills = []string{"skills/demo", "skills/demo"}
+		}},
+		{name: "noncanonical declaration", mutate: func(manifest *pluginartifact.APCPluginManifest) { manifest.Skills = []string{"skills/../demo"} }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manifest := valid
+			manifest.Skills = append([]string(nil), valid.Skills...)
+			test.mutate(&manifest)
+			if err := pluginartifact.ValidateAPCPluginManifest(ref, manifest); !errors.Is(err, pluginartifact.ErrInvalid) {
+				t.Fatalf("ValidateAPCPluginManifest() error = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}
+
 func TestAPCPluginManifestRejectsInvalidSchemaIdentityAndSkills(t *testing.T) {
 	// 捕获错误变更：宽松 JSON、身份归一化或递归 skill 路径绕过 canonical v1 闭集。
 	ref := canonicalPluginRef()
@@ -256,6 +289,19 @@ func TestAPCPluginRawPackageEntriesRejectSnapshotOutsideDeclaredSkillWorld(t *te
 	invalid := append(append([]pluginartifact.RawPackageEntry(nil), entries...), pluginartifact.RawPackageEntry{Path: "README.md"})
 	if err := pluginartifact.ValidateRawPackageEntries(manifest, invalid); !errors.Is(err, pluginartifact.ErrInvalid) {
 		t.Fatalf("ValidateRawPackageEntries() error = %v, want ErrInvalid", err)
+	}
+	for _, missing := range []string{"apc-plugin.json", "skills", "skills/demo", "skills/demo/SKILL.md", "skills/demo/skill-card.md"} {
+		t.Run("missing "+missing, func(t *testing.T) {
+			incomplete := make([]pluginartifact.RawPackageEntry, 0, len(entries)-1)
+			for _, entry := range entries {
+				if entry.Path != missing {
+					incomplete = append(incomplete, entry)
+				}
+			}
+			if err := pluginartifact.ValidateRawPackageEntries(manifest, incomplete); !errors.Is(err, pluginartifact.ErrInvalid) {
+				t.Fatalf("ValidateRawPackageEntries() error = %v, want missing-entry ErrInvalid", err)
+			}
+		})
 	}
 }
 

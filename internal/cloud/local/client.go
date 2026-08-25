@@ -18,16 +18,19 @@ import (
 
 // Client 从绝对本地目录读取能力资源，不拥有缓存、staging 或用户目录。
 type Client struct {
-	resourcesRoot          string
-	beforeAgentWrite       func(*os.File)
-	agentTemporaryChmod    func(*os.File, os.FileMode) error
-	beforeAgentPublish     func()
-	beforeTreeSnapshot     func()
-	beforeSnapshotFileOpen func(string)
-	afterSnapshotDataOpen  func(string)
-	beforeTreePublish      func()
-	afterMCPDecode         func()
-	afterMCPClone          func()
+	resourcesRoot                string
+	beforeAgentWrite             func(*os.File)
+	agentTemporaryChmod          func(*os.File, os.FileMode) error
+	beforeAgentPublish           func()
+	beforeTreeSnapshot           func()
+	beforeSnapshotFileOpen       func(string)
+	afterSnapshotDataOpen        func(string)
+	beforeTreePublish            func()
+	afterMCPDecode               func()
+	afterMCPClone                func()
+	catalogDestinationAfterOpen  func(string, *os.File)
+	catalogDestinationStat       func(*os.File) (fs.FileInfo, error)
+	catalogArchiveAfterBodyChunk func(string)
 }
 
 var _ cloud.Client = (*Client)(nil)

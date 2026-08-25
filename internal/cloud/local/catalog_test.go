@@ -178,6 +178,96 @@ func TestLocalCatalogVersionPreservesCancellation(t *testing.T) {
 	}
 }
 
+func TestLocalCatalogRejectsPluginSnapshotOutsideAuthoritativeClosedWorld(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, string)
+	}{
+		{name: "null skills", mutate: func(t *testing.T, source string) {
+			writeLocalCatalogFile(t, filepath.Join(source, "apc-plugin.json"), []byte(`{"schema_version":1,"name":"catalog-plugin","version":"v1.0.0","description":"plugin description v1.0.0","skills":null}`))
+		}},
+		{name: "duplicate declaration", mutate: func(t *testing.T, source string) {
+			writeLocalCatalogFile(t, filepath.Join(source, "apc-plugin.json"), []byte(`{"schema_version":1,"name":"catalog-plugin","version":"v1.0.0","description":"plugin description v1.0.0","skills":["skills/helper","skills/helper"]}`))
+		}},
+		{name: "noncanonical declaration", mutate: func(t *testing.T, source string) {
+			writeLocalCatalogFile(t, filepath.Join(source, "apc-plugin.json"), []byte(`{"schema_version":1,"name":"catalog-plugin","version":"v1.0.0","description":"plugin description v1.0.0","skills":["skills/../helper"]}`))
+		}},
+		{name: "declared missing", mutate: func(t *testing.T, source string) {
+			if err := os.RemoveAll(filepath.Join(source, "skills", "helper")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "undeclared directory", mutate: func(t *testing.T, source string) {
+			writeLocalCatalogFile(t, filepath.Join(source, "skills", "extra", "SKILL.md"), []byte("extra"))
+			writeLocalCatalogFile(t, filepath.Join(source, "skills", "extra", "skill-card.md"), []byte("extra"))
+		}},
+		{name: "extra root", mutate: func(t *testing.T, source string) {
+			writeLocalCatalogFile(t, filepath.Join(source, "README.md"), []byte("extra"))
+		}},
+		{name: "native manifest", mutate: func(t *testing.T, source string) {
+			writeLocalCatalogFile(t, filepath.Join(source, ".codex-plugin", "plugin.json"), []byte(`{"name":"shadow"}`))
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			fixture := writeLocalCatalogPower(t, root, domain.PowerTypePlugin, "v1.0.0")
+			test.mutate(t, fixture.path)
+			client, err := local.New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.CatalogVersion(context.Background()); !errors.Is(err, cloud.ErrUnsafeContent) {
+				t.Fatalf("CatalogVersion() error = %v, want ErrUnsafeContent", err)
+			}
+		})
+	}
+}
+
+func TestLocalCatalogSkillFrontmatterRequiresExactOpener(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		opener string
+	}{
+		{name: "leading space", opener: " ---\n"},
+		{name: "leading tab", opener: "\t---\n"},
+		{name: "inline YAML", opener: "---name: catalog-skill\n"},
+		{name: "vertical tab suffix", opener: "--- \v\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			fixture := writeLocalCatalogPower(t, root, domain.PowerTypeSkill, "v1.0.0")
+			body := test.opener + "name: catalog-skill\nversion: \"v1.0.0\"\ndescription: skill description v1.0.0\n---\n# Skill\n"
+			writeLocalCatalogFile(t, filepath.Join(fixture.path, "SKILL.md"), []byte(body))
+			client, err := local.New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.CatalogVersion(context.Background()); !errors.Is(err, cloud.ErrUnsafeContent) {
+				t.Fatalf("CatalogVersion() error = %v, want exact-opener ErrUnsafeContent", err)
+			}
+		})
+	}
+}
+
+func TestLocalCatalogSkillFrontmatterAcceptsSpaceTabAndLFOrCRLF(t *testing.T) {
+	for _, opener := range []string{"---\n", "--- \t\n", "---\r\n", "--- \t\r\n"} {
+		t.Run(hex.EncodeToString([]byte(opener)), func(t *testing.T) {
+			root := t.TempDir()
+			fixture := writeLocalCatalogPower(t, root, domain.PowerTypeSkill, "v1.0.0")
+			body := opener + "name: catalog-skill\nversion: \"v1.0.0\"\ndescription: skill description v1.0.0\n---\n# Skill\n"
+			writeLocalCatalogFile(t, filepath.Join(fixture.path, "SKILL.md"), []byte(body))
+			client, err := local.New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.CatalogVersion(context.Background()); err != nil {
+				t.Fatalf("CatalogVersion() error = %v", err)
+			}
+		})
+	}
+}
+
 func downloadLocalCatalog(t *testing.T, client *local.Client) []byte {
 	t.Helper()
 	destination := filepath.Join(t.TempDir(), "catalog.json")

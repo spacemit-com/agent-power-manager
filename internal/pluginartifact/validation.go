@@ -150,9 +150,9 @@ type RawPackageEntry struct {
 }
 
 // ValidateRawPackageEntries 复用 raw package 闭集规则校验不可变快照路径。
-// 调用方必须先以 ValidateRawPackage 完成 manifest 身份、schema 与声明 Skill 校验。
+// 调用方必须先以 ValidateAPCPluginManifest 完成 manifest 身份、schema 与声明 Skill 校验。
 func ValidateRawPackageEntries(manifest APCPluginManifest, entries []RawPackageEntry) error {
-	seen := make(map[string]struct{}, len(entries))
+	seen := make(map[string]RawPackageEntry, len(entries))
 	for _, entry := range entries {
 		if entry.Path == "" || entry.Path == "." || path.IsAbs(entry.Path) || strings.Contains(entry.Path, `\`) || path.Clean(entry.Path) != entry.Path {
 			return fmt.Errorf("Plugin artifact snapshot path %q is not canonical: %w", entry.Path, ErrInvalid)
@@ -160,9 +160,35 @@ func ValidateRawPackageEntries(manifest APCPluginManifest, entries []RawPackageE
 		if _, duplicate := seen[entry.Path]; duplicate {
 			return fmt.Errorf("Plugin artifact snapshot repeats path %q: %w", entry.Path, ErrInvalid)
 		}
-		seen[entry.Path] = struct{}{}
+		seen[entry.Path] = entry
 		if !rawPackageEntryAllowed(manifest, entry.Path, entry.Directory) {
 			return fmt.Errorf("Plugin artifact contains path outside canonical schema %q: %w", entry.Path, ErrInvalid)
+		}
+	}
+	require := func(required string, directory bool) error {
+		entry, ok := seen[required]
+		if !ok || entry.Directory != directory {
+			return fmt.Errorf("Plugin artifact snapshot requires %q (directory=%t): %w", required, directory, ErrInvalid)
+		}
+		return nil
+	}
+	for _, required := range []RawPackageEntry{
+		{Path: apcPluginManifestPath},
+		{Path: "skills", Directory: true},
+	} {
+		if err := require(required.Path, required.Directory); err != nil {
+			return err
+		}
+	}
+	for _, skillPath := range manifest.Skills {
+		for _, required := range []RawPackageEntry{
+			{Path: skillPath, Directory: true},
+			{Path: path.Join(skillPath, "SKILL.md")},
+			{Path: path.Join(skillPath, "skill-card.md")},
+		} {
+			if err := require(required.Path, required.Directory); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

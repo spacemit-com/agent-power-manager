@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -72,11 +73,20 @@ func (c *Client) DownloadCatalog(ctx context.Context, destination string) (resul
 	if err != nil {
 		return catalogDestinationError("create Local catalog destination", err)
 	}
-	created, statErr := output.Stat()
+	if c.catalogDestinationAfterOpen != nil {
+		c.catalogDestinationAfterOpen(destination, output)
+	}
+	var created fs.FileInfo
+	var statErr error
+	if c.catalogDestinationStat != nil {
+		created, statErr = c.catalogDestinationStat(output)
+	} else {
+		created, statErr = output.Stat()
+	}
 	if statErr != nil {
 		closeErr := output.Close()
-		cleanupErr := removeLocalCatalogDestination(destination, nil)
-		return catalogDestinationError("inspect Local catalog destination", errors.Join(statErr, closeErr, cleanupErr))
+		// 无 descriptor identity 时不能证明 pathname 仍属于本次调用，必须保守保留。
+		return catalogDestinationError("inspect Local catalog destination", errors.Join(statErr, closeErr))
 	}
 	defer func() {
 		if output != nil {
@@ -193,7 +203,7 @@ func (c *Client) loadCatalogSkill(ctx context.Context, ref domain.PowerRef) (str
 	if name != ref.Name || version != ref.Version {
 		return "", nil, unsafeContent("Local Skill metadata %s/%s does not match fixture path %s/%s", name, version, ref.Name, ref.Version)
 	}
-	contents, err := buildLocalCatalogArchive(snapshot)
+	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
 	return description, contents, err
 }
 
@@ -221,10 +231,19 @@ func (c *Client) loadCatalogPlugin(ctx context.Context, ref domain.PowerRef) (st
 	if err := jsonstrict.Decode(manifestBytes, &manifest, true); err != nil {
 		return "", nil, unsafeContent("decode Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
 	}
-	if manifest.SchemaVersion != 1 || manifest.Name != ref.Name || manifest.Version != ref.Version || strings.TrimSpace(manifest.Description) != manifest.Description || manifest.Description == "" {
-		return "", nil, unsafeContent("Local Plugin manifest metadata does not match %s/%s", ref.Name, ref.Version)
+	if err := pluginartifact.ValidateAPCPluginManifest(ref, manifest); err != nil {
+		return "", nil, unsafeContent("validate Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
 	}
-	contents, err := buildLocalCatalogArchive(snapshot)
+	entries := make([]pluginartifact.RawPackageEntry, 0, len(snapshot.nodes))
+	for _, node := range snapshot.nodes {
+		entries = append(entries, pluginartifact.RawPackageEntry{
+			Path: filepath.ToSlash(node.relative), Directory: node.directory,
+		})
+	}
+	if err := pluginartifact.ValidateRawPackageEntries(manifest, entries); err != nil {
+		return "", nil, unsafeContent("validate Local Plugin snapshot %s/%s: %v", ref.Name, ref.Version, err)
+	}
+	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
 	return manifest.Description, contents, err
 }
 
@@ -323,7 +342,14 @@ func parseLocalSkillMetadata(snapshot *treeSnapshot) (string, string, string, er
 
 func extractLocalSkillFrontmatter(contents []byte) ([]byte, error) {
 	firstLineEnd := bytes.IndexByte(contents, '\n')
-	if firstLineEnd < 0 || strings.TrimSpace(strings.TrimSuffix(string(contents[:firstLineEnd]), "\r")) != "---" {
+	if firstLineEnd < 0 {
+		return nil, fmt.Errorf("SKILL.md must start with YAML frontmatter")
+	}
+	opener := contents[:firstLineEnd]
+	if len(opener) > 0 && opener[len(opener)-1] == '\r' {
+		opener = opener[:len(opener)-1]
+	}
+	if !bytes.HasPrefix(opener, []byte("---")) || len(bytes.Trim(opener[len("---"):], " \t")) != 0 {
 		return nil, fmt.Errorf("SKILL.md must start with YAML frontmatter")
 	}
 	rest := contents[firstLineEnd+1:]
@@ -346,17 +372,26 @@ func extractLocalSkillFrontmatter(contents []byte) ([]byte, error) {
 	return nil, fmt.Errorf("SKILL.md frontmatter is not closed")
 }
 
-func buildLocalCatalogArchive(snapshot *treeSnapshot) ([]byte, error) {
+func buildLocalCatalogArchive(ctx context.Context, snapshot *treeSnapshot, afterBodyChunk func(string)) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	nodes := append([]treeNodeSnapshot(nil), snapshot.nodes...)
 	sort.Slice(nodes, func(left, right int) bool {
 		return filepath.ToSlash(nodes[left].relative) < filepath.ToSlash(nodes[right].relative)
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var output bytes.Buffer
 	gzipWriter := gzip.NewWriter(&output)
 	gzipWriter.Header.ModTime = time.Time{}
 	gzipWriter.Header.Name = ""
 	tarWriter := tar.NewWriter(gzipWriter)
 	for _, node := range nodes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		name := filepath.ToSlash(node.relative)
 		header := &tar.Header{Name: name, Uid: 0, Gid: 0, ModTime: time.Unix(0, 0), Size: int64(len(node.contents))}
 		if node.directory {
@@ -371,19 +406,55 @@ func buildLocalCatalogArchive(snapshot *treeSnapshot) ([]byte, error) {
 		if err := tarWriter.WriteHeader(header); err != nil {
 			return nil, err
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !node.directory {
-			if _, err := tarWriter.Write(node.contents); err != nil {
+			if err := writeLocalArchiveBody(ctx, tarWriter, name, node.contents, afterBodyChunk); err != nil {
 				return nil, err
 			}
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := tarWriter.Close(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err := gzipWriter.Close(); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return output.Bytes(), nil
+}
+
+func writeLocalArchiveBody(ctx context.Context, writer io.Writer, relative string, contents []byte, afterChunk func(string)) error {
+	for len(contents) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		chunk := contents
+		if len(chunk) > sourceCopyChunkSize {
+			chunk = chunk[:sourceCopyChunkSize]
+		}
+		written, err := writer.Write(chunk)
+		if err != nil {
+			return err
+		}
+		if written != len(chunk) {
+			return io.ErrShortWrite
+		}
+		contents = contents[written:]
+		if afterChunk != nil {
+			afterChunk(relative)
+		}
+	}
+	return ctx.Err()
 }
 
 func (c *Client) catalogSourcePath(ref domain.PowerRef) (string, error) {
@@ -447,6 +518,9 @@ func verifyLocalCatalogDestination(output *os.File, destination string, created 
 }
 
 func removeLocalCatalogDestination(destination string, created fs.FileInfo) error {
+	if created == nil {
+		return fmt.Errorf("refuse cleanup of destination %q without created identity", destination)
+	}
 	named, err := os.Lstat(destination)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
