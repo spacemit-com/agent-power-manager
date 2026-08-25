@@ -6,26 +6,26 @@ import (
 	"fmt"
 
 	"apm/internal/cli"
-	"apm/internal/cloud"
 	"apm/internal/config"
+	"apm/internal/domain"
 	"apm/internal/transaction"
 )
 
 // ListService 实现带只读日志检查的 Cloud 与已安装清单查询。
 type ListService struct {
 	inspector transaction.Inspector
-	cloud     cloud.Client
+	manager   CatalogManager
 	registry  AdapterRegistry
 	config    config.Repository
 }
 
 // NewList 创建 List 生命周期；Inspector 仅用于只读检查，不得在查询中恢复事务。
-func NewList(inspector transaction.Inspector, cloud cloud.Client, registry AdapterRegistry, config config.Repository) (*ListService, error) {
+func NewList(inspector transaction.Inspector, manager CatalogManager, registry AdapterRegistry, config config.Repository) (*ListService, error) {
 	switch {
 	case isNilInterface(inspector):
 		return nil, errors.New("create List lifecycle with nil transaction inspector")
-	case isNilInterface(cloud):
-		return nil, errors.New("create List lifecycle with nil Cloud client")
+	case isNilInterface(manager):
+		return nil, errors.New("create List lifecycle with nil catalog manager")
 	case isNilInterface(registry):
 		return nil, errors.New("create List lifecycle with nil adapter registry")
 	case isNilInterface(config):
@@ -33,7 +33,7 @@ func NewList(inspector transaction.Inspector, cloud cloud.Client, registry Adapt
 	}
 	return &ListService{
 		inspector: inspector,
-		cloud:     cloud,
+		manager:   manager,
 		registry:  registry,
 		config:    config,
 	}, nil
@@ -47,9 +47,10 @@ func (s *ListService) List(ctx context.Context, flags cli.Flags) (cli.ListResult
 	if flags.Installed {
 		return s.listInstalled(ctx, flags)
 	}
-	refs, err := s.cloud.List(ctx)
+	snapshot, status, err := s.manager.Snapshot(ctx)
 	if err != nil {
-		return cli.ListResult{}, fmt.Errorf("list Cloud powers: %w", err)
+		return cli.ListResult{}, fmt.Errorf("snapshot catalog powers: %w", err)
 	}
-	return makeCloudListResult(flags, refs), nil
+	warnStaleCatalog("list", status)
+	return makeCatalogListResult(flags, snapshot.List(domain.PowerType(flags.Type))), nil
 }

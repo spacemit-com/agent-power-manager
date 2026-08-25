@@ -8,14 +8,14 @@ import (
 	"apm/internal/domain"
 )
 
-func TestMakeCloudListResultFiltersTypeKeepsAllVersionsAndSorts(t *testing.T) {
+func TestMakeCatalogListResultFiltersTypeKeepsAllVersionsAndSorts(t *testing.T) {
 	refs := []domain.PowerRef{
 		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.9.0"},
 		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.10.0"},
 		{Type: domain.PowerTypePlugin, Name: "alpha", Version: "v2.0.0"},
 	}
 
-	got := makeCloudListResult(cli.Flags{}, refs)
+	got := makeCatalogListResult(cli.Flags{}, catalogEntriesFromRefs(refs))
 	want := cli.ListResult{Powers: []cli.ListedPower{
 		{Power: refs[2]},
 		{Power: refs[1]},
@@ -23,62 +23,71 @@ func TestMakeCloudListResultFiltersTypeKeepsAllVersionsAndSorts(t *testing.T) {
 	}}
 
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("makeCloudListResult() = %#v, want %#v", got, want)
+		t.Fatalf("makeCatalogListResult() = %#v, want %#v", got, want)
 	}
 }
 
-func TestMakeCloudListResultAppliesExactTypeFilter(t *testing.T) {
+func TestMakeCatalogListResultAppliesExactTypeFilter(t *testing.T) {
 	refs := []domain.PowerRef{
 		{Type: domain.PowerTypeSkill, Name: "demo-skill", Version: "v1.0.0"},
 		{Type: domain.PowerTypePlugin, Name: "demo-plugin", Version: "v1.0.0"},
 	}
 	want := cli.ListResult{Powers: []cli.ListedPower{{Power: refs[0]}}}
 
-	if got := makeCloudListResult(cli.Flags{Type: "skill"}, refs); !reflect.DeepEqual(got, want) {
-		t.Fatalf("makeCloudListResult() = %#v, want %#v", got, want)
+	if got := makeCatalogListResult(cli.Flags{Type: "skill"}, catalogEntriesFromRefs(refs)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("makeCatalogListResult() = %#v, want %#v", got, want)
 	}
 }
 
-func TestMakeCloudListResultKeepsCompleteDuplicatesStable(t *testing.T) {
+func TestMakeCatalogListResultKeepsCompleteDuplicatesStable(t *testing.T) {
 	refs := []domain.PowerRef{
 		{Type: domain.PowerTypeSkill, Name: "first", Version: "v1.0.0"},
 		{Type: domain.PowerTypeSkill, Name: "first", Version: "v1.0.0"},
 		{Type: domain.PowerTypeSkill, Name: "second", Version: "v1.0.0"},
 	}
 
-	got := makeCloudListResult(cli.Flags{}, refs)
+	got := makeCatalogListResult(cli.Flags{}, catalogEntriesFromRefs(refs))
 	want := cli.ListResult{Powers: []cli.ListedPower{
 		{Power: refs[0]},
 		{Power: refs[1]},
 		{Power: refs[2]},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("makeCloudListResult() = %#v, want %#v", got, want)
+		t.Fatalf("makeCatalogListResult() = %#v, want %#v", got, want)
 	}
 }
 
-func TestMakeCloudListResultReturnsNonNilEmptySlice(t *testing.T) {
-	got := makeCloudListResult(cli.Flags{}, nil)
+func TestMakeCatalogListResultReturnsNonNilEmptySlice(t *testing.T) {
+	got := makeCatalogListResult(cli.Flags{}, nil)
 	if got.Powers == nil {
-		t.Fatal("makeCloudListResult() returned nil Powers, want non-nil empty slice")
+		t.Fatal("makeCatalogListResult() returned nil Powers, want non-nil empty slice")
 	}
 	if len(got.Powers) != 0 {
-		t.Fatalf("makeCloudListResult() returned %#v, want empty Powers", got.Powers)
+		t.Fatalf("makeCatalogListResult() returned %#v, want empty Powers", got.Powers)
 	}
 }
 
-func TestMakeCloudListResultDoesNotModifyInput(t *testing.T) {
+func TestMakeCatalogListResultDoesNotModifyInput(t *testing.T) {
 	refs := []domain.PowerRef{
 		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
 		{Type: domain.PowerTypePlugin, Name: "alpha", Version: "v2.0.0"},
 	}
-	want := append([]domain.PowerRef(nil), refs...)
+	entries := catalogEntriesFromRefs(refs)
+	want := append([]domain.CatalogEntry(nil), entries...)
 
-	_ = makeCloudListResult(cli.Flags{}, refs)
+	_ = makeCatalogListResult(cli.Flags{}, entries)
 
-	if !reflect.DeepEqual(refs, want) {
-		t.Fatalf("makeCloudListResult() modified input: got %#v, want %#v", refs, want)
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("makeCatalogListResult() modified input: got %#v, want %#v", entries, want)
 	}
+}
+
+func catalogEntriesFromRefs(refs []domain.PowerRef) []domain.CatalogEntry {
+	entries := make([]domain.CatalogEntry, 0, len(refs))
+	for _, ref := range refs {
+		entries = append(entries, catalogEntryFromRef(ref))
+	}
+	return entries
 }
 
 func TestMakeInstalledListResultAddsAgentFiltersAndSorts(t *testing.T) {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,10 +12,12 @@ import (
 	"testing"
 
 	"apm/internal/cache"
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/config"
 	"apm/internal/domain"
+	"apm/internal/lifecycle"
 	"apm/internal/logging"
 	"apm/internal/pluginresource"
 )
@@ -127,6 +130,94 @@ func TestLifecycleCompositionOpensOneCloudClientPerInvocation(t *testing.T) {
 	}
 }
 
+type recordingCatalogManager struct {
+	snapshot      catalog.Snapshot
+	snapshotCalls int
+}
+
+func (manager *recordingCatalogManager) Snapshot(context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	manager.snapshotCalls++
+	return manager.snapshot, catalog.SyncStatus{}, nil
+}
+
+func (manager *recordingCatalogManager) SnapshotLocked(context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	return manager.snapshot, catalog.SyncStatus{}, nil
+}
+
+func TestCatalogLifecycleCompositionSharesOneLazyManager(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	manager := &recordingCatalogManager{snapshot: mainTestCatalogSnapshot(t)}
+	managerFactoryCalls := 0
+	composition := newCatalogLifecycleCompositionWithManagerFactory(func() (lifecycle.CatalogManager, error) {
+		managerFactoryCalls++
+		return manager, nil
+	})
+
+	search, err := composition.newSearchLifecycle()
+	if err != nil {
+		t.Fatalf("compose search lifecycle: %v", err)
+	}
+	list, err := composition.newListLifecycle()
+	if err != nil {
+		t.Fatalf("compose list lifecycle: %v", err)
+	}
+	if managerFactoryCalls != 0 {
+		t.Fatalf("manager factory calls after construction = %d, want 0", managerFactoryCalls)
+	}
+	if _, err := search.Search(context.Background(), cli.Flags{Keyword: "demo"}); err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if _, err := list.List(context.Background(), cli.Flags{Type: "skill"}); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if managerFactoryCalls != 1 || manager.snapshotCalls != 2 {
+		t.Fatalf("manager factory/Snapshot calls = %d/%d, want 1/2", managerFactoryCalls, manager.snapshotCalls)
+	}
+}
+
+func TestCatalogLifecycleCompositionDefersManagerForInstalledList(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	managerFactoryCalls := 0
+	composition := newCatalogLifecycleCompositionWithManagerFactory(func() (lifecycle.CatalogManager, error) {
+		managerFactoryCalls++
+		return nil, errors.New("invalid catalog source configuration")
+	})
+
+	list, err := composition.newListLifecycle()
+	if err != nil {
+		t.Fatalf("compose list lifecycle: %v", err)
+	}
+	result, err := list.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
+	if err != nil || len(result.Powers) != 0 {
+		t.Fatalf("List(installed) = %#v, %v, want an empty successful result", result, err)
+	}
+	if managerFactoryCalls != 0 {
+		t.Fatalf("manager/source/lock factory calls = %d, want 0", managerFactoryCalls)
+	}
+}
+
+func mainTestCatalogSnapshot(t *testing.T) catalog.Snapshot {
+	t.Helper()
+	entry := domain.CatalogEntry{
+		Ref:         domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+		Description: "test power", Message: "test message", ContentType: "application/gzip",
+		ContentSize: 1, ContentMD5: "00000000000000000000000000000000", PublishedAt: "2026-08-25T00:00:00Z", Tags: []string{},
+	}
+	data, err := catalog.Encode([]domain.CatalogEntry{entry})
+	if err != nil {
+		t.Fatalf("encode catalog: %v", err)
+	}
+	snapshot, err := catalog.Decode(data)
+	if err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	return snapshot
+}
+
 func TestInstallCompositionSharesSelectedClientWithCacheAndPluginResource(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("APM_HOME", root)
@@ -190,8 +281,16 @@ func pluginRefForMainTest() domain.PowerRef {
 }
 
 func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
-	t.Setenv("APM_HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	home := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatalf("secure APM home: %v", err)
+	}
+	t.Setenv("APM_HOME", home)
+	cacheHome := t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatalf("secure cache home: %v", err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	useBundledLocalCloud(t)
 	changeToRepositoryRoot(t)
 
@@ -213,7 +312,7 @@ func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
 	}
 }
 
-func TestNewSearchLifecycleSearchesWithoutLockPath(t *testing.T) {
+func TestNewSearchLifecycleRequiresCatalogLockPath(t *testing.T) {
 	lockPathBlocker := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(lockPathBlocker, nil, 0o600); err != nil {
 		t.Fatalf("create lock path blocker: %v", err)
@@ -227,12 +326,9 @@ func TestNewSearchLifecycleSearchesWithoutLockPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newSearchLifecycle() error = %v", err)
 	}
-	result, err := service.Search(context.Background(), cli.Flags{Keyword: "summary"})
-	if err != nil {
-		t.Fatalf("Search(summary) error = %v", err)
-	}
-	if len(result.Powers) != 1 || result.Powers[0].Name != "foo-before-summary" {
-		t.Fatalf("Search(summary) = %#v, want the bundled summary Skill", result)
+	_, err = service.Search(context.Background(), cli.Flags{Keyword: "summary"})
+	if err == nil || !strings.Contains(err.Error(), "acquire catalog synchronization lock") {
+		t.Fatalf("Search(summary) error = %v, want catalog lock failure", err)
 	}
 }
 
@@ -323,8 +419,16 @@ func TestNewFixLifecycleSucceedsWithoutActiveJournal(t *testing.T) {
 }
 
 func TestNewListLifecycleListsBundledCloud(t *testing.T) {
-	t.Setenv("APM_HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	home := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatalf("secure APM home: %v", err)
+	}
+	t.Setenv("APM_HOME", home)
+	cacheHome := t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatalf("secure cache home: %v", err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	useBundledLocalCloud(t)
 	changeToRepositoryRoot(t)
 
@@ -357,6 +461,9 @@ func TestNewListLifecycleListsInstalledManifest(t *testing.T) {
 	t.Setenv("HERMES_HOME", "")
 	changeToRepositoryRoot(t)
 	clearCloudEnvironment(t)
+	// 已安装列表不依赖目录；故意损坏 Local 配置不能阻断该离线路径。
+	t.Setenv("APM_CLOUD_PROVIDER", "local")
+	t.Setenv("APM_CLOUD_LOCAL_ROOT", "relative/resources")
 
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatalf("create Codex root: %v", err)

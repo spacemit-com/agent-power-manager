@@ -859,11 +859,11 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJou
 	if err != nil {
 		t.Fatal(err)
 	}
-	search, err := NewSearch(transactions, harness.cloud)
+	search, err := NewSearch(transactions, newReadOnlyCatalogManager(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := NewList(transactions, harness.cloud, harness.registry, harness.repository)
+	list, err := NewList(transactions, newReadOnlyCatalogManager(t), harness.registry, harness.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -968,11 +968,11 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesyst
 	if err != nil {
 		t.Fatal(err)
 	}
-	search, err := NewSearch(transactions, harness.cloud)
+	search, err := NewSearch(transactions, newReadOnlyCatalogManager(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := NewList(transactions, harness.cloud, harness.registry, harness.repository)
+	list, err := NewList(transactions, newReadOnlyCatalogManager(t), harness.registry, harness.repository)
 	if err != nil {
 		t.Fatal(err)
 	}

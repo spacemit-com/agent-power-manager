@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"apm/internal/adapter"
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/logging"
@@ -19,13 +21,15 @@ import (
 type listFixture struct {
 	inspectErr error
 	refreshErr error
-	cloudErr   error
+	managerErr error
 
 	inspection transaction.InspectionResult
 	snapshot   domain.AgentSnapshot
 	groups     map[domain.AgentID]domain.PowerGroups
 	configErrs map[domain.AgentID]error
 	cloudRefs  []domain.PowerRef
+	catalog    catalog.Snapshot
+	syncStatus catalog.SyncStatus
 
 	beforeRefresh func()
 }
@@ -40,37 +44,22 @@ func (i *listFakeInspector) Inspect(context.Context) (transaction.InspectionResu
 	return i.fixture.inspection, i.fixture.inspectErr
 }
 
-type listFakeCloud struct {
+type listFakeCatalogManager struct {
 	calls   *[]string
 	fixture *listFixture
 }
 
-func (c *listFakeCloud) List(ctx context.Context) ([]domain.PowerRef, error) {
-	*c.calls = append(*c.calls, "cloud-list")
+func (c *listFakeCatalogManager) Snapshot(ctx context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	*c.calls = append(*c.calls, "catalog-snapshot")
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return catalog.Snapshot{}, catalog.SyncStatus{}, err
 	}
-	return c.fixture.cloudRefs, c.fixture.cloudErr
+	return c.fixture.catalog, c.fixture.syncStatus, c.fixture.managerErr
 }
-func (*listFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.PowerRef, error) {
-	return ref, nil
-}
-func (*listFakeCloud) DownloadSkill(context.Context, domain.PowerRef, string) error { return nil }
-func (*listFakeCloud) DownloadAgent(context.Context, domain.PowerRef, string) error { return nil }
-func (*listFakeCloud) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
-	return domain.SubmissionResult{}, nil
-}
-func (*listFakeCloud) GetSubmission(context.Context, string) (domain.Submission, error) {
-	return domain.Submission{}, nil
-}
-func (*listFakeCloud) ListSubmissions(context.Context, domain.SubmissionListQuery) (domain.SubmissionList, error) {
-	return domain.SubmissionList{}, nil
-}
-func (*listFakeCloud) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
-	return domain.MCPServer{}, nil
-}
-func (*listFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, string) error {
-	return errors.New("unexpected Plugin download")
+
+func (c *listFakeCatalogManager) SnapshotLocked(context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	*c.calls = append(*c.calls, "catalog-snapshot-locked")
+	return c.fixture.catalog, c.fixture.syncStatus, c.fixture.managerErr
 }
 
 type listFakeRegistry struct {
@@ -111,7 +100,7 @@ func TestNewListRejectsNilDependencies(t *testing.T) {
 	var calls []string
 	fixture := &listFixture{}
 	inspector := &listFakeInspector{calls: &calls, fixture: fixture}
-	cloud := &listFakeCloud{calls: &calls, fixture: fixture}
+	manager := &listFakeCatalogManager{calls: &calls, fixture: fixture}
 	registry := &listFakeRegistry{calls: &calls, fixture: fixture}
 	config := &listFakeConfig{calls: &calls, fixture: fixture}
 
@@ -120,14 +109,16 @@ func TestNewListRejectsNilDependencies(t *testing.T) {
 		new  func() (*ListService, error)
 		want string
 	}{
-		{"inspector", func() (*ListService, error) { return NewList(nil, cloud, registry, config) }, "create List lifecycle with nil transaction inspector"},
-		{"typed nil inspector", func() (*ListService, error) { return NewList((*listFakeInspector)(nil), cloud, registry, config) }, "create List lifecycle with nil transaction inspector"},
-		{"Cloud client", func() (*ListService, error) { return NewList(inspector, nil, registry, config) }, "create List lifecycle with nil Cloud client"},
-		{"typed nil Cloud client", func() (*ListService, error) { return NewList(inspector, (*listFakeCloud)(nil), registry, config) }, "create List lifecycle with nil Cloud client"},
-		{"adapter registry", func() (*ListService, error) { return NewList(inspector, cloud, nil, config) }, "create List lifecycle with nil adapter registry"},
-		{"typed nil adapter registry", func() (*ListService, error) { return NewList(inspector, cloud, (*listFakeRegistry)(nil), config) }, "create List lifecycle with nil adapter registry"},
-		{"config repository", func() (*ListService, error) { return NewList(inspector, cloud, registry, nil) }, "create List lifecycle with nil config repository"},
-		{"typed nil config repository", func() (*ListService, error) { return NewList(inspector, cloud, registry, (*listFakeConfig)(nil)) }, "create List lifecycle with nil config repository"},
+		{"inspector", func() (*ListService, error) { return NewList(nil, manager, registry, config) }, "create List lifecycle with nil transaction inspector"},
+		{"typed nil inspector", func() (*ListService, error) { return NewList((*listFakeInspector)(nil), manager, registry, config) }, "create List lifecycle with nil transaction inspector"},
+		{"catalog manager", func() (*ListService, error) { return NewList(inspector, nil, registry, config) }, "create List lifecycle with nil catalog manager"},
+		{"typed nil catalog manager", func() (*ListService, error) {
+			return NewList(inspector, (*listFakeCatalogManager)(nil), registry, config)
+		}, "create List lifecycle with nil catalog manager"},
+		{"adapter registry", func() (*ListService, error) { return NewList(inspector, manager, nil, config) }, "create List lifecycle with nil adapter registry"},
+		{"typed nil adapter registry", func() (*ListService, error) { return NewList(inspector, manager, (*listFakeRegistry)(nil), config) }, "create List lifecycle with nil adapter registry"},
+		{"config repository", func() (*ListService, error) { return NewList(inspector, manager, registry, nil) }, "create List lifecycle with nil config repository"},
+		{"typed nil config repository", func() (*ListService, error) { return NewList(inspector, manager, registry, (*listFakeConfig)(nil)) }, "create List lifecycle with nil config repository"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -139,7 +130,7 @@ func TestNewListRejectsNilDependencies(t *testing.T) {
 	}
 }
 
-func TestListCloudInspectsBeforeListing(t *testing.T) {
+func TestListCatalogInspectsBeforeTakingOneSnapshot(t *testing.T) {
 	var calls []string
 	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}
 	service := newListService(t, &calls, listFixture{cloudRefs: []domain.PowerRef{ref}})
@@ -148,7 +139,7 @@ func TestListCloudInspectsBeforeListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"inspect", "cloud-list"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"inspect", "catalog-snapshot"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 	if want := (cli.ListResult{Powers: []cli.ListedPower{{Power: ref}}}); !reflect.DeepEqual(result, want) {
@@ -156,24 +147,24 @@ func TestListCloudInspectsBeforeListing(t *testing.T) {
 	}
 }
 
-func TestListCloudFailurePreservesCauseAfterInspection(t *testing.T) {
+func TestListCatalogFailurePreservesCauseAfterInspection(t *testing.T) {
 	var calls []string
 	wantErr := errors.New("Cloud unavailable")
-	service := newListService(t, &calls, listFixture{cloudErr: wantErr})
+	service := newListService(t, &calls, listFixture{managerErr: wantErr})
 
 	result, err := service.List(context.Background(), cli.Flags{})
-	if !errors.Is(err, wantErr) || !strings.Contains(err.Error(), "list Cloud powers") {
+	if !errors.Is(err, wantErr) || !strings.Contains(err.Error(), "snapshot catalog powers") {
 		t.Fatalf("List() error = %v, want wrapped %v", err, wantErr)
 	}
 	if len(result.Powers) != 0 {
 		t.Fatalf("List() result = %#v, want no powers", result)
 	}
-	if want := []string{"inspect", "cloud-list"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"inspect", "catalog-snapshot"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 }
 
-func TestListCloudJournalWarningsDoNotBlockListing(t *testing.T) {
+func TestListCatalogJournalWarningsDoNotBlockListing(t *testing.T) {
 	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}
 	damagedErr := errors.New("damaged journal")
 	cloudErr := errors.New("Cloud unavailable")
@@ -184,7 +175,7 @@ func TestListCloudJournalWarningsDoNotBlockListing(t *testing.T) {
 		wantLog      string
 	}{
 		{"active", listFixture{inspection: transaction.InspectionResult{Active: true, Operation: transaction.OperationInstall, Agent: domain.AgentCodex, Power: ref}, cloudRefs: []domain.PowerRef{ref}}, nil, "transaction recovery required"},
-		{"damaged", listFixture{inspectErr: damagedErr, cloudErr: cloudErr}, cloudErr, "transaction journal is damaged"},
+		{"damaged", listFixture{inspectErr: damagedErr, managerErr: cloudErr}, cloudErr, "transaction journal is damaged"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -200,10 +191,10 @@ func TestListCloudJournalWarningsDoNotBlockListing(t *testing.T) {
 				if err != nil || !reflect.DeepEqual(result, cli.ListResult{Powers: []cli.ListedPower{{Power: ref}}}) {
 					t.Fatalf("List() = (%#v, %v), want Cloud result without error", result, err)
 				}
-			} else if !errors.Is(err, tt.wantCloudErr) || !strings.Contains(err.Error(), "list Cloud powers") {
+			} else if !errors.Is(err, tt.wantCloudErr) || !strings.Contains(err.Error(), "snapshot catalog powers") {
 				t.Fatalf("List() error = %v, want Cloud error", err)
 			}
-			if want := []string{"inspect", "cloud-list"}; !reflect.DeepEqual(calls, want) {
+			if want := []string{"inspect", "catalog-snapshot"}; !reflect.DeepEqual(calls, want) {
 				t.Fatalf("calls = %v, want %v", calls, want)
 			}
 			if !strings.Contains(stderr.String(), tt.wantLog) || stdout.Len() != 0 {
@@ -215,9 +206,10 @@ func TestListCloudJournalWarningsDoNotBlockListing(t *testing.T) {
 
 func newListService(t *testing.T, calls *[]string, fixture listFixture) *ListService {
 	t.Helper()
+	fixture.catalog = catalogSnapshotFromRefs(t, fixture.cloudRefs)
 	service, err := NewList(
 		&listFakeInspector{calls: calls, fixture: &fixture},
-		&listFakeCloud{calls: calls, fixture: &fixture},
+		&listFakeCatalogManager{calls: calls, fixture: &fixture},
 		&listFakeRegistry{calls: calls, fixture: &fixture},
 		&listFakeConfig{calls: calls, fixture: &fixture},
 	)
@@ -225,4 +217,65 @@ func newListService(t *testing.T, calls *[]string, fixture listFixture) *ListSer
 		t.Fatal(err)
 	}
 	return service
+}
+
+func TestListCatalogStaleWarningIsRenderedOnceOutsideResult(t *testing.T) {
+	var calls []string
+	var stdout, stderr bytes.Buffer
+	originalLogger := slog.Default()
+	slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
+	t.Cleanup(func() { slog.SetDefault(originalLogger) })
+	cause := errors.New("catalog source unavailable")
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}
+	service := newListService(t, &calls, listFixture{
+		cloudRefs:  []domain.PowerRef{ref},
+		syncStatus: catalog.SyncStatus{Stale: true, Cause: cause},
+	})
+
+	result, err := service.List(context.Background(), cli.Flags{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"inspect", "catalog-snapshot"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+	if got := strings.Count(stderr.String(), "level=WARN"); got != 1 || !strings.Contains(stderr.String(), "catalog snapshot is stale") || !strings.Contains(stderr.String(), cause.Error()) || stdout.Len() != 0 {
+		t.Fatalf("output = stdout %q stderr %q, want one stale warning", stdout.String(), stderr.String())
+	}
+	data, marshalErr := json.Marshal(result)
+	if marshalErr != nil || strings.Contains(string(data), "stale") || strings.Contains(string(data), cause.Error()) {
+		t.Fatalf("JSON result = %q, %v, want no warning data", data, marshalErr)
+	}
+}
+
+// catalogSnapshotFromRefs 为生命周期测试构造只读的有效目录快照。
+func catalogSnapshotFromRefs(t *testing.T, refs []domain.PowerRef) catalog.Snapshot {
+	t.Helper()
+	entries := make([]domain.CatalogEntry, 0, len(refs))
+	for _, ref := range refs {
+		entries = append(entries, catalogEntryFromRef(ref))
+	}
+	data, err := catalog.Encode(entries)
+	if err != nil {
+		t.Fatalf("encode test catalog: %v", err)
+	}
+	snapshot, err := catalog.Decode(data)
+	if err != nil {
+		t.Fatalf("decode test catalog: %v", err)
+	}
+	return snapshot
+}
+
+func catalogEntryFromRef(ref domain.PowerRef) domain.CatalogEntry {
+	contentType := "application/json"
+	switch ref.Type {
+	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+		contentType = "application/gzip"
+	case domain.PowerTypeAgent:
+		contentType = "application/yaml"
+	}
+	return domain.CatalogEntry{
+		Ref: ref, Description: "test power", Message: "test message", ContentType: contentType,
+		ContentSize: 1, ContentMD5: "00000000000000000000000000000000", PublishedAt: "2026-08-25T00:00:00Z", Tags: []string{},
+	}
 }

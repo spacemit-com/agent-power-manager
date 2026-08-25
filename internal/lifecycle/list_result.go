@@ -8,14 +8,14 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-// makeCloudListResult 将 Cloud 能力复制为 CLI 列表结果并完成过滤排序。
-func makeCloudListResult(flags cli.Flags, refs []domain.PowerRef) cli.ListResult {
-	powers := make([]cli.ListedPower, 0, len(refs))
-	for _, ref := range refs {
-		if flags.Type != "" && ref.Type != domain.PowerType(flags.Type) {
+// makeCatalogListResult 将目录条目复制为 CLI 列表结果并完成过滤排序。
+func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.ListResult {
+	powers := make([]cli.ListedPower, 0, len(entries))
+	for _, entry := range entries {
+		if flags.Type != "" && entry.Ref.Type != domain.PowerType(flags.Type) {
 			continue
 		}
-		powers = append(powers, cli.ListedPower{Power: ref})
+		powers = append(powers, cli.ListedPower{Power: entry.Ref})
 	}
 
 	sortListedPowers(powers)
