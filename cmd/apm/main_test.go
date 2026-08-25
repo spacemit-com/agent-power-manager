@@ -356,10 +356,10 @@ func TestInstallCompositionSharesSelectedClientWithCacheAndPluginResource(t *tes
 
 type recordingCloudClient struct{}
 
-func (*recordingCloudClient) List(context.Context) ([]domain.PowerRef, error) { return nil, nil }
-func (*recordingCloudClient) Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error) {
-	return domain.PowerRef{}, nil
+func (*recordingCloudClient) CatalogVersion(context.Context) (domain.CatalogVersion, error) {
+	return domain.CatalogVersion{}, nil
 }
+func (*recordingCloudClient) DownloadCatalog(context.Context, string) error { return nil }
 func (*recordingCloudClient) DownloadSkill(context.Context, domain.CatalogEntry, string) error {
 	return nil
 }

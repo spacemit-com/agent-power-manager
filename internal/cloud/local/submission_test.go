@@ -31,10 +31,6 @@ func TestLocalAgentReadWorksWhileSubmissionUnsupported(t *testing.T) {
 	client := newAgentTestClient(t)
 	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
 
-	got, err := client.Resolve(context.Background(), domain.PowerRef{Type: domain.PowerTypeAgent, Name: ref.Name})
-	if err != nil || got != ref {
-		t.Fatalf("Resolve(agent) = %+v, %v; want %+v", got, err, ref)
-	}
 	destination := filepath.Join(t.TempDir(), "agent.yaml")
 	content, err := client.loadCatalogContent(context.Background(), ref)
 	if err != nil {

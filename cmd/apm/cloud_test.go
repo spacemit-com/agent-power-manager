@@ -103,7 +103,7 @@ func TestNewCloudClientUsesRemoteBaseURLOverride(t *testing.T) {
 			t.Errorf("anonymous catalog Authorization = %q, want absent", authorization)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"snapshot_updated_at":"2026-08-21T00:00:00Z","items":[],"next_cursor":""}`))
+		_, _ = w.Write([]byte(`{"schema_version":1,"catalog_sha256":"0000000000000000000000000000000000000000000000000000000000000000","catalog_size":0}`))
 	}))
 	defer server.Close()
 	t.Setenv("APC_BASE_URL", server.URL)
@@ -112,14 +112,14 @@ func TestNewCloudClientUsesRemoteBaseURLOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refs, err := client.List(context.Background())
+	version, err := client.CatalogVersion(context.Background())
 	if err != nil {
-		t.Fatalf("List() error = %v", err)
+		t.Fatalf("CatalogVersion() error = %v", err)
 	}
-	if len(refs) != 0 {
-		t.Fatalf("List() = %#v, want empty overridden catalog", refs)
+	if version.Size != 0 {
+		t.Fatalf("CatalogVersion() = %#v, want empty overridden catalog", version)
 	}
-	if requestPath != "/api/v1/resources?limit=100" {
+	if requestPath != "/api/v1/resources/version" {
 		t.Fatalf("request URI = %q, want overridden APC catalog path", requestPath)
 	}
 }
@@ -277,8 +277,8 @@ func TestNewCloudClientDoesNotFallbackAfterRemoteRequestFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.List(context.Background()); !errors.Is(err, cloud.ErrInvalidResponse) {
-		t.Fatalf("List() error = %v, want Remote ErrInvalidResponse without Local fallback", err)
+	if _, err := client.CatalogVersion(context.Background()); !errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("CatalogVersion() error = %v, want Remote ErrInvalidResponse without Local fallback", err)
 	}
 }
 

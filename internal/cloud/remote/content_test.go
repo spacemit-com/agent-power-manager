@@ -233,7 +233,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 					w.Header().Set("Content-Length", "99")
 					return
 				}
-				writeExactMetadata(t, w, remoteAgentRef, contents, nil)
+				rejectRemovedMetadata(t, w)
 			},
 		},
 		{
@@ -245,7 +245,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 					_, _ = w.Write(contents[:4])
 					return
 				}
-				writeExactMetadata(t, w, remoteAgentRef, contents, nil)
+				rejectRemovedMetadata(t, w)
 			},
 		},
 		{
@@ -257,7 +257,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 					_, _ = w.Write(append(append([]byte(nil), contents...), '!'))
 					return
 				}
-				writeExactMetadata(t, w, remoteAgentRef, contents, nil)
+				rejectRemovedMetadata(t, w)
 			},
 		},
 		{
@@ -268,10 +268,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 					_, _ = w.Write([]byte("tampered bytes"))
 					return
 				}
-				writeExactMetadata(t, w, remoteAgentRef, []byte("tampered bytes"), map[string]any{
-					"content_size": len("tampered bytes"),
-					"content_md5":  md5Hex(contents),
-				})
+				rejectRemovedMetadata(t, w)
 			},
 		},
 	}
@@ -422,7 +419,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 		started := make(chan struct{})
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !strings.HasSuffix(r.URL.Path, "/content") {
-				writeExactMetadata(t, w, remoteAgentRef, []byte("0123456789"), nil)
+				rejectRemovedMetadata(t, w)
 				return
 			}
 			w.Header().Set("Content-Type", "application/yaml")
@@ -489,19 +486,12 @@ func serveValidContent(t *testing.T, w http.ResponseWriter, r *http.Request, ref
 		_, _ = w.Write(contents)
 		return
 	}
-	writeExactMetadata(t, w, ref, contents, nil)
+	rejectRemovedMetadata(t, w)
 }
 
-func writeExactMetadata(t *testing.T, w http.ResponseWriter, ref domain.PowerRef, contents []byte, overrides map[string]any) {
+func rejectRemovedMetadata(t *testing.T, w http.ResponseWriter) {
 	t.Helper()
-	metadata := validMetadata(string(ref.Type), ref.Name, ref.Version)
-	metadata["content_size"] = len(contents)
-	metadata["content_md5"] = md5Hex(contents)
-	metadata["status"] = "published"
-	for key, value := range overrides {
-		metadata[key] = value
-	}
-	writeJSON(t, w, metadata)
+	http.Error(w, "resource metadata endpoint is removed", http.StatusNotFound)
 }
 
 func md5Hex(contents []byte) string {

@@ -122,7 +122,7 @@ func (c *Client) DownloadCatalog(ctx context.Context, destination string) (resul
 }
 
 func (c *Client) buildCatalog(ctx context.Context) ([]byte, error) {
-	refs, err := c.List(ctx)
+	refs, err := c.catalogRefs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("enumerate Local catalog: %w", err)
 	}

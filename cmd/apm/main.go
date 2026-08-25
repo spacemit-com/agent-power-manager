@@ -148,10 +148,6 @@ func newDefaultCatalogManager() (lifecycle.CatalogManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	source, ok := cloudClient.(cloud.CatalogSource)
-	if !ok {
-		return nil, fmt.Errorf("selected Cloud client %T does not provide catalog snapshots", cloudClient)
-	}
 	catalogPath, err := paths.CatalogPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve catalog path: %w", err)
@@ -168,7 +164,7 @@ func newDefaultCatalogManager() (lifecycle.CatalogManager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve catalog temporary path: %w", err)
 	}
-	manager, err := catalog.NewManager(source, repository, locker, temporaryRoot)
+	manager, err := catalog.NewManager(cloudClient, repository, locker, temporaryRoot)
 	if err != nil {
 		return nil, fmt.Errorf("create catalog manager: %w", err)
 	}

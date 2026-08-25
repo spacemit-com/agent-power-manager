@@ -667,14 +667,9 @@ func TestAnonymousCatalogNeverReceivesSubmissionBearer(t *testing.T) {
 		if authorization := r.Header.Values("Authorization"); len(authorization) != 0 {
 			t.Fatalf("%s Authorization = %q, want absent", r.URL.EscapedPath(), authorization)
 		}
-		if r.URL.EscapedPath() == "/api/v1/resources" {
+		if r.URL.EscapedPath() == "/api/v1/resources/version" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"snapshot_updated_at":"2026-08-24T10:00:00Z","items":[],"next_cursor":""}`))
-			return
-		}
-		if r.URL.EscapedPath() == "/api/v1/resources/mcp/demo/versions/v1.0.0" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"type":"mcp","name":"demo","version":"v1.0.0","description":"demo MCP","message":"publish demo MCP","content_type":"application/json","content_size":%d,"content_md5":"%s","published_at":"2026-08-24T10:00:00Z","status":"published","yanked_at":"","yank_reason":""}`, len(content), md5Hex(content))
+			_, _ = w.Write([]byte(`{"schema_version":1,"catalog_sha256":"0000000000000000000000000000000000000000000000000000000000000000","catalog_size":0}`))
 			return
 		}
 		if r.URL.EscapedPath() == "/api/v1/resources/mcp/demo/versions/v1.0.0/content" {
@@ -687,13 +682,10 @@ func TestAnonymousCatalogNeverReceivesSubmissionBearer(t *testing.T) {
 	}))
 	defer server.Close()
 	client := newTestSubmissionClientWithKey(t, server, "official-key")
-	if _, err := client.List(context.Background()); err != nil {
-		t.Fatalf("List() error = %v", err)
+	if _, err := client.CatalogVersion(context.Background()); err != nil {
+		t.Fatalf("CatalogVersion() error = %v", err)
 	}
 	ref := domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}
-	if got, err := client.Resolve(context.Background(), ref); err != nil || got != ref {
-		t.Fatalf("Resolve() = %+v, %v, want %+v", got, err, ref)
-	}
 	got, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(ref, content))
 	if err != nil {
 		t.Fatalf("GetMCP() error = %v", err)
@@ -703,8 +695,7 @@ func TestAnonymousCatalogNeverReceivesSubmissionBearer(t *testing.T) {
 		t.Fatalf("GetMCP() = %#v, want %#v", got, want)
 	}
 	wantPaths := []string{
-		"/api/v1/resources",
-		"/api/v1/resources/mcp/demo/versions/v1.0.0",
+		"/api/v1/resources/version",
 		"/api/v1/resources/mcp/demo/versions/v1.0.0/content",
 	}
 	if !reflect.DeepEqual(paths, wantPaths) {

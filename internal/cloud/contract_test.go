@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +28,6 @@ import (
 	"apm/internal/lifecycle"
 	"apm/internal/pluginartifact"
 	"apm/internal/submission"
-	"github.com/Masterminds/semver/v3"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -40,25 +38,25 @@ type clientFactory struct {
 }
 
 var canonicalPowerOracle = []domain.PowerRef{
-	{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"},
-	{Name: "company-tools", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
-	{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
-	{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.1.0"},
-	{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"},
-	{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"},
 	{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "checklist-first", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "code-comment-cn", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
-	{Name: "commit-message-helper", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "commit-message-helper", Type: domain.PowerTypeSkill, Version: "v0.1.0"},
+	{Name: "commit-message-helper", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "error-context", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
-	{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.1.0"},
+	{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "meeting-notes", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "plain-language", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
-	{Name: "test-case-namer", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "test-case-namer", Type: domain.PowerTypeSkill, Version: "v0.1.0"},
+	{Name: "test-case-namer", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 	{Name: "worklog-entry", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+	{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"},
+	{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"},
+	{Name: "company-tools", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
+	{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.1.0"},
+	{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
+	{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"},
 }
 
 func TestProviderContract(t *testing.T) {
@@ -352,12 +350,8 @@ func canonicalRemoteCatalog(t *testing.T, resources []canonicalRemoteResource) [
 
 func catalogSnapshotForClient(t *testing.T, client cloud.Client) catalog.Snapshot {
 	t.Helper()
-	source, ok := client.(cloud.CatalogSource)
-	if !ok {
-		t.Fatalf("%T does not implement cloud.CatalogSource", client)
-	}
 	destination := filepath.Join(privateTestDir(t), "catalog.json")
-	if err := source.DownloadCatalog(context.Background(), destination); err != nil {
+	if err := client.DownloadCatalog(context.Background(), destination); err != nil {
 		t.Fatalf("DownloadCatalog() for content contract: %v", err)
 	}
 	contents, err := os.ReadFile(destination)
@@ -399,35 +393,22 @@ func contractRemoteEntry(resource canonicalRemoteResource) domain.CatalogEntry {
 func runProviderContract(t *testing.T, client cloud.Client) {
 	t.Helper()
 	snapshot := catalogSnapshotForClient(t, client)
-	refs, err := client.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	entries := snapshot.List("")
+	refs := make([]domain.PowerRef, len(entries))
+	for index, entry := range entries {
+		refs[index] = entry.Ref
 	}
 	if err := compareRefsToOracle(refs); err != nil {
-		t.Fatalf("List() does not match the committed fixture oracle: %v", err)
+		t.Fatalf("catalog snapshot does not match the committed fixture oracle: %v", err)
 	}
 
 	for _, ref := range canonicalPowerOracle {
-		got, err := client.Resolve(context.Background(), ref)
-		if err != nil || got != ref {
-			t.Fatalf("Resolve(exact %+v) = %+v, %v", ref, got, err)
-		}
 		entry, err := snapshot.Metadata(ref)
 		if err != nil {
 			t.Fatalf("Catalog Metadata(%+v): %v", ref, err)
 		}
 		assertPowerReadable(t, client, entry)
-	}
-	latest, err := latestPowerRefs(canonicalPowerOracle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range latest {
-		query := domain.PowerRef{Type: want.Type, Name: want.Name}
-		got, err := client.Resolve(context.Background(), query)
-		if err != nil || got != want {
-			t.Fatalf("Resolve(latest %+v) = %+v, %v; want %+v", query, got, err, want)
-		}
+		assertMismatchedCatalogMetadataRejected(t, client, entry)
 	}
 	assertClientOperationErrors(t, client)
 }
@@ -437,37 +418,6 @@ func compareRefsToOracle(got []domain.PowerRef) error {
 		return fmt.Errorf("got %#v, want %#v", got, canonicalPowerOracle)
 	}
 	return nil
-}
-
-func latestPowerRefs(refs []domain.PowerRef) ([]domain.PowerRef, error) {
-	type powerKey struct {
-		powerType domain.PowerType
-		name      string
-	}
-	latest := make(map[powerKey]domain.PowerRef)
-	versions := make(map[powerKey]*semver.Version)
-	for _, ref := range refs {
-		parsed, err := semver.StrictNewVersion(strings.TrimPrefix(ref.Version, "v"))
-		if err != nil || "v"+parsed.String() != ref.Version {
-			return nil, fmt.Errorf("oracle contains invalid version %q", ref.Version)
-		}
-		key := powerKey{powerType: ref.Type, name: ref.Name}
-		if current, found := versions[key]; !found || parsed.GreaterThan(current) {
-			versions[key] = parsed
-			latest[key] = ref
-		}
-	}
-	result := make([]domain.PowerRef, 0, len(latest))
-	for _, ref := range latest {
-		result = append(result, ref)
-	}
-	sort.Slice(result, func(left, right int) bool {
-		if result[left].Type != result[right].Type {
-			return result[left].Type < result[right].Type
-		}
-		return result[left].Name < result[right].Name
-	})
-	return result, nil
 }
 
 func testCanonicalPowerOracleMutations(t *testing.T) {
@@ -484,19 +434,6 @@ func testCanonicalPowerOracleMutations(t *testing.T) {
 			mutated = append(mutated, canonicalPowerOracle[mutation.index+1:]...)
 			if err := compareRefsToOracle(mutated); err == nil {
 				t.Fatal("oracle comparison accepted an omitted committed fixture")
-			}
-			if mutation.name == "omitted_highest_version" {
-				want, err := latestPowerRefs(canonicalPowerOracle)
-				if err != nil {
-					t.Fatal(err)
-				}
-				got, err := latestPowerRefs(mutated)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if reflect.DeepEqual(got, want) {
-					t.Fatal("independent SemVer maximum accepted an omitted highest version")
-				}
 			}
 		})
 	}
@@ -527,6 +464,27 @@ func assertPowerReadable(t *testing.T, client cloud.Client, entry domain.Catalog
 	}
 }
 
+func assertMismatchedCatalogMetadataRejected(t *testing.T, client cloud.Client, entry domain.CatalogEntry) {
+	t.Helper()
+	entry.ContentSize++
+	var err error
+	switch entry.Ref.Type {
+	case domain.PowerTypeSkill:
+		err = client.DownloadSkill(context.Background(), entry, filepath.Join(privateTestDir(t), "skill"))
+	case domain.PowerTypePlugin:
+		err = client.DownloadPlugin(context.Background(), entry, filepath.Join(privateTestDir(t), "plugin"))
+	case domain.PowerTypeMCP:
+		_, err = client.GetMCP(context.Background(), entry)
+	case domain.PowerTypeAgent:
+		err = client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent.yaml"))
+	default:
+		t.Fatalf("unsupported Power type %q", entry.Ref.Type)
+	}
+	if !errors.Is(err, cloud.ErrIntegrity) {
+		t.Fatalf("content with mismatched catalog size for %+v error = %v, want ErrIntegrity", entry.Ref, err)
+	}
+}
+
 type contractOperation struct {
 	name           string
 	ref            domain.PowerRef
@@ -537,14 +495,6 @@ type contractOperation struct {
 func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 	t.Helper()
 	cancellationOperations := []contractOperation{
-		{name: "List", invoke: func(ctx context.Context, client cloud.Client, _ domain.PowerRef, _ string) (domain.MCPServer, error) {
-			_, err := client.List(ctx)
-			return domain.MCPServer{}, err
-		}},
-		{name: "Resolve", ref: oracleRef(t, domain.PowerTypeAgent), invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
-			_, err := client.Resolve(ctx, ref)
-			return domain.MCPServer{}, err
-		}},
 		{name: "DownloadSkill", ref: oracleRef(t, domain.PowerTypeSkill), hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
 			return domain.MCPServer{}, client.DownloadSkill(ctx, contractEntry(ref), destination)
 		}},
@@ -582,10 +532,6 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 		missingByType[powerType] = domain.PowerRef{Type: powerType, Name: "contract-exact-miss", Version: "v9.9.9"}
 	}
 	missOperations := []contractOperation{
-		{name: "Resolve/skill", ref: missingByType[domain.PowerTypeSkill], invoke: resolveOperation},
-		{name: "Resolve/mcp", ref: missingByType[domain.PowerTypeMCP], invoke: resolveOperation},
-		{name: "Resolve/plugin", ref: missingByType[domain.PowerTypePlugin], invoke: resolveOperation},
-		{name: "Resolve/agent", ref: missingByType[domain.PowerTypeAgent], invoke: resolveOperation},
 		{name: "DownloadSkill", ref: missingByType[domain.PowerTypeSkill], hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
 			return domain.MCPServer{}, client.DownloadSkill(ctx, contractEntry(ref), destination)
 		}},
@@ -616,7 +562,6 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 
 	for _, invalidName := range []string{"Bad_Name", "a--b", strings.Repeat("a", 65)} {
 		for _, operation := range []contractOperation{
-			{name: "Resolve", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: invalidName}, invoke: resolveOperation},
 			{name: "DownloadSkill", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: invalidName, Version: "v1.0.0"}, hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
 				return domain.MCPServer{}, client.DownloadSkill(ctx, contractEntry(ref), destination)
 			}},
@@ -641,11 +586,6 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 			})
 		}
 	}
-}
-
-func resolveOperation(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
-	_, err := client.Resolve(ctx, ref)
-	return domain.MCPServer{}, err
 }
 
 func oracleRef(t *testing.T, powerType domain.PowerType) domain.PowerRef {
@@ -694,45 +634,30 @@ func compareProviderOutcomes(t *testing.T, localClient, remoteClient cloud.Clien
 	t.Helper()
 	localSnapshot := catalogSnapshotForClient(t, localClient)
 	remoteSnapshot := catalogSnapshotForClient(t, remoteClient)
-	localRefs, err := localClient.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	localEntries := localSnapshot.List("")
+	localRefs := make([]domain.PowerRef, len(localEntries))
+	for index, entry := range localEntries {
+		localRefs[index] = entry.Ref
 	}
-	remoteRefs, err := remoteClient.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	remoteEntries := remoteSnapshot.List("")
+	remoteRefs := make([]domain.PowerRef, len(remoteEntries))
+	for index, entry := range remoteEntries {
+		remoteRefs[index] = entry.Ref
 	}
 	if err := compareRefsToOracle(localRefs); err != nil {
-		t.Fatalf("Local List oracle mismatch: %v", err)
+		t.Fatalf("Local catalog oracle mismatch: %v", err)
 	}
 	if err := compareRefsToOracle(remoteRefs); err != nil {
-		t.Fatalf("Remote List oracle mismatch: %v", err)
+		t.Fatalf("Remote catalog oracle mismatch: %v", err)
 	}
 
 	for _, ref := range canonicalPowerOracle {
-		localExact, localErr := localClient.Resolve(context.Background(), ref)
-		remoteExact, remoteErr := remoteClient.Resolve(context.Background(), ref)
-		if localErr != nil || remoteErr != nil || localExact != remoteExact {
-			t.Fatalf("exact Resolve parity for %+v: local=%+v/%v remote=%+v/%v", ref, localExact, localErr, remoteExact, remoteErr)
-		}
 		localEntry, localEntryErr := localSnapshot.Metadata(ref)
 		remoteEntry, remoteEntryErr := remoteSnapshot.Metadata(ref)
 		if localEntryErr != nil || remoteEntryErr != nil {
 			t.Fatalf("catalog entry parity for %+v: local=%v remote=%v", ref, localEntryErr, remoteEntryErr)
 		}
 		comparePowerOutcome(t, localClient, remoteClient, localEntry, remoteEntry)
-	}
-	latest, err := latestPowerRefs(canonicalPowerOracle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range latest {
-		query := domain.PowerRef{Type: want.Type, Name: want.Name}
-		localLatest, localErr := localClient.Resolve(context.Background(), query)
-		remoteLatest, remoteErr := remoteClient.Resolve(context.Background(), query)
-		if localErr != nil || remoteErr != nil || localLatest != want || remoteLatest != want {
-			t.Fatalf("latest Resolve oracle for %+v: local=%+v/%v remote=%+v/%v want=%+v", query, localLatest, localErr, remoteLatest, remoteErr, want)
-		}
 	}
 }
 

@@ -108,7 +108,7 @@ func TestDownloadSkillVerifiesMD5BeforeArchiveInspection(t *testing.T) {
 			_, _ = w.Write(contents)
 			return
 		}
-		writeExactMetadata(t, w, remoteSkillRef, contents, map[string]any{"content_md5": md5Hex([]byte("different"))})
+		rejectRemovedMetadata(t, w)
 	})
 	destination := filepath.Join(trustedTestDir(t), "skill")
 	entry := validRemoteCatalogEntry(remoteSkillRef, contents)

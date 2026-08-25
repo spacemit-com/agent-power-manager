@@ -45,8 +45,8 @@ func New(resourcesRoot string) (*Client, error) {
 	}, nil
 }
 
-// List 按类型、名称和 SemVer 升序返回有效的本地 Power 资源；枚举期间必须响应取消。
-func (c *Client) List(ctx context.Context) ([]domain.PowerRef, error) {
+// catalogRefs 仅为 Local Catalog 构建器枚举受信 fixture；不对 lifecycle 暴露独立发现接口。
+func (c *Client) catalogRefs(ctx context.Context) ([]domain.PowerRef, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -87,47 +87,6 @@ func (c *Client) List(ctx context.Context) ([]domain.PowerRef, error) {
 		return left.LessThan(right)
 	})
 	return refs, nil
-}
-
-// Resolve 返回同类型同名能力的精确版本或最大 SemVer，且不改变 List 返回的引用切片。
-func (c *Client) Resolve(ctx context.Context, query domain.PowerRef) (domain.PowerRef, error) {
-	if err := ctx.Err(); err != nil {
-		return domain.PowerRef{}, err
-	}
-	if !safePowerIdentity(query) {
-		return domain.PowerRef{}, cloud.ErrNotFound
-	}
-	refs, err := c.List(ctx)
-	if err != nil {
-		return domain.PowerRef{}, err
-	}
-	var latest domain.PowerRef
-	var latestVersion *semver.Version
-	found := false
-	for _, ref := range refs {
-		if ref.Type != query.Type || ref.Name != query.Name {
-			continue
-		}
-		if query.Version != "" {
-			if ref.Version == query.Version {
-				return ref, nil
-			}
-			continue
-		}
-		version, valid := canonicalPowerVersion(ref.Version)
-		if !valid {
-			continue
-		}
-		if !found || version.GreaterThan(latestVersion) {
-			latest = ref
-			latestVersion = version
-			found = true
-		}
-	}
-	if !found {
-		return domain.PowerRef{}, cloud.ErrNotFound
-	}
-	return latest, nil
 }
 
 // canonicalPowerVersion 解析严格的 vMAJOR.MINOR.PATCH 版本；预发布和构建元数据不属于本地资源标识。

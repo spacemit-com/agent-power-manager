@@ -25,21 +25,6 @@ func newAgentTestClient(t *testing.T) *Client {
 	return client
 }
 
-func TestLocalClientListsAgents(t *testing.T) {
-	client := newAgentTestClient(t)
-	refs, err := client.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	for _, ref := range refs {
-		if ref == want {
-			return
-		}
-	}
-	t.Fatalf("List() = %#v, missing %#v", refs, want)
-}
-
 func TestLocalDownloadAgentWritesDestinationWithoutGlobalCache(t *testing.T) {
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)

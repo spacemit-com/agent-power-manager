@@ -181,22 +181,17 @@ func (fixture *canonicalRemoteServer) serveHTTP(writer http.ResponseWriter, requ
 		return
 	}
 	if len(segments) == 4 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "resources" && segments[3] == "version" {
-		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources", "version"}, "application/json", false) {
+		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources", "version"}, "application/json") {
 			return
 		}
 		fixture.serveCatalogVersion(writer)
 		return
 	}
 	if len(segments) == 3 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "resources" {
-		legacyList := request.URL.RawQuery != "" || request.URL.ForceQuery
-		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources"}, "application/json", legacyList) {
+		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources"}, "application/json") {
 			return
 		}
-		if legacyList {
-			fixture.serveList(writer, request)
-		} else {
-			fixture.serveCatalog(writer)
-		}
+		fixture.serveCatalog(writer)
 		return
 	}
 	if len(segments) < 6 || segments[0] != "api" || segments[1] != "v1" || segments[2] != "resources" {
@@ -204,24 +199,9 @@ func (fixture *canonicalRemoteServer) serveHTTP(writer http.ResponseWriter, requ
 		return
 	}
 	ref := domain.PowerRef{Type: domain.PowerType(segments[3]), Name: segments[4]}
-	if len(segments) == 6 && segments[5] == "latest" {
-		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources", segments[3], segments[4], "latest"}, "application/json", false) {
-			return
-		}
-		fixture.serveLatest(writer, request, ref)
-		return
-	}
-	if len(segments) == 7 && segments[5] == "versions" {
-		ref.Version = segments[6]
-		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources", segments[3], segments[4], "versions", segments[6]}, "application/json", false) {
-			return
-		}
-		fixture.serveExact(writer, request, ref)
-		return
-	}
 	if len(segments) == 8 && segments[5] == "versions" && segments[7] == "content" {
 		ref.Version = segments[6]
-		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources", segments[3], segments[4], "versions", segments[6], "content"}, canonicalContentType(ref.Type), false) {
+		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources", segments[3], segments[4], "versions", segments[6], "content"}, canonicalContentType(ref.Type)) {
 			return
 		}
 		fixture.serveContent(writer, request, ref)
@@ -246,54 +226,7 @@ func (fixture *canonicalRemoteServer) serveCatalog(writer http.ResponseWriter) {
 	_, _ = writer.Write(fixture.catalog)
 }
 
-func (fixture *canonicalRemoteServer) serveList(writer http.ResponseWriter, request *http.Request) {
-	const pageSize = 5
-	start := 0
-	if cursor := request.URL.Query().Get("cursor"); cursor != "" {
-		start, _ = parseCanonicalCursor(cursor, len(fixture.resources))
-	}
-	end := start + pageSize
-	if end > len(fixture.resources) {
-		end = len(fixture.resources)
-	}
-	items := make([]map[string]any, 0, end-start)
-	for _, resource := range fixture.resources[start:end] {
-		items = append(items, resource.metadata(false))
-	}
-	next := ""
-	if end < len(fixture.resources) {
-		next = fmt.Sprintf("page-%d", end)
-	}
-	writeCanonicalJSON(writer, map[string]any{
-		"snapshot_updated_at": canonicalSnapshotTime,
-		"items":               items,
-		"next_cursor":         next,
-	})
-}
-
-func (fixture *canonicalRemoteServer) serveLatest(writer http.ResponseWriter, request *http.Request, query domain.PowerRef) {
-	latestRefs, err := latestPowerRefs(canonicalPowerOracle)
-	if err != nil {
-		fixture.rejectProtocol(writer, request, "invalid oracle SemVer: %v", err)
-		return
-	}
-	var latest domain.PowerRef
-	for _, ref := range latestRefs {
-		if ref.Type == query.Type && ref.Name == query.Name {
-			latest = ref
-			break
-		}
-	}
-	if latest == (domain.PowerRef{}) {
-		http.NotFound(writer, request)
-		return
-	}
-	writeCanonicalJSON(writer, map[string]any{
-		"type": latest.Type, "name": latest.Name, "version": latest.Version,
-	})
-}
-
-func (fixture *canonicalRemoteServer) requireRequest(writer http.ResponseWriter, request *http.Request, segments []string, accept string, list bool) bool {
+func (fixture *canonicalRemoteServer) requireRequest(writer http.ResponseWriter, request *http.Request, segments []string, accept string) bool {
 	expectedPath := escapedAPIPath(segments...)
 	if request.URL.EscapedPath() != expectedPath {
 		fixture.rejectProtocol(writer, request, "escaped path = %q, want %q", request.URL.EscapedPath(), expectedPath)
@@ -308,46 +241,11 @@ func (fixture *canonicalRemoteServer) requireRequest(writer http.ResponseWriter,
 		fixture.rejectProtocol(writer, request, "resource Authorization = %q, want absent", authorization)
 		return false
 	}
-	if list {
-		query, err := url.ParseQuery(request.URL.RawQuery)
-		if err != nil || !validCanonicalListQuery(query, len(fixture.resources)) {
-			fixture.rejectProtocol(writer, request, "list query = %q, want limit=100 and optional valid opaque cursor", request.URL.RawQuery)
-			return false
-		}
-		return true
-	}
 	if request.URL.RawQuery != "" || request.URL.ForceQuery {
 		fixture.rejectProtocol(writer, request, "endpoint query = %q, want none", request.URL.RawQuery)
 		return false
 	}
 	return true
-}
-
-func validCanonicalListQuery(query url.Values, resourceCount int) bool {
-	if len(query) < 1 || len(query) > 2 || len(query["limit"]) != 1 || query.Get("limit") != "100" {
-		return false
-	}
-	for key := range query {
-		if key != "limit" && key != "cursor" {
-			return false
-		}
-	}
-	if values, found := query["cursor"]; found {
-		if len(values) != 1 {
-			return false
-		}
-		_, valid := parseCanonicalCursor(values[0], resourceCount)
-		return valid
-	}
-	return true
-}
-
-func parseCanonicalCursor(cursor string, resourceCount int) (int, bool) {
-	if !strings.HasPrefix(cursor, "page-") {
-		return 0, false
-	}
-	start, err := strconv.Atoi(strings.TrimPrefix(cursor, "page-"))
-	return start, err == nil && start > 0 && start < resourceCount && start%5 == 0
 }
 
 func escapedAPIPath(segments ...string) string {
@@ -395,9 +293,14 @@ func testCanonicalRemoteServerProtocolMutations(t *testing.T) {
 		name, method, target, accept string
 	}{
 		{name: "method", method: http.MethodPost, target: "/api/v1/resources?limit=100", accept: "application/json"},
+		{name: "removed_cursor_list", method: http.MethodGet, target: "/api/v1/resources?limit=100", accept: "application/json"},
+		{name: "removed_cursor_parameter", method: http.MethodGet, target: "/api/v1/resources?cursor=legacy-page", accept: "application/json"},
 		{name: "duplicate_limit", method: http.MethodGet, target: "/api/v1/resources?limit=100&limit=100", accept: "application/json"},
 		{name: "unexpected_query", method: http.MethodGet, target: "/api/v1/resources?limit=100&extra=1", accept: "application/json"},
-		{name: "latest_query", method: http.MethodGet, target: "/api/v1/resources/agent/bianbu-agent-default/latest?limit=100", accept: "application/json"},
+		{name: "removed_version_series", method: http.MethodGet, target: escapedAPIPath("api", "v1", "resources", "agent", "bianbu-agent-default", "versions"), accept: "application/json"},
+		{name: "removed_latest", method: http.MethodGet, target: escapedAPIPath("api", "v1", "resources", "agent", "bianbu-agent-default", "latest"), accept: "application/json"},
+		{name: "latest_query", method: http.MethodGet, target: escapedAPIPath("api", "v1", "resources", "agent", "bianbu-agent-default", "latest") + "?limit=100", accept: "application/json"},
+		{name: "removed_exact_metadata", method: http.MethodGet, target: "/api/v1/resources/agent/bianbu-agent-default/versions/v1.0.0", accept: "application/json"},
 		{name: "content_accept", method: http.MethodGet, target: "/api/v1/resources/agent/bianbu-agent-default/versions/v1.0.0/content", accept: "application/json"},
 		{name: "noncanonical_escape", method: http.MethodGet, target: "/api/v1/resources/%61gent/bianbu-agent-default/versions/v1.0.0", accept: "application/json"},
 	} {
@@ -415,15 +318,6 @@ func testCanonicalRemoteServerProtocolMutations(t *testing.T) {
 			}
 		})
 	}
-}
-
-func (fixture *canonicalRemoteServer) serveExact(writer http.ResponseWriter, request *http.Request, ref domain.PowerRef) {
-	resource := fixture.find(ref)
-	if resource == nil {
-		http.NotFound(writer, request)
-		return
-	}
-	writeCanonicalJSON(writer, resource.metadata(true))
 }
 
 func (fixture *canonicalRemoteServer) serveContent(writer http.ResponseWriter, request *http.Request, ref domain.PowerRef) {
@@ -445,22 +339,6 @@ func (fixture *canonicalRemoteServer) find(ref domain.PowerRef) *canonicalRemote
 		}
 	}
 	return nil
-}
-
-func (resource canonicalRemoteResource) metadata(exact bool) map[string]any {
-	digest := md5.Sum(resource.content)
-	metadata := map[string]any{
-		"type": resource.ref.Type, "name": resource.ref.Name, "version": resource.ref.Version,
-		"description": "canonical test fixture", "message": "publish canonical fixture",
-		"content_type": resource.contentType, "content_size": len(resource.content),
-		"content_md5": hex.EncodeToString(digest[:]), "published_at": canonicalSnapshotTime,
-	}
-	if exact {
-		metadata["status"] = "published"
-		metadata["yanked_at"] = ""
-		metadata["yank_reason"] = ""
-	}
-	return metadata
 }
 
 // serveSubmissionAPI 模拟提交、本人活动列表与详情三个 APC v1 端点，并严格校验

@@ -139,11 +139,11 @@ type uninstallFakeCloud struct {
 	fixture *uninstallFixture
 }
 
-func (*uninstallFakeCloud) List(context.Context) ([]domain.PowerRef, error) {
-	panic("Uninstall must not list Cloud catalog")
+func (*uninstallFakeCloud) CatalogVersion(context.Context) (domain.CatalogVersion, error) {
+	panic("Uninstall must not inspect the Cloud catalog version")
 }
-func (*uninstallFakeCloud) Resolve(_ context.Context, ref domain.PowerRef) (domain.PowerRef, error) {
-	panic("Uninstall must not resolve Cloud catalog")
+func (*uninstallFakeCloud) DownloadCatalog(context.Context, string) error {
+	panic("Uninstall must not download the Cloud catalog")
 }
 func (*uninstallFakeCloud) DownloadSkill(context.Context, domain.CatalogEntry, string) error {
 	panic("Uninstall must not download Cloud content")

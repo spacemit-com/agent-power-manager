@@ -7,13 +7,6 @@ import (
 	"apm/internal/domain"
 )
 
-// Catalog 定义可取消的 Cloud 能力目录查询边界。
-// List 返回稳定展示顺序；Resolve 仅按精确类型和名称解析，不得将不同类型的同名能力混合。
-type Catalog interface {
-	List(context.Context) ([]domain.PowerRef, error)
-	Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error)
-}
-
 // CatalogSource 定义目录版本与完整目录下载边界；destination 必须由调用方提供、绝对且尚不存在。
 // DownloadCatalog 仅在 destination 本地无法安全使用或清理时包装 ErrCatalogDestination；传输、协议和内容错误不得使用该标记。
 type CatalogSource interface {
@@ -43,9 +36,10 @@ type AgentSource interface {
 	DownloadAgent(context.Context, domain.CatalogEntry, string) error
 }
 
-// Client 定义 Cloud 资源发现、各类精确版本获取及提交边界。
+// Client 聚合唯一目录快照、各类精确内容与提交边界；
+// 资源查询只能在本地 Catalog Snapshot 上完成，Provider 不得暴露分页或 metadata 解析接口。
 type Client interface {
-	Catalog
+	CatalogSource
 	SkillSource
 	PluginSource
 	MCPSource

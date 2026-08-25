@@ -266,37 +266,12 @@ func (manager *installFakeCatalogManager) SnapshotLocked(ctx context.Context) (c
 	return snapshot, manager.fixture.catalogStatus, err
 }
 
-func (c *installFakeCloud) List(ctx context.Context) ([]domain.PowerRef, error) {
-	*c.calls = append(*c.calls, "cloud:list")
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return c.fixture.cloudRefs, c.fixture.cloudListErr
+func (*installFakeCloud) CatalogVersion(context.Context) (domain.CatalogVersion, error) {
+	panic("Install content client must not synchronize the catalog directly")
 }
 
-func (c *installFakeCloud) Resolve(ctx context.Context, query domain.PowerRef) (domain.PowerRef, error) {
-	*c.calls = append(*c.calls, "cloud:resolve")
-	if err := ctx.Err(); err != nil {
-		return domain.PowerRef{}, err
-	}
-	if c.fixture.cloudListErr != nil {
-		return domain.PowerRef{}, c.fixture.cloudListErr
-	}
-	if query.Version != "" && c.fixture.versionErr != nil {
-		return domain.PowerRef{}, c.fixture.versionErr
-	}
-	for _, ref := range c.fixture.cloudRefs {
-		if ref.Type != query.Type || ref.Name != query.Name {
-			continue
-		}
-		if query.Version == "" && c.fixture.selected != "" && ref.Version != c.fixture.selected {
-			continue
-		}
-		if query.Version == "" || ref.Version == query.Version {
-			return ref, nil
-		}
-	}
-	return domain.PowerRef{}, errors.New("cloud power not found")
+func (*installFakeCloud) DownloadCatalog(context.Context, string) error {
+	panic("Install content client must not download the catalog directly")
 }
 
 func (c *installFakeCloud) DownloadSkill(_ context.Context, entry domain.CatalogEntry, _ string) error {

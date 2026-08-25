@@ -226,7 +226,7 @@ func TestDownloadAgentRejectsMD5MismatchWithoutDestination(t *testing.T) {
 			_, _ = w.Write(contents)
 			return
 		}
-		writeExactMetadata(t, w, remoteAgentRef, contents, map[string]any{"content_md5": md5Hex([]byte("different"))})
+		rejectRemovedMetadata(t, w)
 	})
 	destination := filepath.Join(trustedTestDir(t), "agent.yaml")
 	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
@@ -336,7 +336,7 @@ func TestDownloadAgentRejectsCrossOriginContentRedirect(t *testing.T) {
 			http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusFound)
 			return
 		}
-		writeExactMetadata(t, w, remoteAgentRef, contents, nil)
+		rejectRemovedMetadata(t, w)
 	}))
 	defer source.Close()
 	client := newRemoteTestClient(t, source.URL)

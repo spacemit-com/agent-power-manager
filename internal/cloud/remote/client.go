@@ -38,7 +38,7 @@ type Client struct {
 	beforeMCPCleanup   func(*ownedDirectory)
 }
 
-var _ cloud.Catalog = (*Client)(nil)
+var _ cloud.Client = (*Client)(nil)
 
 // New 创建匿名远端目录 Client；非回环 HTTP、含路径歧义的 URL 和无界 HTTP Client 均被拒绝。
 func New(baseURL string, httpClient *http.Client) (*Client, error) {

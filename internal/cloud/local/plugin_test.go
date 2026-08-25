@@ -437,58 +437,6 @@ func snapshotTree(t *testing.T, root string) map[string]treeSnapshotEntry {
 	return snapshot
 }
 
-func TestLocalClientListsPluginsFromSharedPackages(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	writeRawPluginPackageDir(t, root, "demo-plugin", "v0.1.0")
-	writeRawPluginPackageDir(t, root, "demo-plugin", "v0.0.1")
-	writeRawPluginPackageDir(t, root, "ignored", "not-a-version")
-
-	client, err := local.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := client.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []domain.PowerRef{
-		{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"},
-		{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("List() = %#v, want %#v", got, want)
-	}
-}
-
-func TestLocalClientListAcceptsEmptySharedPackageWithoutAuditingAgentEntries(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	writeRawPluginPackageDir(t, root, "empty", "v1.0.0")
-	client, err := local.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := client.List(context.Background())
-	want := []domain.PowerRef{{Name: "empty", Type: domain.PowerTypePlugin, Version: "v1.0.0"}}
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("List() = %#v, %v; want %#v", got, err, want)
-	}
-}
-
-func TestLocalClientPluginMissingRootReturnsEmptyList(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	client, err := local.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := client.List(context.Background())
-	if err != nil || len(got) != 0 {
-		t.Fatalf("List() = %#v, %v", got, err)
-	}
-}
-
 func TestBundledPluginResourcesAreCompleteSharedPackagesForEveryVersion(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "resources", "plugins"))
 	if err != nil {

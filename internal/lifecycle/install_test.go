@@ -132,7 +132,7 @@ func TestInstallPropagatesResolvedCatalogEntryToTypeBoundaries(t *testing.T) {
 			if countEvent(calls, "catalog:snapshot-locked") != 1 {
 				t.Fatalf("calls = %v, want SnapshotLocked exactly once", calls)
 			}
-			for _, forbidden := range []string{"cloud:list", "cloud:resolve", "cloud:unexpected-download-plugin"} {
+			for _, forbidden := range []string{"cloud:catalog-version", "cloud:download-catalog", "cloud:unexpected-download-plugin"} {
 				if containsEvent(calls, forbidden) {
 					t.Fatalf("calls = %v, content path must not use legacy discovery event %q", calls, forbidden)
 				}

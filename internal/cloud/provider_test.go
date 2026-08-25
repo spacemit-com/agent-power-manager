@@ -11,10 +11,10 @@ import (
 
 type stubClient struct{}
 
-func (*stubClient) List(context.Context) ([]domain.PowerRef, error) { return nil, nil }
-func (*stubClient) Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error) {
-	return domain.PowerRef{}, nil
+func (*stubClient) CatalogVersion(context.Context) (domain.CatalogVersion, error) {
+	return domain.CatalogVersion{}, nil
 }
+func (*stubClient) DownloadCatalog(context.Context, string) error                     { return nil }
 func (*stubClient) DownloadSkill(context.Context, domain.CatalogEntry, string) error  { return nil }
 func (*stubClient) DownloadPlugin(context.Context, domain.CatalogEntry, string) error { return nil }
 func (*stubClient) GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error) {

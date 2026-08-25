@@ -30,10 +30,10 @@ type stubCatalogManager struct {
 // stubCloudClient 保留提交生命周期测试复用的最小 Cloud 空实现。
 type stubCloudClient struct{}
 
-func (*stubCloudClient) List(context.Context) ([]domain.PowerRef, error) { return nil, nil }
-func (*stubCloudClient) Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error) {
-	return domain.PowerRef{}, nil
+func (*stubCloudClient) CatalogVersion(context.Context) (domain.CatalogVersion, error) {
+	return domain.CatalogVersion{}, nil
 }
+func (*stubCloudClient) DownloadCatalog(context.Context, string) error { return nil }
 func (*stubCloudClient) DownloadSkill(context.Context, domain.CatalogEntry, string) error {
 	return nil
 }
