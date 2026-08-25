@@ -135,6 +135,20 @@ type recordingCatalogManager struct {
 	snapshotCalls int
 }
 
+type typedNilCatalogManager struct{}
+
+var typedNilCatalogManagerSnapshotCalls int
+
+func (*typedNilCatalogManager) Snapshot(context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	typedNilCatalogManagerSnapshotCalls++
+	return catalog.Snapshot{}, catalog.SyncStatus{}, nil
+}
+
+func (*typedNilCatalogManager) SnapshotLocked(context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	typedNilCatalogManagerSnapshotCalls++
+	return catalog.Snapshot{}, catalog.SyncStatus{}, nil
+}
+
 func (manager *recordingCatalogManager) Snapshot(context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
 	manager.snapshotCalls++
 	return manager.snapshot, catalog.SyncStatus{}, nil
@@ -197,6 +211,81 @@ func TestCatalogLifecycleCompositionDefersManagerForInstalledList(t *testing.T) 
 	}
 	if managerFactoryCalls != 0 {
 		t.Fatalf("manager/source/lock factory calls = %d, want 0", managerFactoryCalls)
+	}
+}
+
+func TestCatalogLifecycleCompositionRejectsTypedNilManagerAcrossListAndSearch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	typedNilCatalogManagerSnapshotCalls = 0
+	var typedNil *typedNilCatalogManager
+	managerFactoryCalls := 0
+	composition := newCatalogLifecycleCompositionWithManagerFactory(func() (lifecycle.CatalogManager, error) {
+		managerFactoryCalls++
+		return typedNil, nil
+	})
+	search, err := composition.newSearchLifecycle()
+	if err != nil {
+		t.Fatalf("compose search lifecycle: %v", err)
+	}
+	list, err := composition.newListLifecycle()
+	if err != nil {
+		t.Fatalf("compose list lifecycle: %v", err)
+	}
+
+	operations := []struct {
+		name string
+		call func() error
+	}{
+		{name: "first search", call: func() error { _, err := search.Search(context.Background(), cli.Flags{Keyword: "demo"}); return err }},
+		{name: "first list", call: func() error { _, err := list.List(context.Background(), cli.Flags{}); return err }},
+		{name: "repeat search", call: func() error { _, err := search.Search(context.Background(), cli.Flags{Keyword: "demo"}); return err }},
+		{name: "repeat list", call: func() error { _, err := list.List(context.Background(), cli.Flags{}); return err }},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			err := operation.call()
+			if !errors.Is(err, errNilCatalogManager) || !strings.Contains(err.Error(), "create catalog manager: catalog manager factory returned nil manager") {
+				t.Fatalf("operation error = %v, want controlled typed-nil error", err)
+			}
+		})
+	}
+	if managerFactoryCalls != 1 {
+		t.Fatalf("manager factory calls = %d, want 1", managerFactoryCalls)
+	}
+	if typedNilCatalogManagerSnapshotCalls != 0 {
+		t.Fatalf("typed-nil delegate calls = %d, want 0", typedNilCatalogManagerSnapshotCalls)
+	}
+}
+
+func TestLazyCatalogManagerCachesOrdinaryNilAndFactoryFailures(t *testing.T) {
+	factoryCause := errors.New("catalog provider configuration failed")
+	for _, test := range []struct {
+		name    string
+		factory func() (lifecycle.CatalogManager, error)
+		want    error
+		message string
+	}{
+		{name: "ordinary nil", factory: func() (lifecycle.CatalogManager, error) { return nil, nil }, want: errNilCatalogManager, message: "create catalog manager: catalog manager factory returned nil manager"},
+		{name: "factory error", factory: func() (lifecycle.CatalogManager, error) { return nil, factoryCause }, want: factoryCause, message: "create catalog manager: catalog provider configuration failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			factoryCalls := 0
+			manager := &lazyCatalogManager{newManager: func() (lifecycle.CatalogManager, error) {
+				factoryCalls++
+				return test.factory()
+			}}
+			for attempt := 0; attempt < 2; attempt++ {
+				_, _, err := manager.Snapshot(context.Background())
+				if !errors.Is(err, test.want) || err.Error() != test.message {
+					t.Fatalf("Snapshot attempt %d error = %v, want %q with cause %v", attempt, err, test.message, test.want)
+				}
+			}
+			if factoryCalls != 1 {
+				t.Fatalf("factory calls = %d, want 1", factoryCalls)
+			}
+		})
 	}
 }
 

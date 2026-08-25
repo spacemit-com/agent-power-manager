@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -21,6 +22,8 @@ import (
 	"apm/internal/transaction"
 	"apm/internal/version"
 )
+
+var errNilCatalogManager = errors.New("catalog manager factory returned nil manager")
 
 func main() {
 	catalogLifecycles := newCatalogLifecycleComposition()
@@ -106,14 +109,28 @@ func (manager *lazyCatalogManager) resolve() (lifecycle.CatalogManager, error) {
 			return
 		}
 		manager.manager, manager.err = manager.newManager()
-		if manager.manager == nil && manager.err == nil {
-			manager.err = fmt.Errorf("create catalog manager: nil manager")
+		if isNilCatalogManager(manager.manager) && manager.err == nil {
+			manager.err = errNilCatalogManager
 		}
 	})
 	if manager.err != nil {
 		return nil, fmt.Errorf("create catalog manager: %w", manager.err)
 	}
 	return manager.manager, nil
+}
+
+// isNilCatalogManager 同时识别接口零值和包装在接口中的 typed nil，避免惰性门面委托时解引用空指针。
+func isNilCatalogManager(manager lifecycle.CatalogManager) bool {
+	if manager == nil {
+		return true
+	}
+	value := reflect.ValueOf(manager)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // newDefaultCatalogManager 用同一选中 Provider、唯一目录 Repository 和全局锁构造目录同步 Manager。
