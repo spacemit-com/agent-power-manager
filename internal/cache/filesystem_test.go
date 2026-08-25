@@ -17,7 +17,7 @@ func TestPrepareSkillPublishesCacheAndStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
-	staging, err := store.PrepareSkill(context.Background(), ref)
+	staging, err := store.PrepareSkill(context.Background(), cacheCatalogEntry(ref))
 	if err != nil {
 		t.Fatal(err)
 	}

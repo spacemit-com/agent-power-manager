@@ -107,6 +107,7 @@ func TestProviderContractRejectsIncompleteSkillPackage(t *testing.T) {
 	remoteFixture := &canonicalRemoteServer{resources: []canonicalRemoteResource{{
 		ref: ref, contentType: "application/gzip", content: deterministicArchive(t, source),
 	}}}
+	entry := contractRemoteEntry(remoteFixture.resources[0])
 	server := httptest.NewServer(http.HandlerFunc(remoteFixture.serveHTTP))
 	t.Cleanup(server.Close)
 	remoteClient, err := remote.New(server.URL, &http.Client{Timeout: 5 * time.Second})
@@ -121,7 +122,7 @@ func TestProviderContractRejectsIncompleteSkillPackage(t *testing.T) {
 		t.Run(provider.name, func(t *testing.T) {
 			destinationRoot := privateTestDir(t)
 			destination := filepath.Join(destinationRoot, "skill")
-			err := provider.client.DownloadSkill(context.Background(), ref, destination)
+			err := provider.client.DownloadSkill(context.Background(), entry, destination)
 			assertExclusiveContractError(t, err, cloud.ErrUnsafeContent)
 			assertNoDownloadResidue(t, destinationRoot, destination)
 		})
@@ -349,8 +350,55 @@ func canonicalRemoteCatalog(t *testing.T, resources []canonicalRemoteResource) [
 	return contents
 }
 
+func catalogSnapshotForClient(t *testing.T, client cloud.Client) catalog.Snapshot {
+	t.Helper()
+	source, ok := client.(cloud.CatalogSource)
+	if !ok {
+		t.Fatalf("%T does not implement cloud.CatalogSource", client)
+	}
+	destination := filepath.Join(privateTestDir(t), "catalog.json")
+	if err := source.DownloadCatalog(context.Background(), destination); err != nil {
+		t.Fatalf("DownloadCatalog() for content contract: %v", err)
+	}
+	contents, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Decode(contents)
+	if err != nil {
+		t.Fatalf("decode provider catalog for content contract: %v", err)
+	}
+	return snapshot
+}
+
+func contractEntry(ref domain.PowerRef) domain.CatalogEntry {
+	contentType := map[domain.PowerType]string{
+		domain.PowerTypeSkill:  "application/gzip",
+		domain.PowerTypePlugin: "application/gzip",
+		domain.PowerTypeMCP:    "application/json",
+		domain.PowerTypeAgent:  "application/yaml",
+	}[ref.Type]
+	return domain.CatalogEntry{
+		Ref: ref, Description: "contract fixture", Message: "contract fixture",
+		ContentType: contentType, ContentSize: 1, ContentMD5: strings.Repeat("0", 32),
+		PublishedAt: canonicalSnapshotTime, Tags: []string{},
+	}
+}
+
+func contractRemoteEntry(resource canonicalRemoteResource) domain.CatalogEntry {
+	entry := contractEntry(resource.ref)
+	digest := md5.Sum(resource.content)
+	entry.Description = "canonical test fixture"
+	entry.Message = "publish canonical fixture"
+	entry.ContentType = resource.contentType
+	entry.ContentSize = int64(len(resource.content))
+	entry.ContentMD5 = hex.EncodeToString(digest[:])
+	return entry
+}
+
 func runProviderContract(t *testing.T, client cloud.Client) {
 	t.Helper()
+	snapshot := catalogSnapshotForClient(t, client)
 	refs, err := client.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -364,7 +412,11 @@ func runProviderContract(t *testing.T, client cloud.Client) {
 		if err != nil || got != ref {
 			t.Fatalf("Resolve(exact %+v) = %+v, %v", ref, got, err)
 		}
-		assertPowerReadable(t, client, ref)
+		entry, err := snapshot.Metadata(ref)
+		if err != nil {
+			t.Fatalf("Catalog Metadata(%+v): %v", ref, err)
+		}
+		assertPowerReadable(t, client, entry)
 	}
 	latest, err := latestPowerRefs(canonicalPowerOracle)
 	if err != nil {
@@ -450,23 +502,24 @@ func testCanonicalPowerOracleMutations(t *testing.T) {
 	}
 }
 
-func assertPowerReadable(t *testing.T, client cloud.Client, ref domain.PowerRef) {
+func assertPowerReadable(t *testing.T, client cloud.Client, entry domain.CatalogEntry) {
 	t.Helper()
+	ref := entry.Ref
 	switch ref.Type {
 	case domain.PowerTypeSkill:
-		if err := client.DownloadSkill(context.Background(), ref, filepath.Join(privateTestDir(t), "skill")); err != nil {
+		if err := client.DownloadSkill(context.Background(), entry, filepath.Join(privateTestDir(t), "skill")); err != nil {
 			t.Fatalf("DownloadSkill(%+v): %v", ref, err)
 		}
 	case domain.PowerTypePlugin:
-		if err := client.DownloadPlugin(context.Background(), ref, filepath.Join(privateTestDir(t), "plugin")); err != nil {
+		if err := client.DownloadPlugin(context.Background(), entry, filepath.Join(privateTestDir(t), "plugin")); err != nil {
 			t.Fatalf("DownloadPlugin(%+v): %v", ref, err)
 		}
 	case domain.PowerTypeMCP:
-		if _, err := client.GetMCP(context.Background(), ref); err != nil {
+		if _, err := client.GetMCP(context.Background(), entry); err != nil {
 			t.Fatalf("GetMCP(%+v): %v", ref, err)
 		}
 	case domain.PowerTypeAgent:
-		if err := client.DownloadAgent(context.Background(), ref, filepath.Join(privateTestDir(t), "agent.yaml")); err != nil {
+		if err := client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent.yaml")); err != nil {
 			t.Fatalf("DownloadAgent(%+v): %v", ref, err)
 		}
 	default:
@@ -493,16 +546,16 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 			return domain.MCPServer{}, err
 		}},
 		{name: "DownloadSkill", ref: oracleRef(t, domain.PowerTypeSkill), hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
-			return domain.MCPServer{}, client.DownloadSkill(ctx, ref, destination)
+			return domain.MCPServer{}, client.DownloadSkill(ctx, contractEntry(ref), destination)
 		}},
 		{name: "DownloadPlugin", ref: oracleRef(t, domain.PowerTypePlugin), hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
-			return domain.MCPServer{}, client.DownloadPlugin(ctx, ref, destination)
+			return domain.MCPServer{}, client.DownloadPlugin(ctx, contractEntry(ref), destination)
 		}},
 		{name: "GetMCP", ref: oracleRef(t, domain.PowerTypeMCP), invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
-			return client.GetMCP(ctx, ref)
+			return client.GetMCP(ctx, contractEntry(ref))
 		}},
 		{name: "DownloadAgent", ref: oracleRef(t, domain.PowerTypeAgent), hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
-			return domain.MCPServer{}, client.DownloadAgent(ctx, ref, destination)
+			return domain.MCPServer{}, client.DownloadAgent(ctx, contractEntry(ref), destination)
 		}},
 	}
 	for _, operation := range cancellationOperations {
@@ -534,16 +587,16 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 		{name: "Resolve/plugin", ref: missingByType[domain.PowerTypePlugin], invoke: resolveOperation},
 		{name: "Resolve/agent", ref: missingByType[domain.PowerTypeAgent], invoke: resolveOperation},
 		{name: "DownloadSkill", ref: missingByType[domain.PowerTypeSkill], hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
-			return domain.MCPServer{}, client.DownloadSkill(ctx, ref, destination)
+			return domain.MCPServer{}, client.DownloadSkill(ctx, contractEntry(ref), destination)
 		}},
 		{name: "DownloadPlugin", ref: missingByType[domain.PowerTypePlugin], hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
-			return domain.MCPServer{}, client.DownloadPlugin(ctx, ref, destination)
+			return domain.MCPServer{}, client.DownloadPlugin(ctx, contractEntry(ref), destination)
 		}},
 		{name: "GetMCP", ref: missingByType[domain.PowerTypeMCP], invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
-			return client.GetMCP(ctx, ref)
+			return client.GetMCP(ctx, contractEntry(ref))
 		}},
 		{name: "DownloadAgent", ref: missingByType[domain.PowerTypeAgent], hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
-			return domain.MCPServer{}, client.DownloadAgent(ctx, ref, destination)
+			return domain.MCPServer{}, client.DownloadAgent(ctx, contractEntry(ref), destination)
 		}},
 	}
 	for _, operation := range missOperations {
@@ -565,13 +618,13 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 		for _, operation := range []contractOperation{
 			{name: "Resolve", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: invalidName}, invoke: resolveOperation},
 			{name: "DownloadSkill", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: invalidName, Version: "v1.0.0"}, hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
-				return domain.MCPServer{}, client.DownloadSkill(ctx, ref, destination)
+				return domain.MCPServer{}, client.DownloadSkill(ctx, contractEntry(ref), destination)
 			}},
 			{name: "GetMCP", ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: invalidName, Version: "v1.0.0"}, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
-				return client.GetMCP(ctx, ref)
+				return client.GetMCP(ctx, contractEntry(ref))
 			}},
 			{name: "DownloadAgent", ref: domain.PowerRef{Type: domain.PowerTypeAgent, Name: invalidName, Version: "v1.0.0"}, hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
-				return domain.MCPServer{}, client.DownloadAgent(ctx, ref, destination)
+				return domain.MCPServer{}, client.DownloadAgent(ctx, contractEntry(ref), destination)
 			}},
 		} {
 			t.Run("invalid_name/"+operation.name+"/"+invalidName, func(t *testing.T) {
@@ -639,6 +692,8 @@ func assertNoDownloadResidue(t *testing.T, root, destination string) {
 
 func compareProviderOutcomes(t *testing.T, localClient, remoteClient cloud.Client) {
 	t.Helper()
+	localSnapshot := catalogSnapshotForClient(t, localClient)
+	remoteSnapshot := catalogSnapshotForClient(t, remoteClient)
 	localRefs, err := localClient.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -660,7 +715,12 @@ func compareProviderOutcomes(t *testing.T, localClient, remoteClient cloud.Clien
 		if localErr != nil || remoteErr != nil || localExact != remoteExact {
 			t.Fatalf("exact Resolve parity for %+v: local=%+v/%v remote=%+v/%v", ref, localExact, localErr, remoteExact, remoteErr)
 		}
-		comparePowerOutcome(t, localClient, remoteClient, ref)
+		localEntry, localEntryErr := localSnapshot.Metadata(ref)
+		remoteEntry, remoteEntryErr := remoteSnapshot.Metadata(ref)
+		if localEntryErr != nil || remoteEntryErr != nil {
+			t.Fatalf("catalog entry parity for %+v: local=%v remote=%v", ref, localEntryErr, remoteEntryErr)
+		}
+		comparePowerOutcome(t, localClient, remoteClient, localEntry, remoteEntry)
 	}
 	latest, err := latestPowerRefs(canonicalPowerOracle)
 	if err != nil {
@@ -676,19 +736,23 @@ func compareProviderOutcomes(t *testing.T, localClient, remoteClient cloud.Clien
 	}
 }
 
-func comparePowerOutcome(t *testing.T, localClient, remoteClient cloud.Client, ref domain.PowerRef) {
+func comparePowerOutcome(t *testing.T, localClient, remoteClient cloud.Client, localEntry, remoteEntry domain.CatalogEntry) {
 	t.Helper()
+	ref := localEntry.Ref
+	if remoteEntry.Ref != ref {
+		t.Fatalf("content entry identity parity: local=%+v remote=%+v", ref, remoteEntry.Ref)
+	}
 	switch ref.Type {
 	case domain.PowerTypeSkill, domain.PowerTypePlugin:
 		localTarget := filepath.Join(privateTestDir(t), "local")
 		remoteTarget := filepath.Join(privateTestDir(t), "remote")
 		var localErr, remoteErr error
 		if ref.Type == domain.PowerTypeSkill {
-			localErr = localClient.DownloadSkill(context.Background(), ref, localTarget)
-			remoteErr = remoteClient.DownloadSkill(context.Background(), ref, remoteTarget)
+			localErr = localClient.DownloadSkill(context.Background(), localEntry, localTarget)
+			remoteErr = remoteClient.DownloadSkill(context.Background(), remoteEntry, remoteTarget)
 		} else {
-			localErr = localClient.DownloadPlugin(context.Background(), ref, localTarget)
-			remoteErr = remoteClient.DownloadPlugin(context.Background(), ref, remoteTarget)
+			localErr = localClient.DownloadPlugin(context.Background(), localEntry, localTarget)
+			remoteErr = remoteClient.DownloadPlugin(context.Background(), remoteEntry, remoteTarget)
 		}
 		if localErr != nil || remoteErr != nil {
 			t.Fatalf("download parity for %+v: local=%v remote=%v", ref, localErr, remoteErr)
@@ -699,16 +763,16 @@ func comparePowerOutcome(t *testing.T, localClient, remoteClient cloud.Client, r
 			t.Fatalf("tree parity for %+v:\nlocal:  %#v\nremote: %#v", ref, localTree, remoteTree)
 		}
 	case domain.PowerTypeMCP:
-		localServer, localErr := localClient.GetMCP(context.Background(), ref)
-		remoteServer, remoteErr := remoteClient.GetMCP(context.Background(), ref)
+		localServer, localErr := localClient.GetMCP(context.Background(), localEntry)
+		remoteServer, remoteErr := remoteClient.GetMCP(context.Background(), remoteEntry)
 		if localErr != nil || remoteErr != nil || !reflect.DeepEqual(localServer, remoteServer) {
 			t.Fatalf("MCP parity for %+v: local=%#v/%v remote=%#v/%v", ref, localServer, localErr, remoteServer, remoteErr)
 		}
 	case domain.PowerTypeAgent:
 		localTarget := filepath.Join(privateTestDir(t), "agent.yaml")
 		remoteTarget := filepath.Join(privateTestDir(t), "agent.yaml")
-		localErr := localClient.DownloadAgent(context.Background(), ref, localTarget)
-		remoteErr := remoteClient.DownloadAgent(context.Background(), ref, remoteTarget)
+		localErr := localClient.DownloadAgent(context.Background(), localEntry, localTarget)
+		remoteErr := remoteClient.DownloadAgent(context.Background(), remoteEntry, remoteTarget)
 		if localErr != nil || remoteErr != nil {
 			t.Fatalf("Agent parity for %+v: local=%v remote=%v", ref, localErr, remoteErr)
 		}
@@ -904,9 +968,14 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 		t.Fatalf("Submit() quota error = %v, want typed TOO_MANY_ACTIVE_SUBMISSIONS conflict", err)
 	}
 
-	mcp, err := client.GetMCP(context.Background(), domain.PowerRef{
+	mcpRef := domain.PowerRef{
 		Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v0.1.0",
-	})
+	}
+	mcpEntry, err := catalogSnapshotForClient(t, client).Metadata(mcpRef)
+	if err != nil {
+		t.Fatalf("Catalog Metadata(%+v) error = %v", mcpRef, err)
+	}
+	mcp, err := client.GetMCP(context.Background(), mcpEntry)
 	if err != nil {
 		t.Fatalf("GetMCP() error = %v", err)
 	}

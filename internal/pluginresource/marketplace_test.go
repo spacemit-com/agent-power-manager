@@ -84,7 +84,7 @@ func TestSharedMarketplaceNewBuildsCompleteArtifacts(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	ref := testPluginRef()
-	artifact, err := service.Ensure(context.Background(), ref)
+	artifact, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 	if err != nil {
 		t.Fatalf("Ensure() error = %v", err)
 	}
@@ -240,7 +240,7 @@ func TestEnsureRejectsInvalidSharedPackagesWithoutPublishingCache(t *testing.T) 
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
-			if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+			if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 			}
 			finalRoot := testArtifactRoot(roots.cache, ref)
@@ -276,7 +276,7 @@ func TestEnsureWithLocalCloudRejectsSymlinkedSourceBeforePublishingArtifact(t *t
 	roots := newTestRoots(t)
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, client, builtInBuilder())
 
-	if _, err := service.Ensure(context.Background(), ref); err == nil {
+	if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); err == nil {
 		t.Fatal("Ensure() error = nil, want non-physical Local Cloud source rejection")
 	}
 	finalRoot := testArtifactRoot(roots.cache, ref)
@@ -308,7 +308,7 @@ func TestLookupRequiresBothGeneratedMarketplacesWithoutReplacingImmutableCache(t
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
-			artifact, err := service.Ensure(context.Background(), ref)
+			artifact, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 			if err != nil {
 				t.Fatalf("initial Ensure() error = %v", err)
 			}
@@ -319,7 +319,7 @@ func TestLookupRequiresBothGeneratedMarketplacesWithoutReplacingImmutableCache(t
 			if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 			}
-			if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+			if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Ensure() error = %v, want immutable cache rejection", err)
 			}
 			if calls.Load() != 1 {
@@ -348,7 +348,7 @@ func TestLookupRejectsExtraCapabilityNativeAndMarketplaceFilesWithoutReplacingIm
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
-			artifact, err := service.Ensure(context.Background(), ref)
+			artifact, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 			if err != nil {
 				t.Fatalf("initial Ensure() error = %v", err)
 			}
@@ -359,7 +359,7 @@ func TestLookupRejectsExtraCapabilityNativeAndMarketplaceFilesWithoutReplacingIm
 			if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 			}
-			if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+			if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Ensure() error = %v, want immutable cache rejection", err)
 			}
 			if calls.Load() != 1 {
@@ -446,7 +446,7 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
-			artifact, err := service.Ensure(context.Background(), ref)
+			artifact, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 			if err != nil {
 				t.Fatalf("initial Ensure() error = %v", err)
 			}
@@ -455,7 +455,7 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 			if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 			}
-			if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+			if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 			}
 			if calls.Load() != 1 {
@@ -490,7 +490,7 @@ func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCach
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
-			artifact, err := service.Ensure(context.Background(), ref)
+			artifact, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 			if err != nil {
 				t.Fatalf("initial Ensure() error = %v", err)
 			}
@@ -500,7 +500,7 @@ func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCach
 			if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Lookup() error = %v, want ErrInvalidArtifact", err)
 			}
-			if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+			if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Ensure() error = %v, want immutable cache rejection", err)
 			}
 			if calls.Load() != 1 {
@@ -534,7 +534,7 @@ func TestEnsureValidatesDownloadedPhysicalTreeBeforeSharedBuilder(t *testing.T) 
 				service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, observer)
 				ref := testPluginRef()
 
-				if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+				if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 					t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 				}
 				if observer.buildCalls.Load() != 0 {
@@ -554,8 +554,8 @@ func TestEnsureValidatesDownloadedPhysicalTreeBeforeSharedBuilder(t *testing.T) 
 
 type pluginDownloadFunc func(context.Context, domain.PowerRef, string) error
 
-func (download pluginDownloadFunc) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
-	return download(ctx, ref, destination)
+func (download pluginDownloadFunc) DownloadPlugin(ctx context.Context, entry domain.CatalogEntry, destination string) error {
+	return download(ctx, entry.Ref, destination)
 }
 
 type observingArtifactBuilder struct {

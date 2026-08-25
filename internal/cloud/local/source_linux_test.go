@@ -32,7 +32,7 @@ func TestDownloadSkillRejectsSourceRootSwapBeforeDescriptorSnapshot(t *testing.T
 	}
 	destination := filepath.Join(t.TempDir(), "download")
 
-	err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+	err = client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 
 	assertUnsafeNoDownloadResidue(t, err, destination)
 }
@@ -72,7 +72,7 @@ func TestDownloadSkillRejectsFileGrowthBetweenMetadataAndDescriptorRead(t *testi
 	}
 	destination := filepath.Join(t.TempDir(), "download")
 
-	err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+	err = client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 
 	assertUnsafeNoDownloadResidue(t, err, destination)
 }
@@ -97,7 +97,7 @@ func TestDownloadSkillRejectsFileSwapBetweenMetadataAndDescriptorRead(t *testing
 	}
 	destination := filepath.Join(t.TempDir(), "download")
 
-	err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+	err = client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 
 	assertUnsafeNoDownloadResidue(t, err, destination)
 }
@@ -143,7 +143,7 @@ func TestDownloadSkillRejectsSpecialNodeSwapBeforeAnyDataOpen(t *testing.T) {
 			}
 			destination := filepath.Join(t.TempDir(), "download")
 
-			err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+			err = client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 
 			assertUnsafeNoDownloadResidue(t, err, destination)
 			if dataOpened {
@@ -174,7 +174,7 @@ func TestDownloadAgentRejectsFIFOSwapBeforeAnyDataOpen(t *testing.T) {
 	}
 	destination := filepath.Join(t.TempDir(), "agent.yaml")
 
-	err = client.DownloadAgent(context.Background(), ref, destination)
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(ref), destination)
 
 	assertUnsafeNoDownloadResidue(t, err, destination)
 	if dataOpened {
@@ -185,11 +185,15 @@ func TestDownloadAgentRejectsFIFOSwapBeforeAnyDataOpen(t *testing.T) {
 func TestDownloadSkillPublishesValidatedSnapshotWhenSourceChangesAfterRead(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "skills", testSkillRef.Name, testSkillRef.Version)
-	writeTestFile(t, filepath.Join(source, "SKILL.md"), "skill")
+	writeTestFile(t, filepath.Join(source, "SKILL.md"), "---\nname: demo\nversion: v1.0.0\ndescription: demo\n---\nskill")
 	writeTestFile(t, filepath.Join(source, "skill-card.md"), "card")
 	payload := filepath.Join(source, "payload.md")
 	writeTestFile(t, payload, "validated")
 	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := client.loadCatalogContent(context.Background(), testSkillRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +202,7 @@ func TestDownloadSkillPublishesValidatedSnapshotWhenSourceChangesAfterRead(t *te
 	}
 	destination := filepath.Join(t.TempDir(), "download")
 
-	if err := client.DownloadSkill(context.Background(), testSkillRef, destination); err != nil {
+	if err := client.DownloadSkill(context.Background(), content.entry, destination); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(destination, "payload.md"))
@@ -210,9 +214,13 @@ func TestDownloadSkillPublishesValidatedSnapshotWhenSourceChangesAfterRead(t *te
 func TestDownloadSkillCancellationBeforePublishLeavesNoDestination(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "skills", testSkillRef.Name, testSkillRef.Version)
-	writeTestFile(t, filepath.Join(source, "SKILL.md"), "skill")
+	writeTestFile(t, filepath.Join(source, "SKILL.md"), "---\nname: demo\nversion: v1.0.0\ndescription: demo\n---\nskill")
 	writeTestFile(t, filepath.Join(source, "skill-card.md"), "card")
 	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := client.loadCatalogContent(context.Background(), testSkillRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +228,7 @@ func TestDownloadSkillCancellationBeforePublishLeavesNoDestination(t *testing.T)
 	client.beforeTreePublish = cancel
 	destination := filepath.Join(t.TempDir(), "download")
 
-	err = client.DownloadSkill(ctx, testSkillRef, destination)
+	err = client.DownloadSkill(ctx, content.entry, destination)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("DownloadSkill() error = %v, want context.Canceled", err)
@@ -261,10 +269,15 @@ func TestGetMCPCancellationAfterDecodeReturnsCanceled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}
+	content, err := client.loadCatalogContent(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	client.afterMCPDecode = cancel
 
-	_, err = client.GetMCP(ctx, domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"})
+	_, err = client.GetMCP(ctx, content.entry)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("GetMCP() error = %v, want context.Canceled", err)

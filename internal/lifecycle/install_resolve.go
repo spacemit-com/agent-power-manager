@@ -1,26 +1,30 @@
 package lifecycle
 
 import (
-	"context"
 	"fmt"
 	"slices"
 
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/domain"
 )
 
-// resolvePower 按显式类型走精确 Cloud 解析；未指定类型时保留跨类型歧义检查。
-func (s *InstallService) resolvePower(ctx context.Context, flags cli.Flags) (domain.PowerRef, error) {
-	if flags.Type != "" {
-		return s.cloud.Resolve(ctx, domain.PowerRef{
-			Type: domain.PowerType(flags.Type), Name: flags.Name, Version: flags.Version,
-		})
+// resolveCatalogEntry 仅在同一不可变目录快照中选择类型、版本与权威内容元数据。
+func resolveCatalogEntry(flags cli.Flags, snapshot catalog.Snapshot, selector VersionSelector) (domain.CatalogEntry, error) {
+	entries := snapshot.List("")
+	refs := make([]domain.PowerRef, len(entries))
+	for index, entry := range entries {
+		refs[index] = entry.Ref
 	}
-	refs, err := s.cloud.List(ctx)
+	ref, err := resolveInstallPower(flags, refs, selector)
 	if err != nil {
-		return domain.PowerRef{}, fmt.Errorf("list Cloud powers for install: %w", err)
+		return domain.CatalogEntry{}, err
 	}
-	return resolveInstallPower(flags, refs, s.versions)
+	entry, err := snapshot.Resolve(ref)
+	if err != nil {
+		return domain.CatalogEntry{}, fmt.Errorf("resolve catalog entry for install power %+v: %w", ref, err)
+	}
+	return entry, nil
 }
 
 // resolveInstallPower 在可信引用中解析 Install 的能力类型和目标版本。

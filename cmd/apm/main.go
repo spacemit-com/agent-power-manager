@@ -33,7 +33,7 @@ func main() {
 		logging.SetupLogging,
 		catalogLifecycles.newSearchLifecycle,
 		catalogLifecycles.newListLifecycle,
-		newInstallLifecycle,
+		catalogLifecycles.newInstallLifecycle,
 		newUninstallLifecycle,
 		newFixLifecycle,
 		newValidateLifecycle,
@@ -84,6 +84,15 @@ func (composition *catalogLifecycleComposition) newListLifecycle() (cli.ListLife
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
 	return lifecycle.NewList(transactions, composition.manager, registry, repository)
+}
+
+func (composition *catalogLifecycleComposition) newInstallLifecycle() (cli.InstallLifecycle, error) {
+	return newInstallLifecycleWithCatalogAndCloudFactories(
+		composition.manager,
+		newCloudClient,
+		func(source cache.Source) (cache.PowerCache, error) { return cache.NewFilesystem(source) },
+		newPluginResources,
+	)
 }
 
 func (manager *lazyCatalogManager) Snapshot(ctx context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
@@ -207,7 +216,7 @@ func newListLifecycle() (cli.ListLifecycle, error) {
 
 // newInstallLifecycle 创建 Install 命令所需的默认依赖，并共享清单读写 Repository。
 func newInstallLifecycle() (cli.InstallLifecycle, error) {
-	return newInstallLifecycleWithCloudFactory(newCloudClient)
+	return newCatalogLifecycleComposition().newInstallLifecycle()
 }
 
 // cloudClientFactory 是命令级 composition 边界：每次 lifecycle 构造只能调用一次，返回的同一 Client 必须共享给全部 Cloud 消费者。
@@ -227,7 +236,21 @@ func newInstallLifecycleWithCloudFactories(
 	newCache func(cache.Source) (cache.PowerCache, error),
 	newPlugins func(pluginresource.Downloader) (pluginresource.Manager, error),
 ) (cli.InstallLifecycle, error) {
-	if openCloud == nil || newCache == nil || newPlugins == nil {
+	return newInstallLifecycleWithCatalogAndCloudFactories(
+		newCatalogLifecycleComposition().manager,
+		openCloud,
+		newCache,
+		newPlugins,
+	)
+}
+
+func newInstallLifecycleWithCatalogAndCloudFactories(
+	catalogs lifecycle.CatalogManager,
+	openCloud cloudClientFactory,
+	newCache func(cache.Source) (cache.PowerCache, error),
+	newPlugins func(pluginresource.Downloader) (pluginresource.Manager, error),
+) (cli.InstallLifecycle, error) {
+	if isNilCatalogManager(catalogs) || openCloud == nil || newCache == nil || newPlugins == nil {
 		return nil, fmt.Errorf("create install lifecycle with nil composition factory: %w", cloud.ErrProviderConfig)
 	}
 	locker, err := lock.NewDefault()
@@ -255,6 +278,7 @@ func newInstallLifecycleWithCloudFactories(
 	return lifecycle.NewInstall(
 		locker,
 		transactions,
+		catalogs,
 		cloudClient,
 		powerCache,
 		pluginResources,

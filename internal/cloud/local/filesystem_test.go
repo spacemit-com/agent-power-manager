@@ -16,25 +16,29 @@ import (
 
 var testSkillRef = domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 
+func catalogEntryForTest(ref domain.PowerRef) domain.CatalogEntry {
+	return domain.CatalogEntry{Ref: ref}
+}
+
 func TestLocalTreeDownloadsSanitizePublicationModes(t *testing.T) {
 	tests := []struct {
 		name     string
 		root     string
 		marker   string
 		ref      domain.PowerRef
-		download func(*Client, context.Context, domain.PowerRef, string) error
+		download func(*Client, context.Context, domain.CatalogEntry, string) error
 	}{
 		{
 			name: "Skill", root: "skills", marker: "SKILL.md", ref: testSkillRef,
-			download: func(client *Client, ctx context.Context, ref domain.PowerRef, destination string) error {
-				return client.DownloadSkill(ctx, ref, destination)
+			download: func(client *Client, ctx context.Context, entry domain.CatalogEntry, destination string) error {
+				return client.DownloadSkill(ctx, entry, destination)
 			},
 		},
 		{
 			name: "Plugin", root: "plugins", marker: "apc-plugin.json",
 			ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
-			download: func(client *Client, ctx context.Context, ref domain.PowerRef, destination string) error {
-				return client.DownloadPlugin(ctx, ref, destination)
+			download: func(client *Client, ctx context.Context, entry domain.CatalogEntry, destination string) error {
+				return client.DownloadPlugin(ctx, entry, destination)
 			},
 		},
 	}
@@ -42,16 +46,27 @@ func TestLocalTreeDownloadsSanitizePublicationModes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			resources := t.TempDir()
 			source := filepath.Join(resources, test.root, test.ref.Name, test.ref.Version)
-			nested := filepath.Join(source, "scripts")
+			nestedRelative := "scripts"
+			if test.ref.Type == domain.PowerTypePlugin {
+				nestedRelative = filepath.Join("skills", test.ref.Name, "scripts")
+			}
+			nested := filepath.Join(source, nestedRelative)
 			if err := os.MkdirAll(nested, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			marker := filepath.Join(source, test.marker)
-			if err := os.WriteFile(marker, []byte("marker\n"), 0o600); err != nil {
+			markerContents := "---\nname: demo\nversion: v1.0.0\ndescription: demo\n---\n"
+			if test.ref.Type == domain.PowerTypePlugin {
+				markerContents = `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo","skills":["skills/demo"]}`
+			}
+			if err := os.WriteFile(marker, []byte(markerContents), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if test.ref.Type == domain.PowerTypeSkill {
 				writeTestFile(t, filepath.Join(source, "skill-card.md"), "card\n")
+			} else {
+				writeTestFile(t, filepath.Join(source, "skills", test.ref.Name, "SKILL.md"), "skill\n")
+				writeTestFile(t, filepath.Join(source, "skills", test.ref.Name, "skill-card.md"), "card\n")
 			}
 			executable := filepath.Join(nested, "run.sh")
 			if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o710); err != nil {
@@ -69,17 +84,26 @@ func TestLocalTreeDownloadsSanitizePublicationModes(t *testing.T) {
 				t.Fatal(err)
 			}
 			destination := filepath.Join(t.TempDir(), "download")
-			if err := test.download(client, context.Background(), test.ref, destination); err != nil {
+			content, err := client.loadCatalogContent(context.Background(), test.ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := test.download(client, context.Background(), content.entry, destination); err != nil {
 				t.Fatalf("Download%s() error = %v", test.name, err)
 			}
 			expectations := map[string]publishedNodeExpectation{
-				".":                                {mode: 0o755, directory: true},
-				"scripts":                          {mode: 0o755, directory: true},
-				test.marker:                        {mode: 0o644},
-				filepath.Join("scripts", "run.sh"): {mode: 0o754},
+				".":                                     {mode: 0o755, directory: true},
+				nestedRelative:                          {mode: 0o755, directory: true},
+				test.marker:                             {mode: 0o644},
+				filepath.Join(nestedRelative, "run.sh"): {mode: 0o754},
 			}
 			if test.ref.Type == domain.PowerTypeSkill {
 				expectations["skill-card.md"] = publishedNodeExpectation{mode: 0o644}
+			} else {
+				expectations["skills"] = publishedNodeExpectation{mode: 0o755, directory: true}
+				expectations[filepath.Join("skills", test.ref.Name)] = publishedNodeExpectation{mode: 0o755, directory: true}
+				expectations[filepath.Join("skills", test.ref.Name, "SKILL.md")] = publishedNodeExpectation{mode: 0o644}
+				expectations[filepath.Join("skills", test.ref.Name, "skill-card.md")] = publishedNodeExpectation{mode: 0o644}
 			}
 			assertPublishedTree(t, destination, expectations)
 		})
@@ -188,7 +212,7 @@ func TestDownloadSkillRejectsUnsafeSourceTree(t *testing.T) {
 				t.Fatal(err)
 			}
 			destination := filepath.Join(t.TempDir(), "download")
-			err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+			err = client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 			assertUnsafeNoDownloadResidue(t, err, destination)
 		})
 	}
@@ -206,13 +230,13 @@ func TestDownloadSkillRejectsOverlappingAndNonEmptyDestination(t *testing.T) {
 
 	t.Run("destination inside source", func(t *testing.T) {
 		destination := filepath.Join(source, "nested", "download")
-		err := client.DownloadSkill(context.Background(), testSkillRef, destination)
+		err := client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 		assertUnsafeNoDownloadResidue(t, err, destination)
 	})
 	t.Run("non-empty destination", func(t *testing.T) {
 		destination := filepath.Join(t.TempDir(), "download")
 		writeTestFile(t, filepath.Join(destination, "keep"), "keep")
-		err := client.DownloadSkill(context.Background(), testSkillRef, destination)
+		err := client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 		if !errors.Is(err, cloud.ErrUnsafeContent) {
 			t.Fatalf("DownloadSkill() error = %v, want ErrUnsafeContent", err)
 		}
@@ -237,11 +261,11 @@ func TestMCPAndAgentRejectContentOverTwentyMiB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if _, err := client.GetMCP(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"})); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
 	}
 	destination := filepath.Join(t.TempDir(), "agent.yaml")
-	err = client.DownloadAgent(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, destination)
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
 	assertUnsafeNoDownloadResidue(t, err, destination)
 }
 

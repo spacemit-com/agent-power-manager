@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"apm/internal/cloud"
 	"apm/internal/domain"
 )
 
@@ -21,33 +20,16 @@ func (c *Client) listAgents(ctx context.Context) ([]domain.PowerRef, error) {
 }
 
 // DownloadAgent 将精确版本 Agent yaml 原子复制至调用方提供的私有文件，不访问全局缓存。
-func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destination string) (resultErr error) {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if ref.Type != domain.PowerTypeAgent || !safePowerIdentity(ref) || !isCanonicalVersion(ref.Version) {
-		return cloud.ErrNotFound
-	}
-	source := filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version, "agent.yaml")
-	info, err := os.Lstat(source)
-	if errors.Is(err, fs.ErrNotExist) {
-		return cloud.ErrNotFound
-	}
+func (c *Client) DownloadAgent(ctx context.Context, entry domain.CatalogEntry, destination string) (resultErr error) {
+	content, err := c.loadMatchingCatalogContent(ctx, entry, domain.PowerTypeAgent)
 	if err != nil {
-		return fmt.Errorf("stat source Agent %q: %w", source, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return unsafeContent("source Agent %q is not a physical regular file", source)
+		return err
 	}
 	destination, err = absoluteDestination(destination)
 	if err != nil {
 		return err
 	}
 	if err := validateFileDestination(destination); err != nil {
-		return err
-	}
-	contents, _, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
-	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
@@ -66,7 +48,7 @@ func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destina
 	if c.beforeAgentWrite != nil {
 		c.beforeAgentWrite(temporary)
 	}
-	if _, err := temporary.Write(contents); err != nil {
+	if _, err := temporary.Write(content.bytes); err != nil {
 		_ = temporary.Close()
 		return fmt.Errorf("write Agent temporary destination %q: %w", temporaryName, err)
 	}

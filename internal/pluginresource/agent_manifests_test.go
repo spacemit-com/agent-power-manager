@@ -155,7 +155,7 @@ func TestAgentManifestPartialGenerationCannotPublishArtifact(t *testing.T) {
 		return nil
 	})
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, partialAgentManifestBuilder{})
-	if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 	}
 	if _, err := os.Lstat(testArtifactRoot(roots.cache, ref)); !errors.Is(err, os.ErrNotExist) {

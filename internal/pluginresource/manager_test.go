@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
+	"apm/internal/catalog"
 	"apm/internal/cloud/local"
 	"apm/internal/domain"
 	"apm/internal/utils/filesystem"
@@ -39,8 +41,24 @@ func TestEnsureBuildsOneCompleteSharedArtifactFromLocalCloud(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+	catalogPath := filepath.Join(t.TempDir(), "catalog.json")
+	if err := client.DownloadCatalog(context.Background(), catalogPath); err != nil {
+		t.Fatal(err)
+	}
+	catalogBytes, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Decode(catalogBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := snapshot.Resolve(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	artifact, err := service.Ensure(context.Background(), ref)
+	artifact, err := service.Ensure(context.Background(), entry)
 	if err != nil {
 		t.Fatalf("Ensure() error = %v", err)
 	}
@@ -126,9 +144,9 @@ func TestEnsurePersistsValidatedArtifactAndReusesImmutableVersion(t *testing.T) 
 	roots := newTestRoots(t)
 	downloader := &testDownloader{}
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, downloader, testBuilders())
-	ref := testPluginRef()
+	entry := testPluginEntry()
 
-	artifact, err := service.Ensure(context.Background(), ref)
+	artifact, err := service.Ensure(context.Background(), entry)
 	if err != nil {
 		t.Fatalf("Ensure() error = %v", err)
 	}
@@ -144,7 +162,7 @@ func TestEnsurePersistsValidatedArtifactAndReusesImmutableVersion(t *testing.T) 
 		t.Fatalf("DownloadPlugin calls = %d, want 1", downloader.calls)
 	}
 
-	again, err := service.Ensure(context.Background(), ref)
+	again, err := service.Ensure(context.Background(), entry)
 	if err != nil {
 		t.Fatalf("second Ensure() error = %v", err)
 	}
@@ -153,6 +171,9 @@ func TestEnsurePersistsValidatedArtifactAndReusesImmutableVersion(t *testing.T) 
 	}
 	if downloader.calls != 1 {
 		t.Fatalf("DownloadPlugin calls after cache hit = %d, want 1", downloader.calls)
+	}
+	if len(downloader.entries) != 1 || !reflect.DeepEqual(downloader.entries[0], entry) {
+		t.Fatalf("DownloadPlugin entries = %#v, want complete entry %#v once", downloader.entries, entry)
 	}
 }
 
@@ -167,7 +188,7 @@ func TestEnsureAndLookupRejectDamagedImmutableVersionWithoutDownloading(t *testi
 		t.Fatal(err)
 	}
 
-	if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 	}
 	if downloader.calls != 0 {
@@ -551,7 +572,7 @@ func TestEnsurePublishesOneSharedArtifactForConcurrentCallers(t *testing.T) {
 	group.Add(1)
 	go func() {
 		defer group.Done()
-		artifact, err := service.Ensure(context.Background(), ref)
+		artifact, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 		results <- artifact
 		errs <- err
 	}()
@@ -560,7 +581,7 @@ func TestEnsurePublishesOneSharedArtifactForConcurrentCallers(t *testing.T) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			artifact, err := service.Ensure(context.Background(), ref)
+			artifact, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 			results <- artifact
 			errs <- err
 		}()
@@ -615,7 +636,7 @@ func TestEnsurePublishRaceConvergesThroughLookupWithoutOverwritingPublishedVersi
 		return renameErr
 	}
 
-	artifact, err := service.Ensure(context.Background(), ref)
+	artifact, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 	if err != nil {
 		t.Fatalf("Ensure() publish race error = %v", err)
 	}
@@ -719,12 +740,12 @@ func TestEnsureRejectsTypedNilDependencies(t *testing.T) {
 	ref := testPluginRef()
 	var downloader *typedNilDownloader
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, downloader, testBuilders())
-	if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Ensure() typed-nil downloader error = %v, want ErrInvalidArtifact", err)
 	}
 	var builder *typedNilBuilder
 	service = newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, builder)
-	if _, err := service.Ensure(context.Background(), ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Ensure() typed-nil builder error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -745,7 +766,7 @@ func TestEnsureJoinsRenameAndInspectErrors(t *testing.T) {
 		return os.Lstat(path)
 	}
 
-	_, err := service.Ensure(context.Background(), ref)
+	_, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref))
 	if !errors.Is(err, renameErr) || !errors.Is(err, inspectErr) {
 		t.Fatalf("Ensure() error = %v, want rename and inspect errors", err)
 	}
@@ -759,7 +780,7 @@ func TestEnsureJoinsDownloadAndUniqueTemporaryCleanupErrors(t *testing.T) {
 	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, failingDownloader{err: downloadErr}, testBuilders())
 	service.files.removeAll = func(string) error { return cleanupErr }
 
-	_, err := service.Ensure(context.Background(), testPluginRef())
+	_, err := service.Ensure(context.Background(), testPluginEntry())
 	if !errors.Is(err, downloadErr) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("Ensure() error = %v, want download and cleanup errors", err)
 	}
@@ -808,12 +829,28 @@ func testPluginRef() domain.PowerRef {
 	return domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
 }
 
-type testDownloader struct {
-	calls int
+func testPluginEntry() domain.CatalogEntry {
+	return testCatalogPluginEntry(testPluginRef())
 }
 
-func (downloader *testDownloader) DownloadPlugin(_ context.Context, ref domain.PowerRef, destination string) error {
+func testCatalogPluginEntry(ref domain.PowerRef) domain.CatalogEntry {
+	return domain.CatalogEntry{
+		Ref: ref, Description: "catalog description", Message: "catalog message",
+		ContentType: "application/gzip", ContentSize: 17,
+		ContentMD5:  "0123456789abcdef0123456789abcdef",
+		PublishedAt: "2026-08-25T12:34:56Z", Tags: []string{"catalog-tag"},
+	}
+}
+
+type testDownloader struct {
+	calls   int
+	entries []domain.CatalogEntry
+}
+
+func (downloader *testDownloader) DownloadPlugin(_ context.Context, entry domain.CatalogEntry, destination string) error {
 	downloader.calls++
+	downloader.entries = append(downloader.entries, entry.Clone())
+	ref := entry.Ref
 	if err := writeSharedTestPluginManifests(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
 		return err
 	}
@@ -853,7 +890,8 @@ func newBlockingDownloader() *blockingDownloader {
 	}
 }
 
-func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, ref domain.PowerRef, destination string) error {
+func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, entry domain.CatalogEntry, destination string) error {
+	ref := entry.Ref
 	switch downloader.started.Add(1) {
 	case 1:
 		close(downloader.firstStarted)
@@ -885,7 +923,7 @@ func (copier *blockingCopier) copy(source, destination string) error {
 
 type typedNilDownloader struct{}
 
-func (*typedNilDownloader) DownloadPlugin(context.Context, domain.PowerRef, string) error {
+func (*typedNilDownloader) DownloadPlugin(context.Context, domain.CatalogEntry, string) error {
 	panic("typed nil downloader must not be called")
 }
 
@@ -903,6 +941,6 @@ type failingDownloader struct {
 	err error
 }
 
-func (downloader failingDownloader) DownloadPlugin(context.Context, domain.PowerRef, string) error {
+func (downloader failingDownloader) DownloadPlugin(context.Context, domain.CatalogEntry, string) error {
 	return downloader.err
 }

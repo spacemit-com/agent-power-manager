@@ -13,7 +13,8 @@ import (
 var _ cloud.AgentSource = (*Client)(nil)
 
 // DownloadAgent 验证精确版本 Agent 的原始字节，并通过同目录临时文件原子发布到尚不存在的绝对目标。
-func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destination string) (resultErr error) {
+func (c *Client) DownloadAgent(ctx context.Context, entry domain.CatalogEntry, destination string) (resultErr error) {
+	ref := entry.Ref
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("download remote Agent: %w", err)
 	}
@@ -34,7 +35,7 @@ func (c *Client) DownloadAgent(ctx context.Context, ref domain.PowerRef, destina
 	if err := parent.requireAbsent(destinationName); err != nil {
 		return err
 	}
-	temporary, err := c.downloadVerifiedContent(ctx, ref, "application/yaml", parent, 0o644)
+	temporary, err := c.downloadVerifiedContent(ctx, entry, "application/yaml", parent, 0o644)
 	if err != nil {
 		return fmt.Errorf("download remote Agent content: %w", err)
 	}

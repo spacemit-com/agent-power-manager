@@ -45,7 +45,8 @@ func TestLocalClientGetMCPReadsExactVersionWithoutCacheMaterialization(t *testin
 		t.Fatal(err)
 	}
 
-	got, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v1.2.3"})
+	ref := domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v1.2.3"}
+	got, err := client.GetMCP(context.Background(), catalogEntryFromLocalProvider(t, client, ref))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestLocalClientGetMCPRejectsEmbeddedIdentityMismatch(t *testing.T) {
 	writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), mcpResourceJSON("shadow", "v1.0.0", `{"transport":"stdio","command":"npx"}`))
 	client := newMCPTestClient(t, root)
 
-	_, err := client.GetMCP(context.Background(), domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"})
+	_, err := client.GetMCP(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}))
 
 	if !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
@@ -88,7 +89,7 @@ func TestLocalClientGetMCPRejectsLegacyAndDuplicateResourceMetadata(t *testing.T
 			writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), tt.body)
 			client := newMCPTestClient(t, root)
 
-			_, err := client.GetMCP(context.Background(), domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"})
+			_, err := client.GetMCP(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}))
 
 			if !errors.Is(err, cloud.ErrUnsafeContent) {
 				t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
@@ -102,13 +103,14 @@ func TestLocalClientGetMCPReturnsMutationIsolatedDefinition(t *testing.T) {
 	writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), mcpResourceJSON("demo", "v1.0.0", `{"transport":"stdio","command":"npx","args":["original"]}`))
 	client := newMCPTestClient(t, root)
 	ref := domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}
+	entry := catalogEntryFromLocalProvider(t, client, ref)
 
-	first, err := client.GetMCP(context.Background(), ref)
+	first, err := client.GetMCP(context.Background(), entry)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first.Args[0] = "mutated"
-	second, err := client.GetMCP(context.Background(), ref)
+	second, err := client.GetMCP(context.Background(), entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +144,7 @@ func TestLocalClientGetMCPRejectsInvalidResourceDefinitions(t *testing.T) {
 			root := t.TempDir()
 			writeCloudMarker(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), mcpResourceJSON("demo", "v1.0.0", tt.body))
 			client := newMCPTestClient(t, root)
-			if _, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); !errors.Is(err, cloud.ErrUnsafeContent) {
+			if _, err := client.GetMCP(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"})); !errors.Is(err, cloud.ErrUnsafeContent) {
 				t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
 			}
 		})
@@ -166,11 +168,11 @@ func TestLocalClientGetMCPMapsUnsupportedReferencesToNotFoundAndSymlinkToUnsafeC
 		{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"},
 		{Name: "missing", Type: domain.PowerTypeMCP, Version: "v1.0.0"},
 	} {
-		if _, err := client.GetMCP(context.Background(), ref); !errors.Is(err, cloud.ErrNotFound) {
+		if _, err := client.GetMCP(context.Background(), catalogEntryForLocalTest(ref)); !errors.Is(err, cloud.ErrNotFound) {
 			t.Fatalf("GetMCP(%#v) error = %v, want ErrNotFound", ref, err)
 		}
 	}
-	if _, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if _, err := client.GetMCP(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"})); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("GetMCP(symlink) error = %v, want ErrUnsafeContent", err)
 	}
 }
@@ -226,7 +228,7 @@ func TestLocalClientGetMCPReturnsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := client.GetMCP(ctx, domain.PowerRef{Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v0.1.0"}); !errors.Is(err, context.Canceled) {
+	if _, err := client.GetMCP(ctx, catalogEntryForLocalTest(domain.PowerRef{Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v0.1.0"})); !errors.Is(err, context.Canceled) {
 		t.Fatalf("GetMCP() error = %v, want context.Canceled", err)
 	}
 }

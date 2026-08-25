@@ -28,6 +28,7 @@ import (
 
 	"apm/internal/adapter"
 	"apm/internal/cache"
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/cloud/local"
@@ -184,7 +185,7 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	locker, _ := lock.NewDefault()
 	powerCache, _ := cache.NewFilesystem(cloudClient)
 	pluginResources := newIntegrationPluginResources(t, cloudClient)
-	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
+	installer, err := NewInstall(locker, transactions, catalogManagerFromSource(t, cloudClient), cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +297,7 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 			locker, _ := lock.NewDefault()
 			powerCache, _ := cache.NewFilesystem(cloudClient)
 			pluginResources := newIntegrationPluginResources(t, cloudClient)
-			installer, _ := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
+			installer, _ := NewInstall(locker, transactions, catalogManagerFromSource(t, cloudClient), cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
 			uninstaller, _ := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
 			for _, target := range []struct {
 				version string
@@ -342,6 +343,7 @@ type isolatedPluginHarness struct {
 	manifests  *acceptanceManifestRepository
 	registry   *adapter.Registry
 	cloud      cloud.Client
+	catalog    catalog.Snapshot
 	plugins    pluginresource.Manager
 	downloader *countingPluginDownloader
 	install    *InstallService
@@ -354,9 +356,9 @@ type countingPluginDownloader struct {
 	calls  int
 }
 
-func (d *countingPluginDownloader) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
+func (d *countingPluginDownloader) DownloadPlugin(ctx context.Context, entry domain.CatalogEntry, destination string) error {
 	d.calls++
-	return d.source.DownloadPlugin(ctx, ref, destination)
+	return d.source.DownloadPlugin(ctx, entry, destination)
 }
 
 func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *isolatedPluginHarness {
@@ -425,7 +427,12 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	}
 	downloader := &countingPluginDownloader{source: cloudClient}
 	pluginResources := newIntegrationPluginResources(t, downloader)
-	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, manifests, version.NewSelector())
+	catalogs := catalogManagerFromSource(t, cloudClient)
+	catalogSnapshot, _, err := catalogs.SnapshotLocked(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer, err := NewInstall(locker, transactions, catalogs, cloudClient, powerCache, pluginResources, registry, manifests, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +446,7 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	}
 	return &isolatedPluginHarness{
 		t: t, root: root, fakeBin: fakeBin, state: state, calls: calls, cacheHome: cacheHome,
-		agentRoots: agentRoots, repository: repository, manifests: manifests, registry: registry, cloud: cloudClient,
+		agentRoots: agentRoots, repository: repository, manifests: manifests, registry: registry, cloud: cloudClient, catalog: catalogSnapshot,
 		plugins: pluginResources, downloader: downloader, install: installer, uninstall: uninstaller, fix: fixer,
 	}
 }
@@ -810,7 +817,11 @@ func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
 func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJournal(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
-	artifact, err := harness.plugins.Ensure(context.Background(), ref)
+	entry, err := harness.catalog.Resolve(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := harness.plugins.Ensure(context.Background(), entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1247,6 +1258,30 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 		server.rejectProtocol(writer, request, "method = %q, want GET", request.Method)
 		return
 	}
+	if request.URL.Path == "/api/v1/resources" {
+		if !server.requireRequest(writer, request, []string{"api", "v1", "resources"}, "application/json") {
+			return
+		}
+		entries := make([]domain.CatalogEntry, 0, len(server.resource))
+		for ref, resource := range server.resource {
+			digest := md5.Sum(resource.content)
+			entries = append(entries, domain.CatalogEntry{
+				Ref: ref, Description: "lifecycle fixture", Message: "fixture",
+				ContentType: resource.contentType, ContentSize: int64(len(resource.content)),
+				ContentMD5: fmt.Sprintf("%x", digest), PublishedAt: "2026-08-01T00:00:00Z", Tags: []string{},
+			})
+		}
+		raw, err := catalog.Encode(entries)
+		if err != nil {
+			server.rejectProtocol(writer, request, "encode catalog: %v", err)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write(raw)
+		return
+	}
 	if len(segments) < 7 || segments[0] != "api" || segments[1] != "v1" || segments[2] != "resources" || segments[5] != "versions" {
 		server.rejectProtocol(writer, request, "unknown endpoint")
 		return
@@ -1472,7 +1507,7 @@ func newProviderLifecycleHarness(t *testing.T, client cloud.Client) *isolatedMCP
 		t.Fatal(err)
 	}
 	plugins := newIntegrationPluginResources(t, client)
-	harness.install, err = NewInstall(locker, transactions, client, powerCache, plugins, harness.registry, harness.repository, version.NewSelector())
+	harness.install, err = NewInstall(locker, transactions, catalogManagerFromSource(t, client), client, powerCache, plugins, harness.registry, harness.repository, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}

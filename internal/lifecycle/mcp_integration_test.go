@@ -12,6 +12,7 @@ import (
 
 	"apm/internal/adapter"
 	"apm/internal/cache"
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/cloud/local"
@@ -86,6 +87,7 @@ type isolatedMCPHarness struct {
 	repository *config.JSONRepository
 	registry   *adapter.Registry
 	cloud      cloud.Client
+	catalog    catalog.Snapshot
 	install    *InstallService
 	uninstall  *UninstallService
 }
@@ -156,7 +158,12 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 		t.Fatal(err)
 	}
 	pluginResources := &installFakePluginResources{}
-	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
+	catalogs := catalogManagerFromSource(t, cloudClient)
+	catalogSnapshot, _, err := catalogs.SnapshotLocked(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer, err := NewInstall(locker, transactions, catalogs, cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +173,7 @@ func newIsolatedMCPHarness(t *testing.T, installedAgent domain.AgentID) *isolate
 	}
 	return &isolatedMCPHarness{
 		t: t, agent: installedAgent, root: root, fakeBin: fakeBin, state: state, calls: calls, cacheHome: cacheHome,
-		repository: repository, registry: registry, cloud: cloudClient, install: installer, uninstall: uninstaller,
+		repository: repository, registry: registry, cloud: cloudClient, catalog: catalogSnapshot, install: installer, uninstall: uninstaller,
 	}
 }
 
@@ -281,7 +288,11 @@ func testMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 	t.Helper()
 	harness := newIsolatedMCPHarness(t, agent)
 	ref := domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}
-	server, err := harness.cloud.GetMCP(context.Background(), ref)
+	entry, err := harness.catalog.Resolve(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := harness.cloud.GetMCP(context.Background(), entry)
 	if err != nil {
 		t.Fatal(err)
 	}

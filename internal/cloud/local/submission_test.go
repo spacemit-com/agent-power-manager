@@ -36,7 +36,11 @@ func TestLocalAgentReadWorksWhileSubmissionUnsupported(t *testing.T) {
 		t.Fatalf("Resolve(agent) = %+v, %v; want %+v", got, err, ref)
 	}
 	destination := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := client.DownloadAgent(context.Background(), ref, destination); err != nil {
+	content, err := client.loadCatalogContent(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DownloadAgent(context.Background(), content.entry, destination); err != nil {
 		t.Fatalf("DownloadAgent() error = %v", err)
 	}
 	contents, err := os.ReadFile(destination)

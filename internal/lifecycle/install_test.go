@@ -5,10 +5,15 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"apm/internal/adapter"
+	"apm/internal/cache"
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/logging"
@@ -33,7 +38,7 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 		t.Fatal(err)
 	}
 	wantCalls := []string{
-		"acquire", "recover", "refresh", "cloud:resolve",
+		"acquire", "recover", "refresh", "catalog:snapshot-locked",
 		"resolve:bibit", "config:find:bibit", "cache:prepare-skill:bibit", "transaction:install:bibit",
 		"resolve:claude-code", "config:find:claude-code", "cache:prepare-skill:claude-code", "transaction:install:claude-code",
 		"resolve:codex", "config:find:codex",
@@ -49,6 +54,183 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 		{Agent: domain.AgentCodex, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeUnchanged},
 		{Agent: domain.AgentHermes, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Outcome: cli.InstallOutcomeInstalled},
 	})
+}
+
+func TestInstallPropagatesResolvedCatalogEntryToTypeBoundaries(t *testing.T) {
+	tests := []struct {
+		name      string
+		powerType domain.PowerType
+		agent     domain.AgentID
+		configure func(*installFixture)
+		entries   func(*InstallService) []domain.CatalogEntry
+	}{
+		{
+			name: "Skill to cache", powerType: domain.PowerTypeSkill, agent: domain.AgentCodex,
+			entries: func(service *InstallService) []domain.CatalogEntry {
+				return service.cache.(*installFakeCache).fixture.cacheEntries
+			},
+		},
+		{
+			name: "Agent to cache", powerType: domain.PowerTypeAgent, agent: domain.AgentBibit,
+			entries: func(service *InstallService) []domain.CatalogEntry {
+				return service.cache.(*installFakeCache).fixture.cacheEntries
+			},
+		},
+		{
+			name: "Plugin to resource manager", powerType: domain.PowerTypePlugin, agent: domain.AgentCodex,
+			configure: func(fixture *installFixture) {
+				fixture.pluginMode = domain.PluginDeploymentMarketplace
+			},
+			entries: func(service *InstallService) []domain.CatalogEntry {
+				return service.plugins.(*installFakePluginResources).ensureEntries
+			},
+		},
+		{
+			name: "MCP to content source", powerType: domain.PowerTypeMCP, agent: domain.AgentCodex,
+			configure: func(fixture *installFixture) {
+				fixture.mcpPresence = map[domain.AgentID]adapter.MCPPresence{domain.AgentCodex: adapter.MCPAbsent}
+				fixture.mcpDefinitions = map[string]domain.MCPServer{"v2.0.0": {Transport: domain.MCPTransportStdio, Command: "demo"}}
+			},
+			entries: func(service *InstallService) []domain.CatalogEntry {
+				return service.cloud.(*installFakeCloud).fixture.cloudEntries
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ref := domain.PowerRef{Name: "demo", Type: test.powerType, Version: "v2.0.0"}
+			entry := catalogEntryForInstallTest(ref, "authoritative catalog message")
+			entry.Description = "authoritative catalog description"
+			entry.ContentSize = 1234
+			entry.ContentMD5 = "fedcba9876543210fedcba9876543210"
+			entry.Tags = []string{"catalog", "exact-entry"}
+			fixture := installFixture{
+				snapshot:       domain.AgentSnapshot{Agents: []domain.AgentID{test.agent}},
+				catalogEntries: []domain.CatalogEntry{entry},
+				selected:       ref.Version,
+			}
+			if test.configure != nil {
+				test.configure(&fixture)
+			}
+			var calls []string
+			service := newInstallService(t, &calls, fixture)
+
+			result, err := service.Install(context.Background(), cli.Flags{
+				Agent: string(test.agent), Type: string(test.powerType), Name: ref.Name, Version: ref.Version,
+			})
+			if err != nil {
+				t.Fatalf("Install() error = %v", err)
+			}
+			if len(result.Items) != 1 || result.Items[0].Power != ref {
+				t.Fatalf("Install() = %#v, want one result for %+v", result, ref)
+			}
+			got := test.entries(service)
+			if len(got) != 1 || !reflect.DeepEqual(got[0], entry) {
+				t.Fatalf("content-boundary entries = %#v, want exact snapshot entry %#v once", got, entry)
+			}
+			if countEvent(calls, "catalog:snapshot-locked") != 1 {
+				t.Fatalf("calls = %v, want SnapshotLocked exactly once", calls)
+			}
+			for _, forbidden := range []string{"cloud:list", "cloud:resolve", "cloud:unexpected-download-plugin"} {
+				if containsEvent(calls, forbidden) {
+					t.Fatalf("calls = %v, content path must not use legacy discovery event %q", calls, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestInstallStaleCatalogArtifactAvailabilityMatrix(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		seedCache  bool
+		wantErr    bool
+		wantSource int
+	}{
+		{name: "cached artifact succeeds offline", seedCache: true},
+		{name: "cache miss forwards entry and fails offline", wantErr: true, wantSource: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			cacheHome := t.TempDir()
+			t.Setenv("APM_HOME", home)
+			t.Setenv("XDG_CACHE_HOME", cacheHome)
+			ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}
+			entry := catalogEntryForInstallTest(ref, "stale snapshot metadata")
+			entry.Tags = []string{"offline"}
+			if test.seedCache {
+				marker := filepath.Join(cacheHome, "apm", "skills", ref.Name, ref.Version, "SKILL.md")
+				if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				contents := "---\nname: demo\nversion: \"v2.0.0\"\ndescription: cached\n---\n"
+				if err := os.WriteFile(marker, []byte(contents), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			syncCause := errors.New("catalog origin is offline")
+			contentCause := errors.New("content origin is offline")
+			fixture := installFixture{
+				snapshot:       domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+				catalogEntries: []domain.CatalogEntry{entry},
+				catalogStatus:  catalog.SyncStatus{Stale: true, Cause: syncCause},
+				selected:       ref.Version,
+				cloudGetErr:    contentCause,
+			}
+			var calls []string
+			cloudClient := &installFakeCloud{calls: &calls, fixture: &fixture}
+			powerCache, err := cache.NewFilesystem(cloudClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			service, err := NewInstall(
+				&installFakeLocker{calls: &calls, fixture: &fixture},
+				&installFakeTransactions{calls: &calls, fixture: &fixture},
+				&installFakeCatalogManager{calls: &calls, fixture: &fixture},
+				cloudClient,
+				powerCache,
+				&installFakePluginResources{calls: &calls},
+				&installFakeRegistry{calls: &calls, fixture: &fixture},
+				&installFakeConfig{calls: &calls, fixture: &fixture},
+				&installFakeVersions{selected: ref.Version},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			originalLogger := slog.Default()
+			slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
+			t.Cleanup(func() { slog.SetDefault(originalLogger) })
+			result, installErr := service.Install(context.Background(), cli.Flags{
+				Agent: "codex", Type: "skill", Name: ref.Name, Version: ref.Version,
+			})
+			if test.wantErr {
+				if !errors.Is(installErr, contentCause) || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeFailed {
+					t.Fatalf("Install() = %#v, %v, want failed item with %v", result, installErr, contentCause)
+				}
+			} else if installErr != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+				t.Fatalf("Install() = %#v, %v, want offline cached success", result, installErr)
+			}
+			if len(fixture.cloudEntries) != test.wantSource {
+				t.Fatalf("content source entries = %#v, want %d call(s)", fixture.cloudEntries, test.wantSource)
+			}
+			if test.wantSource == 1 && !reflect.DeepEqual(fixture.cloudEntries[0], entry) {
+				t.Fatalf("content source entry = %#v, want exact stale entry %#v", fixture.cloudEntries[0], entry)
+			}
+			if countEvent(calls, "catalog:snapshot-locked") != 1 {
+				t.Fatalf("calls = %v, want SnapshotLocked exactly once", calls)
+			}
+			if strings.Count(stderr.String(), `msg="catalog snapshot is stale"`) != 1 || strings.Count(stderr.String(), "level=WARN") != 1 {
+				t.Fatalf("stderr = %q, want exactly one stale warning", stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "command=install") || !strings.Contains(stderr.String(), syncCause.Error()) {
+				t.Fatalf("stderr = %q, want install command and stale cause", stderr.String())
+			}
+		})
+	}
 }
 
 func TestInstallExplicitPluginManifestHitSkipsCloudAndMutablePluginDependencies(t *testing.T) {
@@ -111,7 +293,7 @@ func TestInstallExplicitPluginManifestFastPathFallsBackWhenAnyAgentDiffers(t *te
 	}
 	assertZeroInstallResult(t, result)
 	wantCalls := []string{
-		"acquire", "recover", "refresh", "config:find:codex", "config:find:hermes-agent", "cloud:resolve", "release",
+		"acquire", "recover", "refresh", "config:find:codex", "config:find:hermes-agent", "catalog:snapshot-locked", "release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want fallback %v", calls, wantCalls)
@@ -135,7 +317,7 @@ func TestInstallPluginFastPathRequiresExplicitCanonicalVersion(t *testing.T) {
 		t.Fatalf("Install() error = %v, want Cloud cause %v", err, cloudCause)
 	}
 	assertZeroInstallResult(t, result)
-	wantCalls := []string{"acquire", "recover", "refresh", "cloud:resolve", "release"}
+	wantCalls := []string{"acquire", "recover", "refresh", "catalog:snapshot-locked", "release"}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want normal resolution %v", calls, wantCalls)
 	}
@@ -417,6 +599,7 @@ func TestNewInstallRejectsNilAndTypedNilDependencies(t *testing.T) {
 	fixture := &installFixture{}
 	locker := &installFakeLocker{calls: &calls, fixture: fixture}
 	transactions := &installFakeTransactions{calls: &calls, fixture: fixture}
+	catalogs := &installFakeCatalogManager{calls: &calls, fixture: fixture}
 	cloud := &installFakeCloud{calls: &calls, fixture: fixture}
 	cache := &installFakeCache{calls: &calls, fixture: fixture}
 	pluginResources := &installFakePluginResources{}
@@ -430,52 +613,58 @@ func TestNewInstallRejectsNilAndTypedNilDependencies(t *testing.T) {
 		want string
 	}{
 		{name: "locker", new: func() (*InstallService, error) {
-			return NewInstall(nil, transactions, cloud, cache, pluginResources, registry, config, versions)
+			return NewInstall(nil, transactions, catalogs, cloud, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil locker"},
 		{name: "typed nil locker", new: func() (*InstallService, error) {
-			return NewInstall((*installFakeLocker)(nil), transactions, cloud, cache, pluginResources, registry, config, versions)
+			return NewInstall((*installFakeLocker)(nil), transactions, catalogs, cloud, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil locker"},
 		{name: "transaction manager", new: func() (*InstallService, error) {
-			return NewInstall(locker, nil, cloud, cache, pluginResources, registry, config, versions)
+			return NewInstall(locker, nil, catalogs, cloud, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil transaction manager"},
 		{name: "typed nil transaction manager", new: func() (*InstallService, error) {
-			return NewInstall(locker, (*installFakeTransactions)(nil), cloud, cache, pluginResources, registry, config, versions)
+			return NewInstall(locker, (*installFakeTransactions)(nil), catalogs, cloud, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil transaction manager"},
+		{name: "catalog manager", new: func() (*InstallService, error) {
+			return NewInstall(locker, transactions, nil, cloud, cache, pluginResources, registry, config, versions)
+		}, want: "create Install lifecycle with nil catalog manager"},
+		{name: "typed nil catalog manager", new: func() (*InstallService, error) {
+			return NewInstall(locker, transactions, (*installFakeCatalogManager)(nil), cloud, cache, pluginResources, registry, config, versions)
+		}, want: "create Install lifecycle with nil catalog manager"},
 		{name: "Cloud client", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, nil, cache, pluginResources, registry, config, versions)
+			return NewInstall(locker, transactions, catalogs, nil, cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil Cloud client"},
 		{name: "typed nil Cloud client", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, (*installFakeCloud)(nil), cache, pluginResources, registry, config, versions)
+			return NewInstall(locker, transactions, catalogs, (*installFakeCloud)(nil), cache, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil Cloud client"},
 		{name: "power cache", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, nil, pluginResources, registry, config, versions)
+			return NewInstall(locker, transactions, catalogs, cloud, nil, pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil power cache"},
 		{name: "typed nil power cache", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, (*installFakeCache)(nil), pluginResources, registry, config, versions)
+			return NewInstall(locker, transactions, catalogs, cloud, (*installFakeCache)(nil), pluginResources, registry, config, versions)
 		}, want: "create Install lifecycle with nil power cache"},
 		{name: "Plugin Resource manager", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, nil, registry, config, versions)
+			return NewInstall(locker, transactions, catalogs, cloud, cache, nil, registry, config, versions)
 		}, want: "create Install lifecycle with nil Plugin Resource manager"},
 		{name: "typed nil Plugin Resource manager", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, (*installFakePluginResources)(nil), registry, config, versions)
+			return NewInstall(locker, transactions, catalogs, cloud, cache, (*installFakePluginResources)(nil), registry, config, versions)
 		}, want: "create Install lifecycle with nil Plugin Resource manager"},
 		{name: "adapter registry", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, pluginResources, nil, config, versions)
+			return NewInstall(locker, transactions, catalogs, cloud, cache, pluginResources, nil, config, versions)
 		}, want: "create Install lifecycle with nil adapter registry"},
 		{name: "typed nil adapter registry", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, pluginResources, (*installFakeRegistry)(nil), config, versions)
+			return NewInstall(locker, transactions, catalogs, cloud, cache, pluginResources, (*installFakeRegistry)(nil), config, versions)
 		}, want: "create Install lifecycle with nil adapter registry"},
 		{name: "config repository", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, pluginResources, registry, nil, versions)
+			return NewInstall(locker, transactions, catalogs, cloud, cache, pluginResources, registry, nil, versions)
 		}, want: "create Install lifecycle with nil config repository"},
 		{name: "typed nil config repository", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, pluginResources, registry, (*installFakeConfig)(nil), versions)
+			return NewInstall(locker, transactions, catalogs, cloud, cache, pluginResources, registry, (*installFakeConfig)(nil), versions)
 		}, want: "create Install lifecycle with nil config repository"},
 		{name: "version selector", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, pluginResources, registry, config, nil)
+			return NewInstall(locker, transactions, catalogs, cloud, cache, pluginResources, registry, config, nil)
 		}, want: "create Install lifecycle with nil version selector"},
 		{name: "typed nil version selector", new: func() (*InstallService, error) {
-			return NewInstall(locker, transactions, cloud, cache, pluginResources, registry, config, (*installFakeVersions)(nil))
+			return NewInstall(locker, transactions, catalogs, cloud, cache, pluginResources, registry, config, (*installFakeVersions)(nil))
 		}, want: "create Install lifecycle with nil version selector"},
 	}
 

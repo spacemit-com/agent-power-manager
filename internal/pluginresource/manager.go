@@ -67,7 +67,14 @@ func newService(
 }
 
 // Ensure 下载并原子发布尚未缓存的 artifact；已存在版本只复验，绝不替换。
-func (service *Service) Ensure(ctx context.Context, ref domain.PowerRef) (artifact Artifact, resultErr error) {
+func (service *Service) Ensure(ctx context.Context, entry domain.CatalogEntry) (artifact Artifact, resultErr error) {
+	if err := entry.Validate(); err != nil {
+		return Artifact{}, fmt.Errorf("validate Plugin catalog entry: %w", errors.Join(ErrInvalidArtifact, err))
+	}
+	ref := entry.Ref
+	if ref.Type != domain.PowerTypePlugin {
+		return Artifact{}, fmt.Errorf("Plugin catalog entry has type %q: %w", ref.Type, ErrInvalidArtifact)
+	}
 	artifact, err := service.Lookup(ref)
 	if err == nil {
 		return artifact, nil
@@ -125,7 +132,7 @@ func (service *Service) Ensure(ctx context.Context, ref domain.PowerRef) (artifa
 	if err != nil {
 		return Artifact{}, err
 	}
-	if err := downloader.DownloadPlugin(ctx, ref, temporaryPluginPath); err != nil {
+	if err := downloader.DownloadPlugin(ctx, entry, temporaryPluginPath); err != nil {
 		return Artifact{}, fmt.Errorf("download plugin artifact: %w", err)
 	}
 	// 共享 builder 读取 manifest 或写 marketplace 前，必须先拒绝下载树中的 symlink。

@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"apm/internal/catalog"
 	"apm/internal/cli"
+	"apm/internal/cloud"
 	"apm/internal/domain"
 	"apm/internal/logging"
 	"apm/internal/transaction"
@@ -31,12 +34,21 @@ func (*stubCloudClient) List(context.Context) ([]domain.PowerRef, error) { retur
 func (*stubCloudClient) Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error) {
 	return domain.PowerRef{}, nil
 }
-func (*stubCloudClient) DownloadSkill(context.Context, domain.PowerRef, string) error  { return nil }
-func (*stubCloudClient) DownloadPlugin(context.Context, domain.PowerRef, string) error { return nil }
-func (*stubCloudClient) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
+func (*stubCloudClient) DownloadSkill(context.Context, domain.CatalogEntry, string) error {
+	return nil
+}
+func (*stubCloudClient) DownloadPlugin(context.Context, domain.CatalogEntry, string) error {
+	return nil
+}
+func (*stubCloudClient) GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*stubCloudClient) DownloadAgent(context.Context, domain.PowerRef, string) error { return nil }
+func (*stubCloudClient) GetMCPForUninstall(context.Context, domain.PowerRef) (domain.MCPServer, error) {
+	return domain.MCPServer{}, nil
+}
+func (*stubCloudClient) DownloadAgent(context.Context, domain.CatalogEntry, string) error {
+	return nil
+}
 func (*stubCloudClient) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
 	return domain.SubmissionResult{}, nil
 }
@@ -50,6 +62,31 @@ func (*stubCloudClient) ListSubmissions(context.Context, domain.SubmissionListQu
 func newReadOnlyCatalogManager(t *testing.T) CatalogManager {
 	t.Helper()
 	return &stubCatalogManager{snapshot: catalogSnapshotFromRefs(t, nil)}
+}
+
+func catalogManagerFromSource(t *testing.T, provider any) CatalogManager {
+	t.Helper()
+	source, ok := provider.(cloud.CatalogSource)
+	if !ok {
+		t.Fatalf("catalog test provider %T does not implement cloud.CatalogSource", provider)
+	}
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(parent, "catalog.json")
+	if err := source.DownloadCatalog(context.Background(), destination); err != nil {
+		t.Fatalf("DownloadCatalog() for lifecycle test: %v", err)
+	}
+	raw, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &stubCatalogManager{snapshot: snapshot}
 }
 
 func (c *stubCatalogManager) Snapshot(ctx context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {

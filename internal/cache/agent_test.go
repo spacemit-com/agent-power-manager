@@ -17,7 +17,7 @@ func TestPrepareAgentPublishesSingleFileAndStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	staging, err := store.PrepareAgent(context.Background(), ref)
+	staging, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestPrepareAgentDownloadsMatchingIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "custom", Version: "v2.3.4"}
-	staging, err := store.PrepareAgent(context.Background(), ref)
+	staging, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref))
 	if err != nil {
 		t.Fatal(err)
 	}

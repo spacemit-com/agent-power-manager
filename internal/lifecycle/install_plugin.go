@@ -14,8 +14,9 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-// installPlugin 以 manifest 为第一事实来源；精确命中时禁止访问资源、Cloud 或 Agent。
-func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
+// installPlugin 以 manifest 为第一事实来源；需要资源时只把同一权威目录条目交给 Ensure。
+func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID, entry domain.CatalogEntry) (cli.InstallItem, error) {
+	ref := entry.Ref
 	previous, installed, err := s.config.Find(agent, ref.Type, ref.Name)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("find installed Plugin %+v for agent %q: %w", ref, agent, err)
@@ -37,7 +38,7 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 	switch pluginAdapter.DeploymentMode() {
 	case domain.PluginDeploymentMarketplace:
 		// 目标版本允许 Ensure 下载；旧版本恢复材料只能由后续 Lookup 离线读取。
-		targetArtifact, err := s.plugins.Ensure(ctx, ref)
+		targetArtifact, err := s.plugins.Ensure(ctx, entry)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("ensure target Plugin artifact %+v for agent %q: %w", ref, agent, err)
 		}
@@ -54,7 +55,7 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 		}
 		return s.installMarketplacePlugin(ctx, agent, ref, previous, installed, target, marketplaceTarget(marketplace), pluginAdapter, marketplaceAdapter)
 	case domain.PluginDeploymentFilesystem:
-		return s.installFilesystemPlugin(ctx, agent, ref, previous, installed, target, pluginAdapter)
+		return s.installFilesystemPlugin(ctx, agent, entry, previous, installed, target, pluginAdapter)
 	default:
 		return cli.InstallItem{}, fmt.Errorf("unsupported Plugin deployment %q: %w", pluginAdapter.DeploymentMode(), adapter.ErrUnsupportedAdapter)
 	}
@@ -190,12 +191,13 @@ func (s *InstallService) installUnmanagedMarketplacePlugin(
 func (s *InstallService) installFilesystemPlugin(
 	ctx context.Context,
 	agent domain.AgentID,
-	ref domain.PowerRef,
+	entry domain.CatalogEntry,
 	previous domain.PowerRef,
 	installed bool,
 	target adapter.PluginTarget,
 	pluginAdapter adapter.PluginAdapter,
 ) (cli.InstallItem, error) {
+	ref := entry.Ref
 	if installed {
 		previousName, err := domain.PluginRuntimeName(previous)
 		if err != nil {
@@ -243,7 +245,7 @@ func (s *InstallService) installFilesystemPlugin(
 	}
 
 	// filesystem 资源写入必须晚于 manifest、Adapter 与物理目标事实校验。
-	targetArtifact, err := s.plugins.Ensure(ctx, ref)
+	targetArtifact, err := s.plugins.Ensure(ctx, entry)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("ensure target Plugin artifact %+v for agent %q: %w", ref, agent, err)
 	}

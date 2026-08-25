@@ -694,7 +694,7 @@ func TestAnonymousCatalogNeverReceivesSubmissionBearer(t *testing.T) {
 	if got, err := client.Resolve(context.Background(), ref); err != nil || got != ref {
 		t.Fatalf("Resolve() = %+v, %v, want %+v", got, err, ref)
 	}
-	got, err := client.GetMCP(context.Background(), ref)
+	got, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(ref, content))
 	if err != nil {
 		t.Fatalf("GetMCP() error = %v", err)
 	}
@@ -704,7 +704,6 @@ func TestAnonymousCatalogNeverReceivesSubmissionBearer(t *testing.T) {
 	}
 	wantPaths := []string{
 		"/api/v1/resources",
-		"/api/v1/resources/mcp/demo/versions/v1.0.0",
 		"/api/v1/resources/mcp/demo/versions/v1.0.0",
 		"/api/v1/resources/mcp/demo/versions/v1.0.0/content",
 	}

@@ -29,8 +29,9 @@ func TestLocalClientDownloadsOneSharedPluginPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+	entry := catalogEntryFromLocalProvider(t, client, ref)
 	destination := filepath.Join(t.TempDir(), "plugin")
-	if err := client.DownloadPlugin(context.Background(), ref, destination); err != nil {
+	if err := client.DownloadPlugin(context.Background(), entry, destination); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
 	for _, required := range []string{
@@ -66,6 +67,11 @@ func TestLocalClientDownloadPluginRejectsDestinationInsideSourceWithoutMutation(
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			source := writeRawSharedPluginPackage(t, root, ref)
+			client, err := local.New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := catalogEntryFromLocalProvider(t, client, ref)
 			destination := filepath.Join(source, "nested", "plugin")
 			if existing {
 				destination = filepath.Join(source, "nested")
@@ -74,12 +80,8 @@ func TestLocalClientDownloadPluginRejectsDestinationInsideSourceWithoutMutation(
 				}
 			}
 			before := snapshotTree(t, source)
-			client, err := local.New(root)
-			if err != nil {
-				t.Fatal(err)
-			}
 
-			if err := client.DownloadPlugin(context.Background(), ref, destination); err == nil || errors.Is(err, cloud.ErrNotFound) {
+			if err := client.DownloadPlugin(context.Background(), entry, destination); err == nil || errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("DownloadPlugin() error = %v, want source-containment error", err)
 			}
 			after := snapshotTree(t, source)
@@ -133,7 +135,7 @@ func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *test
 			case "source ancestor symlink":
 				externalRoot := t.TempDir()
 				externalSource := writeRawSharedPluginPackage(t, externalRoot, ref)
-				externalSentinel = filepath.Join(externalSource, "payload.txt")
+				externalSentinel = filepath.Join(externalSource, "skills", ref.Name, "payload.txt")
 				logicalRoot := filepath.Join(root, "plugins", ref.Name)
 				if err := os.RemoveAll(logicalRoot); err != nil {
 					t.Fatal(err)
@@ -150,7 +152,7 @@ func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *test
 					t.Fatal(err)
 				}
 			case "payload symlink":
-				payload := filepath.Join(source, "payload.txt")
+				payload := filepath.Join(source, "skills", ref.Name, "payload.txt")
 				if err := os.Remove(payload); err != nil {
 					t.Fatal(err)
 				}
@@ -183,7 +185,7 @@ func TestLocalClientDownloadPluginRejectsNonPhysicalSourceTreeBeforeCopy(t *test
 			}
 			destination := filepath.Join(t.TempDir(), "destination")
 
-			err = client.DownloadPlugin(context.Background(), ref, destination)
+			err = client.DownloadPlugin(context.Background(), catalogEntryForLocalTest(ref), destination)
 			if err == nil || errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("DownloadPlugin() error = %v, want physical-source rejection", err)
 			}
@@ -208,10 +210,11 @@ func TestLocalClientDownloadPluginAllowsDestinationWithSourceNamePrefix(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.DownloadPlugin(context.Background(), ref, destination); err != nil {
+	entry := catalogEntryFromLocalProvider(t, client, ref)
+	if err := client.DownloadPlugin(context.Background(), entry, destination); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(destination, "payload.txt")); err != nil || string(got) != "payload" {
+	if got, err := os.ReadFile(filepath.Join(destination, "skills", ref.Name, "payload.txt")); err != nil || string(got) != "payload" {
 		t.Fatalf("copied payload = %q, %v, want payload", got, err)
 	}
 }
@@ -239,7 +242,7 @@ func TestLocalClientDownloadPluginReturnsExactMissesBeforeTouchingDestination(t 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "untouched")
-			err := client.DownloadPlugin(context.Background(), test.ref, destination)
+			err := client.DownloadPlugin(context.Background(), catalogEntryForLocalTest(test.ref), destination)
 			if !errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("DownloadPlugin() error = %v, want ErrNotFound", err)
 			}
@@ -261,13 +264,14 @@ func TestLocalClientDownloadPluginRejectsUnsafeDestinations(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+	entry := catalogEntryFromLocalProvider(t, client, ref)
 
 	nonEmpty := t.TempDir()
 	sentinel := filepath.Join(nonEmpty, "keep.txt")
 	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.DownloadPlugin(context.Background(), ref, nonEmpty); err == nil || errors.Is(err, cloud.ErrNotFound) {
+	if err := client.DownloadPlugin(context.Background(), entry, nonEmpty); err == nil || errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("non-empty destination error = %v, want destination error", err)
 	}
 	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "keep" {
@@ -279,7 +283,7 @@ func TestLocalClientDownloadPluginRejectsUnsafeDestinations(t *testing.T) {
 	if err := os.Symlink(symlinkTarget, symlinkDestination); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.DownloadPlugin(context.Background(), ref, symlinkDestination); err == nil || errors.Is(err, cloud.ErrNotFound) {
+	if err := client.DownloadPlugin(context.Background(), entry, symlinkDestination); err == nil || errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("symlink destination error = %v, want destination error", err)
 	}
 	entries, err := os.ReadDir(symlinkTarget)
@@ -293,7 +297,7 @@ func TestLocalClientDownloadPluginRejectsUnsafeDestinations(t *testing.T) {
 		t.Fatal(err)
 	}
 	throughAncestor := filepath.Join(ancestorLink, "plugin")
-	if err := client.DownloadPlugin(context.Background(), ref, throughAncestor); err == nil || errors.Is(err, cloud.ErrNotFound) {
+	if err := client.DownloadPlugin(context.Background(), entry, throughAncestor); err == nil || errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("symlink ancestor destination error = %v, want destination error", err)
 	}
 	entries, err = os.ReadDir(ancestorTarget)
@@ -315,7 +319,8 @@ func TestLocalClientDownloadPluginAllowsCallerControlledRelativeDestination(t *t
 	working := t.TempDir()
 	t.Chdir(working)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := client.DownloadPlugin(context.Background(), ref, "plugin"); err != nil {
+	entry := catalogEntryFromLocalProvider(t, client, ref)
+	if err := client.DownloadPlugin(context.Background(), entry, "plugin"); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(working, "plugin", "apc-plugin.json")); err != nil {
@@ -338,7 +343,8 @@ func TestLocalClientDownloadPluginDoesNotCreateCloudOwnedCacheOrStaging(t *testi
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := client.DownloadPlugin(context.Background(), ref, filepath.Join(t.TempDir(), "plugin")); err != nil {
+	entry := catalogEntryFromLocalProvider(t, client, ref)
+	if err := client.DownloadPlugin(context.Background(), entry, filepath.Join(t.TempDir(), "plugin")); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
 	for _, path := range []string{
@@ -394,7 +400,7 @@ func writeRawSharedPluginPackage(t *testing.T, root string, ref domain.PowerRef)
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(source, "payload.txt"), []byte("payload"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(skillRoot, "payload.txt"), []byte("payload"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return source

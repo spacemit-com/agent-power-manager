@@ -32,7 +32,7 @@ func TestDownloadPluginPublishesCanonicalBytesWithoutSemanticParsing(t *testing.
 		serveValidContent(t, w, r, remotePluginRef, contents)
 	})
 	destination := filepath.Join(trustedTestDir(t), "plugin")
-	if err := client.DownloadPlugin(context.Background(), remotePluginRef, destination); err != nil {
+	if err := client.DownloadPlugin(context.Background(), validRemoteCatalogEntry(remotePluginRef, contents), destination); err != nil {
 		t.Fatal(err)
 	}
 	assertFileContentsAndMode(t, filepath.Join(destination, "apc-plugin.json"), "Task 7 owns this schema\n", 0o644)
@@ -57,7 +57,7 @@ func TestDownloadPluginRejectsMissingOrNonRegularRootMarker(t *testing.T) {
 				serveValidContent(t, w, r, remotePluginRef, contents)
 			})
 			destination := filepath.Join(trustedTestDir(t), "plugin")
-			err := client.DownloadPlugin(context.Background(), remotePluginRef, destination)
+			err := client.DownloadPlugin(context.Background(), validRemoteCatalogEntry(remotePluginRef, contents), destination)
 			if !errors.Is(err, cloud.ErrUnsafeContent) || errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("DownloadPlugin() error = %v, want only ErrUnsafeContent marker classification", err)
 			}
@@ -75,7 +75,7 @@ func TestDownloadPluginRejectsWrongReferenceBeforeRequest(t *testing.T) {
 	})
 	err := client.DownloadPlugin(
 		context.Background(),
-		domain.PowerRef{Type: domain.PowerTypeSkill, Name: remotePluginRef.Name, Version: remotePluginRef.Version},
+		validRemoteCatalogEntry(domain.PowerRef{Type: domain.PowerTypeSkill, Name: remotePluginRef.Name, Version: remotePluginRef.Version}, []byte("fixture")),
 		filepath.Join(trustedTestDir(t), "plugin"),
 	)
 	if !errors.Is(err, cloud.ErrNotFound) {

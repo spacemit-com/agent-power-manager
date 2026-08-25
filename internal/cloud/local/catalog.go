@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -146,23 +147,28 @@ func (c *Client) buildCatalog(ctx context.Context) ([]byte, error) {
 type localCatalogContent struct {
 	entry domain.CatalogEntry
 	bytes []byte
+	tree  *treeSnapshot
 }
 
 // loadCatalogContent 通过现有 Local 物理快照边界固定一个精确 fixture，再从同一快照
 // 构建下载字节与权威 metadata；Task 7 必须复用本入口，不能从目录名重建 metadata。
 func (c *Client) loadCatalogContent(ctx context.Context, ref domain.PowerRef) (localCatalogContent, error) {
+	if err := ctx.Err(); err != nil {
+		return localCatalogContent{}, err
+	}
 	if _, err := c.catalogSourcePath(ref); err != nil {
 		return localCatalogContent{}, err
 	}
 	var description, contentType string
 	var contents []byte
+	var tree *treeSnapshot
 	var err error
 	switch ref.Type {
 	case domain.PowerTypeSkill:
-		description, contents, err = c.loadCatalogSkill(ctx, ref)
+		description, contents, tree, err = c.loadCatalogSkill(ctx, ref)
 		contentType = "application/gzip"
 	case domain.PowerTypePlugin:
-		description, contents, err = c.loadCatalogPlugin(ctx, ref)
+		description, contents, tree, err = c.loadCatalogPlugin(ctx, ref)
 		contentType = "application/gzip"
 	case domain.PowerTypeMCP:
 		description, contents, err = c.loadCatalogMCP(ctx, ref)
@@ -187,52 +193,74 @@ func (c *Client) loadCatalogContent(ctx context.Context, ref domain.PowerRef) (l
 			PublishedAt: localCatalogPublishedAt, Tags: []string{},
 		},
 		bytes: append([]byte(nil), contents...),
+		tree:  tree,
 	}, nil
 }
 
-func (c *Client) loadCatalogSkill(ctx context.Context, ref domain.PowerRef) (string, []byte, error) {
+// loadMatchingCatalogContent 从一次 fresh 物理快照同时取得内容与 metadata，并要求调用方 entry 完全一致。
+func (c *Client) loadMatchingCatalogContent(ctx context.Context, entry domain.CatalogEntry, powerType domain.PowerType) (localCatalogContent, error) {
+	if entry.Ref.Type != powerType {
+		return localCatalogContent{}, cloud.ErrNotFound
+	}
+	content, err := c.loadCatalogContent(ctx, entry.Ref)
+	if err != nil {
+		return localCatalogContent{}, err
+	}
+	if !equalCatalogEntry(content.entry, entry) {
+		return localCatalogContent{}, fmt.Errorf("Local %s content no longer matches catalog entry %+v: %w", powerType, entry.Ref, cloud.ErrIntegrity)
+	}
+	return content, nil
+}
+
+func equalCatalogEntry(left, right domain.CatalogEntry) bool {
+	return left.Ref == right.Ref && left.Description == right.Description && left.Message == right.Message &&
+		left.ContentType == right.ContentType && left.ContentSize == right.ContentSize &&
+		left.ContentMD5 == right.ContentMD5 && left.PublishedAt == right.PublishedAt && slices.Equal(left.Tags, right.Tags)
+}
+
+func (c *Client) loadCatalogSkill(ctx context.Context, ref domain.PowerRef) (string, []byte, *treeSnapshot, error) {
 	source := filepath.Join(c.resourcesRoot, "skills", ref.Name, ref.Version)
 	snapshot, err := c.validateSkillSource(ctx, source)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	name, version, description, err := parseLocalSkillMetadata(snapshot)
 	if err != nil {
-		return "", nil, unsafeContent("parse Local Skill metadata %s/%s: %v", ref.Name, ref.Version, err)
+		return "", nil, nil, unsafeContent("parse Local Skill metadata %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	if name != ref.Name || version != ref.Version {
-		return "", nil, unsafeContent("Local Skill metadata %s/%s does not match fixture path %s/%s", name, version, ref.Name, ref.Version)
+		return "", nil, nil, unsafeContent("Local Skill metadata %s/%s does not match fixture path %s/%s", name, version, ref.Name, ref.Version)
 	}
 	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
-	return description, contents, err
+	return description, contents, snapshot, err
 }
 
-func (c *Client) loadCatalogPlugin(ctx context.Context, ref domain.PowerRef) (string, []byte, error) {
+func (c *Client) loadCatalogPlugin(ctx context.Context, ref domain.PowerRef) (string, []byte, *treeSnapshot, error) {
 	source := filepath.Join(c.resourcesRoot, "plugins", ref.Name, ref.Version)
 	info, err := os.Lstat(source)
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil, cloud.ErrNotFound
+		return "", nil, nil, cloud.ErrNotFound
 	}
 	if err != nil {
-		return "", nil, fmt.Errorf("stat raw Plugin package %q: %w", source, err)
+		return "", nil, nil, fmt.Errorf("stat raw Plugin package %q: %w", source, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", nil, unsafeContent("raw Plugin package %q is not a physical directory", source)
+		return "", nil, nil, unsafeContent("raw Plugin package %q is not a physical directory", source)
 	}
 	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	manifestBytes, err := snapshot.regularFile("apc-plugin.json")
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	var manifest pluginartifact.APCPluginManifest
 	if err := jsonstrict.Decode(manifestBytes, &manifest, true); err != nil {
-		return "", nil, unsafeContent("decode Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
+		return "", nil, nil, unsafeContent("decode Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	if err := pluginartifact.ValidateAPCPluginManifest(ref, manifest); err != nil {
-		return "", nil, unsafeContent("validate Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
+		return "", nil, nil, unsafeContent("validate Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	entries := make([]pluginartifact.RawPackageEntry, 0, len(snapshot.nodes))
 	for _, node := range snapshot.nodes {
@@ -241,14 +269,19 @@ func (c *Client) loadCatalogPlugin(ctx context.Context, ref domain.PowerRef) (st
 		})
 	}
 	if err := pluginartifact.ValidateRawPackageEntries(manifest, entries); err != nil {
-		return "", nil, unsafeContent("validate Local Plugin snapshot %s/%s: %v", ref.Name, ref.Version, err)
+		return "", nil, nil, unsafeContent("validate Local Plugin snapshot %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
-	return manifest.Description, contents, err
+	return manifest.Description, contents, snapshot, err
 }
 
 func (c *Client) loadCatalogMCP(ctx context.Context, ref domain.PowerRef) (string, []byte, error) {
 	source := filepath.Join(c.resourcesRoot, "mcps", ref.Name, ref.Version, "MCP.json")
+	if _, err := os.Lstat(source); errors.Is(err, fs.ErrNotExist) {
+		return "", nil, cloud.ErrNotFound
+	} else if err != nil {
+		return "", nil, fmt.Errorf("stat Local MCP resource %q: %w", source, err)
+	}
 	raw, _, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
 		return "", nil, err
@@ -269,6 +302,11 @@ func (c *Client) loadCatalogMCP(ctx context.Context, ref domain.PowerRef) (strin
 
 func (c *Client) loadCatalogAgent(ctx context.Context, ref domain.PowerRef) (string, []byte, error) {
 	source := filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version, "agent.yaml")
+	if _, err := os.Lstat(source); errors.Is(err, fs.ErrNotExist) {
+		return "", nil, cloud.ErrNotFound
+	} else if err != nil {
+		return "", nil, fmt.Errorf("stat Local Agent resource %q: %w", source, err)
+	}
 	raw, _, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
 		return "", nil, err

@@ -123,7 +123,7 @@ func TestEnsureRejectsUnsafePluginNameBeforeConstructingCachePath(t *testing.T) 
 
 	unsafeRef := testPluginRef()
 	unsafeRef.Name = "../../outside"
-	if _, err := service.Ensure(context.Background(), unsafeRef); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(unsafeRef)); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 	}
 	assertOutsideSentinel(t, sentinel)

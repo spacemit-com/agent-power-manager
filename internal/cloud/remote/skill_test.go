@@ -32,7 +32,7 @@ func TestDownloadSkillPublishesVerifiedArchiveWithRequiredMarkers(t *testing.T) 
 		serveValidContent(t, w, r, remoteSkillRef, contents)
 	})
 	destination := filepath.Join(trustedTestDir(t), "skill")
-	if err := client.DownloadSkill(context.Background(), remoteSkillRef, destination); err != nil {
+	if err := client.DownloadSkill(context.Background(), validRemoteCatalogEntry(remoteSkillRef, contents), destination); err != nil {
 		t.Fatal(err)
 	}
 	assertFileContentsAndMode(t, filepath.Join(destination, "SKILL.md"), "# Demo\n", 0o644)
@@ -55,7 +55,7 @@ func TestDownloadSkillAcceptsExistingEmptyPhysicalDestination(t *testing.T) {
 	if err := os.Mkdir(destination, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.DownloadSkill(context.Background(), remoteSkillRef, destination); err != nil {
+	if err := client.DownloadSkill(context.Background(), validRemoteCatalogEntry(remoteSkillRef, contents), destination); err != nil {
 		t.Fatal(err)
 	}
 	assertFileContentsAndMode(t, filepath.Join(destination, "SKILL.md"), "skill", 0o644)
@@ -89,7 +89,7 @@ func TestDownloadSkillRejectsMissingOrNonRegularRootMarkers(t *testing.T) {
 				serveValidContent(t, w, r, remoteSkillRef, contents)
 			})
 			destination := filepath.Join(trustedTestDir(t), "skill")
-			err := client.DownloadSkill(context.Background(), remoteSkillRef, destination)
+			err := client.DownloadSkill(context.Background(), validRemoteCatalogEntry(remoteSkillRef, contents), destination)
 			if !errors.Is(err, cloud.ErrUnsafeContent) || errors.Is(err, cloud.ErrNotFound) {
 				t.Fatalf("DownloadSkill() error = %v, want only ErrUnsafeContent marker classification", err)
 			}
@@ -111,7 +111,9 @@ func TestDownloadSkillVerifiesMD5BeforeArchiveInspection(t *testing.T) {
 		writeExactMetadata(t, w, remoteSkillRef, contents, map[string]any{"content_md5": md5Hex([]byte("different"))})
 	})
 	destination := filepath.Join(trustedTestDir(t), "skill")
-	err := client.DownloadSkill(context.Background(), remoteSkillRef, destination)
+	entry := validRemoteCatalogEntry(remoteSkillRef, contents)
+	entry.ContentMD5 = md5Hex([]byte("different"))
+	err := client.DownloadSkill(context.Background(), entry, destination)
 	if !errors.Is(err, cloud.ErrIntegrity) || errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("DownloadSkill() error = %v, want MD5 ErrIntegrity before archive classification", err)
 	}
@@ -149,7 +151,7 @@ func TestDownloadSkillRejectsInvalidIdentityAndUnsafeDestinationBeforeRequest(t 
 		{ref: remoteSkillRef, destination: nonempty, want: cloud.ErrUnsafeContent},
 	}
 	for _, tt := range tests {
-		if err := client.DownloadSkill(context.Background(), tt.ref, tt.destination); !errors.Is(err, tt.want) {
+		if err := client.DownloadSkill(context.Background(), validRemoteCatalogEntry(tt.ref, []byte("fixture")), tt.destination); !errors.Is(err, tt.want) {
 			t.Fatalf("DownloadSkill(%+v, %q) error = %v, want %v", tt.ref, tt.destination, err, tt.want)
 		}
 	}

@@ -26,7 +26,7 @@ func TestGetMCPReturnsStrictValidatedDefinitionAndCleansOwnedDirectory(t *testin
 	}
 	client.mcpTempParent = root
 
-	got, err := client.GetMCP(context.Background(), remoteMCPRef)
+	got, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestGetMCPRejectsEmbeddedIdentityMismatch(t *testing.T) {
 	root := trustedTestDir(t)
 	client.mcpTempParent = root
 
-	_, err := client.GetMCP(context.Background(), remoteMCPRef)
+	_, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents))
 
 	if !errors.Is(err, cloud.ErrInvalidResponse) {
 		t.Fatalf("GetMCP() error = %v, want ErrInvalidResponse", err)
@@ -75,7 +75,7 @@ func TestGetMCPRejectsLegacyAndDuplicateResourceMetadata(t *testing.T) {
 			root := trustedTestDir(t)
 			client.mcpTempParent = root
 
-			_, err := client.GetMCP(context.Background(), remoteMCPRef)
+			_, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, tt.body))
 
 			if !errors.Is(err, cloud.ErrInvalidResponse) {
 				t.Fatalf("GetMCP() error = %v, want ErrInvalidResponse", err)
@@ -92,12 +92,12 @@ func TestGetMCPReturnsMutationIsolatedDefinition(t *testing.T) {
 	})
 	client.mcpTempParent = trustedTestDir(t)
 
-	first, err := client.GetMCP(context.Background(), remoteMCPRef)
+	first, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents))
 	if err != nil {
 		t.Fatal(err)
 	}
 	first.Args[0] = "mutated"
-	second, err := client.GetMCP(context.Background(), remoteMCPRef)
+	second, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestGetMCPReturnsCanceledContextWithoutRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := client.GetMCP(ctx, remoteMCPRef)
+	_, err := client.GetMCP(ctx, validRemoteCatalogEntry(remoteMCPRef, contents))
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("GetMCP() error = %v, want context.Canceled", err)
@@ -145,7 +145,7 @@ func TestGetMCPRejectsInjectedTemporaryParentThroughSymlinkedAncestor(t *testing
 	}
 	client.mcpTempParent = filepath.Join(aliasRoot, "tmp")
 
-	if _, err := client.GetMCP(context.Background(), remoteMCPRef); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if _, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents)); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("GetMCP() error = %v, want symlink ancestor ErrUnsafeContent", err)
 	}
 	if requests != 0 {
@@ -169,7 +169,7 @@ func TestGetMCPCanonicalizesSymlinkedSystemTempDirectory(t *testing.T) {
 	}
 	t.Setenv("TMPDIR", alias)
 
-	if _, err := client.GetMCP(context.Background(), remoteMCPRef); err != nil {
+	if _, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents)); err != nil {
 		t.Fatal(err)
 	}
 	assertDirectoryEmpty(t, physicalParent)
@@ -196,7 +196,7 @@ func TestGetMCPCleanupDetectsOwnedChildIdentityCorruption(t *testing.T) {
 		}
 	}
 
-	_, err := client.GetMCP(context.Background(), remoteMCPRef)
+	_, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents))
 	if !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("GetMCP() error = %v, want cleanup substitution ErrUnsafeContent", err)
 	}
@@ -231,7 +231,7 @@ func TestGetMCPRejectsStrictJSONInvalidUnionAndPlainHTTP(t *testing.T) {
 			})
 			root := trustedTestDir(t)
 			client.mcpTempParent = root
-			_, err := client.GetMCP(context.Background(), remoteMCPRef)
+			_, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents))
 			if !errors.Is(err, cloud.ErrInvalidResponse) {
 				t.Fatalf("GetMCP() error = %v, want ErrInvalidResponse", err)
 			}
@@ -256,7 +256,7 @@ func TestGetMCPRejectsSymlinkTemporaryParentWithoutDeletingTarget(t *testing.T) 
 	}
 	client.mcpTempParent = link
 
-	if _, err := client.GetMCP(context.Background(), remoteMCPRef); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if _, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents)); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
 	}
 	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "keep" {
@@ -284,7 +284,7 @@ func TestGetMCPRejectsWritableInjectedTemporaryParentWithoutRequest(t *testing.T
 	}
 	client.mcpTempParent = root
 
-	if _, err := client.GetMCP(context.Background(), remoteMCPRef); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if _, err := client.GetMCP(context.Background(), validRemoteCatalogEntry(remoteMCPRef, contents)); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("GetMCP() error = %v, want directory trust ErrUnsafeContent", err)
 	}
 	if requests != 0 {

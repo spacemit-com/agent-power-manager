@@ -11,8 +11,9 @@ import (
 	"apm/internal/transaction"
 )
 
-// installAgentPower 先核对本地清单，再准备 staging 并交由 Agent 事务完成发布和结果分类。
-func (s *InstallService) installAgentPower(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
+// installAgentPower 先核对本地清单，再用权威目录条目准备 staging 并交由 Agent 事务发布。
+func (s *InstallService) installAgentPower(ctx context.Context, agent domain.AgentID, entry domain.CatalogEntry) (cli.InstallItem, error) {
+	ref := entry.Ref
 	resolvedAdapter, err := s.registry.ResolveAgent(agent)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("resolve install adapter for agent %q: %w", agent, err)
@@ -26,7 +27,7 @@ func (s *InstallService) installAgentPower(ctx context.Context, agent domain.Age
 		return cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeUnchanged}, nil
 	}
 
-	staging, err := s.cache.PrepareAgent(ctx, ref)
+	staging, err := s.cache.PrepareAgent(ctx, entry)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("prepare install power %+v: %w", ref, err)
 	}

@@ -32,7 +32,7 @@ func TestLocalCloudAndCachePrepareSkill(t *testing.T) {
 	}
 	ref := domain.PowerRef{Name: "foo-before-summary", Type: domain.PowerTypeSkill, Version: "v0.0.1"}
 
-	stagingRoot, err := store.PrepareSkill(context.Background(), ref)
+	stagingRoot, err := store.PrepareSkill(context.Background(), catalogEntryFromLocalProvider(t, client, ref))
 	if err != nil {
 		t.Fatal(err)
 	}

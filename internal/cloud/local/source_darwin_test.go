@@ -16,19 +16,42 @@ import (
 
 func TestDarwinLocalClientRetrievesEveryResourceKind(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "skills", "demo", "v1.0.0", "SKILL.md"), "skill")
+	writeTestFile(t, filepath.Join(root, "skills", "demo", "v1.0.0", "SKILL.md"), "---\nname: demo\nversion: v1.0.0\ndescription: demo\n---\nskill")
+	writeTestFile(t, filepath.Join(root, "skills", "demo", "v1.0.0", "skill-card.md"), "card")
 	writeTestFile(t, filepath.Join(root, "skills", "demo", "v1.0.0", "payload.md"), "payload")
-	writeTestFile(t, filepath.Join(root, "plugins", "demo", "v1.0.0", ".codex-plugin", "plugin.json"), `{"name":"demo","version":"1.0.0"}`)
-	writeTestFile(t, filepath.Join(root, "plugins", "demo", "v1.0.0", "README.md"), "plugin")
-	writeTestFile(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), `{"transport":"stdio","command":"npx"}`)
-	writeTestFile(t, filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml"), "agent: demo")
+	writeTestFile(t, filepath.Join(root, "plugins", "demo", "v1.0.0", "apc-plugin.json"), `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo","skills":["skills/demo"]}`)
+	writeTestFile(t, filepath.Join(root, "plugins", "demo", "v1.0.0", "skills", "demo", "SKILL.md"), "skill")
+	writeTestFile(t, filepath.Join(root, "plugins", "demo", "v1.0.0", "skills", "demo", "skill-card.md"), "card")
+	writeTestFile(t, filepath.Join(root, "plugins", "demo", "v1.0.0", "skills", "demo", "README.md"), "plugin")
+	writeTestFile(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo","definition":{"transport":"stdio","command":"npx"}}`)
+	writeTestFile(t, filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml"), "schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n")
 	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skillRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
+	pluginRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
+	mcpRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}
+	agentRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	skillContent, err := client.loadCatalogContent(context.Background(), skillRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pluginContent, err := client.loadCatalogContent(context.Background(), pluginRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpContent, err := client.loadCatalogContent(context.Background(), mcpRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentContent, err := client.loadCatalogContent(context.Background(), agentRef)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	skillDestination := filepath.Join(t.TempDir(), "skill")
-	if err := client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, skillDestination); err != nil {
+	if err := client.DownloadSkill(context.Background(), skillContent.entry, skillDestination); err != nil {
 		t.Fatalf("DownloadSkill() error = %v", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(skillDestination, "payload.md")); err != nil || string(got) != "payload" {
@@ -36,23 +59,23 @@ func TestDarwinLocalClientRetrievesEveryResourceKind(t *testing.T) {
 	}
 
 	pluginDestination := filepath.Join(t.TempDir(), "plugin")
-	if err := client.DownloadPlugin(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}, pluginDestination); err != nil {
+	if err := client.DownloadPlugin(context.Background(), pluginContent.entry, pluginDestination); err != nil {
 		t.Fatalf("DownloadPlugin() error = %v", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(pluginDestination, "README.md")); err != nil || string(got) != "plugin" {
+	if got, err := os.ReadFile(filepath.Join(pluginDestination, "skills", "demo", "README.md")); err != nil || string(got) != "plugin" {
 		t.Fatalf("downloaded Plugin payload = %q, %v", got, err)
 	}
 
-	server, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"})
+	server, err := client.GetMCP(context.Background(), mcpContent.entry)
 	if err != nil || server.Command != "npx" {
 		t.Fatalf("GetMCP() = %+v, %v", server, err)
 	}
 
 	agentDestination := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := client.DownloadAgent(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, agentDestination); err != nil {
+	if err := client.DownloadAgent(context.Background(), agentContent.entry, agentDestination); err != nil {
 		t.Fatalf("DownloadAgent() error = %v", err)
 	}
-	if got, err := os.ReadFile(agentDestination); err != nil || string(got) != "agent: demo" {
+	if got, err := os.ReadFile(agentDestination); err != nil || string(got) != "schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n" {
 		t.Fatalf("downloaded Agent = %q, %v", got, err)
 	}
 	assertNoLinkSnapshotWorkspaceResidue(t, root)
@@ -87,7 +110,7 @@ func TestDarwinSnapshotRejectsFIFOSwapBeforeAnyDataOpen(t *testing.T) {
 	}
 	destination := filepath.Join(t.TempDir(), "skill")
 
-	err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+	err = client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 
 	assertUnsafeNoDownloadResidue(t, err, destination)
 	if dataOpened {
@@ -109,7 +132,7 @@ func TestDarwinSnapshotRejectsHardlinkedSingleFile(t *testing.T) {
 	}
 	destination := filepath.Join(t.TempDir(), "agent.yaml")
 
-	err = client.DownloadAgent(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, destination)
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
 
 	if !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrUnsafeContent", err)

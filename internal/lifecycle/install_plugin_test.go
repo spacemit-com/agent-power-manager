@@ -22,7 +22,7 @@ func TestInstallPluginManifestTargetIsUnchangedWithoutDependencies(t *testing.T)
 		installed: map[domain.AgentID]domain.PowerRef{domain.AgentCodex: ref},
 	})
 
-	item, err := service.installForAgent(context.Background(), domain.AgentCodex, ref)
+	item, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, ref)
 	if err != nil {
 		t.Fatalf("installForAgent() error = %v", err)
 	}
@@ -43,7 +43,7 @@ func TestInstallPluginMarketplaceFirstInstallUsesLocalArtifact(t *testing.T) {
 		pluginRequestSink: &requests,
 	})
 
-	item, err := service.installForAgent(context.Background(), domain.AgentCodex, ref)
+	item, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, ref)
 	if err != nil {
 		t.Fatalf("installForAgent() error = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestInstallPluginMarketplaceRejectsUnmanagedFacts(t *testing.T) {
 				marketplaceFacts: map[string]adapter.MarketplaceFact{"apm-demo": test.marketplaceFact},
 				pluginFacts:      map[string]adapter.PluginFact{"demo": test.pluginFact},
 			})
-			_, err := service.installForAgent(context.Background(), domain.AgentCodex, ref)
+			_, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, ref)
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("installForAgent() error = %v, want %v", err, test.wantErr)
 			}
@@ -126,7 +126,7 @@ func TestInstallPluginMarketplaceClaudeForeignSelectorFailsClosed(t *testing.T) 
 		},
 	})
 
-	_, err := service.installForAgent(context.Background(), domain.AgentClaudeCode, ref)
+	_, err := installForAgentTest(t, service, context.Background(), domain.AgentClaudeCode, ref)
 	if !errors.Is(err, adapter.ErrPluginConflict) {
 		t.Fatalf("installForAgent() error = %v, want ErrPluginConflict", err)
 	}
@@ -152,7 +152,7 @@ func TestInstallPluginMarketplaceSwitchUsesPreviousLookupOnly(t *testing.T) {
 		},
 	})
 
-	item, err := service.installForAgent(context.Background(), domain.AgentCodex, target)
+	item, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
 	if err != nil {
 		t.Fatalf("installForAgent() error = %v", err)
 	}
@@ -188,7 +188,7 @@ func TestInstallPluginMarketplaceStaleManifestClearsSingleEntryThenFirstInstalls
 		pluginMode: domain.PluginDeploymentMarketplace,
 	})
 
-	item, err := service.installForAgent(context.Background(), domain.AgentCodex, target)
+	item, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
 	if err != nil || item.Outcome != cli.InstallOutcomeInstalled {
 		t.Fatalf("installForAgent() = %+v, %v, want fresh install", item, err)
 	}
@@ -216,7 +216,7 @@ func TestInstallPluginMarketplaceDoubleAbsentWrongMarketplaceNamePreservesManife
 		},
 	})
 
-	_, err := service.installForAgent(context.Background(), domain.AgentCodex, target)
+	_, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
 	if !errors.Is(err, transaction.ErrIndeterminateState) {
 		t.Fatalf("installForAgent() error = %v, want ErrIndeterminateState", err)
 	}
@@ -235,7 +235,7 @@ func TestInstallPluginMarketplaceDoubleAbsentWrongPluginNamePreservesManifest(t 
 		},
 	})
 
-	_, err := service.installForAgent(context.Background(), domain.AgentCodex, target)
+	_, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
 	if !errors.Is(err, transaction.ErrIndeterminateState) {
 		t.Fatalf("installForAgent() error = %v, want ErrIndeterminateState", err)
 	}
@@ -283,7 +283,7 @@ func TestInstallPluginMarketplaceFailsClosedOnManagedAnomalies(t *testing.T) {
 				pluginFacts:      map[string]adapter.PluginFact{"demo": test.pluginFact},
 				pluginResources:  resources,
 			})
-			_, err := service.installForAgent(context.Background(), domain.AgentCodex, target)
+			_, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("installForAgent() error = %v, want %v", err, test.wantErr)
 			}
@@ -316,7 +316,7 @@ func TestInstallFilesystemPluginStagesOnlyAtPublishBoundaryForBibitAndHermes(t *
 					pluginFacts:     map[string]adapter.PluginFact{"demo": test.fact},
 					pluginResources: resources,
 				})
-				_, err := service.installForAgent(context.Background(), agent, ref)
+				_, err := installForAgentTest(t, service, context.Background(), agent, ref)
 				if !errors.Is(err, test.wantErr) {
 					t.Fatalf("installForAgent() error = %v, want %v", err, test.wantErr)
 				}
@@ -374,7 +374,7 @@ func TestInstallFilesystemPluginAbsentFactValidatesPhysicalManagedTargetBeforeMu
 				pluginResources: resources,
 			})
 
-			_, err = service.installForAgent(context.Background(), domain.AgentHermes, targetRef)
+			_, err = installForAgentTest(t, service, context.Background(), domain.AgentHermes, targetRef)
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("installForAgent() error = %v, want %v", err, test.wantErr)
 			}
@@ -403,7 +403,7 @@ func TestInstallFilesystemPluginAbsentFactAndPhysicalTargetMissingCleansManifest
 		pluginTargets: map[string]string{"demo": target},
 	})
 
-	item, err := service.installForAgent(context.Background(), domain.AgentHermes, targetRef)
+	item, err := installForAgentTest(t, service, context.Background(), domain.AgentHermes, targetRef)
 	if err != nil || item.Outcome != cli.InstallOutcomeInstalled {
 		t.Fatalf("installForAgent() = %+v, %v; want fresh install after stale manifest cleanup", item, err)
 	}
@@ -431,7 +431,7 @@ func TestInstallPluginPreviousLookupNeverDownloadsOldVersion(t *testing.T) {
 		pluginResources:  resources,
 	})
 
-	_, err := service.installForAgent(context.Background(), domain.AgentCodex, target)
+	_, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
 	if !errors.Is(err, oldMiss) {
 		t.Fatalf("installForAgent() error = %v, want old Lookup miss", err)
 	}
@@ -461,7 +461,7 @@ func TestInstallPluginUnknownCollectionFactRetainsManifestWithoutMutation(t *tes
 		pluginResources:     resources,
 	})
 
-	_, err = service.installForAgent(context.Background(), domain.AgentCodex, target)
+	_, err = installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
 	if !errors.Is(err, unknown) {
 		t.Fatalf("installForAgent() error = %v, want %v", err, unknown)
 	}

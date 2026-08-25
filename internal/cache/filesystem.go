@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"apm/internal/utils/filesystem"
 
 	"github.com/Masterminds/semver/v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // FilesystemCache 将精确版本内容发布到缓存，并物化为公共 staging。
@@ -75,7 +77,11 @@ func isNilSource(source Source) bool {
 }
 
 // PrepareSkill 确保精确版本 Skill 已原子发布到缓存并返回可安装 staging 根目录。
-func (c *FilesystemCache) PrepareSkill(ctx context.Context, ref domain.PowerRef) (string, error) {
+func (c *FilesystemCache) PrepareSkill(ctx context.Context, entry domain.CatalogEntry) (string, error) {
+	if err := entry.Validate(); err != nil {
+		return "", fmt.Errorf("validate Skill catalog entry: %w", err)
+	}
+	ref := entry.Ref
 	if !validExactCacheRef(ref, domain.PowerTypeSkill) {
 		return "", errors.New("exact Skill type and version are required")
 	}
@@ -83,10 +89,10 @@ func (c *FilesystemCache) PrepareSkill(ctx context.Context, ref domain.PowerRef)
 	lock := c.lockFor(final)
 	lock.Lock()
 	defer lock.Unlock()
-	if hit, err := cachedSkill(final); err != nil {
+	if hit, err := cachedSkill(final, ref); err != nil {
 		return "", err
 	} else if !hit {
-		if err := c.downloadSkill(ctx, ref, final); err != nil {
+		if err := c.downloadSkill(ctx, entry, final); err != nil {
 			return "", err
 		}
 	}
@@ -96,7 +102,11 @@ func (c *FilesystemCache) PrepareSkill(ctx context.Context, ref domain.PowerRef)
 }
 
 // PrepareAgent 确保精确版本 Agent 已原子发布到缓存并返回可安装 staging 根目录。
-func (c *FilesystemCache) PrepareAgent(ctx context.Context, ref domain.PowerRef) (string, error) {
+func (c *FilesystemCache) PrepareAgent(ctx context.Context, entry domain.CatalogEntry) (string, error) {
+	if err := entry.Validate(); err != nil {
+		return "", fmt.Errorf("validate Agent catalog entry: %w", err)
+	}
+	ref := entry.Ref
 	if !validExactCacheRef(ref, domain.PowerTypeAgent) {
 		return "", errors.New("exact Agent type and version are required")
 	}
@@ -107,7 +117,7 @@ func (c *FilesystemCache) PrepareAgent(ctx context.Context, ref domain.PowerRef)
 	if hit, err := cachedAgent(final, ref); err != nil {
 		return "", err
 	} else if !hit {
-		if err := c.downloadAgent(ctx, ref, final); err != nil {
+		if err := c.downloadAgent(ctx, entry, final); err != nil {
 			return "", err
 		}
 	}
@@ -139,7 +149,8 @@ func (c *FilesystemCache) lockFor(path string) *sync.Mutex {
 	return lock
 }
 
-func (c *FilesystemCache) downloadSkill(ctx context.Context, ref domain.PowerRef, final string) (resultErr error) {
+func (c *FilesystemCache) downloadSkill(ctx context.Context, entry domain.CatalogEntry, final string) (resultErr error) {
+	ref := entry.Ref
 	temporary, err := c.newTemporaryVersion("skill-" + ref.Name + "-")
 	if err != nil {
 		return err
@@ -149,10 +160,10 @@ func (c *FilesystemCache) downloadSkill(ctx context.Context, ref domain.PowerRef
 			resultErr = errors.Join(resultErr, fmt.Errorf("remove Skill temporary version %q: %w", temporary, err))
 		}
 	}()
-	if err := c.source.DownloadSkill(ctx, ref, temporary); err != nil {
+	if err := c.source.DownloadSkill(ctx, entry, temporary); err != nil {
 		return fmt.Errorf("download Skill %+v: %w", ref, err)
 	}
-	if hit, err := cachedSkill(temporary); err != nil || !hit {
+	if hit, err := cachedSkill(temporary, ref); err != nil || !hit {
 		if err != nil {
 			return err
 		}
@@ -167,7 +178,8 @@ func (c *FilesystemCache) downloadSkill(ctx context.Context, ref domain.PowerRef
 	return nil
 }
 
-func (c *FilesystemCache) downloadAgent(ctx context.Context, ref domain.PowerRef, final string) (resultErr error) {
+func (c *FilesystemCache) downloadAgent(ctx context.Context, entry domain.CatalogEntry, final string) (resultErr error) {
+	ref := entry.Ref
 	temporary, err := c.newTemporaryVersion("agent-" + ref.Name + "-")
 	if err != nil {
 		return err
@@ -178,7 +190,7 @@ func (c *FilesystemCache) downloadAgent(ctx context.Context, ref domain.PowerRef
 		}
 	}()
 	destination := filepath.Join(temporary, "agent.yaml")
-	if err := c.source.DownloadAgent(ctx, ref, destination); err != nil {
+	if err := c.source.DownloadAgent(ctx, entry, destination); err != nil {
 		return fmt.Errorf("download Agent %+v: %w", ref, err)
 	}
 	if hit, err := cachedAgent(temporary, ref); err != nil || !hit {
@@ -207,7 +219,7 @@ func (c *FilesystemCache) newTemporaryVersion(prefix string) (string, error) {
 	return temporary, nil
 }
 
-func cachedSkill(root string) (bool, error) {
+func cachedSkill(root string, ref domain.PowerRef) (bool, error) {
 	info, err := os.Lstat(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -228,7 +240,59 @@ func cachedSkill(root string) (bool, error) {
 	if !marker.Mode().IsRegular() {
 		return false, fmt.Errorf("Skill cache marker %q is not a physical regular file", root)
 	}
+	raw, err := os.ReadFile(filepath.Join(root, "SKILL.md"))
+	if err != nil {
+		return false, fmt.Errorf("read Skill cache marker %q: %w", root, err)
+	}
+	name, version, err := cachedSkillIdentity(raw)
+	if err != nil {
+		return false, fmt.Errorf("validate Skill cache identity %q for %+v: %w", root, ref, err)
+	}
+	if name != ref.Name || version != ref.Version {
+		return false, fmt.Errorf("Skill cache identity %s/%s does not match %+v", name, version, ref)
+	}
 	return true, nil
+}
+
+// cachedSkillIdentity 只读取缓存 Skill 的权威 frontmatter 身份；其余内容语义仍由发布边界负责。
+func cachedSkillIdentity(raw []byte) (string, string, error) {
+	firstEnd := bytes.IndexByte(raw, '\n')
+	if firstEnd < 0 || string(bytes.TrimSpace(raw[:firstEnd])) != "---" {
+		return "", "", errors.New("SKILL.md must start with YAML frontmatter")
+	}
+	rest := raw[firstEnd+1:]
+	closing := -1
+	lineStart := 0
+	for lineStart <= len(rest) {
+		lineLength := bytes.IndexByte(rest[lineStart:], '\n')
+		lineEnd := len(rest)
+		if lineLength >= 0 {
+			lineEnd = lineStart + lineLength
+		}
+		marker := string(bytes.TrimSpace(bytes.TrimSuffix(rest[lineStart:lineEnd], []byte{'\r'})))
+		if marker == "---" || marker == "..." {
+			closing = lineStart
+			break
+		}
+		if lineLength < 0 {
+			break
+		}
+		lineStart = lineEnd + 1
+	}
+	if closing < 0 {
+		return "", "", errors.New("SKILL.md frontmatter is not closed")
+	}
+	var document struct {
+		Name    string `yaml:"name"`
+		Version string `yaml:"version"`
+	}
+	if err := yaml.Unmarshal(rest[:closing], &document); err != nil {
+		return "", "", fmt.Errorf("decode SKILL.md frontmatter: %w", err)
+	}
+	if document.Name == "" || document.Version == "" {
+		return "", "", errors.New("SKILL.md frontmatter requires name and version")
+	}
+	return document.Name, document.Version, nil
 }
 
 // cachedAgent 报告 root 是否为身份与 ref 完全一致的已发布 Agent 版本。

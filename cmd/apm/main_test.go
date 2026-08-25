@@ -35,16 +35,18 @@ func useBundledLocalCloud(t *testing.T) {
 
 type recordingPluginPackageDownloader struct {
 	ctx         context.Context
+	entry       domain.CatalogEntry
 	ref         domain.PowerRef
 	destination string
 	err         error
 	calls       int
 }
 
-func (downloader *recordingPluginPackageDownloader) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
+func (downloader *recordingPluginPackageDownloader) DownloadPlugin(ctx context.Context, entry domain.CatalogEntry, destination string) error {
 	downloader.calls++
 	downloader.ctx = ctx
-	downloader.ref = ref
+	downloader.entry = entry.Clone()
+	downloader.ref = entry.Ref
 	downloader.destination = destination
 	return downloader.err
 }
@@ -54,7 +56,7 @@ func TestNewPluginResourcesRejectsNilDownloaderAtConstruction(t *testing.T) {
 	tests := []struct {
 		name   string
 		source interface {
-			DownloadPlugin(context.Context, domain.PowerRef, string) error
+			DownloadPlugin(context.Context, domain.CatalogEntry, string) error
 		}
 	}{
 		{name: "nil"},
@@ -133,6 +135,7 @@ func TestLifecycleCompositionOpensOneCloudClientPerInvocation(t *testing.T) {
 type recordingCatalogManager struct {
 	snapshot      catalog.Snapshot
 	snapshotCalls int
+	lockedCalls   int
 }
 
 type typedNilCatalogManager struct{}
@@ -155,6 +158,7 @@ func (manager *recordingCatalogManager) Snapshot(context.Context) (catalog.Snaps
 }
 
 func (manager *recordingCatalogManager) SnapshotLocked(context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	manager.lockedCalls++
 	return manager.snapshot, catalog.SyncStatus{}, nil
 }
 
@@ -162,6 +166,12 @@ func TestCatalogLifecycleCompositionSharesOneLazyManager(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("APM_HOME", root)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	t.Setenv("CODEX_HOME", "")
+	useBundledLocalCloud(t)
+	changeToRepositoryRoot(t)
+	if err := os.Mkdir(filepath.Join(root, ".codex"), 0o755); err != nil {
+		t.Fatalf("create Codex root: %v", err)
+	}
 	manager := &recordingCatalogManager{snapshot: mainTestCatalogSnapshot(t)}
 	managerFactoryCalls := 0
 	composition := newCatalogLifecycleCompositionWithManagerFactory(func() (lifecycle.CatalogManager, error) {
@@ -177,6 +187,10 @@ func TestCatalogLifecycleCompositionSharesOneLazyManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose list lifecycle: %v", err)
 	}
+	install, err := composition.newInstallLifecycle()
+	if err != nil {
+		t.Fatalf("compose install lifecycle: %v", err)
+	}
 	if managerFactoryCalls != 0 {
 		t.Fatalf("manager factory calls after construction = %d, want 0", managerFactoryCalls)
 	}
@@ -186,8 +200,11 @@ func TestCatalogLifecycleCompositionSharesOneLazyManager(t *testing.T) {
 	if _, err := list.List(context.Background(), cli.Flags{Type: "skill"}); err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if managerFactoryCalls != 1 || manager.snapshotCalls != 2 {
-		t.Fatalf("manager factory/Snapshot calls = %d/%d, want 1/2", managerFactoryCalls, manager.snapshotCalls)
+	if _, err := install.Install(context.Background(), cli.Flags{Agent: "codex", Name: "missing-power"}); err == nil {
+		t.Fatal("Install(missing-power) error = nil, want catalog resolution failure")
+	}
+	if managerFactoryCalls != 1 || manager.snapshotCalls != 2 || manager.lockedCalls != 1 {
+		t.Fatalf("manager factory/Snapshot/SnapshotLocked calls = %d/%d/%d, want 1/2/1", managerFactoryCalls, manager.snapshotCalls, manager.lockedCalls)
 	}
 }
 
@@ -343,16 +360,19 @@ func (*recordingCloudClient) List(context.Context) ([]domain.PowerRef, error) { 
 func (*recordingCloudClient) Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error) {
 	return domain.PowerRef{}, nil
 }
-func (*recordingCloudClient) DownloadSkill(context.Context, domain.PowerRef, string) error {
+func (*recordingCloudClient) DownloadSkill(context.Context, domain.CatalogEntry, string) error {
 	return nil
 }
-func (*recordingCloudClient) DownloadPlugin(context.Context, domain.PowerRef, string) error {
+func (*recordingCloudClient) DownloadPlugin(context.Context, domain.CatalogEntry, string) error {
 	return nil
 }
-func (*recordingCloudClient) GetMCP(context.Context, domain.PowerRef) (domain.MCPServer, error) {
+func (*recordingCloudClient) GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error) {
 	return domain.MCPServer{}, nil
 }
-func (*recordingCloudClient) DownloadAgent(context.Context, domain.PowerRef, string) error {
+func (*recordingCloudClient) GetMCPForUninstall(context.Context, domain.PowerRef) (domain.MCPServer, error) {
+	return domain.MCPServer{}, nil
+}
+func (*recordingCloudClient) DownloadAgent(context.Context, domain.CatalogEntry, string) error {
 	return nil
 }
 func (*recordingCloudClient) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
@@ -577,8 +597,15 @@ func TestNewListLifecycleListsInstalledManifest(t *testing.T) {
 
 func TestNewInstallLifecycleInstallsBundledSkillAndThenReturnsUnchanged(t *testing.T) {
 	home := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cacheHome := t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("APM_HOME", home)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")
@@ -670,8 +697,15 @@ func TestNewInstallLifecycleRejectsAllWhenNoAgentsAreInstalled(t *testing.T) {
 
 func TestNewUninstallLifecycleRemovesBundledSkillAndThenReportsNotInstalled(t *testing.T) {
 	home := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cacheHome := t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("APM_HOME", home)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HERMES_HOME", "")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"apm/internal/adapter"
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/transaction"
@@ -13,8 +14,9 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-// installMCP 根据 manifest 与目标 Agent CLI 的联合状态决定是否读取 Cloud 定义并启动事务。
-func (s *InstallService) installMCP(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
+// installMCP 仅用本次安装的同一目录快照取得目标与旧版本权威条目，再读取内容并启动事务。
+func (s *InstallService) installMCP(ctx context.Context, agent domain.AgentID, entry domain.CatalogEntry, snapshot catalog.Snapshot) (cli.InstallItem, error) {
+	ref := entry.Ref
 	mcpAdapter, err := s.registry.ResolveMCP(agent)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("resolve MCP install adapter for agent %q: %w", agent, err)
@@ -40,18 +42,22 @@ func (s *InstallService) installMCP(ctx context.Context, agent domain.AgentID, r
 		request.Previous = &previousCopy
 	}
 	if presence == adapter.MCPPresent && installed && previous.Version != ref.Version {
-		previousServer, err := s.cloud.GetMCP(ctx, previous)
+		previousEntry, err := snapshot.Metadata(previous)
+		if err != nil {
+			return cli.InstallItem{}, fmt.Errorf("get previous MCP catalog entry %+v: %w", previous, err)
+		}
+		previousServer, err := s.cloud.GetMCP(ctx, previousEntry)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("get previous MCP %+v from Cloud: %w", previous, err)
 		}
-		server, err := s.cloud.GetMCP(ctx, ref)
+		server, err := s.cloud.GetMCP(ctx, entry)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("get target MCP %+v from Cloud: %w", ref, err)
 		}
 		request.PreviousServer = mcpServerPointer(previousServer)
 		request.Server = mcpServerPointer(server)
 	} else if presence == adapter.MCPAbsent && !installed {
-		server, err := s.cloud.GetMCP(ctx, ref)
+		server, err := s.cloud.GetMCP(ctx, entry)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("get MCP %+v from Cloud: %w", ref, err)
 		}

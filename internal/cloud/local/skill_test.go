@@ -20,14 +20,14 @@ func TestLocalClientDownloadSkillValidatesRefAndNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(t.TempDir(), "download")
-	if err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill}, destination); !errors.Is(err, cloud.ErrNotFound) {
+	if err = client.DownloadSkill(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill}), destination); !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("empty version error = %v, want ErrNotFound", err)
 	}
 	for _, ref := range []domain.PowerRef{
 		{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
 		{Name: "missing", Type: domain.PowerTypeSkill, Version: "v1.0.0"},
 	} {
-		if err = client.DownloadSkill(context.Background(), ref, destination); !errors.Is(err, cloud.ErrNotFound) {
+		if err = client.DownloadSkill(context.Background(), catalogEntryForLocalTest(ref), destination); !errors.Is(err, cloud.ErrNotFound) {
 			t.Fatalf("DownloadSkill(%#v) error = %v, want ErrNotFound", ref, err)
 		}
 	}
@@ -47,7 +47,7 @@ func TestLocalClientDownloadSkillMapsInvalidSourceLayoutToUnsafeContent(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "download"))
+	err = client.DownloadSkill(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}), filepath.Join(t.TempDir(), "download"))
 	if !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("DownloadSkill() error = %v, want ErrUnsafeContent", err)
 	}
@@ -59,14 +59,15 @@ func TestLocalClientDownloadSkillRejectsMissingSkillCard(t *testing.T) {
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0o644); err != nil {
+	skill := []byte("---\nname: demo\nversion: \"v1.0.0\"\ndescription: demo skill\n---\nskill\n")
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), skill, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	client, err := local.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "download"))
+	err = client.DownloadSkill(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}), filepath.Join(t.TempDir(), "download"))
 	if !errors.Is(err, cloud.ErrUnsafeContent) || errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("DownloadSkill() error = %v, want only ErrUnsafeContent", err)
 	}
@@ -91,7 +92,7 @@ func TestLocalClientDownloadSkillMapsSymlinkMarkerToUnsafeContent(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	err = client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "download"))
+	err = client.DownloadSkill(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}), filepath.Join(t.TempDir(), "download"))
 	if !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("DownloadSkill() error = %v, want ErrUnsafeContent", err)
 	}
@@ -105,7 +106,7 @@ func TestLocalDownloadSkillWritesDestinationWithoutGlobalCache(t *testing.T) {
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: demo\nversion: v1.0.0\ndescription: demo\n---\nskill\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(source, "skill-card.md"), []byte("card"), 0o600); err != nil {
@@ -116,8 +117,9 @@ func TestLocalDownloadSkillWritesDestinationWithoutGlobalCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
+	entry := catalogEntryFromLocalProvider(t, client, ref)
 	destination := filepath.Join(t.TempDir(), "download")
-	if err = client.DownloadSkill(context.Background(), ref, destination); err != nil {
+	if err = client.DownloadSkill(context.Background(), entry, destination); err != nil {
 		t.Fatal(err)
 	}
 	target := destination
@@ -132,7 +134,7 @@ func TestLocalDownloadSkillWritesDestinationWithoutGlobalCache(t *testing.T) {
 	if err = os.RemoveAll(source); err != nil {
 		t.Fatal(err)
 	}
-	if err = client.DownloadSkill(context.Background(), ref, filepath.Join(t.TempDir(), "second")); !errors.Is(err, cloud.ErrNotFound) {
+	if err = client.DownloadSkill(context.Background(), entry, filepath.Join(t.TempDir(), "second")); !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("second DownloadSkill() error = %v, want ErrNotFound", err)
 	}
 }
@@ -143,7 +145,10 @@ func TestLocalDownloadSkillRejectsNonEmptyDestination(t *testing.T) {
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: demo\nversion: v1.0.0\ndescription: demo\n---\nskill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "skill-card.md"), []byte("card"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	client, err := local.New(root)
@@ -157,7 +162,8 @@ func TestLocalDownloadSkillRejectsNonEmptyDestination(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(destination, "old"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.DownloadSkill(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, destination); err == nil {
+	entry := catalogEntryFromLocalProvider(t, client, domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"})
+	if err := client.DownloadSkill(context.Background(), entry, destination); err == nil {
 		t.Fatal("DownloadSkill() error = nil, want non-empty destination error")
 	}
 	if got, err := os.ReadFile(filepath.Join(destination, "old")); err != nil || string(got) != "old" {

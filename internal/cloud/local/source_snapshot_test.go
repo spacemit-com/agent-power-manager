@@ -34,7 +34,7 @@ func TestDownloadSkillRequiresMarkerInDescriptorSnapshot(t *testing.T) {
 			}
 			destination := filepath.Join(t.TempDir(), "download")
 
-			err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+			err = client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 
 			assertUnsafeNoDownloadResidue(t, err, destination)
 		})
@@ -65,7 +65,7 @@ func TestDownloadPluginRequiresMarkerInDescriptorSnapshot(t *testing.T) {
 			}
 			destination := filepath.Join(t.TempDir(), "download")
 
-			err = client.DownloadPlugin(context.Background(), ref, destination)
+			err = client.DownloadPlugin(context.Background(), catalogEntryForTest(ref), destination)
 
 			assertUnsafeNoDownloadResidue(t, err, destination)
 		})
@@ -80,10 +80,15 @@ func TestGetMCPCancellationAfterCloneReturnsCanceled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}
+	content, err := client.loadCatalogContent(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	client.afterMCPClone = cancel
 
-	_, err = client.GetMCP(ctx, domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"})
+	_, err = client.GetMCP(ctx, content.entry)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("GetMCP() error = %v, want context.Canceled", err)

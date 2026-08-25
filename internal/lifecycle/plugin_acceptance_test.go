@@ -15,6 +15,7 @@ import (
 
 	"apm/internal/adapter"
 	"apm/internal/cache"
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/cloud/local"
 	"apm/internal/config"
@@ -212,6 +213,7 @@ type pluginAcceptanceHarness struct {
 	manifests    *acceptanceManifestRepository
 	registry     *adapter.Registry
 	plugins      pluginresource.Manager
+	catalog      catalog.Snapshot
 	install      *InstallService
 	uninstall    *UninstallService
 	fix          *FixService
@@ -346,7 +348,12 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	if err != nil {
 		t.Fatal(err)
 	}
-	installer, err := NewInstall(locker, transactions, cloudClient, powerCache, plugins, registry, manifests, version.NewSelector())
+	catalogs := catalogManagerFromSource(t, cloudClient)
+	catalogSnapshot, _, err := catalogs.SnapshotLocked(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer, err := NewInstall(locker, transactions, catalogs, cloudClient, powerCache, plugins, registry, manifests, version.NewSelector())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +369,7 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 		t: t, root: root, fakeBin: fakeBin, calls: calls, interrupt: interrupt, unreadable: unreadable,
 		barrierKey: barrierKey, barrierEvent: barrierEvent, barrierGate: barrierGate, failBefore: failBefore,
 		cacheHome: cacheHome, agent: agent, agentHome: agentHome, repository: repository, manifests: manifests, registry: registry,
-		plugins: plugins, install: installer, uninstall: uninstaller, fix: fixer,
+		plugins: plugins, catalog: catalogSnapshot, install: installer, uninstall: uninstaller, fix: fixer,
 	}
 }
 
@@ -395,6 +402,15 @@ func writeAcceptancePluginPackage(t *testing.T, root, logical, release string) {
 
 func (h *pluginAcceptanceHarness) ref(logical, release string) domain.PowerRef {
 	return domain.PowerRef{Name: logical, Type: domain.PowerTypePlugin, Version: release}
+}
+
+func (h *pluginAcceptanceHarness) entry(logical, release string) domain.CatalogEntry {
+	h.t.Helper()
+	entry, err := h.catalog.Resolve(h.ref(logical, release))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return entry
 }
 
 func (h *pluginAcceptanceHarness) installRef(logical, release string) (cli.InstallResult, error) {
@@ -1023,7 +1039,7 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 	} {
 		t.Run("no manifest "+test.name+" remains unmanaged", func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-			artifact, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
+			artifact, err := h.plugins.Ensure(context.Background(), h.entry("demo-plugin", "v0.0.1"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1147,7 +1163,7 @@ func TestFixPluginAcceptanceFirstInstallJournalPhases(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-			artifact, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
+			artifact, err := h.plugins.Ensure(context.Background(), h.entry("demo-plugin", "v0.0.1"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1254,11 +1270,11 @@ func TestFixPluginAcceptanceVersionSwitchJournalPhases(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-			old, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
+			old, err := h.plugins.Ensure(context.Background(), h.entry("demo-plugin", "v0.0.1"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			target, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.1.0"))
+			target, err := h.plugins.Ensure(context.Background(), h.entry("demo-plugin", "v0.1.0"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1632,7 +1648,7 @@ func TestFixPluginAcceptanceRecoversEveryMarketplaceCLIMutation(t *testing.T) {
 
 func TestFixPluginAcceptanceUnknownFactsRetainJournalUntilReadable(t *testing.T) {
 	h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-	artifact, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
+	artifact, err := h.plugins.Ensure(context.Background(), h.entry("demo-plugin", "v0.0.1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1674,7 +1690,7 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-			artifact, err := h.plugins.Ensure(context.Background(), h.ref("demo-plugin", "v0.0.1"))
+			artifact, err := h.plugins.Ensure(context.Background(), h.entry("demo-plugin", "v0.0.1"))
 			if err != nil {
 				t.Fatal(err)
 			}

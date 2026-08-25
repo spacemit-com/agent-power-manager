@@ -61,7 +61,7 @@ func TestDownloadSkillRejectsLinuxSpecialNodes(t *testing.T) {
 			}
 			destination := filepath.Join(t.TempDir(), "download")
 
-			err = client.DownloadSkill(context.Background(), testSkillRef, destination)
+			err = client.DownloadSkill(context.Background(), catalogEntryForTest(testSkillRef), destination)
 
 			assertUnsafeNoDownloadResidue(t, err, destination)
 			if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {

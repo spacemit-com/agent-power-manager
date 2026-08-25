@@ -11,8 +11,9 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-// installSkill 先核对本地清单，再准备 staging 并交由 Skill 事务完成发布和结果分类。
-func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
+// installSkill 先核对本地清单，再用权威目录条目准备 staging 并交由事务发布。
+func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID, entry domain.CatalogEntry) (cli.InstallItem, error) {
+	ref := entry.Ref
 	resolvedAdapter, err := s.registry.ResolveSkill(agent)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("resolve install adapter for agent %q: %w", agent, err)
@@ -26,7 +27,7 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 		return cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeUnchanged}, nil
 	}
 
-	staging, err := s.cache.PrepareSkill(ctx, ref)
+	staging, err := s.cache.PrepareSkill(ctx, entry)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("prepare install power %+v: %w", ref, err)
 	}

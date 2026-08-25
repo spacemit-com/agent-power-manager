@@ -22,7 +22,7 @@ func TestDownloadAgentPreservesRawBytesAndPublishesMode(t *testing.T) {
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
 	destination := filepath.Join(trustedTestDir(t), "agent.yaml")
-	if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); err != nil {
+	if err := client.DownloadAgent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), destination); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(destination)
@@ -54,7 +54,7 @@ func TestDownloadAgentPublishesBelowTestingTempDirWithMissingHome(t *testing.T) 
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	destination := filepath.Join(root, "agent.yaml")
 
-	if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); err != nil {
+	if err := client.DownloadAgent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), destination); err != nil {
 		t.Fatalf("DownloadAgent() below t.TempDir with nonexistent HOME error = %v", err)
 	}
 	if got, err := os.ReadFile(destination); err != nil || !bytes.Equal(got, contents) {
@@ -80,7 +80,7 @@ func TestDownloadAgentRejectsSymlinkedAncestorWithoutRequest(t *testing.T) {
 	}
 	destination := filepath.Join(aliasRoot, "tmp", "agent.yaml")
 
-	if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if err := client.DownloadAgent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), destination); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("DownloadAgent() error = %v, want symlink ancestor ErrUnsafeContent", err)
 	}
 	if got := requests.Load(); got != 0 {
@@ -113,7 +113,7 @@ func TestDownloadAgentKeepsPinnedParentAfterSameProcessRename(t *testing.T) {
 	destination := filepath.Join(parent, "agent.yaml")
 	done := make(chan error, 1)
 	go func() {
-		done <- client.DownloadAgent(context.Background(), remoteAgentRef, destination)
+		done <- client.DownloadAgent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), destination)
 	}()
 	<-contentStarted
 	if err := os.Rename(parent, originalParent); err != nil {
@@ -165,7 +165,7 @@ func TestDownloadAgentChmodsStagedDescriptorBeforeNoReplacePublication(t *testin
 		}
 	}
 
-	err := client.DownloadAgent(context.Background(), remoteAgentRef, destination)
+	err := client.DownloadAgent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), destination)
 	if !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("DownloadAgent() error = %v, want no-replace ErrUnsafeContent", err)
 	}
@@ -203,7 +203,7 @@ func TestDownloadAgentDetectsStagedIdentityCorruptionWithoutDeletingReplacement(
 		}
 	}
 
-	err := client.DownloadAgent(context.Background(), remoteAgentRef, destination)
+	err := client.DownloadAgent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), destination)
 	if !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("DownloadAgent() error = %v, want substituted-stage ErrUnsafeContent", err)
 	}
@@ -229,7 +229,9 @@ func TestDownloadAgentRejectsMD5MismatchWithoutDestination(t *testing.T) {
 		writeExactMetadata(t, w, remoteAgentRef, contents, map[string]any{"content_md5": md5Hex([]byte("different"))})
 	})
 	destination := filepath.Join(trustedTestDir(t), "agent.yaml")
-	err := client.DownloadAgent(context.Background(), remoteAgentRef, destination)
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	entry.ContentMD5 = md5Hex([]byte("different"))
+	err := client.DownloadAgent(context.Background(), entry, destination)
 	if !errors.Is(err, cloud.ErrIntegrity) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrIntegrity", err)
 	}
@@ -253,6 +255,7 @@ func TestDownloadAgentRejectsUnsafeOrExistingDestinationWithoutRequest(t *testin
 	client := newContentClient(t, remoteAgentRef, nil, func(http.ResponseWriter, *http.Request) {
 		requests.Add(1)
 	})
+	entry := validRemoteCatalogEntry(remoteAgentRef, []byte("fixture"))
 	tests := []string{
 		"relative.yaml",
 		parent + string(filepath.Separator) + "." + string(filepath.Separator) + "agent.yaml",
@@ -260,7 +263,7 @@ func TestDownloadAgentRejectsUnsafeOrExistingDestinationWithoutRequest(t *testin
 		existing,
 	}
 	for _, destination := range tests {
-		if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); !errors.Is(err, cloud.ErrUnsafeContent) {
+		if err := client.DownloadAgent(context.Background(), entry, destination); !errors.Is(err, cloud.ErrUnsafeContent) {
 			t.Fatalf("DownloadAgent(%q) error = %v, want ErrUnsafeContent", destination, err)
 		}
 	}
@@ -277,6 +280,7 @@ func TestDownloadAgentRejectsWritableDirectoryTrustViolationsWithoutRequest(t *t
 	client := newContentClient(t, remoteAgentRef, nil, func(http.ResponseWriter, *http.Request) {
 		requests.Add(1)
 	})
+	entry := validRemoteCatalogEntry(remoteAgentRef, []byte("fixture"))
 	tests := []struct {
 		name    string
 		prepare func(*testing.T) string
@@ -310,7 +314,7 @@ func TestDownloadAgentRejectsWritableDirectoryTrustViolationsWithoutRequest(t *t
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			destination := filepath.Join(tt.prepare(t), "agent.yaml")
-			if err := client.DownloadAgent(context.Background(), remoteAgentRef, destination); !errors.Is(err, cloud.ErrUnsafeContent) {
+			if err := client.DownloadAgent(context.Background(), entry, destination); !errors.Is(err, cloud.ErrUnsafeContent) {
 				t.Fatalf("DownloadAgent() error = %v, want directory trust ErrUnsafeContent", err)
 			}
 		})
@@ -337,7 +341,7 @@ func TestDownloadAgentRejectsCrossOriginContentRedirect(t *testing.T) {
 	defer source.Close()
 	client := newRemoteTestClient(t, source.URL)
 	destination := filepath.Join(trustedTestDir(t), "agent.yaml")
-	err := client.DownloadAgent(context.Background(), remoteAgentRef, destination)
+	err := client.DownloadAgent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), destination)
 	if !errors.Is(err, cloud.ErrInvalidResponse) {
 		t.Fatalf("DownloadAgent() error = %v, want redirect ErrInvalidResponse", err)
 	}
@@ -354,7 +358,7 @@ func TestDownloadAgentRejectsWrongReferenceBeforeRequest(t *testing.T) {
 	client := newContentClient(t, remoteAgentRef, nil, func(http.ResponseWriter, *http.Request) {
 		requests.Add(1)
 	})
-	err := client.DownloadAgent(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo-agent", Version: "v1.2.3"}, filepath.Join(trustedTestDir(t), "agent.yaml"))
+	err := client.DownloadAgent(context.Background(), validRemoteCatalogEntry(domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo-agent", Version: "v1.2.3"}, []byte("fixture")), filepath.Join(trustedTestDir(t), "agent.yaml"))
 	if !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrNotFound", err)
 	}

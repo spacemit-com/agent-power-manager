@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"apm/internal/cloud"
@@ -44,8 +45,11 @@ func TestSkillAcceptsExactFileAndTreeSizeLimits(t *testing.T) {
 
 func TestAgentAndMCPAcceptExactTwentyMiBLimit(t *testing.T) {
 	root := t.TempDir()
-	agentPath := filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml")
-	writeRepeatedTextFile(t, agentPath, maxSingleSize)
+	agentRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	agentPath := filepath.Join(root, "agents", agentRef.Name, agentRef.Version, "agent.yaml")
+	agentPrefix := "schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n#"
+	agentContents := agentPrefix + strings.Repeat("x", int(maxSingleSize)-len(agentPrefix)-1) + "\n"
+	writeTestFile(t, agentPath, agentContents)
 	mcpPath := filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json")
 	validJSON := []byte(`{"schema_version":1,"name":"demo","version":"v1.0.0","description":"Demo MCP server","definition":{"transport":"stdio","command":"npx"}}`)
 	mcpContents := append(validJSON, bytes.Repeat([]byte(" "), int(maxSingleSize)-len(validJSON))...)
@@ -55,11 +59,20 @@ func TestAgentAndMCPAcceptExactTwentyMiBLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}); err != nil {
+	mcpRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}
+	mcpContent, err := client.loadCatalogContent(context.Background(), mcpRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentContent, err := client.loadCatalogContent(context.Background(), agentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GetMCP(context.Background(), mcpContent.entry); err != nil {
 		t.Fatalf("GetMCP(exact limit) error = %v", err)
 	}
 	destination := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := client.DownloadAgent(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, destination); err != nil {
+	if err := client.DownloadAgent(context.Background(), agentContent.entry, destination); err != nil {
 		t.Fatalf("DownloadAgent(exact limit) error = %v", err)
 	}
 	if info, err := os.Stat(destination); err != nil || info.Size() != maxSingleSize {
@@ -81,7 +94,7 @@ func TestDownloadPluginRejectsSharedTreeFileLimit(t *testing.T) {
 	}
 	destination := filepath.Join(t.TempDir(), "plugin")
 
-	err = client.DownloadPlugin(context.Background(), ref, destination)
+	err = client.DownloadPlugin(context.Background(), catalogEntryForTest(ref), destination)
 
 	assertUnsafeNoDownloadResidue(t, err, destination)
 }
@@ -120,14 +133,14 @@ func TestMCPAndAgentRejectHardlinkBinaryAndArchiveContent(t *testing.T) {
 					t.Fatal(err)
 				}
 				if resource == "mcp" {
-					_, err = client.GetMCP(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"})
+					_, err = client.GetMCP(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}))
 					if !errors.Is(err, cloud.ErrUnsafeContent) {
 						t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
 					}
 					return
 				}
 				destination := filepath.Join(t.TempDir(), "agent.yaml")
-				err = client.DownloadAgent(context.Background(), domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, destination)
+				err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
 				assertUnsafeNoDownloadResidue(t, err, destination)
 			})
 		}

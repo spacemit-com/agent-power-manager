@@ -8,13 +8,15 @@ import (
 )
 
 // Source 定义 Cache 获取精确版本 Skill 和 Agent 到私有目标的最小边界。
+// CatalogEntry 已由目录快照验证且是内容元数据的唯一权威，调用链不得按 Ref 重建或回源查询 metadata。
 type Source interface {
-	DownloadSkill(context.Context, domain.PowerRef, string) error
-	DownloadAgent(context.Context, domain.PowerRef, string) error
+	DownloadSkill(context.Context, domain.CatalogEntry, string) error
+	DownloadAgent(context.Context, domain.CatalogEntry, string) error
 }
 
-// PowerCache 定义准备可安装 Skill 与 Agent staging 的边界；缓存命中及下载发布均由实现管理。
+// PowerCache 定义准备可安装 Skill 与 Agent staging 的边界；缓存键只使用 entry.Ref，
+// miss 必须把同一权威 CatalogEntry 完整透传给 Source，禁止重建 metadata。
 type PowerCache interface {
-	PrepareSkill(context.Context, domain.PowerRef) (stagingRoot string, err error)
-	PrepareAgent(context.Context, domain.PowerRef) (stagingRoot string, err error)
+	PrepareSkill(context.Context, domain.CatalogEntry) (stagingRoot string, err error)
+	PrepareAgent(context.Context, domain.CatalogEntry) (stagingRoot string, err error)
 }

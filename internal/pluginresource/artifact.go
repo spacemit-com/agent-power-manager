@@ -9,14 +9,16 @@ import (
 	"apm/internal/domain"
 )
 
-// Downloader 下载指定版本的完整共享 Plugin artifact。
+// Downloader 下载指定版本的完整共享 Plugin artifact；CatalogEntry 是权威 metadata，
+// 调用链必须完整透传，禁止按 Ref 重建或二次回源查询。
 type Downloader interface {
-	DownloadPlugin(context.Context, domain.PowerRef, string) error
+	DownloadPlugin(context.Context, domain.CatalogEntry, string) error
 }
 
-// Manager 管理本地共享 Plugin artifact；同一 Plugin 版本对所有 Agent 只有一份不可变制品。
+// Manager 管理本地共享 Plugin artifact；Ensure 以权威 CatalogEntry 获取目标内容，
+// Lookup 与 StageFilesystem 只操作已经发布的精确 Ref 制品。
 type Manager interface {
-	Ensure(context.Context, domain.PowerRef) (Artifact, error)
+	Ensure(context.Context, domain.CatalogEntry) (Artifact, error)
 	Lookup(domain.PowerRef) (Artifact, error)
 	StageFilesystem(domain.PowerRef) (string, error)
 }

@@ -160,14 +160,14 @@ func TestLocalClientRejectsNonCanonicalPowerNames(t *testing.T) {
 					return resolveErr
 				}},
 				{name: "DownloadSkill", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: name, Version: "v1.0.0"}, run: func() error {
-					return client.DownloadSkill(context.Background(), domain.PowerRef{Type: domain.PowerTypeSkill, Name: name, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "skill"))
+					return client.DownloadSkill(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Type: domain.PowerTypeSkill, Name: name, Version: "v1.0.0"}), filepath.Join(t.TempDir(), "skill"))
 				}},
 				{name: "GetMCP", ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: name, Version: "v1.0.0"}, run: func() error {
-					_, getErr := client.GetMCP(context.Background(), domain.PowerRef{Type: domain.PowerTypeMCP, Name: name, Version: "v1.0.0"})
+					_, getErr := client.GetMCP(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Type: domain.PowerTypeMCP, Name: name, Version: "v1.0.0"}))
 					return getErr
 				}},
 				{name: "DownloadAgent", ref: domain.PowerRef{Type: domain.PowerTypeAgent, Name: name, Version: "v1.0.0"}, run: func() error {
-					return client.DownloadAgent(context.Background(), domain.PowerRef{Type: domain.PowerTypeAgent, Name: name, Version: "v1.0.0"}, filepath.Join(t.TempDir(), "agent.yaml"))
+					return client.DownloadAgent(context.Background(), catalogEntryForLocalTest(domain.PowerRef{Type: domain.PowerTypeAgent, Name: name, Version: "v1.0.0"}), filepath.Join(t.TempDir(), "agent.yaml"))
 				}},
 			}
 			for _, operation := range operations {

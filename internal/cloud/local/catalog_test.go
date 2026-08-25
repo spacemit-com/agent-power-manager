@@ -48,6 +48,31 @@ type localCatalogFixture struct {
 	raw         []byte
 }
 
+func catalogEntryFromLocalProvider(t *testing.T, client *local.Client, ref domain.PowerRef) domain.CatalogEntry {
+	t.Helper()
+	destination := filepath.Join(t.TempDir(), "catalog.json")
+	if err := client.DownloadCatalog(context.Background(), destination); err != nil {
+		t.Fatalf("DownloadCatalog() for entry %+v: %v", ref, err)
+	}
+	raw, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := snapshot.Resolve(ref)
+	if err != nil {
+		t.Fatalf("Resolve(%+v): %v", ref, err)
+	}
+	return entry
+}
+
+func catalogEntryForLocalTest(ref domain.PowerRef) domain.CatalogEntry {
+	return domain.CatalogEntry{Ref: ref}
+}
+
 func TestLocalCatalogIsDeterministicAndUsesAuthoritativeContent(t *testing.T) {
 	firstRoot, firstFixtures := writeLocalCatalogFixtureTree(t, false)
 	secondRoot, _ := writeLocalCatalogFixtureTree(t, true)
@@ -120,6 +145,34 @@ func TestLocalCatalogIsDeterministicAndUsesAuthoritativeContent(t *testing.T) {
 
 	assertLocalCatalogMCPUsesCompleteJCS(t, snapshot)
 	assertLocalCatalogAgentUsesRawYAML(t, snapshot, firstFixtures)
+}
+
+func TestLocalContentRejectsCatalogEntryMetadataDrift(t *testing.T) {
+	root, fixtures := writeLocalCatalogFixtureTree(t, false)
+	client, err := local.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range fixtures {
+		t.Run(string(fixture.ref.Type), func(t *testing.T) {
+			entry := catalogEntryFromLocalProvider(t, client, fixture.ref)
+			entry.Description += " drift"
+			var err error
+			switch entry.Ref.Type {
+			case domain.PowerTypeSkill:
+				err = client.DownloadSkill(context.Background(), entry, filepath.Join(t.TempDir(), "skill"))
+			case domain.PowerTypePlugin:
+				err = client.DownloadPlugin(context.Background(), entry, filepath.Join(t.TempDir(), "plugin"))
+			case domain.PowerTypeMCP:
+				_, err = client.GetMCP(context.Background(), entry)
+			case domain.PowerTypeAgent:
+				err = client.DownloadAgent(context.Background(), entry, filepath.Join(t.TempDir(), "agent.yaml"))
+			}
+			if !errors.Is(err, cloud.ErrIntegrity) {
+				t.Fatalf("content operation with drifted entry error = %v, want ErrIntegrity", err)
+			}
+		})
+	}
 }
 
 func TestLocalCatalogDownloadRequiresCallerOwnedDestination(t *testing.T) {

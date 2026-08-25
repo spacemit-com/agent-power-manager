@@ -24,7 +24,7 @@ func TestInstallFirstInstallOrdersDependenciesAndReturnsInstalled(t *testing.T) 
 		t.Fatal(err)
 	}
 	wantEvents := []string{
-		"acquire", "recover", "refresh", "cloud:resolve",
+		"acquire", "recover", "refresh", "catalog:snapshot-locked",
 		"resolve:codex", "config:find:codex", "cache:prepare-skill:codex",
 		"transaction:install:codex", "release",
 	}
@@ -49,7 +49,7 @@ func TestInstallPreparesCacheBeforeTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantCalls := []string{
-		"acquire", "recover", "refresh", "cloud:resolve", "resolve:codex", "config:find:codex",
+		"acquire", "recover", "refresh", "catalog:snapshot-locked", "resolve:codex", "config:find:codex",
 		"cache:prepare-skill:codex", "transaction:install:codex", "release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
@@ -78,7 +78,7 @@ func TestInstallSameVersionReturnsUnchangedWithoutFetchOrTransaction(t *testing.
 		t.Fatal(err)
 	}
 	wantCalls := []string{
-		"acquire", "recover", "refresh", "cloud:resolve", "resolve:codex", "config:find:codex", "release",
+		"acquire", "recover", "refresh", "catalog:snapshot-locked", "resolve:codex", "config:find:codex", "release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want %v", calls, wantCalls)

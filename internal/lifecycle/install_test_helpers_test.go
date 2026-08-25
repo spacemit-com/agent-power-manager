@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"apm/internal/adapter"
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/domain"
 	"apm/internal/lock"
@@ -18,6 +19,8 @@ type installFixture struct {
 	recovery       transaction.RecoveryResult
 	snapshot       domain.AgentSnapshot
 	cloudRefs      []domain.PowerRef
+	catalogEntries []domain.CatalogEntry
+	catalogStatus  catalog.SyncStatus
 	selected       string
 	installed      map[domain.AgentID]domain.PowerRef
 	cacheResponses map[domain.AgentID][]installCacheResponse
@@ -52,21 +55,24 @@ type installFixture struct {
 
 	currentAgent domain.AgentID
 	cacheCalls   map[domain.AgentID]int
+	cacheEntries []domain.CatalogEntry
+	cloudEntries []domain.CatalogEntry
 
 	beforeRefresh func()
 	beforeRelease func()
 }
 
 type fakePluginResources struct {
-	calls       *[]string
-	artifacts   map[string]pluginresource.Artifact
-	ensureErr   map[string]error
-	lookupErr   map[string]error
-	stageRoot   string
-	stageErr    error
-	stageCalls  int
-	ensureCalls int
-	lookupCalls int
+	calls         *[]string
+	artifacts     map[string]pluginresource.Artifact
+	ensureErr     map[string]error
+	lookupErr     map[string]error
+	stageRoot     string
+	stageErr      error
+	stageCalls    int
+	ensureCalls   int
+	lookupCalls   int
+	ensureEntries []domain.CatalogEntry
 }
 
 type installFakePluginResources = fakePluginResources
@@ -85,8 +91,10 @@ func fakePluginArtifact(ref domain.PowerRef) pluginresource.Artifact {
 	return artifact
 }
 
-func (resources *fakePluginResources) Ensure(_ context.Context, ref domain.PowerRef) (pluginresource.Artifact, error) {
+func (resources *fakePluginResources) Ensure(_ context.Context, entry domain.CatalogEntry) (pluginresource.Artifact, error) {
+	ref := entry.Ref
 	resources.ensureCalls++
+	resources.ensureEntries = append(resources.ensureEntries, entry.Clone())
 	if resources.calls != nil {
 		*resources.calls = append(*resources.calls, "resource:ensure:"+ref.Version)
 	}
@@ -219,6 +227,45 @@ type installFakeCloud struct {
 	fixture *installFixture
 }
 
+type installFakeCatalogManager struct {
+	calls   *[]string
+	fixture *installFixture
+}
+
+func (manager *installFakeCatalogManager) Snapshot(context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	return catalog.Snapshot{}, catalog.SyncStatus{}, errors.New("Install lifecycle called catalog Snapshot instead of SnapshotLocked")
+}
+
+func (manager *installFakeCatalogManager) SnapshotLocked(ctx context.Context) (catalog.Snapshot, catalog.SyncStatus, error) {
+	*manager.calls = append(*manager.calls, "catalog:snapshot-locked")
+	if err := ctx.Err(); err != nil {
+		return catalog.Snapshot{}, catalog.SyncStatus{}, err
+	}
+	if manager.fixture.cloudListErr != nil {
+		return catalog.Snapshot{}, catalog.SyncStatus{}, manager.fixture.cloudListErr
+	}
+	entries := append([]domain.CatalogEntry(nil), manager.fixture.catalogEntries...)
+	if len(entries) == 0 {
+		seen := make(map[domain.PowerRef]struct{})
+		for _, ref := range manager.fixture.cloudRefs {
+			entries = append(entries, catalogEntryForInstallTest(ref, "install fixture"))
+			seen[ref] = struct{}{}
+		}
+		for _, ref := range manager.fixture.installed {
+			if _, exists := seen[ref]; exists {
+				continue
+			}
+			entries = append(entries, catalogEntryForInstallTest(ref, "installed fixture"))
+		}
+	}
+	raw, err := catalog.Encode(entries)
+	if err != nil {
+		return catalog.Snapshot{}, catalog.SyncStatus{}, err
+	}
+	snapshot, err := catalog.Decode(raw)
+	return snapshot, manager.fixture.catalogStatus, err
+}
+
 func (c *installFakeCloud) List(ctx context.Context) ([]domain.PowerRef, error) {
 	*c.calls = append(*c.calls, "cloud:list")
 	if err := ctx.Err(); err != nil {
@@ -252,12 +299,14 @@ func (c *installFakeCloud) Resolve(ctx context.Context, query domain.PowerRef) (
 	return domain.PowerRef{}, errors.New("cloud power not found")
 }
 
-func (c *installFakeCloud) DownloadSkill(context.Context, domain.PowerRef, string) error {
+func (c *installFakeCloud) DownloadSkill(_ context.Context, entry domain.CatalogEntry, _ string) error {
+	c.fixture.cloudEntries = append(c.fixture.cloudEntries, entry.Clone())
 	*c.calls = append(*c.calls, "cloud:download-skill")
 	return c.fixture.cloudGetErr
 }
 
-func (c *installFakeCloud) DownloadAgent(context.Context, domain.PowerRef, string) error {
+func (c *installFakeCloud) DownloadAgent(_ context.Context, entry domain.CatalogEntry, _ string) error {
+	c.fixture.cloudEntries = append(c.fixture.cloudEntries, entry.Clone())
 	*c.calls = append(*c.calls, "cloud:download-agent")
 	return nil
 }
@@ -272,7 +321,9 @@ func (c *installFakeCloud) ListSubmissions(context.Context, domain.SubmissionLis
 	return domain.SubmissionList{}, nil
 }
 
-func (c *installFakeCloud) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
+func (c *installFakeCloud) GetMCP(ctx context.Context, entry domain.CatalogEntry) (domain.MCPServer, error) {
+	ref := entry.Ref
+	c.fixture.cloudEntries = append(c.fixture.cloudEntries, entry.Clone())
 	*c.calls = append(*c.calls, "cloud:get-mcp:"+ref.Version)
 	if err := ctx.Err(); err != nil {
 		return domain.MCPServer{}, err
@@ -280,7 +331,11 @@ func (c *installFakeCloud) GetMCP(ctx context.Context, ref domain.PowerRef) (dom
 	return c.fixture.mcpDefinitions[ref.Version], c.fixture.mcpGetErrors[ref.Version]
 }
 
-func (c *installFakeCloud) DownloadPlugin(context.Context, domain.PowerRef, string) error {
+func (*installFakeCloud) GetMCPForUninstall(context.Context, domain.PowerRef) (domain.MCPServer, error) {
+	return domain.MCPServer{}, errors.New("Install lifecycle called MCP uninstall compatibility boundary")
+}
+
+func (c *installFakeCloud) DownloadPlugin(context.Context, domain.CatalogEntry, string) error {
 	*c.calls = append(*c.calls, "cloud:unexpected-download-plugin")
 	return errors.New("unexpected direct Plugin Cloud download")
 }
@@ -290,11 +345,13 @@ type installFakeCache struct {
 	fixture *installFixture
 }
 
-func (c *installFakeCache) PrepareSkill(context.Context, domain.PowerRef) (string, error) {
+func (c *installFakeCache) PrepareSkill(_ context.Context, entry domain.CatalogEntry) (string, error) {
+	c.fixture.cacheEntries = append(c.fixture.cacheEntries, entry.Clone())
 	return c.prepare("skill")
 }
 
-func (c *installFakeCache) PrepareAgent(context.Context, domain.PowerRef) (string, error) {
+func (c *installFakeCache) PrepareAgent(_ context.Context, entry domain.CatalogEntry) (string, error) {
+	c.fixture.cacheEntries = append(c.fixture.cacheEntries, entry.Clone())
 	return c.prepare("agent")
 }
 
@@ -477,6 +534,7 @@ func newInstallService(t *testing.T, calls *[]string, fixture installFixture) *I
 	service, err := NewInstall(
 		&installFakeLocker{calls: calls, fixture: &fixture},
 		&installFakeTransactions{calls: calls, fixture: &fixture},
+		&installFakeCatalogManager{calls: calls, fixture: &fixture},
 		&installFakeCloud{calls: calls, fixture: &fixture},
 		&installFakeCache{calls: calls, fixture: &fixture},
 		pluginResources,
@@ -488,6 +546,18 @@ func newInstallService(t *testing.T, calls *[]string, fixture installFixture) *I
 		t.Fatal(err)
 	}
 	return service
+}
+
+func installForAgentTest(t *testing.T, service *InstallService, ctx context.Context, agent domain.AgentID, ref domain.PowerRef) (cli.InstallItem, error) {
+	t.Helper()
+	entries := []domain.CatalogEntry{catalogEntryForInstallTest(ref, "target metadata")}
+	if config, ok := service.config.(*installFakeConfig); ok {
+		if previous, installed := config.fixture.installed[agent]; installed && previous != ref {
+			entries = append(entries, catalogEntryForInstallTest(previous, "previous metadata"))
+		}
+	}
+	snapshot := catalogSnapshotForInstallTest(t, entries)
+	return service.installForAgent(ctx, agent, entries[0], snapshot)
 }
 
 func installTarget() domain.PowerRef {
@@ -570,4 +640,14 @@ func containsEvent(events []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func countEvent(events []string, want string) int {
+	count := 0
+	for _, event := range events {
+		if event == want {
+			count++
+		}
+	}
+	return count
 }

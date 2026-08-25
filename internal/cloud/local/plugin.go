@@ -14,30 +14,16 @@ import (
 
 // DownloadPlugin 复制指定版本的完整共享 Plugin 包；Cloud 不生成 marketplace，也不按 Agent 裁剪入口。
 // 目标必须不存在或为空物理目录，发布失败时仅清理本次调用创建的临时目录。
-func (c *Client) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destination string) error {
-	if _, err := domain.PluginRuntimeName(ref); err != nil {
+func (c *Client) DownloadPlugin(ctx context.Context, entry domain.CatalogEntry, destination string) error {
+	if _, err := domain.PluginRuntimeName(entry.Ref); err != nil {
 		return cloud.ErrNotFound
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	source := filepath.Join(c.resourcesRoot, "plugins", ref.Name, ref.Version)
-	info, err := os.Lstat(source)
-	if errors.Is(err, fs.ErrNotExist) {
-		return cloud.ErrNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("stat raw Plugin package %q: %w", source, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return unsafeContent("raw Plugin package %q is not a physical directory", source)
-	}
-	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
+	content, err := c.loadMatchingCatalogContent(ctx, entry, domain.PowerTypePlugin)
 	if err != nil {
 		return err
 	}
-	if err := snapshot.requireRegularFile("apc-plugin.json"); err != nil {
+	source, err := c.catalogSourcePath(entry.Ref)
+	if err != nil {
 		return err
 	}
 	resolvedDestination, err := absoluteDestination(destination)
@@ -50,7 +36,10 @@ func (c *Client) DownloadPlugin(ctx context.Context, ref domain.PowerRef, destin
 	if err := validateCopyBoundary(source, resolvedDestination); err != nil {
 		return err
 	}
-	return copyTreeAtomically(ctx, snapshot, resolvedDestination, "Plugin", c.beforeTreePublish)
+	if content.tree == nil {
+		return unsafeContent("Local Plugin catalog content has no captured tree")
+	}
+	return copyTreeAtomically(ctx, content.tree, resolvedDestination, "Plugin", c.beforeTreePublish)
 }
 
 // listPlugins 根据 `<logical>/<version>` 共享原始包目录发现逻辑 Plugin，不审计各 Agent 入口完整性。

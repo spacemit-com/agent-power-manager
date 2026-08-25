@@ -5,9 +5,54 @@ import (
 	"strings"
 	"testing"
 
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/domain"
 )
+
+func TestResolveCatalogEntryReturnsExactSnapshotMetadata(t *testing.T) {
+	entries := []domain.CatalogEntry{
+		catalogEntryForInstallTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, "old metadata"),
+		catalogEntryForInstallTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, "authoritative metadata"),
+	}
+	snapshot := catalogSnapshotForInstallTest(t, entries)
+	selector := &recordingVersionSelector{selected: "v2.0.0"}
+
+	got, err := resolveCatalogEntry(cli.Flags{Name: "demo", Type: "skill"}, snapshot, selector)
+	if err != nil {
+		t.Fatalf("resolveCatalogEntry() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, entries[1]) {
+		t.Fatalf("resolveCatalogEntry() = %#v, want exact snapshot entry %#v", got, entries[1])
+	}
+}
+
+func catalogEntryForInstallTest(ref domain.PowerRef, message string) domain.CatalogEntry {
+	contentType := "application/gzip"
+	if ref.Type == domain.PowerTypeMCP {
+		contentType = "application/json"
+	} else if ref.Type == domain.PowerTypeAgent {
+		contentType = "application/yaml"
+	}
+	return domain.CatalogEntry{
+		Ref: ref, Description: "test entry", Message: message, ContentType: contentType,
+		ContentSize: 1, ContentMD5: "0123456789abcdef0123456789abcdef",
+		PublishedAt: "2026-08-25T00:00:00Z", Tags: []string{},
+	}
+}
+
+func catalogSnapshotForInstallTest(t *testing.T, entries []domain.CatalogEntry) catalog.Snapshot {
+	t.Helper()
+	raw, err := catalog.Encode(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
 
 type recordingVersionSelector struct {
 	candidates []string

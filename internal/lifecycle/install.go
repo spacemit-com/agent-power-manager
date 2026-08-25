@@ -21,6 +21,7 @@ import (
 type InstallService struct {
 	locker       lock.Locker
 	transactions transaction.Manager
+	catalogs     CatalogManager
 	cloud        cloud.Client
 	cache        cache.PowerCache
 	plugins      pluginresource.Manager
@@ -31,12 +32,14 @@ type InstallService struct {
 
 // NewInstall 创建持有完整共享状态区间的 Install 生命周期。
 // plugins 仅允许对目标版本 Ensure；已安装旧版本必须在 manifest 判定后由 Lookup 离线读取。
-func NewInstall(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, cache cache.PowerCache, plugins pluginresource.Manager, registry AdapterRegistry, config config.Repository, versions VersionSelector) (*InstallService, error) {
+func NewInstall(locker lock.Locker, transactions transaction.Manager, catalogs CatalogManager, cloud cloud.Client, cache cache.PowerCache, plugins pluginresource.Manager, registry AdapterRegistry, config config.Repository, versions VersionSelector) (*InstallService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Install lifecycle with nil locker")
 	case isNilInterface(transactions):
 		return nil, errors.New("create Install lifecycle with nil transaction manager")
+	case isNilInterface(catalogs):
+		return nil, errors.New("create Install lifecycle with nil catalog manager")
 	case isNilInterface(cloud):
 		return nil, errors.New("create Install lifecycle with nil Cloud client")
 	case isNilInterface(cache):
@@ -53,6 +56,7 @@ func NewInstall(locker lock.Locker, transactions transaction.Manager, cloud clou
 	return &InstallService{
 		locker:       locker,
 		transactions: transactions,
+		catalogs:     catalogs,
 		cloud:        cloud,
 		cache:        cache,
 		plugins:      plugins,
@@ -94,17 +98,23 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 		return result, nil
 	}
 
-	ref, err := s.resolvePower(ctx, flags)
+	catalogSnapshot, catalogStatus, err := s.catalogs.SnapshotLocked(ctx)
+	if err != nil {
+		return cli.InstallResult{}, releaseInstall(unlock, fmt.Errorf("snapshot catalog for install: %w", err))
+	}
+	warnStaleCatalog("install", catalogStatus)
+	entry, err := resolveCatalogEntry(flags, catalogSnapshot, s.versions)
 	if err != nil {
 		return cli.InstallResult{}, releaseInstall(unlock, err)
 	}
+	ref := entry.Ref
 
 	items := make([]cli.InstallItem, 0, len(agents))
 	var failedAgent domain.AgentID
 	var businessErr error
 	// 批处理首错即停止；后续 Agent 补为 unexecuted，使成功解锁后的汇总保持完整顺序。
 	for index, agent := range agents {
-		item, installErr := s.installForAgent(ctx, agent, ref)
+		item, installErr := s.installForAgent(ctx, agent, entry, catalogSnapshot)
 		if installErr != nil {
 			failedAgent = agent
 			businessErr = installErr

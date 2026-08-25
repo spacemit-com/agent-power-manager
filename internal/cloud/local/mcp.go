@@ -12,8 +12,19 @@ import (
 	"apm/internal/domain"
 )
 
-// GetMCP 直接读取精确版本的完整 MCP 资源；文件内声明的身份必须与 ref 一致。
-func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
+var _ cloud.MCPUninstallDefinitionSource = (*Client)(nil)
+
+// GetMCP 从一次 fresh Local catalog content 读取定义；entry metadata 必须与该物理快照精确一致。
+func (c *Client) GetMCP(ctx context.Context, entry domain.CatalogEntry) (domain.MCPServer, error) {
+	content, err := c.loadMatchingCatalogContent(ctx, entry, domain.PowerTypeMCP)
+	if err != nil {
+		return domain.MCPServer{}, err
+	}
+	return c.decodeMCPContent(ctx, entry.Ref, content.bytes)
+}
+
+// GetMCPForUninstall 临时保留 Task 8 前的按 Ref definition 获取；Install 禁止调用本方法。
+func (c *Client) GetMCPForUninstall(ctx context.Context, ref domain.PowerRef) (domain.MCPServer, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.MCPServer{}, err
 	}
@@ -35,12 +46,16 @@ func (c *Client) GetMCP(ctx context.Context, ref domain.PowerRef) (domain.MCPSer
 	if err != nil {
 		return domain.MCPServer{}, err
 	}
+	return c.decodeMCPContent(ctx, ref, contents)
+}
+
+func (c *Client) decodeMCPContent(ctx context.Context, ref domain.PowerRef, contents []byte) (domain.MCPServer, error) {
 	resource, err := domain.DecodeMCPResourceJSON(contents)
 	if err != nil {
-		return domain.MCPServer{}, unsafeContent("decode MCP resource %q: %v", markerPath, err)
+		return domain.MCPServer{}, unsafeContent("decode MCP resource %+v: %v", ref, err)
 	}
 	if err := resource.ValidatePowerRef(ref); err != nil {
-		return domain.MCPServer{}, unsafeContent("validate MCP resource identity %q: %v", markerPath, err)
+		return domain.MCPServer{}, unsafeContent("validate MCP resource identity %+v: %v", ref, err)
 	}
 	if c.afterMCPDecode != nil {
 		c.afterMCPDecode()

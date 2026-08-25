@@ -13,15 +13,12 @@ import (
 )
 
 // DownloadSkill 将精确版本 Skill 原子复制至调用方提供的私有目录，不访问全局缓存。
-func (c *Client) DownloadSkill(ctx context.Context, ref domain.PowerRef, destination string) error {
-	if err := ctx.Err(); err != nil {
+func (c *Client) DownloadSkill(ctx context.Context, entry domain.CatalogEntry, destination string) error {
+	content, err := c.loadMatchingCatalogContent(ctx, entry, domain.PowerTypeSkill)
+	if err != nil {
 		return err
 	}
-	if ref.Type != domain.PowerTypeSkill || !safePowerIdentity(ref) || !isCanonicalVersion(ref.Version) {
-		return cloud.ErrNotFound
-	}
-	source := filepath.Join(c.resourcesRoot, "skills", ref.Name, ref.Version)
-	snapshot, err := c.validateSkillSource(ctx, source)
+	source, err := c.catalogSourcePath(entry.Ref)
 	if err != nil {
 		return err
 	}
@@ -35,7 +32,10 @@ func (c *Client) DownloadSkill(ctx context.Context, ref domain.PowerRef, destina
 	if err := validateCopyBoundary(source, destination); err != nil {
 		return err
 	}
-	return copyTreeAtomically(ctx, snapshot, destination, "Skill", c.beforeTreePublish)
+	if content.tree == nil {
+		return unsafeContent("Local Skill catalog content has no captured tree")
+	}
+	return copyTreeAtomically(ctx, content.tree, destination, "Skill", c.beforeTreePublish)
 }
 
 func (c *Client) validateSkillSource(ctx context.Context, source string) (*treeSnapshot, error) {
