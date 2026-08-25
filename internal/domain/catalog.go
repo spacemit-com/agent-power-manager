@@ -37,7 +37,9 @@ type CatalogEntry struct {
 
 // Clone 返回不共享 Tags 底层数组的条目副本，供不可变快照向调用方暴露数据。
 func (entry CatalogEntry) Clone() CatalogEntry {
-	entry.Tags = append([]string(nil), entry.Tags...)
+	if entry.Tags != nil {
+		entry.Tags = append([]string{}, entry.Tags...)
+	}
 	return entry
 }
 
@@ -75,6 +77,9 @@ func (entry CatalogEntry) Validate() error {
 	}
 	if _, err := time.Parse(time.RFC3339, entry.PublishedAt); err != nil {
 		return fmt.Errorf("catalog entry published at %q must be RFC3339: %w", entry.PublishedAt, err)
+	}
+	if entry.Tags == nil {
+		return fmt.Errorf("catalog entry tags must be a non-null array")
 	}
 	for index, tag := range entry.Tags {
 		if tag == "" || strings.TrimSpace(tag) != tag {

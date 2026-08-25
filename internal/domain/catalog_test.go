@@ -75,6 +75,14 @@ func TestCatalogEntryCloneDoesNotShareTags(t *testing.T) {
 	}
 }
 
+func TestCatalogEntryValidateRequiresNonNilTags(t *testing.T) {
+	entry := catalogEntryFixture()
+	entry.Tags = nil
+	if err := entry.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want nil tags rejected")
+	}
+}
+
 func catalogEntryFixture() CatalogEntry {
 	return CatalogEntry{
 		Ref:         PowerRef{Type: PowerTypeSkill, Name: "catalog-entry", Version: "v1.2.3"},

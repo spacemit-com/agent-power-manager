@@ -25,7 +25,6 @@ func TestDecodeStrictCatalogV1(t *testing.T) {
 		{name: "bad item order", data: replaceJSON(t, valid, `"name":"alpha","version":"v2.0.0"`, `"name":"zulu","version":"v2.0.0"`)},
 		{name: "bad tag order", data: replaceJSON(t, valid, `"tags":["alpha","catalog"]`, `"tags":["catalog","alpha"]`)},
 		{name: "invalid metadata", data: replaceJSON(t, valid, `"content_size":2`, `"content_size":0`)},
-		{name: "oversized", data: append(append([]byte(nil), valid...), bytes.Repeat([]byte(" "), int(MaxCatalogSize)+1)...)},
 	}
 	if _, err := Decode(valid); err != nil {
 		t.Fatalf("Decode(valid) error = %v", err)
@@ -36,6 +35,55 @@ func TestDecodeStrictCatalogV1(t *testing.T) {
 				t.Fatal("Decode() error = nil, want strict validation failure")
 			}
 		})
+	}
+}
+
+func TestDecodeRejectsCaseVariantCatalogFields(t *testing.T) {
+	valid := validCatalogJSON()
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{name: "top schema version", data: replaceJSON(t, valid, `"schema_version":1`, `"SCHEMA_VERSION":1`)},
+		{name: "group schema version", data: replaceJSON(t, valid, `"skills":{"schema_version":1`, `"skills":{"SCHEMA_VERSION":1`)},
+		{name: "group items", data: replaceJSON(t, valid, `"skills":{"schema_version":1,"items":`, `"skills":{"schema_version":1,"ITEMS":`)},
+		{name: "item name", data: replaceJSON(t, valid, `"name":"alpha"`, `"NAME":"alpha"`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Decode(tt.data); err == nil {
+				t.Fatal("Decode() error = nil, want exact field-name validation failure")
+			}
+		})
+	}
+}
+
+func TestEncodeDecodeClosesOverEmptyTags(t *testing.T) {
+	entry := catalogEntriesFixture()[0].Clone()
+	entry.Tags = []string{}
+	encoded, err := Encode([]domain.CatalogEntry{entry})
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+	if !bytes.Contains(encoded, []byte(`"tags":[]`)) {
+		t.Fatalf("Encode() = %s, want non-null empty tags", encoded)
+	}
+	snapshot, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("Decode(Encode()) error = %v", err)
+	}
+	got := snapshot.List(domain.PowerTypeSkill)
+	if len(got) != 1 || got[0].Tags == nil || len(got[0].Tags) != 0 {
+		t.Fatalf("Decode(Encode()).List() = %#v, want non-nil empty tags", got)
+	}
+}
+
+func TestDecodeCatalogSizeBoundary(t *testing.T) {
+	if _, err := Decode(validCatalogJSONWithSize(t, MaxCatalogSize)); err != nil {
+		t.Fatalf("Decode(exactly MaxCatalogSize) error = %v", err)
+	}
+	if _, err := Decode(validCatalogJSONWithSize(t, MaxCatalogSize+1)); err == nil {
+		t.Fatal("Decode(MaxCatalogSize+1) error = nil, want size-limit failure")
 	}
 }
 
@@ -88,4 +136,24 @@ func catalogEntriesFixture() []domain.CatalogEntry {
 		{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "bravo", Version: "v1.0.0"}, Description: "description", Message: "message", ContentType: "application/gzip", ContentSize: 1, ContentMD5: "0123456789abcdef0123456789abcdef", PublishedAt: "2026-08-25T12:34:56Z", Tags: []string{"bravo"}},
 		{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "charlie", Version: "v1.0.0"}, Description: "description", Message: "message", ContentType: "application/gzip", ContentSize: 1, ContentMD5: "0123456789abcdef0123456789abcdef", PublishedAt: "2026-08-25T12:34:56Z", Tags: []string{"charlie"}},
 	}
+}
+
+func validCatalogJSONWithSize(t *testing.T, size int64) []byte {
+	t.Helper()
+	const prefix = `{"schema_version":1,"skills":{"schema_version":1,"items":[{"name":"size-boundary","version":"v1.0.0","description":"`
+	const suffix = `","message":"message","content_type":"application/gzip","content_size":1,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":[]}]},"plugins":{"schema_version":1,"items":[]},"mcps":{"schema_version":1,"items":[]},"agents":{"schema_version":1,"items":[]}}`
+	if size < int64(len(prefix)+len(suffix)) {
+		t.Fatalf("size %d is too small for valid fixture", size)
+	}
+	data := make([]byte, size)
+	copy(data, prefix)
+	descriptionLength := len(data) - len(prefix) - len(suffix)
+	for index := 0; index+6 <= descriptionLength; index += 6 {
+		copy(data[len(prefix)+index:], `\u0061`)
+	}
+	for index := descriptionLength - descriptionLength%6; index < descriptionLength; index++ {
+		data[len(prefix)+index] = 'a'
+	}
+	copy(data[len(data)-len(suffix):], suffix)
+	return data
 }
