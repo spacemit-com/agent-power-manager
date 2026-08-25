@@ -30,6 +30,9 @@ func (s *Service) UninstallMCP(ctx context.Context, request MCPUninstallRequest)
 	if err != nil {
 		return result, fmt.Errorf("inspect MCP before uninstall: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	if presence == adapter.MCPAbsent {
 		result.TargetMissing = true
 		if err := s.manifests.Remove(request.Agent, domain.PowerTypeMCP, request.Power.Name); err != nil {
@@ -47,15 +50,18 @@ func (s *Service) UninstallMCP(ctx context.Context, request MCPUninstallRequest)
 	if err := s.journals.Create(journal); err != nil {
 		return result, fmt.Errorf("create MCP uninstall journal: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	mutation, removeErr := request.Adapter.Remove(ctx, request.Power)
 	switch mutation.State {
 	case adapter.MCPMutationApplied:
 		journal.Phase = PhaseCommitting
 		if err := s.journals.Update(journal); err != nil {
-			return result, errors.Join(removeErr, fmt.Errorf("persist MCP uninstall committing direction: %w", err))
+			return result, errors.Join(removeErr, fmt.Errorf("persist MCP uninstall committing direction: %w", err), ctx.Err())
 		}
 		if removeErr != nil {
-			return result, removeErr
+			return result, errors.Join(removeErr, ctx.Err())
 		}
 	case adapter.MCPMutationNotApplied:
 		return result, s.finishMCPRollback(journal, mutationError("remove MCP", removeErr))

@@ -86,6 +86,24 @@ func TestMCPUninstallAbsentRemovesOnlyManifestEntry(t *testing.T) {
 	}
 }
 
+func TestMCPUninstallAbsentCancellationAfterInspectPreservesManifest(t *testing.T) {
+	fixture := newMCPUninstallFixture(t)
+	fixture.adapter.presence = adapter.MCPAbsent
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture.adapter.onInspect = cancel
+
+	result, err := fixture.service.UninstallMCP(ctx, fixture.request)
+	if !errors.Is(err, context.Canceled) || result.TargetMissing || fixture.journals.found {
+		t.Fatalf("UninstallMCP() = %+v, %v, journal=%v", result, err, fixture.journals.found)
+	}
+	if fixture.manifests.removed.Name != "" || len(fixture.adapter.removeRefs) != 0 {
+		t.Fatalf("cancelled absent uninstall changed manifest/target: %+v/%v", fixture.manifests.removed, fixture.adapter.removeRefs)
+	}
+	if want := []string{"adapter:inspect"}; !reflect.DeepEqual(fixture.events, want) {
+		t.Fatalf("events = %v, want %v", fixture.events, want)
+	}
+}
+
 func TestMCPUninstallCommittingPhaseWriteFailureRetainsRemovingJournal(t *testing.T) {
 	fixture := newMCPUninstallFixture(t)
 	fixture.journals.fail["update:committing"] = errors.New("phase write failed")
@@ -96,6 +114,41 @@ func TestMCPUninstallCommittingPhaseWriteFailureRetainsRemovingJournal(t *testin
 	}
 	if fixture.manifests.removed.Name != "" {
 		t.Fatalf("manifest removed before committing phase persisted: %+v", fixture.manifests.removed)
+	}
+}
+
+func TestMCPUninstallCommittingPhaseWriteFailureJoinsCancellation(t *testing.T) {
+	fixture := newMCPUninstallFixture(t)
+	phaseErr := errors.New("phase write failed")
+	fixture.journals.fail["update:committing"] = phaseErr
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture.journals.beforeUpdate = func(journal Journal) {
+		if journal.Phase == PhaseCommitting {
+			cancel()
+		}
+	}
+
+	_, err := fixture.service.UninstallMCP(ctx, fixture.request)
+	if !errors.Is(err, phaseErr) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("UninstallMCP() error = %v, want phase error joined with context.Canceled", err)
+	}
+	if !fixture.journals.found || fixture.journals.journal.Phase != PhaseRemoving || fixture.manifests.removed.Name != "" {
+		t.Fatalf("journal/manifest = %v/%+v/%+v", fixture.journals.found, fixture.journals.journal, fixture.manifests.removed)
+	}
+}
+
+func TestMCPUninstallCancellationAfterRemovingJournalPreservesRecoverableIntent(t *testing.T) {
+	fixture := newMCPUninstallFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture.journals.onCreate = func(Journal) { cancel() }
+
+	_, err := fixture.service.UninstallMCP(ctx, fixture.request)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("UninstallMCP() error = %v, want context.Canceled", err)
+	}
+	if !fixture.journals.found || fixture.journals.journal.Phase != PhaseRemoving ||
+		fixture.manifests.removed.Name != "" || len(fixture.adapter.removeRefs) != 0 {
+		t.Fatalf("journal/manifest/removes = %v/%+v/%v", fixture.journals.journal, fixture.manifests.removed, fixture.adapter.removeRefs)
 	}
 }
 

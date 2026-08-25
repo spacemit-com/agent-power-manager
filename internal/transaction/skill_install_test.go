@@ -19,6 +19,7 @@ type recordingJournalStore struct {
 	events       *[]string
 	fail         map[string]error
 	onCreate     func(Journal)
+	beforeUpdate func(Journal)
 	onUpdate     func(Journal)
 	inspectCalls int
 	createCalls  int
@@ -51,6 +52,9 @@ func (s *recordingJournalStore) Create(journal Journal) error {
 func (s *recordingJournalStore) Update(journal Journal) error {
 	s.updateCalls++
 	*s.events = append(*s.events, "update:"+string(journal.Phase))
+	if s.beforeUpdate != nil {
+		s.beforeUpdate(journal)
+	}
 	if err := s.fail["update:"+string(journal.Phase)]; err != nil {
 		return err
 	}

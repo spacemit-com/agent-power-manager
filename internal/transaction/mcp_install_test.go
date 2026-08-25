@@ -19,6 +19,8 @@ type recordingMCPAdapter struct {
 	events        *[]string
 	presence      adapter.MCPPresence
 	inspectErr    error
+	onInspect     func()
+	onRemove      func()
 	addAnswers    []mcpMutationAnswer
 	removeAnswers []mcpMutationAnswer
 	addServers    []domain.MCPServer
@@ -27,6 +29,9 @@ type recordingMCPAdapter struct {
 
 func (a *recordingMCPAdapter) Inspect(context.Context, string) (adapter.MCPPresence, error) {
 	*a.events = append(*a.events, "adapter:inspect")
+	if a.onInspect != nil {
+		a.onInspect()
+	}
 	return a.presence, a.inspectErr
 }
 
@@ -43,6 +48,9 @@ func (a *recordingMCPAdapter) Remove(_ context.Context, ref domain.PowerRef) (ad
 	a.removeRefs = append(a.removeRefs, ref)
 	answer := a.removeAnswers[0]
 	a.removeAnswers = a.removeAnswers[1:]
+	if a.onRemove != nil {
+		a.onRemove()
+	}
 	return answer.result, answer.err
 }
 

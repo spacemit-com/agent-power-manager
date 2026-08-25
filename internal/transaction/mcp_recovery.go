@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"apm/internal/adapter"
@@ -26,6 +27,11 @@ func (s *Service) recoverMCP(ctx context.Context, journal Journal, result *Recov
 	presence, err := mcpAdapter.Inspect(ctx, journal.Power.Name)
 	if err != nil {
 		return fmt.Errorf("inspect MCP recovery state: %w", err)
+	}
+	if journal.Operation == OperationUninstall {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
 
 	switch journal.Operation {
@@ -97,8 +103,11 @@ func (s *Service) recoverMCPUninstall(ctx context.Context, journal Journal, pres
 		if presence == adapter.MCPAbsent {
 			if journal.Phase != PhaseCommitting {
 				if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
-					return err
+					return errors.Join(err, ctx.Err())
 				}
+			}
+			if err := ctx.Err(); err != nil {
+				return err
 			}
 			return s.commitRecoveredMCP(journal, result)
 		}
@@ -108,18 +117,30 @@ func (s *Service) recoverMCPUninstall(ctx context.Context, journal Journal, pres
 		committing := journal.Phase == PhaseCommitting
 		if !committing {
 			if err := s.persistRecoveryDirection(&journal, PhaseRemoving); err != nil {
-				return err
+				return errors.Join(err, ctx.Err())
 			}
 		}
-		mutation, err := mcpAdapter.Remove(ctx, journal.Power)
-		if err := requireAppliedRecoveryMutation("continue MCP uninstall", mutation, err); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveMCP})
-		if !committing {
-			if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
+		mutation, removeErr := mcpAdapter.Remove(ctx, journal.Power)
+		switch mutation.State {
+		case adapter.MCPMutationApplied:
+			result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemoveMCP})
+			if !committing {
+				if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
+					return errors.Join(removeErr, err, ctx.Err())
+				}
+			}
+			if err := errors.Join(removeErr, ctx.Err()); err != nil {
 				return err
 			}
+		case adapter.MCPMutationNotApplied:
+			return mutationError("continue MCP uninstall", removeErr)
+		case adapter.MCPMutationUnknown:
+			return indeterminateMCPMutation("continue MCP uninstall", removeErr)
+		default:
+			return indeterminateMCPMutation(fmt.Sprintf("continue MCP uninstall returned state %q", mutation.State), removeErr)
 		}
 		return s.commitRecoveredMCP(journal, result)
 	default:

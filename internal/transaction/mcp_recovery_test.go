@@ -3,6 +3,7 @@ package transaction
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -202,6 +203,10 @@ func TestMCPUninstallRecoveryCrashWindowsConvergeToAbsent(t *testing.T) {
 			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "update:removing", "adapter:remove", "update:committing", "manifest:remove", "delete:journal"},
 		},
 		{
+			name: "rollback phase with absent target", phase: PhaseRollingBack, presence: adapter.MCPAbsent,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "update:committing", "manifest:remove", "delete:journal"},
+		},
+		{
 			name: "after phase update target present", phase: PhaseCommitting, presence: adapter.MCPPresent,
 			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "adapter:remove", "manifest:remove", "delete:journal"},
 		},
@@ -224,6 +229,186 @@ func TestMCPUninstallRecoveryCrashWindowsConvergeToAbsent(t *testing.T) {
 				t.Fatalf("uninstall recovery called Add: %+v", fixture.adapter.addServers)
 			}
 		})
+	}
+}
+
+func TestMCPUninstallRecoveryCancellationAfterInspectPreservesJournalAndManifest(t *testing.T) {
+	for _, phase := range []Phase{PhaseRemoving, PhaseRollingBack, PhaseCommitting} {
+		for _, presence := range []adapter.MCPPresence{adapter.MCPPresent, adapter.MCPAbsent} {
+			t.Run(string(phase)+"/"+string(presence), func(t *testing.T) {
+				fixture := newMCPRecoveryFixture(t, OperationUninstall, phase, false, presence)
+				ctx, cancel := context.WithCancel(context.Background())
+				fixture.adapter.onInspect = cancel
+
+				result, err := fixture.service.Recover(ctx)
+				if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, context.Canceled) || result.Recovered {
+					t.Fatalf("Recover() = %+v, %v", result, err)
+				}
+				if !fixture.journals.found || fixture.journals.journal.Phase != phase || fixture.manifests.removed.Name != "" {
+					t.Fatalf("journal/manifest = %v/%+v/%+v", fixture.journals.found, fixture.journals.journal, fixture.manifests.removed)
+				}
+				if want := []string{"resolver:claude-code", "adapter:inspect"}; !reflect.DeepEqual(fixture.events, want) {
+					t.Fatalf("events = %v, want %v", fixture.events, want)
+				}
+			})
+		}
+	}
+}
+
+func TestMCPUninstallRecoveryCancellationAfterDirectionPersistPreservesNewPhase(t *testing.T) {
+	tests := []struct {
+		name       string
+		phase      Phase
+		presence   adapter.MCPPresence
+		wantPhase  Phase
+		wantEvents []string
+	}{
+		{
+			name: "rolling-back present persists removing", phase: PhaseRollingBack, presence: adapter.MCPPresent, wantPhase: PhaseRemoving,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "update:removing"},
+		},
+		{
+			name: "rolling-back absent persists committing", phase: PhaseRollingBack, presence: adapter.MCPAbsent, wantPhase: PhaseCommitting,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "update:committing"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMCPRecoveryFixture(t, OperationUninstall, test.phase, false, test.presence)
+			ctx, cancel := context.WithCancel(context.Background())
+			fixture.journals.onUpdate = func(journal Journal) {
+				if journal.Phase == test.wantPhase {
+					cancel()
+				}
+			}
+
+			result, err := fixture.service.Recover(ctx)
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, context.Canceled) || result.Recovered {
+				t.Fatalf("Recover() = %+v, %v", result, err)
+			}
+			if !fixture.journals.found || fixture.journals.journal.Phase != test.wantPhase || fixture.manifests.removed.Name != "" {
+				t.Fatalf("journal/manifest = %v/%+v/%+v", fixture.journals.found, fixture.journals.journal, fixture.manifests.removed)
+			}
+			if !reflect.DeepEqual(fixture.events, test.wantEvents) || len(fixture.adapter.removeRefs) != 0 {
+				t.Fatalf("events/removes = %v/%v, want %v/none", fixture.events, fixture.adapter.removeRefs, test.wantEvents)
+			}
+		})
+	}
+}
+
+func TestMCPUninstallRecoveryDirectionUpdateFailurePreservesPhaseAndErrorIdentity(t *testing.T) {
+	tests := []struct {
+		name       string
+		phase      Phase
+		presence   adapter.MCPPresence
+		update     Phase
+		wantEvents []string
+	}{
+		{
+			name: "rolling-back to removing", phase: PhaseRollingBack, presence: adapter.MCPPresent, update: PhaseRemoving,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "update:removing"},
+		},
+		{
+			name: "absent to committing", phase: PhaseRemoving, presence: adapter.MCPAbsent, update: PhaseCommitting,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "update:committing"},
+		},
+	}
+	for _, test := range tests {
+		for _, cancelDuringUpdate := range []bool{false, true} {
+			t.Run(test.name+"/cancel="+fmt.Sprint(cancelDuringUpdate), func(t *testing.T) {
+				fixture := newMCPRecoveryFixture(t, OperationUninstall, test.phase, false, test.presence)
+				phaseErr := errors.New("phase update failed")
+				fixture.journals.fail["update:"+string(test.update)] = phaseErr
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				if cancelDuringUpdate {
+					fixture.journals.beforeUpdate = func(journal Journal) {
+						if journal.Phase == test.update {
+							cancel()
+						}
+					}
+				}
+
+				result, err := fixture.service.Recover(ctx)
+				if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, phaseErr) || result.Recovered {
+					t.Fatalf("Recover() = %+v, %v", result, err)
+				}
+				if cancelDuringUpdate && !errors.Is(err, context.Canceled) {
+					t.Fatalf("Recover() error = %v, want joined context.Canceled", err)
+				}
+				if !fixture.journals.found || fixture.journals.journal.Phase != test.phase || fixture.manifests.removed.Name != "" {
+					t.Fatalf("journal/manifest = %v/%+v/%+v", fixture.journals.found, fixture.journals.journal, fixture.manifests.removed)
+				}
+				if !reflect.DeepEqual(fixture.events, test.wantEvents) || len(fixture.adapter.removeRefs) != 0 {
+					t.Fatalf("events/removes = %v/%v, want %v/none", fixture.events, fixture.adapter.removeRefs, test.wantEvents)
+				}
+			})
+		}
+	}
+}
+
+func TestMCPUninstallRecoveryRemoveMutationStates(t *testing.T) {
+	operationErr := errors.New("remove failed")
+	tests := []struct {
+		name       string
+		answer     mcpMutationAnswer
+		wantPhase  Phase
+		wantErr    error
+		wantEvents []string
+	}{
+		{
+			name: "applied plus error", answer: mcpMutationAnswer{result: adapter.MCPMutationResult{State: adapter.MCPMutationApplied}, err: operationErr},
+			wantPhase: PhaseCommitting, wantErr: operationErr,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "adapter:remove", "update:committing"},
+		},
+		{
+			name: "not applied", answer: mcpMutationAnswer{result: adapter.MCPMutationResult{State: adapter.MCPMutationNotApplied}, err: operationErr},
+			wantPhase: PhaseRemoving, wantErr: operationErr,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "adapter:remove"},
+		},
+		{
+			name: "unknown", answer: mcpMutationAnswer{result: adapter.MCPMutationResult{State: adapter.MCPMutationUnknown}, err: operationErr},
+			wantPhase: PhaseRemoving, wantErr: ErrIndeterminateState,
+			wantEvents: []string{"resolver:claude-code", "adapter:inspect", "adapter:remove"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMCPRecoveryFixture(t, OperationUninstall, PhaseRemoving, false, adapter.MCPPresent)
+			fixture.adapter.removeAnswers = []mcpMutationAnswer{test.answer}
+
+			result, err := fixture.service.Recover(context.Background())
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, test.wantErr) || result.Recovered {
+				t.Fatalf("Recover() = %+v, %v", result, err)
+			}
+			if !fixture.journals.found || fixture.journals.journal.Phase != test.wantPhase || fixture.manifests.removed.Name != "" {
+				t.Fatalf("journal/manifest = %v/%+v/%+v", fixture.journals.found, fixture.journals.journal, fixture.manifests.removed)
+			}
+			if !reflect.DeepEqual(fixture.events, test.wantEvents) {
+				t.Fatalf("events = %v, want %v", fixture.events, test.wantEvents)
+			}
+		})
+	}
+}
+
+func TestMCPUninstallRecoveryCancellationAfterCommittingUpdatePreservesManifest(t *testing.T) {
+	fixture := newMCPRecoveryFixture(t, OperationUninstall, PhaseRemoving, false, adapter.MCPPresent)
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture.journals.onUpdate = func(journal Journal) {
+		if journal.Phase == PhaseCommitting {
+			cancel()
+		}
+	}
+
+	result, err := fixture.service.Recover(ctx)
+	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, context.Canceled) || result.Recovered {
+		t.Fatalf("Recover() = %+v, %v", result, err)
+	}
+	if !fixture.journals.found || fixture.journals.journal.Phase != PhaseCommitting || fixture.manifests.removed.Name != "" {
+		t.Fatalf("journal/manifest = %v/%+v/%+v", fixture.journals.found, fixture.journals.journal, fixture.manifests.removed)
+	}
+	if want := []string{"resolver:claude-code", "adapter:inspect", "adapter:remove", "update:committing"}; !reflect.DeepEqual(fixture.events, want) {
+		t.Fatalf("events = %v, want %v", fixture.events, want)
 	}
 }
 
