@@ -25,16 +25,18 @@ type repositoryFileIdentity struct {
 }
 
 type unixRepositoryOps struct {
-	open            func(string, int, uint32) (int, error)
-	openat          func(int, string, int, uint32) (int, error)
-	fstat           func(int, *unix.Stat_t) error
-	fstatat         func(int, string, *unix.Stat_t, int) error
-	readBounded     func(io.Reader, int64) ([]byte, error)
-	renameNoReplace func(int, string, string) error
-	exchange        func(int, string, string) error
-	unlinkat        func(int, string, int) error
-	syncFile        func(*os.File) error
-	syncDirectory   func(*os.File) error
+	open                 func(string, int, uint32) (int, error)
+	openat               func(int, string, int, uint32) (int, error)
+	fstat                func(int, *unix.Stat_t) error
+	fstatat              func(int, string, *unix.Stat_t, int) error
+	readBounded          func(io.Reader, int64) ([]byte, error)
+	renameNoReplace      func(int, string, string) error
+	exchange             func(int, string, string) error
+	unlinkat             func(int, string, int) error
+	flock                func(int, int) error
+	beforeIdentityUnlink func(int, string)
+	syncFile             func(*os.File) error
+	syncDirectory        func(*os.File) error
 }
 
 type unixRepositoryPlatform struct {
@@ -70,8 +72,11 @@ func newRepositoryPlatform() repositoryPlatform {
 		renameNoReplace: renameRepositoryNoReplace,
 		exchange:        exchangeRepositoryEntries,
 		unlinkat:        unix.Unlinkat,
-		syncFile:        func(file *os.File) error { return file.Sync() },
-		syncDirectory:   func(file *os.File) error { return file.Sync() },
+		flock:           unix.Flock,
+		beforeIdentityUnlink: func(int, string) {
+		},
+		syncFile:      func(file *os.File) error { return file.Sync() },
+		syncDirectory: func(file *os.File) error { return file.Sync() },
 	}}
 }
 
@@ -110,8 +115,7 @@ func (platform *unixRepositoryPlatform) replace(path string, expected domain.Cat
 	if actual != expected {
 		return Snapshot{}, fmt.Errorf("staged catalog version %#v does not match expected %#v: %w", actual, expected, ErrInvalidCatalog)
 	}
-	snapshot, err = Decode(data)
-	if err != nil {
+	if _, err = Decode(data); err != nil {
 		return Snapshot{}, fmt.Errorf("decode staged catalog %q: %w", sourcePath, err)
 	}
 
@@ -119,9 +123,17 @@ func (platform *unixRepositoryPlatform) replace(path string, expected domain.Cat
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("open catalog parent for %q: %w", path, err)
 	}
+	committed := false
 	defer func() {
-		resultErr = errors.Join(resultErr, parent.close())
+		closeErr := parent.close()
+		if !committed {
+			resultErr = errors.Join(resultErr, closeErr)
+		}
 	}()
+	if err := parent.lockExclusive(); err != nil {
+		return Snapshot{}, fmt.Errorf("lock catalog parent for %q: %w", path, err)
+	}
+	defer parent.unlock()
 	destination := filepath.Base(path)
 	before, err := parent.inspectOptionalRegular(destination)
 	if err != nil {
@@ -132,14 +144,20 @@ func (platform *unixRepositoryPlatform) replace(path string, expected domain.Cat
 		return Snapshot{}, fmt.Errorf("create owned catalog sibling for %q: %w", path, err)
 	}
 	defer func() {
-		resultErr = errors.Join(resultErr, owned.cleanup())
+		cleanupErr := owned.cleanup()
+		if !committed {
+			resultErr = errors.Join(resultErr, cleanupErr)
+		}
 	}()
-	preparedSnapshot, prepareErr := parent.prepareOwnedCatalog(owned, file, data, expected)
-	closeErr := file.Close()
-	if prepareErr != nil || closeErr != nil {
-		return Snapshot{}, errors.Join(prepareErr, closeErr)
+	defer func() {
+		closeErr := file.Close()
+		if !committed {
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
+	if _, err := parent.prepareOwnedCatalog(owned, file, data, expected); err != nil {
+		return Snapshot{}, err
 	}
-	snapshot = preparedSnapshot
 
 	current, err := parent.inspectOptionalRegular(destination)
 	if err != nil {
@@ -149,15 +167,19 @@ func (platform *unixRepositoryPlatform) replace(path string, expected domain.Cat
 		return Snapshot{}, fmt.Errorf("catalog destination %q changed before publication: %w", path, fs.ErrInvalid)
 	}
 	if !before.exists {
-		if err := parent.publishFirst(owned, destination); err != nil {
+		publishedSnapshot, err := parent.publishFirst(owned, file, destination, expected)
+		if err != nil {
 			return Snapshot{}, fmt.Errorf("publish first catalog %q: %w", path, err)
 		}
-		return snapshot, nil
+		committed = true
+		return publishedSnapshot, nil
 	}
-	if err := parent.publishReplacement(owned, destination, before); err != nil {
+	publishedSnapshot, err := parent.publishReplacement(owned, file, destination, before, expected)
+	if err != nil {
 		return Snapshot{}, fmt.Errorf("replace catalog %q: %w", path, err)
 	}
-	return snapshot, nil
+	committed = true
+	return publishedSnapshot, nil
 }
 
 func versionForCatalogBytes(data []byte) domain.CatalogVersion {
@@ -214,6 +236,12 @@ func (platform *unixRepositoryPlatform) openParent(path string) (*pinnedReposito
 		currentPath = nextPath
 		requireCurrentOwner = sticky
 	}
+	if requireCurrentOwner {
+		return nil, errors.Join(
+			fmt.Errorf("catalog parent %q must not itself be a root-owned sticky directory", path),
+			current.Close(),
+		)
+	}
 	return &pinnedRepositoryDirectory{file: current, path: path, ops: platform.ops}, nil
 }
 
@@ -243,6 +271,20 @@ func (directory *pinnedRepositoryDirectory) close() error {
 	err := directory.file.Close()
 	directory.file = nil
 	return err
+}
+
+func (directory *pinnedRepositoryDirectory) lockExclusive() error {
+	if directory == nil || directory.file == nil {
+		return fs.ErrInvalid
+	}
+	return directory.ops.flock(int(directory.file.Fd()), unix.LOCK_EX)
+}
+
+func (directory *pinnedRepositoryDirectory) unlock() {
+	if directory == nil || directory.file == nil {
+		return
+	}
+	_ = directory.ops.flock(int(directory.file.Fd()), unix.LOCK_UN)
 }
 
 func (directory *pinnedRepositoryDirectory) readRegular(name string, requirePrivateMode bool) ([]byte, error) {
@@ -428,46 +470,119 @@ func (directory *pinnedRepositoryDirectory) prepareOwnedCatalog(owned *ownedRepo
 	return snapshot, nil
 }
 
-func (directory *pinnedRepositoryDirectory) publishFirst(owned *ownedRepositoryFile, destination string) error {
+func (directory *pinnedRepositoryDirectory) publishFirst(owned *ownedRepositoryFile, file *os.File, destination string, expected domain.CatalogVersion) (Snapshot, error) {
 	if err := directory.ops.renameNoReplace(int(directory.file.Fd()), owned.name, destination); err != nil {
-		return err
+		return Snapshot{}, err
 	}
-	destinationStat, err := directory.statEntry(destination)
-	if err != nil || repositoryIdentity(destinationStat) != owned.identity || validateRepositoryRegularStat(destinationStat, true) != nil {
+	snapshot, err := directory.verifyPublishedCatalog(owned, file, destination, expected)
+	if err != nil {
 		rollbackErr := directory.removeEntryIfIdentity(destination, owned.identity)
-		return errors.Join(fmt.Errorf("verify first catalog publication: %w", fs.ErrInvalid), err, rollbackErr)
+		return Snapshot{}, errors.Join(fmt.Errorf("verify first catalog publication: %w", err), rollbackErr)
 	}
 	if err := directory.ops.syncDirectory(directory.file); err != nil {
 		rollbackErr := directory.removeEntryIfIdentity(destination, owned.identity)
 		rollbackSyncErr := directory.ops.syncDirectory(directory.file)
-		return errors.Join(err, rollbackErr, rollbackSyncErr)
+		return Snapshot{}, errors.Join(err, rollbackErr, rollbackSyncErr)
 	}
 	owned.name = ""
-	return nil
+	return snapshot, nil
 }
 
-func (directory *pinnedRepositoryDirectory) publishReplacement(owned *ownedRepositoryFile, destination string, previous repositoryEntryState) error {
+func (directory *pinnedRepositoryDirectory) publishReplacement(owned *ownedRepositoryFile, file *os.File, destination string, previous repositoryEntryState, expected domain.CatalogVersion) (Snapshot, error) {
 	if err := directory.ops.exchange(int(directory.file.Fd()), owned.name, destination); err != nil {
-		return err
+		return Snapshot{}, err
 	}
 	destinationStat, destinationErr := directory.statEntry(destination)
 	temporaryStat, temporaryErr := directory.statEntry(owned.name)
-	newIsDestination := destinationErr == nil && repositoryIdentity(destinationStat) == owned.identity && validateRepositoryRegularStat(destinationStat, true) == nil
+	verifiedSnapshot, verifyErr := directory.verifyPublishedCatalog(owned, file, destination, expected)
+	newIsDestination := destinationErr == nil && verifyErr == nil && repositoryIdentity(destinationStat) == owned.identity && validateRepositoryRegularStat(destinationStat, true) == nil
 	oldIsTemporary := temporaryErr == nil && repositoryIdentity(temporaryStat) == previous.identity && validateRepositoryRegularStat(temporaryStat, true) == nil
 	if !newIsDestination || !oldIsTemporary {
 		rollbackErr := directory.rollbackExchange(owned, destination, temporaryStat, temporaryErr)
-		return errors.Join(fmt.Errorf("catalog destination was substituted during atomic exchange: %w", fs.ErrInvalid), destinationErr, temporaryErr, rollbackErr)
+		return Snapshot{}, errors.Join(
+			fmt.Errorf("catalog publication failed post-exchange verification: %w", fs.ErrInvalid),
+			destinationErr,
+			temporaryErr,
+			verifyErr,
+			rollbackErr,
+		)
 	}
 	if err := directory.ops.syncDirectory(directory.file); err != nil {
 		rollbackErr := directory.rollbackExchange(owned, destination, temporaryStat, nil)
-		return errors.Join(err, rollbackErr)
+		if rollbackErr == nil {
+			return Snapshot{}, err
+		}
+		reconciledSnapshot, reconcileErr := directory.reconcileCommittedReplacement(owned, file, destination, previous, expected)
+		if reconcileErr != nil {
+			return Snapshot{}, errors.Join(err, rollbackErr, reconcileErr)
+		}
+		return reconciledSnapshot, nil
 	}
-	if err := directory.removeEntryIfIdentity(owned.name, previous.identity); err != nil {
-		rollbackErr := directory.rollbackExchange(owned, destination, temporaryStat, nil)
-		return errors.Join(err, rollbackErr)
+	directory.cleanupCommittedPrevious(owned, previous.identity)
+	return verifiedSnapshot, nil
+}
+
+func (directory *pinnedRepositoryDirectory) reconcileCommittedReplacement(owned *ownedRepositoryFile, file *os.File, destination string, previous repositoryEntryState, expected domain.CatalogVersion) (Snapshot, error) {
+	snapshot, err := directory.verifyPublishedCatalog(owned, file, destination, expected)
+	if err != nil {
+		return Snapshot{}, err
 	}
+	temporary, err := directory.statEntry(owned.name)
+	if err != nil || repositoryIdentity(temporary) != previous.identity || validateRepositoryRegularStat(temporary, true) != nil {
+		if err == nil {
+			err = fs.ErrInvalid
+		}
+		return Snapshot{}, fmt.Errorf("verify previous catalog during commit reconciliation: %w", err)
+	}
+	// 回滚已失败且新目录项已经精确复验，此时发布已经线性化；后续同步或清理失败不得把成功反转为失败。
+	_ = directory.ops.syncDirectory(directory.file)
+	directory.cleanupCommittedPrevious(owned, previous.identity)
+	return snapshot, nil
+}
+
+func (directory *pinnedRepositoryDirectory) cleanupCommittedPrevious(owned *ownedRepositoryFile, previous repositoryFileIdentity) {
+	_ = directory.removeEntryIfIdentity(owned.name, previous)
 	owned.name = ""
-	return nil
+	_ = directory.ops.syncDirectory(directory.file)
+}
+
+func (directory *pinnedRepositoryDirectory) verifyPublishedCatalog(owned *ownedRepositoryFile, file *os.File, destination string, expected domain.CatalogVersion) (Snapshot, error) {
+	if owned == nil || file == nil {
+		return Snapshot{}, fs.ErrInvalid
+	}
+	var descriptor unix.Stat_t
+	if err := directory.ops.fstat(int(file.Fd()), &descriptor); err != nil {
+		return Snapshot{}, err
+	}
+	destinationStat, err := directory.statEntry(destination)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err := validateRepositoryRegularStat(descriptor, true); err != nil {
+		return Snapshot{}, err
+	}
+	if err := validateRepositoryRegularStat(destinationStat, true); err != nil {
+		return Snapshot{}, err
+	}
+	if repositoryIdentity(descriptor) != owned.identity || repositoryIdentity(destinationStat) != owned.identity ||
+		descriptor.Size != expected.Size || destinationStat.Size != expected.Size {
+		return Snapshot{}, fmt.Errorf("published catalog identity or size changed: %w", fs.ErrInvalid)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return Snapshot{}, err
+	}
+	data, err := directory.ops.readBounded(file, MaxCatalogSize+1)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if versionForCatalogBytes(data) != expected {
+		return Snapshot{}, fmt.Errorf("published catalog version does not match expected: %w", ErrInvalidCatalog)
+	}
+	snapshot, err := Decode(data)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func (directory *pinnedRepositoryDirectory) rollbackExchange(owned *ownedRepositoryFile, destination string, temporaryStat unix.Stat_t, temporaryErr error) error {
@@ -505,6 +620,14 @@ func (directory *pinnedRepositoryDirectory) removeEntryIfIdentity(name string, i
 	}
 	if validateErr := validateRepositoryRegularStat(stat, true); validateErr != nil || repositoryIdentity(stat) != identity {
 		return fmt.Errorf("refuse removal of substituted catalog entry %q: %w", name, fs.ErrInvalid)
+	}
+	directory.ops.beforeIdentityUnlink(int(directory.file.Fd()), name)
+	stat, err = directory.statEntry(name)
+	if err != nil {
+		return err
+	}
+	if validateErr := validateRepositoryRegularStat(stat, true); validateErr != nil || repositoryIdentity(stat) != identity {
+		return fmt.Errorf("refuse removal of catalog entry %q changed before unlink: %w", name, fs.ErrInvalid)
 	}
 	if err := directory.ops.unlinkat(int(directory.file.Fd()), name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
 		return err

@@ -1,6 +1,9 @@
+//go:build linux || darwin || freebsd
+
 package catalog
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -178,4 +181,15 @@ func trustedRepositoryDir(t *testing.T) string {
 		}
 	}
 	return directory
+}
+
+func assertRepositoryFileBytes(t *testing.T, path string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("file %q bytes differ: got %d bytes, want %d", path, len(got), len(want))
+	}
 }

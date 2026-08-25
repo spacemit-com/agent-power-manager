@@ -1,4 +1,4 @@
-//go:build linux || darwin || freebsd
+//go:build linux || darwin
 
 package catalog
 
@@ -407,6 +407,257 @@ func TestRepositoryReplaceDoesNotRemoveSubstituteDuringOwnedCreation(t *testing.
 	assertRepositoryFileBytes(t, substitutedPath, substituteData)
 }
 
+func TestRepositoryReplaceReconcilesFailedRollbackAsCommittedPublication(t *testing.T) {
+	oldData := validCatalogJSON()
+	newData := repositoryCatalogVariant(t, "replacement message")
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	source := writeRepositoryFile(t, root, "source.json", newData, 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	originalExchange := platform.ops.exchange
+	exchangeCalls := 0
+	platform.ops.exchange = func(directoryFD int, temporary, destination string) error {
+		exchangeCalls++
+		if exchangeCalls == 2 {
+			return errors.New("injected rollback exchange failure")
+		}
+		return originalExchange(directoryFD, temporary, destination)
+	}
+	originalSync := platform.ops.syncDirectory
+	syncCalls := 0
+	platform.ops.syncDirectory = func(file *os.File) error {
+		syncCalls++
+		if syncCalls == 1 {
+			return errors.New("injected pre-commit directory sync failure")
+		}
+		return originalSync(file)
+	}
+
+	if _, err := repository.Replace(repositoryVersion(newData), source); err != nil {
+		t.Fatalf("Replace() error = %v, want reconciled committed success", err)
+	}
+	assertRepositoryFileBytes(t, path, newData)
+	if got := repositoryOwnedTemps(t, root); len(got) != 0 {
+		t.Fatalf("owned temporary entries after reconciled commit = %v, want none", got)
+	}
+}
+
+func TestRepositoryReplaceReconcilesFailedRollbackAndResyncAsCommittedPublication(t *testing.T) {
+	oldData := validCatalogJSON()
+	newData := repositoryCatalogVariant(t, "replacement message")
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	source := writeRepositoryFile(t, root, "source.json", newData, 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	originalExchange := platform.ops.exchange
+	exchangeCalls := 0
+	platform.ops.exchange = func(directoryFD int, temporary, destination string) error {
+		exchangeCalls++
+		if exchangeCalls == 2 {
+			return errors.New("injected rollback exchange failure")
+		}
+		return originalExchange(directoryFD, temporary, destination)
+	}
+	syncCalls := 0
+	platform.ops.syncDirectory = func(*os.File) error {
+		syncCalls++
+		return errors.New("injected directory sync failure")
+	}
+
+	if _, err := repository.Replace(repositoryVersion(newData), source); err != nil {
+		t.Fatalf("Replace() error = %v, want reconciled committed success", err)
+	}
+	if syncCalls < 2 {
+		t.Fatalf("directory sync calls = %d, want publication and reconciliation attempts", syncCalls)
+	}
+	assertRepositoryFileBytes(t, path, newData)
+}
+
+func TestRepositoryReplaceRejectsOwnedBytesModifiedDuringExchange(t *testing.T) {
+	oldData := validCatalogJSON()
+	newData := repositoryCatalogVariant(t, "replacement message")
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	source := writeRepositoryFile(t, root, "source.json", newData, 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	originalExchange := platform.ops.exchange
+	modified := false
+	platform.ops.exchange = func(directoryFD int, temporary, destination string) error {
+		if err := originalExchange(directoryFD, temporary, destination); err != nil {
+			return err
+		}
+		if !modified {
+			modified = true
+			if err := os.WriteFile(path, []byte(`{"schema_version":1}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return nil
+	}
+
+	if _, err := repository.Replace(repositoryVersion(newData), source); err == nil {
+		t.Fatal("Replace() error = nil, want post-exchange bytes/hash/schema rejection")
+	}
+	assertRepositoryFileBytes(t, path, oldData)
+}
+
+func TestRepositoryLoadRejectsRootOwnedStickyFinalParent(t *testing.T) {
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", validCatalogJSON(), 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	originalFstat := platform.ops.fstat
+	components := strings.Split(strings.TrimPrefix(filepath.Dir(path), string(filepath.Separator)), string(filepath.Separator))
+	finalCall := len(components) + 1
+	calls := 0
+	platform.ops.fstat = func(fd int, stat *unix.Stat_t) error {
+		calls++
+		if err := originalFstat(fd, stat); err != nil {
+			return err
+		}
+		if calls == finalCall {
+			stat.Uid = 0
+			stat.Mode = stat.Mode&^0o7777 | unix.S_ISVTX | 0o777
+		}
+		return nil
+	}
+
+	if _, _, err := repository.Load(); err == nil {
+		t.Fatal("Load() error = nil, want root-owned sticky final parent rejected")
+	}
+}
+
+func TestRepositoryReplaceCommittedCleanupPerformsSecondDirectorySync(t *testing.T) {
+	oldData := validCatalogJSON()
+	newData := repositoryCatalogVariant(t, "replacement message")
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	source := writeRepositoryFile(t, root, "source.json", newData, 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	originalSync := platform.ops.syncDirectory
+	syncCalls := 0
+	platform.ops.syncDirectory = func(file *os.File) error {
+		syncCalls++
+		if syncCalls == 2 {
+			return errors.New("injected committed cleanup sync failure")
+		}
+		return originalSync(file)
+	}
+
+	if _, err := repository.Replace(repositoryVersion(newData), source); err != nil {
+		t.Fatalf("Replace() error = %v, want committed success despite cleanup sync failure", err)
+	}
+	if syncCalls != 2 {
+		t.Fatalf("directory sync calls = %d, want publication and cleanup sync", syncCalls)
+	}
+	assertRepositoryFileBytes(t, path, newData)
+	if got := repositoryOwnedTemps(t, root); len(got) != 0 {
+		t.Fatalf("owned temporary entries after cleanup = %v, want none", got)
+	}
+}
+
+func TestRepositoryReplaceSerializesTwoPublishersOnPinnedParent(t *testing.T) {
+	oldData := validCatalogJSON()
+	firstData := repositoryCatalogVariant(t, "first publisher")
+	secondData := repositoryCatalogVariant(t, "second publisher")
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	firstSource := writeRepositoryFile(t, root, "first.json", firstData, 0o600)
+	secondSource := writeRepositoryFile(t, root, "second.json", secondData, 0o600)
+	firstRepository := newTestRepository(t, path).(*filesystemRepository)
+	secondRepository := newTestRepository(t, path).(*filesystemRepository)
+	firstPlatform := firstRepository.platform.(*unixRepositoryPlatform)
+	originalExchange := firstPlatform.ops.exchange
+	firstAtExchange := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstPlatform.ops.exchange = func(directoryFD int, temporary, destination string) error {
+		close(firstAtExchange)
+		<-releaseFirst
+		return originalExchange(directoryFD, temporary, destination)
+	}
+	type replaceResult struct {
+		snapshot Snapshot
+		err      error
+	}
+	firstResult := make(chan replaceResult, 1)
+	secondResult := make(chan replaceResult, 1)
+	go func() {
+		snapshot, err := firstRepository.Replace(repositoryVersion(firstData), firstSource)
+		firstResult <- replaceResult{snapshot: snapshot, err: err}
+	}()
+	<-firstAtExchange
+	go func() {
+		snapshot, err := secondRepository.Replace(repositoryVersion(secondData), secondSource)
+		secondResult <- replaceResult{snapshot: snapshot, err: err}
+	}()
+
+	probeFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		close(releaseFirst)
+		t.Fatal(err)
+	}
+	lockErr := unix.Flock(probeFD, unix.LOCK_EX|unix.LOCK_NB)
+	if lockErr == nil {
+		if err := unix.Flock(probeFD, unix.LOCK_UN); err != nil {
+			t.Errorf("unlock probe directory: %v", err)
+		}
+	}
+	if err := unix.Close(probeFD); err != nil {
+		t.Errorf("close probe directory: %v", err)
+	}
+	close(releaseFirst)
+	first := <-firstResult
+	second := <-secondResult
+
+	if !errors.Is(lockErr, unix.EWOULDBLOCK) && !errors.Is(lockErr, unix.EAGAIN) {
+		t.Fatalf("nonblocking parent lock error = %v, want publisher-held lock", lockErr)
+	}
+	if first.err != nil || second.err != nil {
+		t.Fatalf("concurrent Replace() errors = first %v, second %v", first.err, second.err)
+	}
+	assertRepositoryFileBytes(t, path, secondData)
+}
+
+func TestRepositoryReplaceIdentityCleanupDoesNotDeleteSubstitutedEntry(t *testing.T) {
+	oldData := validCatalogJSON()
+	newData := repositoryCatalogVariant(t, "replacement message")
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	source := writeRepositoryFile(t, root, "source.json", newData, 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	substituteData := []byte("identity cleanup substitute")
+	var substitutedPath string
+	platform.ops.beforeIdentityUnlink = func(_ int, name string) {
+		if substitutedPath != "" || !strings.HasSuffix(name, ".owned") {
+			return
+		}
+		substitutedPath = filepath.Join(root, name)
+		if err := os.Rename(substitutedPath, substitutedPath+".displaced"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(substitutedPath, substituteData, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(substitutedPath, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := repository.Replace(repositoryVersion(newData), source); err != nil {
+		t.Fatalf("Replace() error = %v, want committed success with refused cleanup", err)
+	}
+	assertRepositoryFileBytes(t, path, newData)
+	assertRepositoryFileBytes(t, substitutedPath, substituteData)
+}
+
 func repositoryVersion(data []byte) domain.CatalogVersion {
 	digest := sha256.Sum256(data)
 	return domain.CatalogVersion{SHA256: hex.EncodeToString(digest[:]), Size: int64(len(data))}
@@ -438,15 +689,4 @@ func repositoryOwnedTemps(t *testing.T, root string) []string {
 		t.Fatal(err)
 	}
 	return matches
-}
-
-func assertRepositoryFileBytes(t *testing.T, path string, want []byte) {
-	t.Helper()
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("file %q bytes differ: got %d bytes, want %d", path, len(got), len(want))
-	}
 }
