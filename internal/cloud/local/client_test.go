@@ -23,6 +23,17 @@ func TestNewRejectsRelativeResourceRoot(t *testing.T) {
 	}
 }
 
+func TestLocalClientImplementsCatalogSource(t *testing.T) {
+	client, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source cloud.CatalogSource = client
+	if source == nil {
+		t.Fatal("Local CatalogSource is nil")
+	}
+}
+
 func TestLocalClientListsCommittedSkillFixture(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	root, err := filepath.Abs("../resources")

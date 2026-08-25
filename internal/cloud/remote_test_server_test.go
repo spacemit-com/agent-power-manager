@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,7 @@ type canonicalRemoteResource struct {
 type canonicalRemoteServer struct {
 	server             *httptest.Server
 	resources          []canonicalRemoteResource
+	catalog            []byte
 	mu                 sync.Mutex
 	protocolViolations []string
 	submissions        []recordedSubmission
@@ -68,6 +70,7 @@ func newCanonicalRemoteFixture(t *testing.T, root string) *canonicalRemoteServer
 			ref: ref, contentType: contentType, content: content,
 		})
 	}
+	fixture.catalog = canonicalRemoteCatalog(t, fixture.resources)
 	return fixture
 }
 
@@ -177,11 +180,23 @@ func (fixture *canonicalRemoteServer) serveHTTP(writer http.ResponseWriter, requ
 		fixture.rejectProtocol(writer, request, "method = %q, want GET", request.Method)
 		return
 	}
-	if len(segments) == 3 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "resources" {
-		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources"}, "application/json", true) {
+	if len(segments) == 4 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "resources" && segments[3] == "version" {
+		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources", "version"}, "application/json", false) {
 			return
 		}
-		fixture.serveList(writer, request)
+		fixture.serveCatalogVersion(writer)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "resources" {
+		legacyList := request.URL.RawQuery != "" || request.URL.ForceQuery
+		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources"}, "application/json", legacyList) {
+			return
+		}
+		if legacyList {
+			fixture.serveList(writer, request)
+		} else {
+			fixture.serveCatalog(writer)
+		}
 		return
 	}
 	if len(segments) < 6 || segments[0] != "api" || segments[1] != "v1" || segments[2] != "resources" {
@@ -213,6 +228,22 @@ func (fixture *canonicalRemoteServer) serveHTTP(writer http.ResponseWriter, requ
 		return
 	}
 	fixture.rejectProtocol(writer, request, "unknown endpoint shape")
+}
+
+func (fixture *canonicalRemoteServer) serveCatalogVersion(writer http.ResponseWriter) {
+	digest := sha256.Sum256(fixture.catalog)
+	writeCanonicalJSON(writer, map[string]any{
+		"schema_version": 1,
+		"catalog_sha256": hex.EncodeToString(digest[:]),
+		"catalog_size":   len(fixture.catalog),
+	})
+}
+
+func (fixture *canonicalRemoteServer) serveCatalog(writer http.ResponseWriter) {
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("Content-Length", strconv.Itoa(len(fixture.catalog)))
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(fixture.catalog)
 }
 
 func (fixture *canonicalRemoteServer) serveList(writer http.ResponseWriter, request *http.Request) {
@@ -364,7 +395,6 @@ func testCanonicalRemoteServerProtocolMutations(t *testing.T) {
 		name, method, target, accept string
 	}{
 		{name: "method", method: http.MethodPost, target: "/api/v1/resources?limit=100", accept: "application/json"},
-		{name: "missing_limit", method: http.MethodGet, target: "/api/v1/resources", accept: "application/json"},
 		{name: "duplicate_limit", method: http.MethodGet, target: "/api/v1/resources?limit=100&limit=100", accept: "application/json"},
 		{name: "unexpected_query", method: http.MethodGet, target: "/api/v1/resources?limit=100&extra=1", accept: "application/json"},
 		{name: "latest_query", method: http.MethodGet, target: "/api/v1/resources/agent/bianbu-agent-default/latest?limit=100", accept: "application/json"},

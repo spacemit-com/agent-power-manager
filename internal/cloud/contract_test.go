@@ -1,7 +1,12 @@
 package cloud_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,18 +20,23 @@ import (
 	"testing"
 	"time"
 
+	"apm/internal/catalog"
 	"apm/internal/cli"
 	"apm/internal/cloud"
 	"apm/internal/cloud/local"
 	"apm/internal/cloud/remote"
 	"apm/internal/domain"
 	"apm/internal/lifecycle"
+	"apm/internal/pluginartifact"
+	"apm/internal/submission"
 	"github.com/Masterminds/semver/v3"
+	"go.yaml.in/yaml/v3"
 )
 
 type clientFactory struct {
-	name string
-	open func(t *testing.T) cloud.Client
+	name        string
+	open        func(t *testing.T) cloud.Client
+	wantCatalog []byte
 }
 
 var canonicalPowerOracle = []domain.PowerRef{
@@ -63,6 +73,20 @@ func TestProviderContract(t *testing.T) {
 	})
 	t.Run("oracle_mutations", testCanonicalPowerOracleMutations)
 	t.Run("wire_mutations", testCanonicalRemoteServerProtocolMutations)
+}
+
+func TestCatalogSourceContract(t *testing.T) {
+	factories, _ := providerFactories(t)
+	for _, factory := range factories {
+		t.Run(factory.name, func(t *testing.T) {
+			client := factory.open(t)
+			source, ok := client.(cloud.CatalogSource)
+			if !ok {
+				t.Fatalf("%T does not implement cloud.CatalogSource", client)
+			}
+			runCatalogSourceContract(t, source, factory.wantCatalog)
+		})
+	}
 }
 
 func TestProviderContractRejectsIncompleteSkillPackage(t *testing.T) {
@@ -160,21 +184,169 @@ func providerFactories(t *testing.T) ([]clientFactory, string) {
 	}
 	server := newCanonicalRemoteServer(t, root)
 	return []clientFactory{
-		{name: "local", open: func(t *testing.T) cloud.Client {
+		{name: "local", wantCatalog: canonicalLocalCatalog(t, root), open: func(t *testing.T) cloud.Client {
 			client, err := local.New(root)
 			if err != nil {
 				t.Fatal(err)
 			}
 			return client
 		}},
-		{name: "remote", open: func(t *testing.T) cloud.Client {
-			client, err := remote.New(server.server.URL, &http.Client{Timeout: 5 * time.Second})
+		{name: "remote", wantCatalog: canonicalRemoteCatalog(t, server.resources), open: func(t *testing.T) cloud.Client {
+			client, err := remote.NewWithAPIKey(server.server.URL, &http.Client{Timeout: 5 * time.Second}, canonicalSubmissionAPIKey)
 			if err != nil {
 				t.Fatal(err)
 			}
 			return client
 		}},
 	}, trustedTemp
+}
+
+func runCatalogSourceContract(t *testing.T, source cloud.CatalogSource, wantCatalog []byte) {
+	t.Helper()
+	wantDigest := sha256.Sum256(wantCatalog)
+	wantVersion := domain.CatalogVersion{SHA256: hex.EncodeToString(wantDigest[:]), Size: int64(len(wantCatalog))}
+
+	for call := 0; call < 2; call++ {
+		got, err := source.CatalogVersion(context.Background())
+		if err != nil || got != wantVersion {
+			t.Fatalf("CatalogVersion() call %d = %+v, %v; want %+v", call+1, got, err, wantVersion)
+		}
+	}
+	for call := 0; call < 2; call++ {
+		destination := filepath.Join(privateTestDir(t), "catalog.json")
+		if err := source.DownloadCatalog(context.Background(), destination); err != nil {
+			t.Fatalf("DownloadCatalog() call %d error = %v", call+1, err)
+		}
+		got, err := os.ReadFile(destination)
+		if err != nil || !reflect.DeepEqual(got, wantCatalog) {
+			t.Fatalf("DownloadCatalog() call %d bytes = %q, %v; want exact %q", call+1, got, err, wantCatalog)
+		}
+		info, err := os.Stat(destination)
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("DownloadCatalog() call %d mode = %v, %v; want 0600", call+1, info, err)
+		}
+	}
+
+	preexisting := filepath.Join(privateTestDir(t), "catalog.json")
+	if err := os.WriteFile(preexisting, []byte("sentinel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.DownloadCatalog(context.Background(), preexisting); !errors.Is(err, cloud.ErrCatalogDestination) {
+		t.Fatalf("DownloadCatalog(preexisting) error = %v, want ErrCatalogDestination", err)
+	}
+	if got, err := os.ReadFile(preexisting); err != nil || string(got) != "sentinel" {
+		t.Fatalf("preexisting destination = %q, %v; want unchanged sentinel", got, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := source.CatalogVersion(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled CatalogVersion() error = %v, want context.Canceled", err)
+	}
+	canceledDestination := filepath.Join(privateTestDir(t), "catalog.json")
+	if err := source.DownloadCatalog(ctx, canceledDestination); !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrCatalogDestination) {
+		t.Fatalf("canceled DownloadCatalog() error = %v, want only context.Canceled", err)
+	}
+	if _, err := os.Lstat(canceledDestination); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("canceled destination stat error = %v, want absent", err)
+	}
+}
+
+func canonicalLocalCatalog(t *testing.T, root string) []byte {
+	t.Helper()
+	entries := make([]domain.CatalogEntry, 0, len(canonicalPowerOracle))
+	for _, ref := range canonicalPowerOracle {
+		var description, contentType string
+		var content []byte
+		var err error
+		switch ref.Type {
+		case domain.PowerTypeSkill:
+			source := filepath.Join(root, "skills", ref.Name, ref.Version)
+			content, err = submission.BuildTarGz(source)
+			description = canonicalSkillDescription(t, filepath.Join(source, "SKILL.md"))
+			contentType = "application/gzip"
+		case domain.PowerTypePlugin:
+			source := filepath.Join(root, "plugins", ref.Name, ref.Version)
+			content, err = submission.BuildTarGz(source)
+			var manifest pluginartifact.APCPluginManifest
+			manifestBytes := readCanonicalFile(t, filepath.Join(source, "apc-plugin.json"))
+			if decodeErr := json.Unmarshal(manifestBytes, &manifest); decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			description = manifest.Description
+			contentType = "application/gzip"
+		case domain.PowerTypeMCP:
+			raw := readCanonicalFile(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
+			resource, decodeErr := domain.DecodeMCPResourceJSON(raw)
+			if decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			description = resource.Description
+			content, err = submission.CanonicalizeJSON(raw)
+			contentType = "application/json"
+		case domain.PowerTypeAgent:
+			content = readCanonicalFile(t, filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml"))
+			config, decodeErr := domain.DecodeAgentConfigYAML(content)
+			if decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			description = config.Agent.Description
+			contentType = "application/yaml"
+		default:
+			t.Fatalf("unsupported canonical Local type %q", ref.Type)
+		}
+		if err != nil {
+			t.Fatalf("build canonical Local resource %+v: %v", ref, err)
+		}
+		digest := md5.Sum(content)
+		entries = append(entries, domain.CatalogEntry{
+			Ref: ref, Description: description, Message: "local fixture",
+			ContentType: contentType, ContentSize: int64(len(content)), ContentMD5: hex.EncodeToString(digest[:]),
+			PublishedAt: "1970-01-01T00:00:00Z", Tags: []string{},
+		})
+	}
+	contents, err := catalog.Encode(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
+}
+
+func canonicalSkillDescription(t *testing.T, path string) string {
+	t.Helper()
+	raw := readCanonicalFile(t, path)
+	if !bytes.HasPrefix(raw, []byte("---\n")) {
+		t.Fatalf("canonical Skill %q has no frontmatter", path)
+	}
+	end := bytes.Index(raw[len("---\n"):], []byte("\n---"))
+	if end < 0 {
+		t.Fatalf("canonical Skill %q has no closing frontmatter", path)
+	}
+	var metadata struct {
+		Description string `yaml:"description"`
+	}
+	if err := yaml.Unmarshal(raw[len("---\n"):len("---\n")+end], &metadata); err != nil {
+		t.Fatal(err)
+	}
+	return metadata.Description
+}
+
+func canonicalRemoteCatalog(t *testing.T, resources []canonicalRemoteResource) []byte {
+	t.Helper()
+	entries := make([]domain.CatalogEntry, 0, len(resources))
+	for _, resource := range resources {
+		digest := md5.Sum(resource.content)
+		entries = append(entries, domain.CatalogEntry{
+			Ref: resource.ref, Description: "canonical test fixture", Message: "publish canonical fixture",
+			ContentType: resource.contentType, ContentSize: int64(len(resource.content)), ContentMD5: hex.EncodeToString(digest[:]),
+			PublishedAt: canonicalSnapshotTime, Tags: []string{},
+		})
+	}
+	contents, err := catalog.Encode(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
 }
 
 func runProviderContract(t *testing.T, client cloud.Client) {
