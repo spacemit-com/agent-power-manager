@@ -72,61 +72,67 @@ func TestNewPluginResourcesRejectsNilDownloaderAtConstruction(t *testing.T) {
 	}
 }
 
-func TestNewPluginResourcesCreatesDistinctManagerPerFactoryCall(t *testing.T) {
+func TestNewPluginResourcesCreatesDistinctManagerPerInstallFactoryCall(t *testing.T) {
 	t.Setenv("APM_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	downloader := &recordingPluginPackageDownloader{}
-	installManager, err := newPluginResources(downloader)
+	first, err := newPluginResources(downloader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	uninstallManager, err := newPluginResources(downloader)
+	second, err := newPluginResources(downloader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if installManager == uninstallManager {
+	if first == second {
 		t.Fatal("newPluginResources() reused a mutable manager across factory calls")
 	}
 }
 
-func TestLifecycleCompositionOpensOneCloudClientPerInvocation(t *testing.T) {
+func TestInstallLifecycleCompositionOpensOneCloudClientPerInvocation(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("APM_HOME", root)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	client := &recordingCloudClient{}
-
-	tests := []struct {
-		name    string
-		compose func(cloudClientFactory) (any, error)
-	}{
-		{
-			name: "install",
-			compose: func(factory cloudClientFactory) (any, error) {
-				return newInstallLifecycleWithCloudFactory(factory)
-			},
-		},
-		{
-			name: "uninstall",
-			compose: func(factory cloudClientFactory) (any, error) {
-				return newUninstallLifecycleWithCloudFactory(factory)
-			},
-		},
+	calls := 0
+	service, err := newInstallLifecycleWithCloudFactory(func() (cloud.Client, error) {
+		calls++
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("compose lifecycle: %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			calls := 0
-			service, err := tt.compose(func() (cloud.Client, error) {
-				calls++
-				return client, nil
-			})
-			if err != nil {
-				t.Fatalf("compose lifecycle: %v", err)
-			}
-			if service == nil {
-				t.Fatal("composed lifecycle = nil")
-			}
-			if calls != 1 {
-				t.Fatalf("Cloud factory calls = %d, want 1", calls)
+	if service == nil {
+		t.Fatal("composed lifecycle = nil")
+	}
+	if calls != 1 {
+		t.Fatalf("Cloud factory calls = %d, want 1", calls)
+	}
+}
+
+func TestUninstallCompositionIgnoresInvalidCloudConfiguration(t *testing.T) {
+	tests := []struct {
+		name      string
+		provider  string
+		baseURL   string
+		localRoot string
+	}{
+		{name: "provider", provider: "unsupported"},
+		{name: "remote base URL", provider: "remote", baseURL: "://invalid"},
+		{name: "Local resource root", provider: "local", localRoot: "relative/resources"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("APM_HOME", root)
+			t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+			t.Setenv("APM_CLOUD_PROVIDER", test.provider)
+			t.Setenv("APC_BASE_URL", test.baseURL)
+			t.Setenv("APM_CLOUD_LOCAL_ROOT", test.localRoot)
+
+			service, err := newUninstallLifecycle()
+			if err != nil || service == nil {
+				t.Fatalf("newUninstallLifecycle() = (%T, %v), want local-only lifecycle", service, err)
 			}
 		})
 	}

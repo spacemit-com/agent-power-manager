@@ -409,6 +409,7 @@ func runProviderContract(t *testing.T, client cloud.Client) {
 		}
 		assertPowerReadable(t, client, entry)
 		assertMismatchedCatalogMetadataRejected(t, client, entry)
+		assertInvalidCatalogMetadataRejected(t, client, entry)
 	}
 	assertClientOperationErrors(t, client)
 }
@@ -483,6 +484,25 @@ func assertMismatchedCatalogMetadataRejected(t *testing.T, client cloud.Client, 
 	if !errors.Is(err, cloud.ErrIntegrity) {
 		t.Fatalf("content with mismatched catalog size for %+v error = %v, want ErrIntegrity", entry.Ref, err)
 	}
+}
+
+func assertInvalidCatalogMetadataRejected(t *testing.T, client cloud.Client, entry domain.CatalogEntry) {
+	t.Helper()
+	entry.Tags = nil
+	var err error
+	switch entry.Ref.Type {
+	case domain.PowerTypeSkill:
+		err = client.DownloadSkill(context.Background(), entry, filepath.Join(privateTestDir(t), "skill"))
+	case domain.PowerTypePlugin:
+		err = client.DownloadPlugin(context.Background(), entry, filepath.Join(privateTestDir(t), "plugin"))
+	case domain.PowerTypeMCP:
+		_, err = client.GetMCP(context.Background(), entry)
+	case domain.PowerTypeAgent:
+		err = client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent.yaml"))
+	default:
+		t.Fatalf("unsupported Power type %q", entry.Ref.Type)
+	}
+	assertExclusiveContractError(t, err, cloud.ErrInvalidResponse)
 }
 
 type contractOperation struct {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"net"
 	"net/http"
@@ -180,61 +179,6 @@ func (c *Client) endpoint(segments ...string) *url.URL {
 	endpoint.Path = "/" + strings.Join(decoded, "/")
 	endpoint.RawPath = "/" + strings.Join(escaped, "/")
 	return &endpoint
-}
-
-// getJSON 读取 APC 成功响应；2xx body 必须显式声明可解析的 application/json 媒体类型。
-func (c *Client) getJSON(ctx context.Context, endpoint *url.URL, destination any) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return fmt.Errorf("create remote catalog request: %w", err)
-	}
-	request.Header.Set("Accept", "application/json")
-
-	response, err := c.http.Do(request)
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return fmt.Errorf("request remote catalog: %w", ctxErr)
-		}
-		return fmt.Errorf("request remote catalog: %w", err)
-	}
-	defer response.Body.Close()
-
-	switch response.StatusCode {
-	case http.StatusNotFound:
-		return fmt.Errorf("remote catalog returned HTTP 404: %w", cloud.ErrNotFound)
-	case http.StatusGone:
-		return fmt.Errorf("remote catalog returned HTTP 410: %w", cloud.ErrYanked)
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		problem, readErr := io.ReadAll(io.LimitReader(response.Body, maxProblemBody))
-		if readErr != nil {
-			return fmt.Errorf("read remote HTTP %d problem: %w", response.StatusCode, classifyResponseReadError(ctx, readErr))
-		}
-		problemContext := safeProblemContext(response, problem)
-		if problemContext == "" {
-			return fmt.Errorf("remote catalog returned HTTP %d: %w", response.StatusCode, cloud.ErrInvalidResponse)
-		}
-		return fmt.Errorf("remote catalog returned HTTP %d %s: %w", response.StatusCode, problemContext, cloud.ErrInvalidResponse)
-	}
-	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		return fmt.Errorf("remote JSON response has content type %q: %w", response.Header.Get("Content-Type"), cloud.ErrInvalidResponse)
-	}
-	if response.ContentLength > maxJSONResponse {
-		return fmt.Errorf("remote JSON response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
-	}
-
-	payload, err := io.ReadAll(io.LimitReader(response.Body, maxJSONResponse+1))
-	if err != nil {
-		return fmt.Errorf("read remote JSON response: %w", classifyResponseReadError(ctx, err))
-	}
-	if len(payload) > maxJSONResponse {
-		return fmt.Errorf("remote JSON response exceeds %d bytes: %w", maxJSONResponse, cloud.ErrInvalidResponse)
-	}
-	if err := jsonstrict.Decode(payload, destination, false); err != nil {
-		return fmt.Errorf("decode remote JSON response: %w", errors.Join(cloud.ErrInvalidResponse, err))
-	}
-	return nil
 }
 
 func classifyResponseReadError(ctx context.Context, readErr error) error {

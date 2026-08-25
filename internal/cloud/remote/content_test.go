@@ -130,7 +130,7 @@ func validRemoteCatalogEntry(ref domain.PowerRef, contents []byte) domain.Catalo
 		Ref:         ref,
 		Description: "Remote fixture",
 		Message:     "published fixture",
-		ContentType: expectedContentType(ref.Type),
+		ContentType: expectedContentTypeForTest(ref.Type),
 		ContentSize: int64(len(contents)),
 		ContentMD5:  md5Hex(contents),
 		PublishedAt: testPublished,
@@ -482,11 +482,24 @@ func newContentClient(t *testing.T, _ domain.PowerRef, _ []byte, handler http.Ha
 func serveValidContent(t *testing.T, w http.ResponseWriter, r *http.Request, ref domain.PowerRef, contents []byte) {
 	t.Helper()
 	if strings.HasSuffix(r.URL.Path, "/content") {
-		w.Header().Set("Content-Type", expectedContentType(ref.Type))
+		w.Header().Set("Content-Type", expectedContentTypeForTest(ref.Type))
 		_, _ = w.Write(contents)
 		return
 	}
 	rejectRemovedMetadata(t, w)
+}
+
+func expectedContentTypeForTest(powerType domain.PowerType) string {
+	switch powerType {
+	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+		return "application/gzip"
+	case domain.PowerTypeMCP:
+		return "application/json"
+	case domain.PowerTypeAgent:
+		return "application/yaml"
+	default:
+		return ""
+	}
 }
 
 func rejectRemovedMetadata(t *testing.T, w http.ResponseWriter) {

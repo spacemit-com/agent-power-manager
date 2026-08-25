@@ -357,7 +357,7 @@ func newPluginAcceptanceHarness(t *testing.T, agent domain.AgentID) *pluginAccep
 	if err != nil {
 		t.Fatal(err)
 	}
-	uninstaller, err := NewUninstall(locker, transactions, cloudClient, plugins, registry, manifests)
+	uninstaller, err := NewUninstall(locker, transactions, plugins, registry, manifests)
 	if err != nil {
 		t.Fatal(err)
 	}

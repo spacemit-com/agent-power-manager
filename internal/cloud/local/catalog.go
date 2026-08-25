@@ -206,6 +206,9 @@ func (c *Client) loadMatchingCatalogContent(ctx context.Context, entry domain.Ca
 	if err != nil {
 		return localCatalogContent{}, err
 	}
+	if err := entry.Validate(); err != nil {
+		return localCatalogContent{}, fmt.Errorf("validate Local content catalog entry: %w", errors.Join(cloud.ErrInvalidResponse, err))
+	}
 	if !equalCatalogEntry(content.entry, entry) {
 		return localCatalogContent{}, fmt.Errorf("Local %s content no longer matches catalog entry %+v: %w", powerType, entry.Ref, cloud.ErrIntegrity)
 	}

@@ -286,13 +286,6 @@ func newInstallLifecycleWithCatalogAndCloudFactories(
 
 // newUninstallLifecycle 创建 Uninstall 命令所需的默认依赖，并共享清单读写 Repository。
 func newUninstallLifecycle() (cli.UninstallLifecycle, error) {
-	return newUninstallLifecycleWithCloudFactory(newCloudClient)
-}
-
-func newUninstallLifecycleWithCloudFactory(openCloud cloudClientFactory) (cli.UninstallLifecycle, error) {
-	if openCloud == nil {
-		return nil, fmt.Errorf("create uninstall lifecycle with nil Cloud factory: %w", cloud.ErrProviderConfig)
-	}
 	locker, err := lock.NewDefault()
 	if err != nil {
 		return nil, fmt.Errorf("create default lock: %w", err)
@@ -303,15 +296,11 @@ func newUninstallLifecycleWithCloudFactory(openCloud cloudClientFactory) (cli.Un
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
-	cloudClient, err := openCloud()
+	pluginResources, err := pluginresource.NewLookup()
 	if err != nil {
-		return nil, fmt.Errorf("create uninstall Cloud client: %w", err)
+		return nil, fmt.Errorf("create uninstall Plugin Resource lookup: %w", err)
 	}
-	pluginResources, err := newPluginResources(cloudClient)
-	if err != nil {
-		return nil, err
-	}
-	return lifecycle.NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
+	return lifecycle.NewUninstall(locker, transactions, pluginResources, registry, repository)
 }
 
 // newFixLifecycle 创建修复中断事务所需的锁、清单和事务恢复依赖。

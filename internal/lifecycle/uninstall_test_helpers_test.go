@@ -134,41 +134,6 @@ func (m *uninstallFakeTransactions) UninstallPlugin(_ context.Context, request t
 	return m.fixture.transactionResults[request.Agent], m.fixture.transactionErrors[request.Agent]
 }
 
-type uninstallFakeCloud struct {
-	calls   *[]string
-	fixture *uninstallFixture
-}
-
-func (*uninstallFakeCloud) CatalogVersion(context.Context) (domain.CatalogVersion, error) {
-	panic("Uninstall must not inspect the Cloud catalog version")
-}
-func (*uninstallFakeCloud) DownloadCatalog(context.Context, string) error {
-	panic("Uninstall must not download the Cloud catalog")
-}
-func (*uninstallFakeCloud) DownloadSkill(context.Context, domain.CatalogEntry, string) error {
-	panic("Uninstall must not download Cloud content")
-}
-func (*uninstallFakeCloud) GetMCP(context.Context, domain.CatalogEntry) (domain.MCPServer, error) {
-	panic("Uninstall must not read MCP Cloud content")
-}
-
-func (*uninstallFakeCloud) DownloadPlugin(context.Context, domain.CatalogEntry, string) error {
-	panic("Plugin uninstall must not call Cloud DownloadPlugin")
-}
-
-func (*uninstallFakeCloud) DownloadAgent(context.Context, domain.CatalogEntry, string) error {
-	panic("Agent uninstall must not call Cloud DownloadAgent")
-}
-func (*uninstallFakeCloud) Submit(context.Context, domain.SubmissionRequest) (domain.SubmissionResult, error) {
-	panic("Uninstall must not call Cloud Submit")
-}
-func (*uninstallFakeCloud) GetSubmission(context.Context, string) (domain.Submission, error) {
-	panic("Uninstall must not call Cloud GetSubmission")
-}
-func (*uninstallFakeCloud) ListSubmissions(context.Context, domain.SubmissionListQuery) (domain.SubmissionList, error) {
-	panic("Uninstall must not call Cloud ListSubmissions")
-}
-
 type uninstallFakeRegistry struct {
 	calls   *[]string
 	fixture *uninstallFixture
@@ -317,7 +282,6 @@ func newUninstallService(t *testing.T, calls *[]string, fixture uninstallFixture
 	service, err := NewUninstall(
 		&uninstallFakeLocker{calls: calls, fixture: &fixture},
 		&uninstallFakeTransactions{calls: calls, fixture: &fixture},
-		&uninstallFakeCloud{calls: calls, fixture: &fixture},
 		pluginResources,
 		&uninstallFakeRegistry{calls: calls, fixture: &fixture},
 		&uninstallFakeConfig{calls: calls, fixture: &fixture},

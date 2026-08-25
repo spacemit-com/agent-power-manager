@@ -86,6 +86,31 @@ func TestEnsureBuildsOneCompleteSharedArtifactFromLocalCloud(t *testing.T) {
 	assertGeneratedClaudeMarketplace(t, filepath.Join(artifact.Root, ".claude-plugin", "marketplace.json"))
 }
 
+func TestNewLookupReadsArtifactPublishedByDefaultService(t *testing.T) {
+	t.Setenv("APM_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	publisher, err := New(&testDownloader{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := publisher.Ensure(context.Background(), testPluginEntry())
+	if err != nil {
+		t.Fatalf("Ensure() error = %v", err)
+	}
+
+	lookup, err := NewLookup()
+	if err != nil {
+		t.Fatalf("NewLookup() error = %v", err)
+	}
+	got, err := lookup.Lookup(testPluginRef())
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("Lookup() = %#v, want published %#v", got, want)
+	}
+}
+
 func assertGeneratedCodexMarketplace(t *testing.T, path string) {
 	t.Helper()
 	contents, err := os.ReadFile(path)

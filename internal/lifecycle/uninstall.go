@@ -7,7 +7,6 @@ import (
 	"log/slog"
 
 	"apm/internal/cli"
-	"apm/internal/cloud"
 	"apm/internal/config"
 	"apm/internal/domain"
 	"apm/internal/lock"
@@ -20,22 +19,24 @@ import (
 type UninstallService struct {
 	locker       lock.Locker
 	transactions transaction.Manager
-	cloud        cloud.Client
-	plugins      pluginresource.Manager
+	plugins      pluginArtifactLookup
 	registry     AdapterRegistry
 	config       config.Repository
 }
 
+// pluginArtifactLookup 仅复验 manifest 指向的本地精确 Plugin 制品；卸载不得下载、构建或 staging。
+type pluginArtifactLookup interface {
+	Lookup(domain.PowerRef) (pluginresource.Artifact, error)
+}
+
 // NewUninstall 创建持有完整共享状态区间的 Uninstall 生命周期。
 // plugins 在卸载中只允许 Lookup manifest 指向的精确版本，禁止 Ensure 或回源 Cloud。
-func NewUninstall(locker lock.Locker, transactions transaction.Manager, cloud cloud.Client, plugins pluginresource.Manager, registry AdapterRegistry, config config.Repository) (*UninstallService, error) {
+func NewUninstall(locker lock.Locker, transactions transaction.Manager, plugins pluginArtifactLookup, registry AdapterRegistry, config config.Repository) (*UninstallService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Uninstall lifecycle with nil locker")
 	case isNilInterface(transactions):
 		return nil, errors.New("create Uninstall lifecycle with nil transaction manager")
-	case isNilInterface(cloud):
-		return nil, errors.New("create Uninstall lifecycle with nil Cloud client")
 	case isNilInterface(plugins):
 		return nil, errors.New("create Uninstall lifecycle with nil Plugin Resource manager")
 	case isNilInterface(registry):
@@ -43,7 +44,7 @@ func NewUninstall(locker lock.Locker, transactions transaction.Manager, cloud cl
 	case isNilInterface(config):
 		return nil, errors.New("create Uninstall lifecycle with nil config repository")
 	}
-	return &UninstallService{locker: locker, transactions: transactions, cloud: cloud, plugins: plugins, registry: registry, config: config}, nil
+	return &UninstallService{locker: locker, transactions: transactions, plugins: plugins, registry: registry, config: config}, nil
 }
 
 var _ cli.UninstallLifecycle = (*UninstallService)(nil)

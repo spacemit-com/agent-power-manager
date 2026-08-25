@@ -48,6 +48,15 @@ func New(downloader Downloader) (*Service, error) {
 	return newService(cacheRoot, cacheTempRoot, stagingRoot, stagingTempRoot, downloader, builtInBuilder()), nil
 }
 
+// NewLookup 使用默认缓存路径创建只读 Plugin 制品查询服务；不配置下载器或 staging 路径。
+func NewLookup() (*Service, error) {
+	cacheRoot, err := paths.CachePath()
+	if err != nil {
+		return nil, err
+	}
+	return newService(cacheRoot, "", "", "", nil, builtInBuilder()), nil
+}
+
 func builtInBuilder() artifactBuilder {
 	return sharedMarketplaceBuilder{}
 }

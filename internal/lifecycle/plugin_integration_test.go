@@ -189,7 +189,7 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uninstaller, err := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
+	uninstaller, err := NewUninstall(locker, transactions, pluginResources, registry, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestPluginIntegrationMarketplaceAgentVersionLifecycleIsIsolated(t *testing.
 			powerCache, _ := cache.NewFilesystem(cloudClient)
 			pluginResources := newIntegrationPluginResources(t, cloudClient)
 			installer, _ := NewInstall(locker, transactions, catalogManagerFromSource(t, cloudClient), cloudClient, powerCache, pluginResources, registry, repository, version.NewSelector())
-			uninstaller, _ := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, repository)
+			uninstaller, _ := NewUninstall(locker, transactions, pluginResources, registry, repository)
 			for _, target := range []struct {
 				version string
 				outcome cli.InstallOutcome
@@ -436,7 +436,7 @@ func newIsolatedPluginHarness(t *testing.T, installedAgents ...domain.AgentID) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	uninstaller, err := NewUninstall(locker, transactions, cloudClient, pluginResources, registry, manifests)
+	uninstaller, err := NewUninstall(locker, transactions, pluginResources, registry, manifests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1511,7 +1511,7 @@ func newProviderLifecycleHarness(t *testing.T, client cloud.Client) *isolatedMCP
 	if err != nil {
 		t.Fatal(err)
 	}
-	harness.uninstall, err = NewUninstall(locker, transactions, client, plugins, harness.registry, harness.repository)
+	harness.uninstall, err = NewUninstall(locker, transactions, plugins, harness.registry, harness.repository)
 	if err != nil {
 		t.Fatal(err)
 	}

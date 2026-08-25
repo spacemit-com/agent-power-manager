@@ -18,7 +18,6 @@ func TestNewUninstallRejectsNilDependencies(t *testing.T) {
 	fixture := &uninstallFixture{}
 	locker := &uninstallFakeLocker{calls: &calls, fixture: fixture}
 	transactions := &uninstallFakeTransactions{calls: &calls, fixture: fixture}
-	cloud := &uninstallFakeCloud{calls: &calls, fixture: fixture}
 	pluginResources := &installFakePluginResources{}
 	registry := &uninstallFakeRegistry{calls: &calls, fixture: fixture}
 	config := &uninstallFakeConfig{calls: &calls, fixture: fixture}
@@ -29,40 +28,34 @@ func TestNewUninstallRejectsNilDependencies(t *testing.T) {
 		want string
 	}{
 		{name: "locker", new: func() (*UninstallService, error) {
-			return NewUninstall(nil, transactions, cloud, pluginResources, registry, config)
+			return NewUninstall(nil, transactions, pluginResources, registry, config)
 		}, want: "create Uninstall lifecycle with nil locker"},
 		{name: "typed nil locker", new: func() (*UninstallService, error) {
-			return NewUninstall((*uninstallFakeLocker)(nil), transactions, cloud, pluginResources, registry, config)
+			return NewUninstall((*uninstallFakeLocker)(nil), transactions, pluginResources, registry, config)
 		}, want: "create Uninstall lifecycle with nil locker"},
 		{name: "transaction manager", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, nil, cloud, pluginResources, registry, config)
+			return NewUninstall(locker, nil, pluginResources, registry, config)
 		}, want: "create Uninstall lifecycle with nil transaction manager"},
 		{name: "typed nil transaction manager", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, (*uninstallFakeTransactions)(nil), cloud, pluginResources, registry, config)
+			return NewUninstall(locker, (*uninstallFakeTransactions)(nil), pluginResources, registry, config)
 		}, want: "create Uninstall lifecycle with nil transaction manager"},
-		{name: "Cloud client", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, nil, pluginResources, registry, config)
-		}, want: "create Uninstall lifecycle with nil Cloud client"},
-		{name: "typed nil Cloud client", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, (*uninstallFakeCloud)(nil), pluginResources, registry, config)
-		}, want: "create Uninstall lifecycle with nil Cloud client"},
 		{name: "Plugin Resource manager", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, cloud, nil, registry, config)
+			return NewUninstall(locker, transactions, nil, registry, config)
 		}, want: "create Uninstall lifecycle with nil Plugin Resource manager"},
 		{name: "typed nil Plugin Resource manager", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, cloud, (*installFakePluginResources)(nil), registry, config)
+			return NewUninstall(locker, transactions, (*installFakePluginResources)(nil), registry, config)
 		}, want: "create Uninstall lifecycle with nil Plugin Resource manager"},
 		{name: "adapter registry", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, cloud, pluginResources, nil, config)
+			return NewUninstall(locker, transactions, pluginResources, nil, config)
 		}, want: "create Uninstall lifecycle with nil adapter registry"},
 		{name: "typed nil adapter registry", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, cloud, pluginResources, (*uninstallFakeRegistry)(nil), config)
+			return NewUninstall(locker, transactions, pluginResources, (*uninstallFakeRegistry)(nil), config)
 		}, want: "create Uninstall lifecycle with nil adapter registry"},
 		{name: "config repository", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, cloud, pluginResources, registry, nil)
+			return NewUninstall(locker, transactions, pluginResources, registry, nil)
 		}, want: "create Uninstall lifecycle with nil config repository"},
 		{name: "typed nil config repository", new: func() (*UninstallService, error) {
-			return NewUninstall(locker, transactions, cloud, pluginResources, registry, (*uninstallFakeConfig)(nil))
+			return NewUninstall(locker, transactions, pluginResources, registry, (*uninstallFakeConfig)(nil))
 		}, want: "create Uninstall lifecycle with nil config repository"},
 	}
 

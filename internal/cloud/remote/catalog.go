@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"apm/internal/catalog"
 	"apm/internal/cloud"
@@ -317,18 +316,6 @@ func (writer *catalogDestinationWriter) Write(buffer []byte) (int, error) {
 	return written, err
 }
 
-func validateAPCTimestamp(value string) error {
-	parsed, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		return err
-	}
-	_, offset := parsed.Zone()
-	if offset != 0 || (!strings.HasSuffix(value, "Z") && !strings.HasSuffix(value, "+00:00")) {
-		return errors.New("timestamp is not RFC3339 UTC")
-	}
-	return nil
-}
-
 func validatePowerIdentity(powerType domain.PowerType, name, version string) (domain.PowerRef, *semver.Version, error) {
 	if !isKnownPowerType(powerType) || !domain.IsCanonicalPowerName(name) {
 		return domain.PowerRef{}, nil, fmt.Errorf("invalid resource identity %q/%q: %w", powerType, name, cloud.ErrInvalidResponse)
@@ -370,17 +357,4 @@ func canonicalVersion(version string) (*semver.Version, bool) {
 		return nil, false
 	}
 	return parsed, true
-}
-
-func expectedContentType(powerType domain.PowerType) string {
-	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin:
-		return "application/gzip"
-	case domain.PowerTypeMCP:
-		return "application/json"
-	case domain.PowerTypeAgent:
-		return "application/yaml"
-	default:
-		return ""
-	}
 }

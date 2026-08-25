@@ -228,7 +228,7 @@ func decodeSubmissionDetail(ctx context.Context, response *http.Response) (domai
 	return validateSubmissionDetail(dto)
 }
 
-// getSubmissionJSON 仅为 Submission 查询附加 Bearer；匿名资源读取继续使用 getJSON，避免凭据扩散。
+// getSubmissionJSON 仅为 Submission 查询附加 Bearer；CatalogSource 与资源 content 请求保持匿名，避免凭据扩散。
 func (c *Client) getSubmissionJSON(ctx context.Context, endpoint *url.URL, target any) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("query remote submission: %w", err)
