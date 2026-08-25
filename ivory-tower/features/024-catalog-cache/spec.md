@@ -221,7 +221,8 @@ Snapshot 不访问网络或文件系统。跨类型同名歧义仍由 Install li
 - version 是严格、无 prerelease/build metadata 的 `vMAJOR.MINOR.PATCH`；
 - description/message trim 后非空；
 - content type 与分组匹配；
-- size 非负且处于既有类型上限；
+- `content_size` 必须为正数（`> 0`），且不超过对应 Power content 的既有类型上限；当前 Skill/Plugin
+  指 `.tar.gz` 原始字节、MCP/Agent 指 JSON/YAML 原始字节，四类上限均为 20 MiB；
 - MD5 是 32 位小写十六进制；
 - published_at 是 UTC RFC 3339；
 - tags 非空值、排序、去重并满足 APC tag 规则；
@@ -315,7 +316,9 @@ GET /api/v1/resources/version
 ```
 
 APC 可返回相同 hash 的 ETag，但 APM 不依赖条件请求。version 必须和当前 catalog 对象来自
-同一原子发布状态，不能使用独立、可能漂移的数据库时间戳。
+同一原子发布状态，不能使用独立、可能漂移的数据库时间戳。`catalog_size` 是完整 Catalog body 的
+精确非负字节数（`>= 0`），并继续受 100 MiB Catalog 上限约束；它与 Item 必须为正数的
+`content_size` 不是同一个边界。
 
 ### 9.2 Full catalog
 
