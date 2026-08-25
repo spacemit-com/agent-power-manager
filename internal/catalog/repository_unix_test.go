@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -771,6 +772,98 @@ func TestRepositoryReplaceDoesNotDeleteSubstituteInjectedImmediatelyBeforeUnlink
 	assertRepositoryFileBytes(t, path, newData)
 	assertRepositoryFileBytes(t, substitutedPath, substituteData)
 	assertRepositoryFileBytes(t, preservedPath, oldData)
+}
+
+func TestRepositoryCleanupTrustBoundaryContract(t *testing.T) {
+	source, err := os.ReadFile("repository_unix.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"current EUID 是 pathname 操作的受信任主体",
+		"advisory parent lock 只串行遵守 Repository 协议的发布者",
+		"不承诺隔离恶意同 EUID 在最终 fstatat 到 unlinkat 窄窗的替换",
+	} {
+		if !strings.Contains(string(source), required) {
+			t.Errorf("repository cleanup trust-boundary contract is missing %q", required)
+		}
+	}
+}
+
+func TestRepositoryIdentityCleanupTrustBoundary(t *testing.T) {
+	t.Run("normal exact cleanup", func(t *testing.T) {
+		root := trustedRepositoryDir(t)
+		name := ".catalog-contract.owned"
+		path := writeRepositoryFile(t, root, name, []byte("owned catalog"), 0o600)
+		platform := newRepositoryPlatform().(*unixRepositoryPlatform)
+		parent, err := platform.openParent(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer parent.close()
+		stat, err := parent.statEntry(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := parent.removeEntryIfIdentity(name, repositoryIdentity(stat)); err != nil {
+			t.Fatalf("removeEntryIfIdentity() error = %v", err)
+		}
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("normal cleanup residue = %v, want absent", err)
+		}
+		if entries := repositoryDirectoryEntries(t, root); len(entries) != 0 {
+			t.Fatalf("normal cleanup directory entries = %v, want no residue", entries)
+		}
+	})
+
+	t.Run("last detectable substitution fails closed", func(t *testing.T) {
+		root := trustedRepositoryDir(t)
+		name := ".catalog-contract.owned"
+		originalData := []byte("owned catalog")
+		substituteData := []byte("substitute")
+		path := writeRepositoryFile(t, root, name, originalData, 0o600)
+		preservedPath := path + ".preserved"
+		platform := newRepositoryPlatform().(*unixRepositoryPlatform)
+		originalUnlinkat := platform.ops.unlinkat
+		unlinkCalls := 0
+		platform.ops.unlinkat = func(directoryFD int, entry string, flags int) error {
+			unlinkCalls++
+			return originalUnlinkat(directoryFD, entry, flags)
+		}
+		platform.ops.beforeUnlinkat = func(_ int, entry string) {
+			if entry != name {
+				t.Fatalf("beforeUnlinkat entry = %q, want %q", entry, name)
+			}
+			if err := os.Rename(path, preservedPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, substituteData, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		parent, err := platform.openParent(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer parent.close()
+		stat, err := parent.statEntry(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := parent.removeEntryIfIdentity(name, repositoryIdentity(stat)); !errors.Is(err, fs.ErrInvalid) {
+			t.Fatalf("removeEntryIfIdentity() error = %v, want fail-closed fs.ErrInvalid", err)
+		}
+		if unlinkCalls != 0 {
+			t.Fatalf("unlinkat calls after detectable substitution = %d, want zero", unlinkCalls)
+		}
+		assertRepositoryFileBytes(t, path, substituteData)
+		assertRepositoryFileBytes(t, preservedPath, originalData)
+		if entries := repositoryDirectoryEntries(t, root); !reflect.DeepEqual(entries, []string{name, name + ".preserved"}) {
+			t.Fatalf("fail-closed cleanup entries = %v, want only substitute and preserved inode", entries)
+		}
+	})
 }
 
 func repositoryVersion(data []byte) domain.CatalogVersion {

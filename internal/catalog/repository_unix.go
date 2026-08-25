@@ -192,7 +192,7 @@ func versionForCatalogBytes(data []byte) domain.CatalogVersion {
 	return domain.CatalogVersion{SHA256: hex.EncodeToString(digest[:]), Size: int64(len(data))}
 }
 
-// openParent 从根目录逐级固定现有物理目录，并拒绝可由非受信主体改写的祖先。
+// openParent 从根目录逐级固定并按 owner/mode 验证目录；pathname 操作信任 current EUID。
 func (platform *unixRepositoryPlatform) openParent(path string) (*pinnedRepositoryDirectory, error) {
 	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return nil, fmt.Errorf("catalog parent %q must be absolute and clean", path)
@@ -278,6 +278,7 @@ func (directory *pinnedRepositoryDirectory) close() error {
 	return err
 }
 
+// lockExclusive 使用 advisory parent lock 只串行遵守 Repository 协议的发布者。
 func (directory *pinnedRepositoryDirectory) lockExclusive() error {
 	if directory == nil || directory.file == nil {
 		return fs.ErrInvalid
@@ -576,6 +577,7 @@ func (directory *pinnedRepositoryDirectory) reconcileReplacementState(owned *own
 	return Snapshot{}, false, errors.Join(commitErr, rollbackErr, recheckErr)
 }
 
+// cleanupCommittedPrevious 在提交后尽力清理旧 inode；检测到替换时保留 residue，且不反转提交结果。
 func (directory *pinnedRepositoryDirectory) cleanupCommittedPrevious(owned *ownedRepositoryFile, previous repositoryFileIdentity) {
 	_ = directory.removeEntryIfIdentity(owned.name, previous)
 	owned.name = ""
@@ -649,6 +651,9 @@ func (directory *pinnedRepositoryDirectory) rollbackExchange(owned *ownedReposit
 	return directory.ops.syncDirectory(directory.file)
 }
 
+// removeEntryIfIdentity 仅删除 pinned parent 下仍匹配预期身份的目录项。
+// 调用者须持有 parent advisory lock；current EUID 是 pathname 操作的受信任主体，flock 不隔离无视协议的同 EUID 进程。
+// POSIX 不提供 fd-bound conditional unlink，故本函数对可检测替换 fail closed，但不承诺隔离恶意同 EUID 在最终 fstatat 到 unlinkat 窄窗的替换。
 func (directory *pinnedRepositoryDirectory) removeEntryIfIdentity(name string, identity repositoryFileIdentity) error {
 	stat, err := directory.statEntry(name)
 	if errors.Is(err, unix.ENOENT) {
@@ -669,7 +674,7 @@ func (directory *pinnedRepositoryDirectory) removeEntryIfIdentity(name string, i
 		return fmt.Errorf("refuse removal of catalog entry %q changed before unlink: %w", name, fs.ErrInvalid)
 	}
 	directory.ops.beforeUnlinkat(int(directory.file.Fd()), name)
-	// POSIX 没有按 inode 条件删除目录项的原语；检测到最终窗口中的替换时保留残留并 fail closed。
+	// 这是 unlink 前最后一个可检测窗口；身份改变时保留 residue，不调用 unlinkat。
 	stat, err = directory.statEntry(name)
 	if err != nil {
 		return err

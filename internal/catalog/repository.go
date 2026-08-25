@@ -7,7 +7,7 @@ import (
 	"apm/internal/domain"
 )
 
-// Repository 在物理文件安全边界内加载和原子替换唯一的 catalog 快照。
+// Repository 在物理文件安全边界内加载和原子替换 catalog；pathname 操作将 current EUID 视为受信任主体。
 type Repository interface {
 	Load() (Snapshot, domain.CatalogVersion, error)
 	Replace(expected domain.CatalogVersion, sourcePath string) (Snapshot, error)
@@ -40,7 +40,7 @@ func (repository *filesystemRepository) Load() (Snapshot, domain.CatalogVersion,
 	return repository.platform.load(repository.path)
 }
 
-// Replace 验证 provider staged 文件与期望版本，再以 0600 模式原子替换 catalog。
+// Replace 验证 provider staged 文件与期望版本，再以 0600 模式原子替换 catalog；advisory 锁仅串行遵守协议的发布者。
 func (repository *filesystemRepository) Replace(expected domain.CatalogVersion, sourcePath string) (Snapshot, error) {
 	if err := expected.Validate(); err != nil {
 		return Snapshot{}, fmt.Errorf("validate expected catalog version: %w", err)
