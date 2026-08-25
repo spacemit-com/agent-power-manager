@@ -14,6 +14,12 @@ type Catalog interface {
 	Resolve(context.Context, domain.PowerRef) (domain.PowerRef, error)
 }
 
+// CatalogSource 定义目录版本与完整目录下载边界；destination 必须由调用方提供、绝对且尚不存在。
+type CatalogSource interface {
+	CatalogVersion(context.Context) (domain.CatalogVersion, error)
+	DownloadCatalog(context.Context, string) error
+}
+
 // SkillSource 定义向调用方私有目录下载精确版本 Skill 的边界；destination 必须不存在或是空物理目录。
 type SkillSource interface {
 	DownloadSkill(context.Context, domain.PowerRef, string) error

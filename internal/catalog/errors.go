@@ -10,6 +10,6 @@ var (
 	ErrNotFound = errors.New("catalog entry not found")
 	// ErrAmbiguous 表示未指定类型的名称匹配到多个 Power 类型。
 	ErrAmbiguous = errors.New("catalog entry type is ambiguous")
-	// ErrCatalogUnavailable 表示没有可用的本地 catalog；Manager 会在后续任务中使用它。
+	// ErrCatalogUnavailable 表示本地没有可用目录且本次同步未能完成。
 	ErrCatalogUnavailable = errors.New("catalog unavailable")
 )
