@@ -1,284 +1,190 @@
 classDiagram
-    note for SearchLifecycle "Search factory 先构造并校验 provider；Search 无锁 Inspect journal，Warn/Debug 后调用 Cloud List 并返回结构化结果"
     class SearchLifecycle {
         <<interface>>
-        +Search(Context, Flags) (SearchResult, error)
+        +Search(Context, Flags) SearchResult
     }
-    class SearchResult {
-        +Powers []PowerRef
-    }
-    class searchService {
-        +Search(...)
-    }
-
-    note for ListLifecycle "默认/installed 共用先构造并校验 provider 的 factory，且都无锁 Inspect；installed 进入查询后不访问 Cloud，只做 Refresh 与 best-effort Config reads"
     class ListLifecycle {
         <<interface>>
-        +List(Context, Flags) (ListResult, error)
+        +List(Context, Flags) ListResult
     }
-    class ListResult {
-        +Powers []ListedPower
+    class InstallLifecycle {
+        <<interface>>
+        +Install(Context, Flags) InstallResult
     }
-    class PartialListError {
-        +Failures []AgentFailure
+    class UninstallLifecycle {
+        <<interface>>
+        +Uninstall(Context, Flags) UninstallResult
     }
-    class listService {
-        +List(...)
-    }
-
-    note for FixLifecycle "Fix：一次锁内恰好 Recover 一次；同步 Warn/Debug 后 Release；无 stdout 结果"
     class FixLifecycle {
         <<interface>>
         +Fix(Context) error
     }
-    class fixService {
-        +Fix(Context) error
-    }
-
-    note for InstallLifecycle "Install 专属端口；显式规范 Plugin ref 可在全部 manifest 精确命中时先于 Cloud 返回；只有成功 Release 的 batch error 可保留结果"
-    class InstallLifecycle {
-        <<interface>>
-        +Install(Context, Flags) (InstallResult, error)
-    }
-    class InstallItem {
-        +Agent AgentID
-        +Power PowerRef
-        +Outcome InstallOutcome
-    }
-    class InstallResult {
-        +Items []InstallItem
-    }
-    class InstallBatchError {
-        +Agent AgentID
-        +Err error
-    }
-    class installService {
-        +Install(...)
-    }
-
-    note for UninstallLifecycle "Uninstall 专属端口；只有成功 Release 的 batch error 可保留结果"
-    class UninstallLifecycle {
-        <<interface>>
-        +Uninstall(Context, Flags) (UninstallResult, error)
-    }
-    class UninstallItem {
-        +Agent AgentID
-        +Power *PowerRef
-        +Outcome UninstallOutcome
-    }
-    class UninstallResult {
-        +Items []UninstallItem
-    }
-    class UninstallBatchError {
-        +Agent AgentID
-        +Err error
-    }
-    note for uninstallService "Acquire → Recover/Warn → Refresh → per-Agent Config/Resolve/Transaction → successful Release；Warn 同步且不负责 CLI 渲染"
-    class uninstallService {
-        +Uninstall(...)
-    }
-
-    note for ValidateLifecycle "完全离线，不读 API Key、不访问网络"
     class ValidateLifecycle {
         <<interface>>
-        +Validate(Context, Flags, []string) (ValidateResult, error)
+        +Validate(Context, Flags, args) ValidateResult
     }
-    note for SubmitLifecycle "Prepare 后生成 UUID 幂等键，再 cloud.Submit；输出 outcome accepted/replayed"
     class SubmitLifecycle {
         <<interface>>
-        +Submit(Context, Flags, []string) (SubmitResult, error)
+        +Submit(Context, Flags, args) SubmitResult
     }
-    note for SubmissionQueryLifecycle "submission get/list 查询"
     class SubmissionQueryLifecycle {
         <<interface>>
-        +Get(Context, string) (SubmissionQueryResult, error)
-        +List(Context, Flags) (SubmissionQueryResult, error)
-    }
-    class validateService {
-        +Validate(...)
-    }
-    class submitService {
-        +Submit(...)
-    }
-    class submissionQueryService {
-        +Get(...)
-        +List(...)
-    }
-    note for SubmissionPackage "internal/submission：Validate/Prepare 复用同一套四类规则。Agent 输入为单个原始 agent.yaml，不打包、不重序列化；name/version/description 来自 agent.id/agent.version/agent.description；--type agent 不接受 --version；Prepare 复用 Validate 后的同一份原始字节（Content-Type application/yaml、MD5 针对原始字节）"
-    class SubmissionPackage {
-        <<internal/submission>>
-        +Validate(Context, Request) (Validation, error)
-        +Prepare(Context, Request) (Content, error)
+        +Get(Context, id) SubmissionQueryResult
+        +List(Context, Flags) SubmissionQueryResult
     }
 
-    class AdapterRegistry {
-        <<interface>>
-        +ResolveSkill(AgentID) (Adapter, error)
-        +ResolveAgent(AgentID) (AgentAdapter, error)
-        +ResolveMCP(AgentID) (MCPAdapter, error)
-        +ResolvePlugin(AgentID) (PluginAdapter, error)
-        +RefreshInstalled() (AgentSnapshot, error)
-    }
-    note for Adapter "不定义 Uninstall 方法；Transaction 使用 TargetPath 管理 quarantine"
-    class Adapter {
-        <<interface>>
-        +TargetPath(PowerRef) (string, error)
-        +Install(PowerRef, stagingRoot) (AdapterInstallResult, error)
-    }
-    note for AgentAdapter "仅 Bibit；单文件 agent.yaml 原样字节发布到 agents/<agent.id>/agent.yaml（ADR-015）"
-    class AgentAdapter {
-        <<interface>>
-        +TargetPath(PowerRef) (string, error)
-        +Install(PowerRef, staging) (AgentInstallResult, error)
-    }
-    class AgentInstallResult {
-        +Published bool
-    }
-    class AdapterInstallResult {
-        +Published bool
-    }
-    class AgentSnapshot {
-        +Agents []AgentID
-        +Contains(AgentID) bool
-        +Ordered() []AgentID
-    }
-    class ConfigRepository {
-        <<interface>>
-        +List(AgentID) (PowerGroups, error)
-        +Find(AgentID, PowerType, name) (PowerRef, bool, error)
-        +Set(AgentID, PowerRef) error
-        +Remove(AgentID, PowerType, name) error
-    }
-    note for Inspector "只读读取并统一校验 journal；不恢复、不写状态"
-    class Inspector {
-        <<interface>>
-        +Inspect(Context) (InspectionResult, error)
-    }
-    note for Recoverer "在调用方持锁时收敛唯一 journal"
-    class Recoverer {
-        <<interface>>
-        +Recover(Context) (RecoveryResult, error)
-    }
-    note for TransactionManager "组合 Inspector 与 Recoverer，并提供 Skill/Agent/MCP/Plugin 变更事务；非法 journal 保留"
-    class TransactionManager {
-        <<interface>>
-        +InstallSkill(Context, SkillInstallRequest) error
-        +InstallAgent(Context, AgentInstallRequest) error
-        +InstallMCP(Context, MCPInstallRequest) error
-        +InstallPlugin(Context, PluginInstallRequest) error
-        +UninstallSkill(Context, SkillUninstallRequest) (TransactionUninstallResult, error)
-        +UninstallAgent(Context, AgentUninstallRequest) (TransactionUninstallResult, error)
-        +UninstallMCP(Context, MCPUninstallRequest) (TransactionUninstallResult, error)
-        +UninstallPlugin(Context, PluginUninstallRequest) (TransactionUninstallResult, error)
-    }
-    class TransactionUninstallResult {
-        +TargetMissing bool
-    }
-    class InspectionResult {
-        +Active bool
-        +TransactionID string
-        +Operation Operation
-        +Agent AgentID
-        +Power PowerRef
-        +OriginalPhase Phase
-    }
-    class Locker {
-        <<interface>>
-        +Acquire() (Unlock, error)
-    }
-    class PowerCache {
-        <<interface>>
-        +PrepareSkill(Context, PowerRef) (stagingRoot string, error)
-        +PrepareAgent(Context, PowerRef) (stagingRoot string, error)
-    }
-    class PluginResourceManager {
-        <<interface>>
-        +Ensure(Context, PowerRef) (Artifact, error)
-        +Lookup(PowerRef) (Artifact, error)
-        +StageFilesystem(PowerRef) (stagingRoot string, error)
-    }
-    class PluginArtifact {
-        +Power PowerRef
-        +Root string
-        +PluginPath string
-        +CodexMarketplaceSource string
-        +ClaudeMarketplaceSource string
-        +MarketplaceFor(AgentID) (Marketplace, error)
-    }
-    class CloudClient {
-        <<interface>>
-        +List(Context) ([]PowerRef, error)
-        +Resolve(Context, PowerRef) (PowerRef, error)
-        +DownloadSkill(Context, PowerRef, destination) error
-        +DownloadAgent(Context, PowerRef, destination) error
-        +GetMCP(Context, PowerRef) (MCPServer, error)
-        +DownloadPlugin(Context, PowerRef, destination) error
-        +Submit(Context, SubmissionRequest) (SubmissionResult, error)
-        +GetSubmission(Context, string) (Submission, error)
-        +ListSubmissions(Context, SubmissionListQuery) (SubmissionList, error)
-    }
-    class VersionSelector {
-        <<interface>>
-        +Select(candidates []string, requested string) (string, error)
-    }
-
+    class searchService
+    class listService
+    class installService
+    class uninstallService
+    class fixService
+    class validateService
+    class submitService
+    class submissionQueryService
     searchService ..|> SearchLifecycle
-    searchService --> SearchResult : returns
-    searchService --> Inspector : Inspect only
-    searchService --> CloudClient : List
-
     listService ..|> ListLifecycle
-    listService --> ListResult : returns
-    listService --> PartialListError : all-mode Config failures
-    listService --> AdapterRegistry : installed only
-    listService --> ConfigRepository : installed only
-    listService --> Inspector : Inspect only, both modes
-    listService --> CloudClient : List, Cloud mode
-
-    fixService ..|> FixLifecycle
-    fixService --> Locker : one lock interval
-    fixService --> Recoverer : Recover exactly once
-
     installService ..|> InstallLifecycle
-    installService --> InstallResult : returns
-    installService --> InstallBatchError : successful Release only
-    installService --> Locker : one lock interval
-    installService --> TransactionManager : Recover / InstallSkill / InstallAgent / InstallMCP / InstallPlugin
-    installService --> CloudClient : List / Resolve / GetMCP, Cache and Plugin Resource consume sources
-    installService --> PowerCache : Skill PrepareSkill / Agent PrepareAgent only
-    installService --> PluginResourceManager : Plugin Ensure / Lookup / StageFilesystem
-    installService --> AdapterRegistry : Refresh / ResolveSkill / ResolveAgent / ResolveMCP / ResolvePlugin
-    installService --> ConfigRepository : Find
-    installService --> VersionSelector : resolve version
-
     uninstallService ..|> UninstallLifecycle
-    uninstallService --> UninstallResult : returns after Release
-    uninstallService --> UninstallBatchError : successful Release only
-    uninstallService --> Locker : one lock interval
-    uninstallService --> TransactionManager : Recover / UninstallSkill / UninstallAgent / UninstallMCP / UninstallPlugin
-    uninstallService --> AdapterRegistry : Refresh / ResolveSkill / ResolveAgent / ResolveMCP / ResolvePlugin
-    uninstallService --> ConfigRepository : List
-    uninstallService --> CloudClient : MCP GetMCP only when present
-    uninstallService --> PluginResourceManager : Plugin Lookup only, never Cloud
-
+    fixService ..|> FixLifecycle
     validateService ..|> ValidateLifecycle
     submitService ..|> SubmitLifecycle
     submissionQueryService ..|> SubmissionQueryLifecycle
-    validateService --> SubmissionPackage : Validate
-    submitService --> SubmissionPackage : Prepare
-    submitService --> CloudClient : Submit
-    submissionQueryService --> CloudClient : GetSubmission / ListSubmissions
 
-    AdapterRegistry --> Adapter : resolves
-    AdapterRegistry --> AgentAdapter : resolves
-    AdapterRegistry --> AgentSnapshot : returns
-    Adapter --> AdapterInstallResult : Install returns
-    AgentAdapter --> AgentInstallResult : Install returns
-    TransactionManager --> Adapter : TargetPath / Install
-    TransactionManager --> AgentAdapter : TargetPath / Install
-    TransactionManager --> TransactionUninstallResult : returns
-    TransactionManager --|> Inspector : embeds
-    TransactionManager --|> Recoverer : embeds
-    Inspector --> InspectionResult : returns
-    TransactionManager --> ConfigRepository : Set / Remove
-    PluginResourceManager --> PluginArtifact : returns canonical-derived immutable shared artifact, caller uses MarketplaceFor (ADR-017)
+    class Inspector {
+        <<interface>>
+        +Inspect(Context) InspectionResult
+    }
+    class Recoverer {
+        <<interface>>
+        +Recover(Context) RecoveryResult
+    }
+    class Locker {
+        <<interface>>
+        +Acquire() Unlock
+    }
+    class CatalogManager {
+        <<interface>>
+        +Snapshot(Context) (CatalogSnapshot, SyncStatus, error)
+        +SnapshotLocked(Context) (CatalogSnapshot, SyncStatus, error)
+    }
+    class CatalogSnapshot {
+        +List(PowerType) []CatalogEntry
+        +Resolve(PowerRef) CatalogEntry
+        +Metadata(PowerRef) CatalogEntry
+    }
+    class CatalogEntry {
+        +Ref PowerRef
+        +ContentType string
+        +ContentSize int64
+        +ContentMD5 string
+        +Tags []string
+    }
+    class SyncStatus {
+        +Updated bool
+        +Stale bool
+        +Cause error
+    }
+    CatalogManager --> CatalogSnapshot : returns immutable value
+    CatalogManager --> SyncStatus
+    CatalogSnapshot --> CatalogEntry : returns clones
+    note for CatalogManager "Snapshot 自行短时获取非阻塞 apm.lock；SnapshotLocked 仅供已持锁 Install。Provider/update 失败可返回一次 stale 状态，锁/取消/本地安全失败不降级（ADR-021）"
+
+    searchService --> Inspector : Inspect only
+    searchService --> CatalogManager : Snapshot exactly once
+    searchService --> CatalogSnapshot : local filter and latest per series
+    listService --> Inspector : Inspect only
+    listService --> CatalogManager : Cloud mode Snapshot once
+    listService --> CatalogSnapshot : local type filter
+    note for listService "list --installed 不调用 CatalogManager 或 Cloud；只 RefreshInstalled 与读取 manifest"
+
+    fixService --> Locker : one full interval
+    fixService --> Recoverer : Recover exactly once
+    note for fixService "零 Catalog/Cloud 调用；不渲染业务 stdout"
+
+    installService --> Locker : Acquire before Recover
+    installService --> Recoverer : Recover inside lock
+    installService --> CatalogManager : SnapshotLocked at most once
+    installService --> CatalogSnapshot : resolve one exact CatalogEntry
+    note for installService "显式精确 Plugin 的全部 manifest 命中可在 SnapshotLocked 前 unchanged 早退；其它路径把同一 entry 透传到内容边界"
+
+    class PowerCache {
+        <<interface>>
+        +PrepareSkill(Context, CatalogEntry) stagingRoot
+        +PrepareAgent(Context, CatalogEntry) stagingRoot
+    }
+    class PluginResourceManager {
+        <<interface>>
+        +Ensure(Context, CatalogEntry) Artifact
+        +Lookup(PowerRef) Artifact
+        +StageFilesystem(PowerRef) stagingRoot
+    }
+    class CloudClient {
+        <<interface>>
+        +CatalogVersion(Context) CatalogVersion
+        +DownloadCatalog(Context, destination) error
+        +DownloadSkill(Context, CatalogEntry, destination) error
+        +DownloadAgent(Context, CatalogEntry, destination) error
+        +GetMCP(Context, CatalogEntry) MCPServer
+        +DownloadPlugin(Context, CatalogEntry, destination) error
+        +Submit(Context, SubmissionRequest) SubmissionResult
+        +GetSubmission(Context, id) Submission
+        +ListSubmissions(Context, Query) SubmissionList
+    }
+    installService --> PowerCache : Skill or Agent target entry
+    installService --> PluginResourceManager : Plugin target entry; previous by Ref
+    installService --> CloudClient : MCP target and previous definitions by entry
+
+    class AdapterRegistry {
+        <<interface>>
+        +RefreshInstalled() AgentSnapshot
+        +ResolveSkill(AgentID) SkillAdapter
+        +ResolveAgent(AgentID) AgentAdapter
+        +ResolveMCP(AgentID) MCPAdapter
+        +ResolvePlugin(AgentID) PluginAdapter
+    }
+    class ConfigRepository {
+        <<interface>>
+        +List(AgentID) PowerGroups
+        +Find(AgentID, PowerType, name) (PowerRef, found)
+        +Set(AgentID, PowerRef) error
+        +Remove(AgentID, PowerType, name) error
+    }
+    class TransactionManager {
+        <<interface>>
+        +InstallSkill(Context, Request) error
+        +InstallAgent(Context, Request) error
+        +InstallMCP(Context, Request) error
+        +InstallPlugin(Context, Request) error
+        +UninstallSkill(Context, Request) UninstallResult
+        +UninstallAgent(Context, Request) UninstallResult
+        +UninstallMCP(Context, Request) UninstallResult
+        +UninstallPlugin(Context, Request) UninstallResult
+    }
+    TransactionManager --|> Inspector
+    TransactionManager --|> Recoverer
+    installService --> AdapterRegistry : refresh and resolve
+    installService --> ConfigRepository : manifest facts
+    installService --> TransactionManager : serial recoverable changes
+
+    class PluginArtifactLookup {
+        <<read-only interface>>
+        +Lookup(PowerRef) Artifact
+    }
+    uninstallService --> Locker : one full interval
+    uninstallService --> Recoverer : Recover inside lock
+    uninstallService --> AdapterRegistry : local refresh and adapters
+    uninstallService --> ConfigRepository : manifest authority
+    uninstallService --> PluginArtifactLookup : local Plugin artifact only
+    uninstallService --> TransactionManager : local serial uninstall
+    note for uninstallService "构造和执行均无 CatalogManager/Cloud。MCP 只用 manifest Ref 与 Agent CLI；definition-free journal 的 recovery 永远收敛 absent，永不 Add"
+
+    class SubmissionPackage {
+        <<internal/submission>>
+        +Validate(Context, Request) Validation
+        +Prepare(Context, Request) Content
+    }
+    validateService --> SubmissionPackage : Validate offline
+    submitService --> SubmissionPackage : Prepare authoritative content
+    submitService --> CloudClient : authenticated Submit
+    submissionQueryService --> CloudClient : authenticated get/list
+    note for SubmissionQueryLifecycle "Submission 认证请求独立于匿名 catalog，失败不使用 stale snapshot"

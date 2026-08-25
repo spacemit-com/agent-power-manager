@@ -1,18 +1,23 @@
 flowchart TD
-    SearchStart([Search CLI]) --> SearchValidate[校验 keyword 与可选 type]
-    SearchValidate -->|失败| SearchCLIError[CLI 记录一次 Error、打印 usage] --> SearchExitError([非零退出])
-    SearchValidate -->|成功| Inspect[无锁 Inspect journal]
-    Inspect -->|无 journal| Debug[可选 Debug]
-    Inspect -->|合法活动 journal| Warn[Warn 并提示 apm fix]
-    Inspect -->|损坏或不可读| Damaged[Warn journal 已损坏]
-    Debug --> SearchCloudList[继续 Cloud List]
-    Warn --> SearchCloudList
-    Damaged --> SearchCloudList
-    SearchCloudList -->|失败| SearchCLIError
-    SearchCloudList -->|成功| SearchFilter[按名称 fold 和可选 type 筛选]
-    SearchFilter --> SearchLatest[每个 Type/Name 选择最新 SemVer]
-    SearchLatest --> SearchSort[按 Type、Name 稳定排序]
-    SearchSort --> SearchResult[返回 SearchResult]
-    SearchResult --> SearchRender[CLI renderer 输出 type/name@version]
-    SearchRender -->|失败| SearchCLIError
-    SearchRender -->|成功| SearchExitOK([正常退出])
+    Start([Search CLI]) --> Validate[校验 keyword 与可选 type]
+    Validate -->|失败| CLIError[记录 Error 与 usage] --> ErrorExit([非零退出])
+    Validate -->|成功| Inspect[无锁 Inspect journal]
+    Inspect -->|合法 journal| JournalWarn[Warn 并提示 apm fix]
+    Inspect -->|损坏或不可读| DamagedWarn[Warn journal 已损坏]
+    Inspect -->|无 journal| Snapshot[CatalogManager.Snapshot]
+    JournalWarn --> Snapshot
+    DamagedWarn --> Snapshot
+    Snapshot --> Lock[短时非阻塞 Acquire apm.lock]
+    Lock -->|竞争| CLIError
+    Lock -->|成功| Sync[严格加载本地文件；检查 catalog SHA-256/size；必要时下载并原子替换]
+    Sync -->|无有效快照、取消或本地安全失败| ReleaseError[Release apm.lock]
+    ReleaseError --> CLIError
+    Sync -->|provider/update 失败且旧快照有效| Stale[一次 stderr stale warning]
+    Sync -->|current 或 updated| Release[Release apm.lock]
+    Stale --> Release
+    Release --> Filter[不可变 Snapshot 按名称 fold 与可选 type 过滤]
+    Filter --> Latest[每个 Type/Name 选择最高 SemVer]
+    Latest --> Sort[按 Type、Name 稳定排序]
+    Sort --> Render[CLI 输出 type/name@version]
+    Render -->|成功| OK([正常退出])
+    Render -->|失败| CLIError

@@ -1,27 +1,51 @@
 classDiagram
-    note for PowerCache "internal/cache 只管理 Skill 与 Agent：复验 cache hit，miss 时创建唯一私有目标，经 Source 下载和 marker 复验后按精确版本原子发布，再原子物化公共 staging"
+    note for CatalogManager "internal/catalog 独占目录同步；Catalog Cache 与 Skill/Agent/Plugin 制品缓存是不同边界（ADR-021）"
+
+    class CatalogManager {
+        <<interface>>
+        +Snapshot(Context) (Snapshot, SyncStatus, error)
+        +SnapshotLocked(Context) (Snapshot, SyncStatus, error)
+    }
+    class CatalogSource {
+        <<interface: internal/cloud.CatalogSource>>
+        +CatalogVersion(Context) CatalogVersion
+        +DownloadCatalog(Context, destination) error
+    }
+    class CatalogRepository {
+        <<interface>>
+        +Load() (Snapshot, CatalogVersion, error)
+        +Replace(CatalogVersion, sourcePath) Snapshot
+    }
+    class CatalogSnapshot {
+        +List(PowerType) []CatalogEntry
+        +Resolve(PowerRef) CatalogEntry
+        +Metadata(PowerRef) CatalogEntry
+    }
+    class CatalogFile {
+        <<~/.apm/catalog.json, mode 0600>>
+    }
+    class GlobalLock {
+        <<apm.lock, non-blocking>>
+    }
+    CatalogManager --> CatalogSource : version and optional full download
+    CatalogManager --> CatalogRepository : strict load and atomic replace
+    CatalogManager --> GlobalLock : Snapshot only
+    CatalogRepository --> CatalogFile : exact bytes, SHA-256 and size
+    CatalogManager --> CatalogSnapshot : returns immutable clone boundary
+    note for CatalogRepository "拒绝 symlink、hardlink、不可信目录和可检测替换；current EUID 是 pathname trusted actor，advisory lock 不隔离恶意同 EUID 写者"
+
     class CacheSource {
         <<interface: internal/cache.Source>>
-        +DownloadSkill(Context, PowerRef, destination) error
-        +DownloadAgent(Context, PowerRef, destination) error
+        +DownloadSkill(Context, CatalogEntry, destination) error
+        +DownloadAgent(Context, CatalogEntry, destination) error
     }
     class PowerCache {
         <<interface: internal/cache.PowerCache>>
-        +PrepareSkill(Context, PowerRef) (stagingRoot string, error)
-        +PrepareAgent(Context, PowerRef) (stagingRoot string, error)
+        +PrepareSkill(Context, CatalogEntry) stagingRoot
+        +PrepareAgent(Context, CatalogEntry) stagingRoot
     }
     class FilesystemCache {
         <<internal/cache.FilesystemCache>>
-        +PrepareSkill(Context, PowerRef) (stagingRoot string, error)
-        +PrepareAgent(Context, PowerRef) (stagingRoot string, error)
-    }
-    class CloudClient {
-        <<internal/cloud.Client>>
-    }
-    class DomainModel {
-        <<internal/domain>>
-        +DecodeAgentConfigYAML(raw []byte) (AgentConfig, error)
-        +ValidatePowerRef(PowerRef) error
     }
     class VersionedPowerCache {
         <<cache/skills or cache/agents/name/version>>
@@ -29,29 +53,30 @@ classDiagram
     class PublicStaging {
         <<staging/skills or staging/agents/name>>
     }
-    note for FilesystemCache "Agent：cachedAgent 在首次下载后与缓存命中时都严格解析 agent.yaml 并校验 id/version 与请求 PowerRef 一致；解析失败或身份不匹配 fail closed，保留精确缓存目录，不删除、不回源覆盖，错误包含缓存路径与 PowerRef"
-
     FilesystemCache ..|> PowerCache
-    FilesystemCache --> CacheSource : injected source
-    CloudClient ..|> CacheSource
-    FilesystemCache --> DomainModel : Agent hit/miss 均经 DecodeAgentConfigYAML + ValidatePowerRef
-    FilesystemCache --> VersionedPowerCache : validate and publish immutable version
-    FilesystemCache --> PublicStaging : atomically replace candidate
+    FilesystemCache --> CacheSource : forwards one authoritative entry on miss
+    FilesystemCache --> VersionedPowerCache : validates immutable exact version
+    FilesystemCache --> PublicStaging : atomically materializes staging
+    note for FilesystemCache "cache hit 复验 identity；损坏或不匹配时 fail closed，不下载覆盖。Agent hit/miss 都校验 agent.yaml 与 entry.Ref"
 
     class PluginResource {
-        <<internal/pluginresource>>
-        +Ensure(Context, PowerRef) (Artifact, error)
-        +Lookup(PowerRef) (Artifact, error)
-        +StageFilesystem(PowerRef) (stagingRoot string, error)
+        <<internal/pluginresource.Manager>>
+        +Ensure(Context, CatalogEntry) Artifact
+        +Lookup(PowerRef) Artifact
+        +StageFilesystem(PowerRef) stagingRoot
     }
-    class PluginArtifactValidator {
-        <<internal/pluginartifact>>
+    class PluginDownloader {
+        <<interface>>
+        +DownloadPlugin(Context, CatalogEntry, destination) error
     }
     class PluginArtifactCache {
         <<cache/plugins/name/version>>
     }
-
-    PluginResource --> CloudClient : DownloadPlugin canonical package
-    PluginResource --> PluginArtifactValidator : parse apc-plugin and validate derived files
-    PluginResource --> PluginArtifactCache : publish shared immutable artifact
-    note for PluginArtifactCache "Plugin cache 不属于 PowerCache；Plugin Resource 保留 apc-plugin.json + skills，先生成 Codex/Claude/Hermes 原生 manifest，再由 marketplace builder 读取对应 manifest 生成双 marketplace（ADR-017）"
+    class PluginArtifactLookup {
+        <<read-only uninstall boundary>>
+        +Lookup(PowerRef) Artifact
+    }
+    PluginResource --> PluginDownloader : Ensure miss forwards target entry
+    PluginResource --> PluginArtifactCache : publishes shared immutable artifact
+    PluginArtifactLookup --> PluginArtifactCache : uninstall reads only
+    note for PluginArtifactCache "Plugin cache 不属于 PowerCache；canonical apc-plugin 派生原生 manifest 与双 marketplace。Uninstall/Fix 不下载或重建"

@@ -1,5 +1,9 @@
 # Submission Resource Metadata and Authenticated Query Implementation Plan
 
+> 历史计划说明：本文记录 Feature 023 当时的实现步骤；其 Submission 契约仍有效，但关于保留
+> 公开资源 cursor/latest/exact-metadata 的步骤已由 [Feature 024](../024-catalog-cache/spec.md) 与
+> [ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md) 取代。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make every Power submission derive identity from its canonical resource, rename the submission note to `message`, adopt the self-describing MCP v1 file, and expose an authenticated active-only Submission query capped at 20 records.

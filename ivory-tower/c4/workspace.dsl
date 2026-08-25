@@ -4,8 +4,8 @@ workspace "Agent Power Manager" "APM：面向多 Agent，统一管理 Skill、Pl
     model {
         user = person "User" "通过 CLI 使用 APM 管理 Power 的开发者/运维人员。"
 
-        apc = softwareSystem "APC" "提供 Published Catalog、版本 metadata 与精确内容的远端匿名只读服务。"
-        cloudRegistry = softwareSystem "Power Resource Fixture" "开发阶段位于 internal/cloud/resources 的本地 Power 资源；用于模拟 Cloud list/get。"
+        apc = softwareSystem "APC" "匿名提供 catalog SHA-256/size、完整确定性 Published Catalog 与精确内容。"
+        cloudRegistry = softwareSystem "Power Resource Fixture" "开发阶段位于 internal/cloud/resources 的本地 Power 资源；Local Provider 从中生成完整 catalog 与精确内容。"
         targetAgent = softwareSystem "Target Agent" "用户本地的目标 Agent（如 Claude Code、Cursor 等），拥有自身的 Skill/Plugin/MCP 加载与运行时；不在 APM 的系统边界内。"
 
         apm = softwareSystem "Agent Power Manager" "统一管理 Skill、Plugin、MCP、Agent 等 Power 的发现、安装、卸载、提交与配置治理，通过 Adapter 适配不同目标 Agent。" {
@@ -21,12 +21,12 @@ workspace "Agent Power Manager" "APM：面向多 Agent，统一管理 Skill、Pl
             autoLayout lr
         }
 
-        container apm "Containers" "APM 内部容器：CLI 进程与本地持久化存储（Agent 清单、下载缓存）。" {
+        container apm "Containers" "APM 内部容器：CLI 进程与本地持久化存储（Agent 清单、catalog、下载缓存）。" {
             include *
             autoLayout lr
         }
 
-        component apm.cli "Components" "CLI 进程内的模块划分：入口、核心生命周期、Adapter、配置模型、锁、缓存、云端客户端。" {
+        component apm.cli "Components" "CLI 进程内的模块划分：入口、核心生命周期、Catalog Manager/Repository、Adapter、配置模型、锁、制品缓存与云端客户端。" {
             include *
             autoLayout lr
         }

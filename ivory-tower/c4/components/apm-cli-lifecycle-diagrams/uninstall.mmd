@@ -1,44 +1,41 @@
 flowchart TD
-    Start([Uninstall]) --> Lock[Acquire]
-    Lock --> Recover[Recover shared journal]
+    Start([Uninstall；不构造 Cloud/Catalog Manager]) --> Lock[Acquire apm.lock]
+    Lock --> Recover[Recover shared journal；零 catalog/content 调用]
     Recover --> Refresh[RefreshInstalled]
-    Refresh --> Manifest[Config List + local resolve]
-    Manifest -->|no record| WarnNone[Warn + Agent-only unexecuted]
-    Manifest -->|record| Type{Power type}
+    Refresh --> Manifest[Config List + manifest-first 本地解析]
+    Manifest -->|无记录| WarnNone[Warn + Agent-only unexecuted]
+    Manifest -->|有记录| Type{Power type}
+
     Type -->|Skill| Skill[ResolveSkill + filesystem Uninstall]
-    Skill --> FSJournal[schema v1 filesystem removing/committing/rolling-back]
-    Type -->|Agent| AgentPower[ResolveAgent + UninstallAgent]
+    Type -->|Agent| AgentPower[ResolveAgent + filesystem UninstallAgent]
+    Skill --> FSJournal[schema v1 filesystem journal]
     AgentPower --> FSJournal
+
     Type -->|MCP| MCP[ResolveMCP + Agent CLI Inspect]
-    MCP -->|present| Def[Cloud GetMCP exact manifest version]
-    Def --> MCPTx[UninstallMCP with definition]
-    MCP -->|absent| MCPStale[UninstallMCP with nil definition]
-    MCPTx --> CLIJournal[schema v1 agent-cli removing/committing/rolling-back]
-    MCPStale --> Missing[remove only matching MCP manifest entry]
-    Type -->|Plugin| Plugin[ResolvePlugin + 从 manifest 推导逻辑 runtime name/selector + Inspect]
-    Plugin -->|Codex / Claude both absent| PluginStale[仅删除对应 manifest 项；不接管其他版本]
-    Plugin -->|Codex / Claude both present| PluginLookup[Plugin Resource Lookup 共享 artifact；MarketplaceFor 验证 source 与逻辑 selector]
-    PluginLookup --> PluginTx[offline UninstallPlugin：只 remove Plugin + manifest；保留 marketplace 与 artifact]
-    Plugin -->|Hermes / Bibit target absent| FilesystemStale[删除对应 manifest；返回 TargetMissing]
-    Plugin -->|Hermes / Bibit exact present| FilesystemPluginTx[offline filesystem UninstallPlugin；只处理逻辑名目录，不连接 Cloud]
-    Plugin -->|Hermes / Bibit partial / conflict| PluginFail
-    Plugin -->|部分、损坏或身份不符| PluginFail[fail closed；保留 manifest/artifact/journal]
-    PluginTx --> PluginJournal[schema v1 plugin removing/committing/rolling-back；不连接 Cloud]
-    FilesystemPluginTx --> PluginJournal
-    FSJournal --> Result{TargetMissing? / error?}
-    CLIJournal --> Result
-    PluginJournal --> Result
-    Missing --> Result
-    PluginStale --> Result
-    FilesystemStale --> Result
-    PluginFail --> Fail
+    MCP -->|absent| MCPMissing[只删除对应 manifest 项；不创建 journal]
+    MCP -->|present| MCPRemove[创建 definition-free agent-cli journal；按 Ref/name Remove]
+    MCPRemove --> MCPCommit[持久化 committing；删除 manifest 与 journal]
+    MCPCommit -. 崩溃后 Fix .-> MCPRecover[再次 Inspect；present 继续 Remove，absent 提交清单删除；永不 Add]
+
+    Type -->|Plugin| Plugin[ResolvePlugin + 本地 Agent facts]
+    Plugin -->|Codex / Claude exact present| Lookup[只读 Lookup manifest 精确 artifact；验证 source/selector]
+    Lookup --> PluginTx[离线 UninstallPlugin；保留 marketplace 与 artifact]
+    Plugin -->|Hermes / Bibit exact present| FilesystemPlugin[离线 filesystem UninstallPlugin]
+    Plugin -->|target absent| PluginMissing[只删除对应 manifest 项]
+    Plugin -->|部分、损坏或冲突| Fail[fail closed；保留 manifest/artifact/journal]
+
+    FSJournal --> Result{TargetMissing 或 error?}
+    MCPMissing --> Result
+    MCPCommit --> Result
+    PluginTx --> Result
+    FilesystemPlugin --> Result
+    PluginMissing --> Result
     Result -->|missing| WarnMissing[lock-held target-missing Warn]
-    Result -->|error| Fail[full-ref failed + fail-fast]
+    Result -->|error| Fail
     Result -->|success| Done[full-ref completed]
-    WarnMissing -->|error| Fail
-    WarnMissing -->|success| Done
-    WarnNone --> Next{next Agent}
+    WarnMissing --> Done
+    WarnNone --> Next{下一个 Agent?}
     Done --> Next
-    Next -->|yes| Manifest
-    Next -->|no| Release[Release then render]
-    Fail --> Release
+    Next -->|是| Manifest
+    Next -->|否| Release[Release 后渲染]
+    Fail --> Batch[当前 failed；剩余 unexecuted] --> Release

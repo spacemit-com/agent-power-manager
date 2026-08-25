@@ -1,91 +1,77 @@
 classDiagram
-    note for CloudClient "internal/cloud.Client 组合六个能力端口；List/Resolve 与所有来源访问都接收 Context。provider 只写调用方私有目标，不拥有 Cache、staging、manifest 或 journal（ADR-016）；Submission.Submit 返回 domain.SubmissionResult（accepted/replayed）"
-    class Catalog {
+    note for CloudClient "internal/cloud.Client 组合 CatalogSource、四类精确内容端口与 Submission。目录查询只在 Catalog Snapshot 完成；Provider 不暴露旧的分页或逐项发现能力（ADR-021）"
+
+    class CatalogSource {
         <<interface>>
-        +List(Context) (PowerRefs, error)
-        +Resolve(Context, PowerRef) (PowerRef, error)
+        +CatalogVersion(Context) CatalogVersion
+        +DownloadCatalog(Context, destination) error
     }
     class SkillSource {
         <<interface>>
-        +DownloadSkill(Context, PowerRef, destination) error
+        +DownloadSkill(Context, CatalogEntry, destination) error
     }
     class PluginSource {
         <<interface>>
-        +DownloadPlugin(Context, PowerRef, destination) error
+        +DownloadPlugin(Context, CatalogEntry, destination) error
     }
     class MCPSource {
         <<interface>>
-        +GetMCP(Context, PowerRef) (MCPServer, error)
+        +GetMCP(Context, CatalogEntry) MCPServer
     }
     class AgentSource {
         <<interface>>
-        +DownloadAgent(Context, PowerRef, destination) error
+        +DownloadAgent(Context, CatalogEntry, destination) error
     }
     class Submission {
         <<interface>>
-        +Submit(Context, SubmissionRequest) (SubmissionResult, error)
-        +GetSubmission(Context, string) (Submission, error)
-        +ListSubmissions(Context, SubmissionListQuery) (SubmissionList, error)
+        +Submit(Context, SubmissionRequest) SubmissionResult
+        +GetSubmission(Context, id) SubmissionDetail
+        +ListSubmissions(Context, SubmissionListQuery) SubmissionList
     }
     class CloudClient {
         <<interface: internal/cloud.Client>>
     }
-    class SubmissionResult {
-        +Outcome SubmissionOutcome
-        +SubmissionID string
-        +Status SubmissionStatus
-        +StatusURL string
-    }
-    note for SubmissionResult "accepted：StatusURL 非空；replayed：StatusURL 固定为空，用 SubmissionID 生成 apm submission get 提示"
-    class SubmissionRequest {
-        +Type PowerType
-        +Name string
-        +Version string
-        +Description string
-        +Message string
-        +ContentType string
-        +ContentMD5 string
-    }
-    class SubmissionListQuery {
-        +Status SubmissionStatus
-        +Type PowerType
-        +Name string
-    }
-    note for SubmissionListQuery "仅筛选当前 API Key 账号的 active Submission；无 limit、cursor 或时间范围，结果最多 20 条"
-    class SubmissionDetail {
-        <<domain.Submission>>
-        +SubmissionID string
-        +Description string
-        +Message string
-        +Status SubmissionStatus
-        +CreatedAt string
-        +UpdatedAt string
-        +Timeline []SubmissionEvent
-    }
-    class SubmissionEvent {
-        +EventID string
-        +EventType string
-        +StatusFrom SubmissionStatus
-        +StatusTo SubmissionStatus
-        +Timestamp string
-        +Message string
-    }
 
-    CloudClient --|> Catalog
+    CloudClient --|> CatalogSource
     CloudClient --|> SkillSource
     CloudClient --|> PluginSource
     CloudClient --|> MCPSource
     CloudClient --|> AgentSource
     CloudClient --|> Submission
 
+    class CatalogVersion {
+        +SHA256 string
+        +Size int64
+    }
+    class CatalogEntry {
+        +Ref PowerRef
+        +Description string
+        +Message string
+        +ContentType string
+        +ContentSize int64
+        +ContentMD5 string
+        +PublishedAt string
+        +Tags []string
+    }
+    class PowerRef {
+        +Type PowerType
+        +Name string
+        +Version string
+    }
+    CatalogSource --> CatalogVersion : version response
+    CatalogEntry *-- PowerRef
+    SkillSource --> CatalogEntry : authoritative metadata
+    PluginSource --> CatalogEntry : authoritative metadata
+    MCPSource --> CatalogEntry : authoritative metadata
+    AgentSource --> CatalogEntry : authoritative metadata
+
     class ProviderRegistry {
         <<internal/cloud.ProviderRegistry>>
         +Register(ProviderID, Factory) error
-        +Open(ProviderID) (CloudClient, error)
+        +Open(ProviderID) CloudClient
     }
     class CompositionRoot {
         <<cmd/apm.newCloudClient>>
-        +newCloudClient() (CloudClient, error)
     }
     class LocalClient {
         <<internal/cloud/local.Client>>
@@ -93,46 +79,71 @@ classDiagram
     class RemoteClient {
         <<internal/cloud/remote.Client>>
     }
-    class MCPServer {
-        +Transport MCPTransport
-        +Command string
-        +Args []string
-        +URL string
-        +Validate() error
+    CompositionRoot --> ProviderRegistry : register local and remote
+    ProviderRegistry --> CloudClient : open selected provider
+    LocalClient ..|> CloudClient
+    RemoteClient ..|> CloudClient
+    note for LocalClient "每次从 canonical fixture 生成确定性四分组 catalog；精确内容从 fresh snapshot 校验 caller CatalogEntry。Submission 保持 unsupported"
+    note for RemoteClient "匿名 GET /resources/version 与无 query 的 GET /resources；content URL 只由 entry.Ref 构造，type/size/MD5 只取 caller CatalogEntry。Submission 使用独立 Bearer 请求"
+
+    class CallerCatalogFile {
+        <<absent private destination>>
     }
+    class CallerPrivateDirectory {
+        <<Skill or Plugin destination>>
+    }
+    class CallerPrivateAgentFile {
+        <<agent.yaml destination>>
+    }
+    CatalogSource --> CallerCatalogFile : writes exact opaque JSON bytes
+    SkillSource --> CallerPrivateDirectory : writes verified Skill tree
+    PluginSource --> CallerPrivateDirectory : writes canonical Plugin tree
+    AgentSource --> CallerPrivateAgentFile : writes original YAML bytes
+
     class MCPResource {
         +SchemaVersion int
         +Name string
         +Version string
         +Description string
         +Definition MCPServer
-        +ValidatePowerRef(PowerRef) error
     }
-    note for MCPResource "Local/Remote/Submission 读取完整 v1 MCP.json；content 为完整资源的 JCS JSON，definition 仅在校验身份后返回调用方"
-    class CallerPrivateDirectory {
-        <<absent or empty physical Skill/Plugin destination>>
+    class MCPServer {
+        +Transport MCPTransport
+        +Command string
+        +Args []string
+        +URL string
     }
-    class CallerPrivateAgentFile {
-        <<absent agent.yaml destination>>
-    }
+    MCPResource *-- MCPServer
+    MCPSource --> MCPResource : strict decode and identity check
+    MCPSource --> MCPServer : returns cloned Definition
 
-    CompositionRoot --> ProviderRegistry : Register closures, then Open selected ID
-    CompositionRoot --> LocalClient : imports local and registers factory closure
-    CompositionRoot --> RemoteClient : imports remote and registers factory closure
-    ProviderRegistry --> CloudClient : selects factory and returns Client or error
-    LocalClient ..|> CloudClient
-    RemoteClient ..|> CloudClient
-    SkillSource --> CallerPrivateDirectory : writes verified tree
-    PluginSource --> CallerPrivateDirectory : writes apc-plugin.json and skills
-    AgentSource --> CallerPrivateAgentFile : writes original YAML bytes
-    MCPSource --> MCPResource : decodes full v1 content
-    MCPResource *-- MCPServer : Definition
-    MCPSource --> MCPServer : returns validated Definition, no file cache
-    Submission --> SubmissionRequest : Submit carries Message outside content
-    Submission --> SubmissionResult : returns accepted (202) or replayed (200)
-    Submission --> SubmissionListQuery : active-only authenticated filter
-    Submission --> SubmissionDetail : Get returns complete detail
-    SubmissionDetail *-- SubmissionEvent : ordered Timeline
-
-    note for LocalClient "显式绝对 fixture 根；物理复制 skills/plugins/agents，严格解码完整 MCPResource 并校验 PowerRef；拒绝链接、特殊节点、路径逃逸、重叠与非空目标。Submission 三方法对全部类型返回 cloud.ErrSubmissionUnsupported（fail loud），只读无真实工单"
-    note for RemoteClient "匿名 APC 资源 HTTP：固定 snapshot 分页、latest/exact metadata、strict JSON、size/MD5、完整 MCPResource、受限 archive、同源 redirect；无 retry/fallback。Submission 使用独立 Bearer 认证请求：list 仅 active status/type/name、最多 20 条且无分页；get 返回 Message 与有序 SubmissionEvent。Submit 严格分流 202 accepted、200 replayed、409 ALREADY_PUBLISHED/RESOURCE_VERSION_CONFLICT；受信目录和跨平台发布保持 fail closed"
+    class SubmissionRequest {
+        +Type PowerType
+        +Name string
+        +Version string
+        +Description string
+        +Message string
+        +ContentMD5 string
+    }
+    class SubmissionResult {
+        +Outcome SubmissionOutcome
+        +SubmissionID string
+        +Status SubmissionStatus
+        +StatusURL string
+    }
+    class SubmissionListQuery {
+        +Status SubmissionStatus
+        +Type PowerType
+        +Name string
+    }
+    class SubmissionDetail {
+        +SubmissionID string
+        +Description string
+        +Message string
+        +Timeline []SubmissionEvent
+    }
+    Submission --> SubmissionRequest
+    Submission --> SubmissionResult
+    Submission --> SubmissionListQuery
+    Submission --> SubmissionDetail
+    note for SubmissionListQuery "active-only、最多 20 条；无 cursor、limit 或时间范围。该认证查询不使用 catalog stale fallback"

@@ -4,6 +4,43 @@
 
 ## 2026-08-25
 
+分类：功能变更
+
+用户需求：为 APM 增加类似 apt 的资源目录缓存：APC 以一个无分页的确定性 Catalog 文件发布 Skill、Plugin、MCP、Agent 全部版本，并提供 SHA-256/size version 接口；APM 在 list/search/install 前按内容校验码同步本地目录，相同内容即复用，按 Power 分组 schema 在本地完成筛选和版本解析。收敛 APC 公开接口并清理不再需要的调用，同时保持 `apm.lock` 串行边界、有效旧目录的 stale 可用性和已有制品离线安装。Uninstall/Fix 不应依赖 Catalog 或 Cloud，MCP 卸载恢复也不应再为删除操作获取或持久化 definition。相关决策记录于 APM ADR-021 与相邻 APC 仓库的 ADR-004。
+
+相关提交：
+
+APM（Feature 024 行为提交）：
+- `92543af feat(catalog): add strict immutable snapshots`
+- `346dfa8 fix(catalog): enforce exact JSON fields`
+- `d323bf5 feat(catalog): persist snapshots securely`
+- `d8d7676 fix(catalog): harden repository publication`
+- `ac6209d fix(catalog): reconcile secure replacement state`
+- `8aabef0 feat(catalog): synchronize cached snapshots`
+- `12c71fb fix(catalog): preserve synchronization failure causes`
+- `ef28101 fix(catalog): classify oversized staged catalogs`
+- `625efcf feat(cloud): download remote catalog snapshots`
+- `0a84732 fix(cloud): harden remote catalog transport`
+- `a1b8351 feat(cloud): generate local catalog snapshots`
+- `72f07b1 fix(cloud): harden local catalog snapshots`
+- `7a2bc0c feat(lifecycle): query cached catalog snapshots`
+- `7e77c6c fix(cmd): reject typed nil catalog managers`
+- `c0b65d6 refactor(install): consume catalog metadata once`
+- `159c329 refactor(mcp): uninstall without cloud definition`
+- `1f4be80 fix(mcp): honor uninstall recovery cancellation`
+- `5cbbf29 refactor(cloud): finalize catalog provider contract`
+- `13d865f fix(cloud): remove uninstall provider dependency`
+- `2e788f0 fix(cloud): enforce read-only lookup and entry validation`
+
+APC（文档契约，未添加 APC 实现）：
+- `5eb4eba docs(api): define catalog snapshot endpoints`
+
+解决方案或完成结果：新增独立 `internal/catalog` 领域、Repository 与 Manager。唯一持久文件为 `~/.apm/catalog.json`：顶层和 `skills/plugins/mcps/agents` 四个分组分别维护 schema v1，Item 由分组确定类型，并携带精确版本、description、message、content type/size/MD5、发布时间和 tags。Repository 对 100 MiB 上限、严格 JSON、排序、身份唯一性、`0600`、普通文件/唯一硬链、目录信任链和 SHA-256/size 执行 fail-closed 校验，以私有临时文件和平台安全原语原子替换；其 pathname 模型明确把 current EUID 视为受信任主体。Manager 在非阻塞 `apm.lock` 内先加载本地文件，再比较 `CatalogVersion`；hash 相同不下载，hash 不同才拉取完整 Catalog 并替换，换源但内容相同也直接复用。仅 Provider/更新失败可以在已有严格有效文件时返回一次 stale warning；锁冲突、取消和本地安全错误不降级。list/search 各消费一次 `Snapshot`，释放锁后本地查询；install 在既有生命周期锁中调用 `SnapshotLocked`，显式 Plugin manifest 全命中可在同步前返回 unchanged。四类 content 接口统一接收同一个完整 `CatalogEntry`，Local/Remote 不再通过公开分页、series、latest 或精确 metadata 接口二次查询；Remote 只使用匿名 `GET /api/v1/resources/version`、无 query 的 `GET /api/v1/resources` 和精确 content endpoint。有效 stale Snapshot 可配合 Skill/Agent/Plugin 已有制品离线安装，cache miss 仍失败。Uninstall 与 Fix 的构造和执行路径均为零 Catalog/零 Cloud；Plugin 卸载只读 Lookup 本地制品，MCP target absent 时直接清理清单，present 时按名称删除并写入不含 definition 的卸载 journal，恢复始终继续收敛到 absent，安装/切换 journal 仍保留 definition 用于安装回滚。APM/APC 当前 BUILD、Project Overview、HTTP API、ADR 引用、C4 与生命周期图已同步；APC 尚未开发，本次仅更新接口契约，不新增服务端实现。
+
+验证结果或限制：fresh `gofmt` 检查、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...` 和私有临时目录隔离构建均退出 0，构建产物与临时目录已删除；生产 Go 过期接口/卸载依赖扫描无匹配。7 个变更 Mermaid 源均通过 Draw.io CLI 转换为权限私有的临时 `.drawio` 并在验证后清理，APM 与 APC 两个 Structurizr workspace 均校验通过；变更 Markdown 的相对链接目标、当前权威文档 stale-contract 扫描和两仓 `diff --check` 均通过。Catalog stale 模式会在 APC 不可达时允许使用已有目录与制品，因此不能即时阻止随后被下架的缓存版本；在线 content miss 仍 fail closed。Repository 的 advisory lock 和身份复验不承诺隔离恶意同 EUID 进程在 POSIX 最终 `fstatat` 到 `unlinkat` syscall 窄窗内的替换；需要覆盖同凭据 Byzantine 写者时必须使用更强的进程/目录隔离或可信设施。APC 本次只有设计与 API 文档，服务端的确定性生成和 current Catalog 原子切换仍待未来实现。
+
+## 2026-08-25
+
 分类：新增功能
 
 用户需求：让 Skill、Plugin、MCP 与 Agent 的 Submission 身份和描述统一从权威资源文件读取，把提交更新说明统一为必填 `--message`，将 MCP 升级为自描述的完整 v1 资源，并新增 API Key 认证的 Submission get/list；list 仅返回当前账号最多 20 条 active Submission，get 完整展示描述、message、时间和 timeline。相关客户端决策记录于 ADR-020，APC 契约决策记录于相邻 APC 仓库的 ADR-003。

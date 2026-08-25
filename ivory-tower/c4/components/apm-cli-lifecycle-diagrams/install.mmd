@@ -1,83 +1,52 @@
 flowchart TD
-    Start([Install]) --> Lock[Acquire]
+    Start([Install]) --> Lock[Acquire apm.lock]
     Lock --> Recover[Recover shared journal]
-    Recover --> Refresh[RefreshInstalled]
-    Refresh --> ExplicitPlugin{显式规范 Plugin ref 且所选 Agent manifest 全部精确命中?}
-    ExplicitPlugin -->|yes| ManifestHit[每个所选 Agent unchanged] --> Release
-    ExplicitPlugin -->|no| List[Cloud List + resolve exact PowerRef]
-    List --> Agent{next Agent}
-    Agent --> Type{Power type}
-    Type -->|Skill| SkillResolve[ResolveSkill + Config Find]
-    SkillResolve --> SkillSame{same manifest version?}
-    SkillSame -->|yes| Unchanged[unchanged]
-    SkillSame -->|no| Cache[Cache PrepareSkill；hit 复验，miss 时私有目标 DownloadSkill 后原子发布 cache/staging]
-    Cache --> FSTx[filesystem Install transaction]
-    FSTx --> FSJournal[schema v1 driver=filesystem]
+    Recover --> Refresh[RefreshInstalled + 选择目标 Agent]
+    Refresh --> ExactPlugin{显式规范 Plugin ref 且全部 manifest 精确命中?}
+    ExactPlugin -->|是| Unchanged[全部 unchanged；零 catalog 调用] --> Release
+    ExactPlugin -->|否| Snapshot[CatalogManager.SnapshotLocked；不二次加锁]
+    Snapshot --> Sync[加载本地 catalog；检查 version；必要时下载并原子替换]
+    Sync -->|provider/update 失败且旧快照有效| Stale[一次 stale warning]
+    Sync -->|无有效快照、取消或本地安全失败| Fatal[返回 fatal error]
+    Sync -->|current 或 updated| Resolve[Snapshot.Resolve 得到精确 CatalogEntry]
+    Stale --> Resolve
+    Resolve --> AgentLoop{下一个 Agent}
+    AgentLoop --> Type{entry.Ref.Type}
 
-    Type -->|Agent| AgentResolve[ResolveAgent + Config Find]
-    AgentResolve --> AgentSame{same manifest version?}
-    AgentSame -->|yes| Unchanged
-    AgentSame -->|no| AgentCache[Cache PrepareAgent；hit/miss 均经 domain DecodeAgentConfigYAML + ValidatePowerRef 校验身份，miss 时私有 agent.yaml DownloadAgent 后原子发布 cache/staging]
-    AgentCache -->|身份不匹配或损坏| AgentCacheFail[fail closed；保留精确缓存目录，不删除、不回源覆盖]
-    AgentCache -->|通过| AgentValidate[bibitAgentAdapter 发布前 ValidateArtifact 校验 staging 身份]
-    AgentValidate -->|身份不匹配| AgentAdapterFail[fail closed；不发布目标]
-    AgentValidate -->|通过| AgentTx[filesystem InstallAgent transaction；原样字节原子发布]
-    AgentTx --> FSJournal
+    Type -->|Skill| SkillFact[ResolveSkill + manifest fact]
+    SkillFact -->|同版本| Unchanged
+    SkillFact -->|变更| SkillCache[PrepareSkill entry；hit 复验，miss 完整透传 entry 下载]
+    SkillCache --> SkillTx[filesystem Install transaction]
 
-    Type -->|MCP| MCPResolve[ResolveMCP + Config Find]
-    MCPResolve --> MCPInspect[Agent CLI Inspect]
-    MCPInspect --> MCPState{manifest / presence / version}
-    MCPState -->|same + present| Unchanged
-    MCPState -->|no manifest + present| Fail[unmanaged conflict]
-    MCPState -->|manifest + absent| MCPStale[InstallMCP nil definitions]
-    MCPState -->|first absent| NewDef[Cloud GetMCP new]
-    MCPState -->|update present| OldDef[Cloud GetMCP old] --> NewDef
-    NewDef --> MCPTx[agent-cli InstallMCP transaction]
-    MCPStale --> MCPTx
-    MCPTx --> MCPJournal[schema v1 driver=agent-cli]
-    MCPJournal --> Phases[removing-old / adding-new / committing / rolling-back]
+    Type -->|Agent| AgentFact[ResolveAgent + manifest fact]
+    AgentFact -->|同版本| Unchanged
+    AgentFact -->|变更| AgentCache[PrepareAgent entry；hit/miss 均校验 agent.yaml 身份]
+    AgentCache --> AgentTx[filesystem InstallAgent transaction]
 
-    Type -->|Plugin| PluginManifest[Config Find target exact version]
-    PluginManifest -->|same version| Unchanged
-    PluginManifest -->|missing or different| PluginResolve[derive logical target + ResolvePlugin]
-    PluginResolve --> PluginMode{DeploymentMode}
+    Type -->|MCP| MCPFact[ResolveMCP + manifest + CLI Inspect]
+    MCPFact -->|同版本且 present| Unchanged
+    MCPFact -->|unmanaged present| BusinessFail[fail closed]
+    MCPFact -->|首装或目标版本| MCPGet[GetMCP target CatalogEntry]
+    MCPFact -->|版本切换| Previous[同一 Snapshot.Metadata previous Ref] --> MCPPrevious[GetMCP previous CatalogEntry] --> MCPGet
+    MCPGet --> MCPTx[agent-cli InstallMCP；安装 journal 保留新旧 definition]
 
-    PluginMode -->|marketplace| MarketplaceEnsure[Ensure target artifact；miss 才下载 canonical package，先生成原生 manifest，再由它们生成双 marketplace]
-    MarketplaceEnsure --> MarketplaceTarget[validate artifact + marketplace adapter + MarketplaceFor target]
-    MarketplaceTarget --> MarketplaceManifest{previous manifest?}
-    MarketplaceManifest -->|no| MarketplaceTargetFacts[Inspect target marketplace，再 Inspect target Plugin]
-    MarketplaceManifest -->|yes| MarketplacePreviousFacts[Inspect previous marketplace，再 Inspect previous Plugin]
-    MarketplacePreviousFacts -->|both absent| MarketplaceStale[Remove stale manifest] --> MarketplaceTargetFacts
-    MarketplacePreviousFacts -->|partial| PluginFail[fail closed；保留 manifest/artifact]
-    MarketplacePreviousFacts -->|both present| PreviousLookup[Lookup previous only now；validate artifact/MarketplaceFor/source/selector]
-    PreviousLookup --> MarketplaceSwitch[切换 remove old Plugin → unregister old source → register new source → add Plugin → manifest]
-    MarketplaceTargetFacts -->|marketplace absent + Plugin absent| MarketplaceFirst[首装 register source → add Plugin → manifest]
-    MarketplaceTargetFacts -->|exact retained source + Plugin absent| MarketplaceReinstall[重装 reuse source → add Plugin → manifest]
-    MarketplaceTargetFacts -->|other| PluginFail
-    MarketplaceReinstall -. commit / rollback / recovery .-> RetainedRecovery[不 unregister/register；仅方向已固定为 rolling-back 且 source 缺失时离线恢复]
+    Type -->|Plugin| PluginFact[ResolvePlugin + manifest/Agent facts]
+    PluginFact -->|同版本| Unchanged
+    PluginFact -->|冲突或损坏| BusinessFail
+    PluginFact -->|可安装| PluginEnsure[Ensure target CatalogEntry；miss 完整透传 entry 下载 canonical package]
+    PluginEnsure --> PluginMode{marketplace 或 filesystem}
+    PluginMode -->|Codex / Claude| Marketplace[验证共享 artifact 与 marketplace；按事实首装、retained 重装或版本切换]
+    PluginMode -->|Hermes / Bibit| Filesystem[StageFilesystem target Ref]
+    Marketplace --> PluginTx[plugin transaction]
+    Filesystem --> PluginTx
 
-    PluginMode -->|filesystem| FilesystemManifest{previous manifest?}
-    FilesystemManifest -->|yes| FilesystemPreviousFact[Inspect previous logical Plugin]
-    FilesystemPreviousFact -->|exact present| FilesystemEnsure
-    FilesystemPreviousFact -->|absent| FilesystemAbsent[TargetPath + validate physical absence + Remove stale manifest] --> FilesystemTargetFact
-    FilesystemPreviousFact -->|other| PluginFail
-    FilesystemManifest -->|no| FilesystemTargetFact[Inspect target logical Plugin]
-    FilesystemTargetFact -->|exact absent| FilesystemEnsure[Ensure target artifact after facts]
-    FilesystemTargetFact -->|present or other| PluginFail
-    FilesystemEnsure --> FilesystemStage[validate artifact + StageFilesystem] --> FilesystemPluginTx[InstallPlugin filesystem transaction；Hermes CLI 激活，Bibit 无 Plugin CLI]
-    MarketplaceFirst --> PluginJournal[schema v1 driver=plugin；每次 Agent 写操作前持久 phase]
-    MarketplaceReinstall --> PluginJournal
-    MarketplaceSwitch --> PluginJournal
-    FilesystemPluginTx --> PluginJournal
-
-    FSJournal --> Outcome[installed/upgraded/downgraded]
-    Phases --> Outcome
-    PluginJournal --> Outcome
-    Unchanged --> Agent
-    Outcome --> Agent
-    Fail --> Batch[fail-fast + remaining unexecuted]
-    PluginFail --> Batch
-    AgentCacheFail --> Batch
-    AgentAdapterFail --> Batch
-    Agent -->|done| Release[Release then render]
+    SkillTx --> Outcome[installed/upgraded/downgraded]
+    AgentTx --> Outcome
+    MCPTx --> Outcome
+    PluginTx --> Outcome
+    Unchanged --> AgentLoop
+    Outcome --> AgentLoop
+    BusinessFail --> Batch[当前 failed；剩余 unexecuted]
+    AgentLoop -->|完成| Release[Release 后才渲染]
     Batch --> Release
+    Fatal --> ReleaseError[Release 并返回 fatal；不渲染业务行]

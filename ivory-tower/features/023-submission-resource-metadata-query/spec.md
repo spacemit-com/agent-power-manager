@@ -1,5 +1,11 @@
 # Feature 023：Submission 资源元数据与认证查询
 
+> 局部取代说明：本文的 Submission message、完整 MCP v1 content、API Key 认证 get/list 与
+> active-only 上限仍然有效；其中对公开资源分页、latest/exact metadata 继续存在的历史假设，
+> 已由 [Feature 024](../024-catalog-cache/spec.md) 与
+> [ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md) 取代。Submission 请求本身仍不
+> 使用 catalog stale fallback。
+
 - Status：Accepted
 - Date：2026-08-24
 - Related ADRs：[ADR-020](../../adr/ADR-020-source-owned-submission-metadata.md)、APC [ADR-003](../../../../apc/ivory-tower/adr/ADR-003-bound-active-submission-query.md)
@@ -265,4 +271,3 @@ APM 实现 domain、Source Loader、CLI/lifecycle、Local/Remote Cloud、fixture
 - 测试只使用 `httptest`、`t.TempDir()` 与 fixture，不访问真实 APC、Agent CLI 或用户目录。
 
 完成门禁：`gofmt`、`go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`、`go build ./cmd/apm`、`git diff --check`；另外校验 APM/APC Markdown、Mermaid/Structurizr 和过期术语扫描。功能全部完成后只写一条 Changelog。
-

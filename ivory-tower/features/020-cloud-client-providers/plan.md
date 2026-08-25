@@ -1,5 +1,10 @@
 # Cloud Client Providers and Canonical APC Plugins Implementation Plan
 
+> 历史计划说明：本文记录 Feature 020 当时的实现步骤，不作为当前目录发现或 MCP 卸载接口
+> 权威。公开 `List/Resolve`、cursor/series/latest/exact-metadata、按 Ref 重查 metadata 和
+> definition-bearing MCP uninstall 已由 [Feature 024](../024-catalog-cache/spec.md) 与
+> [ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md) 取代。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 APM 通过显式 provider 在 Local canonical fixture 与 Remote APC 之间切换，安全获取 Skill、Plugin、MCP、Agent，并从 `apc-plugin.json` 构建当前 Agent 所需的共享不可变 Plugin artifact。

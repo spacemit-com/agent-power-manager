@@ -1,5 +1,10 @@
 # Cloud Client Provider 与 APC Agent 只读契约设计规格
 
+> 局部取代说明：本文保留 Provider、内容安全和 Canonical Plugin 的历史设计；其中公开资源
+> `List/Resolve`、cursor/series/latest/exact-metadata 接口、按 `PowerRef` 重查内容元数据，以及
+> MCP 卸载读取 Cloud definition 的契约，已由 [Feature 024](../024-catalog-cache/spec.md) 与
+> [ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md) 取代。
+
 > 状态：设计与实现已完成，待最终审查并合入 main。重大决策见 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
 ## 背景

@@ -29,6 +29,14 @@ locked 入口以避免死锁。锁继续采用非阻塞 Acquire，已占用时�
 fallback。同步失败时，有效旧 catalog 可供 stale list/search 和已有制品缓存的离线 install
 使用，并输出一次 warning；无有效 catalog 或 caller 主动取消时失败。
 
+Repository 只接受物理普通文件，以 `0600`、100 MiB 上限、严格 schema 和精确 SHA-256/size
+校验加载与原子发布 `catalog.json`；symlink、hardlink、可检测的目录项替换和不可信目录链均
+fail closed。该 pathname 安全模型明确把 current EUID 视为受信任主体：parent advisory lock
+只串行遵守 Repository 协议的发布者，不承诺隔离恶意同 EUID 进程绕过该锁并在 POSIX 最终
+`fstatat` 到 `unlinkat` 的 syscall 窄窗替换目录项。检测到的替换仍拒绝删除；若威胁模型需要
+覆盖同凭据 Byzantine 写者，必须另行采用进程/目录隔离或具备 fd-bound conditional unlink
+能力的可信设施，不能把现有复验描述为该保证。
+
 缓存不绑定 Provider 来源。来源变化后仍只比较 catalog SHA-256；相同字节直接复用，内容
 不同才原子更新。
 
@@ -48,6 +56,8 @@ journal 不再携带 Server definition，恢复遇到 MCP 仍存在时继续删�
   本地已有制品的版本；content 未缓存时仍会失败。
 - 代价与风险：list/search 为同步短时获取全局锁；这改变其原先全程无锁的实现，但不改变
   journal 只检查、不恢复的业务规则。
+- 代价与风险：Repository 的目录项操作依赖 current-EUID trusted boundary；advisory lock 和
+  identity 复验不构成对恶意同 EUID 写者的隔离保证。
 - 代价与风险：MCP 卸载恢复不再因 `NotApplied` 后的外部漂移而重建原定义；
   它始终收敛到用户请求的“已卸载”结果，与其他 Power 卸载方向一致。
 - 后续动作：实现 Feature 024，更新 APM/APC 当前文档并删除旧公开目录接口调用；实现完成

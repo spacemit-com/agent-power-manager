@@ -35,25 +35,27 @@ configModel = component "Config Model" "无状态维护各 Agent 的安装列表
         "classDiagram" "apm-cli-diagrams/config-model.mmd"
     }
 }
-lockManager = component "Lock Manager" "基于 flock 实现防重入文件锁；Search 与两种 List 不获取。Fix 以一次锁覆盖单次 Recover 与日志；Install/Uninstall 各以一次锁覆盖 Recover 与全部变更业务（ADR-003）。" "Go (flock)" {
+lockManager = component "Lock Manager" "基于 flock 实现非阻塞、防重入全局锁；Catalog Snapshot 为默认 List/Search 短时获取，SnapshotLocked 复用 Install 已持锁区间；installed List 不获取，Fix/Install/Uninstall 覆盖各自状态边界（ADR-003/021）。" "Go (flock)" {
     properties {
         "classDiagram" "apm-cli-diagrams/lock-manager.mmd"
     }
 }
-cacheManager = component "Cache Manager" "internal/cache 通过 Source 注入同一 Cloud Client；PrepareSkill/PrepareAgent 独占命中复验、私有下载目标、精确版本原子 cache 发布与公共 staging。" "internal/cache (Go)" {
+catalogManager = component "Catalog Manager" "internal/catalog.Manager 通过 Snapshot/SnapshotLocked 编排 version 检查、必要下载、stale 状态和一次不可变 Snapshot；不读取 manifest 或恢复 journal（ADR-021）。" "internal/catalog (Go)"
+catalogRepository = component "Catalog Repository" "严格读取、验证并以 0600 原子发布唯一 catalog.json；拒绝链接与可检测替换，pathname 操作信任 current EUID（ADR-021）。" "internal/catalog (Go)"
+cacheManager = component "Cache Manager" "internal/cache 通过 Source 注入 Cloud Client；PrepareSkill/PrepareAgent 完整透传同一 CatalogEntry，独占命中复验、私有下载目标、精确版本原子 cache 发布与公共 staging。" "internal/cache (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cache-manager.mmd"
     }
 }
 cloudComposition = component "Cloud Composition" "cmd/apm.newCloudClient 直接 import local|remote，每次把两者的 factory closure 注册到 registry，按环境只打开一个 provider；默认 remote，禁止 fallback（ADR-016）。" "cmd/apm/cloud.go (Go)"
 providerRegistry = component "Provider Registry" "internal/cloud.ProviderRegistry 为中立的实例级显式注册表；只保存 factory、按 ID 选择并返回 Client，拒绝空、重复、未知 provider 及 nil/typed-nil Client。" "internal/cloud (Go)"
-cloudClient = component "Cloud Client Ports" "internal/cloud.Client 组合 Catalog、SkillSource、PluginSource、MCPSource、AgentSource 与 Submission 六个端口；目录 destination 必须不存在或为空物理目录，Agent 文件必须不存在；provider 不拥有 APM cache/staging。Submission.Submit 返回 domain.SubmissionResult（accepted/replayed），Local 对全部类型返回 ErrSubmissionUnsupported。" "internal/cloud (Go)" {
+cloudClient = component "Cloud Client Ports" "internal/cloud.Client 组合 CatalogSource、SkillSource、PluginSource、MCPSource、AgentSource 与 Submission；CatalogSource 只传输 version/full catalog，精确内容方法消费完整 CatalogEntry，不提供旧的分页或逐项发现能力。" "internal/cloud (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cloud-client.mmd"
     }
 }
-localProvider = component "Local Provider" "internal/cloud/local.Client 从显式绝对 canonical fixture 根读取四类 Power；复制物理目录/文件或严格解码 MCP。" "internal/cloud/local (Go)"
-remoteProvider = component "Remote Provider" "internal/cloud/remote.Client 读取 APC HTTP 目录/latest/exact/content；Linux/macOS 完整发布，FreeBSD 的 Skill/Plugin 目录发布返回 ENOTSUP，Windows/其它 content fail closed。" "internal/cloud/remote (Go)"
+localProvider = component "Local Provider" "internal/cloud/local.Client 从显式绝对 canonical fixture 根生成确定性四分组 catalog，并以 fresh snapshot 校验/提供四类精确内容。" "internal/cloud/local (Go)"
+remoteProvider = component "Remote Provider" "internal/cloud/remote.Client 匿名读取 APC catalog version/full object，并仅按 CatalogEntry 获取精确 content；Linux/macOS 完整发布，FreeBSD/其它平台按既有边界 fail closed。" "internal/cloud/remote (Go)"
 pluginResource = component "Plugin Resource" "internal/pluginresource 下载 canonical apc-plugin.json + skills，先派生 Codex/Claude/Hermes 原生 manifest，再由 Codex/Claude builder 读取 manifest 生成双 marketplace，一次发布共享不可变 artifact（ADR-017）。" "internal/pluginresource (Go)" {
 }
 pluginArtifactValidator = component "Plugin Artifact Validator" "internal/pluginartifact 中立只读校验：复验 canonical apc-plugin 身份/Skill 闭集、派生 manifest/marketplace 与物理树；不下载、不生成、不修改 artifact。" "internal/pluginartifact (Go)" {
@@ -74,29 +76,35 @@ journalStore = component "Journal Store" "唯一 transactions/active.json，sche
 }
 
 cliEntry -> lifecycle "通过五个独立 factory 调用 Search/List/Install/Uninstall/Fix 生命周期用例"
-cliEntry -> cloudComposition "Search/List/Install/Uninstall factory 创建 Cloud；Fix 不调用"
+cliEntry -> cloudComposition "Catalog 首次同步、Install content 与 Submission 命令按需创建 Cloud；installed List/Uninstall/Fix 不调用"
 cloudComposition -> providerRegistry "每次注册 local|remote 并 Open 选中 ID"
 cloudComposition -> localProvider "import local 并注册构造 closure"
 cloudComposition -> remoteProvider "import remote 并注册构造 closure"
 providerRegistry -> cloudClient "Open 选择 factory 并返回 Client 或 error"
 localProvider -> cloudClient "implements internal/cloud.Client"
 remoteProvider -> cloudClient "implements internal/cloud.Client"
-remoteProvider -> apc "读取 Published Catalog、metadata 与精确版本 content" "HTTPS/loopback HTTP + JSON/YAML/gzip"
-cloudComposition -> lifecycle "注入选中 Client；Fix 例外"
+remoteProvider -> apc "读取 catalog SHA-256/size、完整确定性对象与精确版本 content" "HTTPS/loopback HTTP + JSON/YAML/gzip"
+cloudComposition -> catalogManager "惰性注入选中 CatalogSource"
+cloudComposition -> lifecycle "Install content 与 Submission 命令注入选中 Client"
 cloudComposition -> cacheManager "Install 将同一选中 Client 作为 Source 注入"
-cloudComposition -> pluginResource "Install/Uninstall 将同一选中 Client 作为 Downloader 注入"
+cloudComposition -> pluginResource "仅 Install 将选中 Client 作为 Downloader 注入；Uninstall 使用只读 Lookup 构造"
 lifecycle -> adapterRegistry "installed List/Install/Uninstall 刷新快照；Install/Uninstall 按 Agent 与 Power 类型解析 Adapter"
 lifecycle -> configModel "installed List、Install 与 Uninstall 读取/处理 manifest 事实"
-lifecycle -> lockManager "仅 Fix、Install、Uninstall 在各自边界获取/释放；Search 与两种 List 不获取"
+lifecycle -> lockManager "Fix/Install/Uninstall 持有完整状态区间；installed List 不获取"
+lifecycle -> catalogManager "默认 List/Search 调用 Snapshot；Install 已持锁调用 SnapshotLocked；Uninstall/Fix 不调用"
 lifecycle -> cacheManager "Skill/Agent Install：PrepareSkill/PrepareAgent 返回公共 staging"
-lifecycle -> cloudClient "Search/List/Install List/Resolve；Install MCP GetMCP；Uninstall 仅 target present MCP 精确 GetMCP"
+lifecycle -> cloudClient "Install 以 CatalogEntry 获取精确 MCP/Skill/Agent/Plugin content；Submit/get/list 使用 Submission 端口；Uninstall/Fix 无依赖"
 lifecycle -> pluginResource "Plugin Ensure / Lookup / StageFilesystem；返回的 Artifact 再由调用方 MarketplaceFor(agent)"
 lifecycle -> transactionManager "Install/Uninstall/Fix 的可恢复事务"
 lifecycle -> submission "Validate/Submit 对四类 Power 调用 Validate/Prepare；Submit 结果再经 cloud.Submit 上传"
 submission -> domain "Agent 原始 YAML 严格解析与身份校验（DecodeAgentConfigYAML/Validate/ValidatePowerRef）"
-cacheManager -> cloudClient "Source.DownloadSkill/DownloadAgent 写入 Cache 私有目标"
+catalogManager -> lockManager "Snapshot 非阻塞 Acquire/Release；SnapshotLocked 不再次获取"
+catalogManager -> cloudClient "CatalogVersion + DownloadCatalog；匿名且每次同步至多一次"
+catalogManager -> catalogRepository "Load 严格旧快照；Replace 验证 hash/size/schema 后原子发布"
+catalogRepository -> apm.catalogCache "读取/替换唯一 0600 catalog.json"
+cacheManager -> cloudClient "Source.DownloadSkill/DownloadAgent 完整透传 CatalogEntry 并写私有目标"
 cacheManager -> domain "PrepareAgent 首次下载与缓存命中均校验 Agent 身份（DecodeAgentConfigYAML + ValidatePowerRef）"
-pluginResource -> cloudClient "DownloadPlugin(ctx, ref, destination) 到临时 canonical Plugin 叶子"
+pluginResource -> cloudClient "DownloadPlugin(ctx, entry, destination) 到临时 canonical Plugin 叶子"
 pluginResource -> rawPluginDestination "创建并控制空的 canonical destination"
 cloudClient -> rawPluginDestination "只写 apc-plugin.json + skills，不生成 Agent 配置/marketplace"
 pluginResource -> pluginArtifactCache "保留 canonical 并一次发布共享 immutable artifact"

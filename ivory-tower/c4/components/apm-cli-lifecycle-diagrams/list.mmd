@@ -1,27 +1,35 @@
 flowchart TD
-    ListStart([CLI 已解析/校验 List 参数]) --> Inspect[无锁 Inspect journal]
+    Start([CLI 已解析 List 参数]) --> Inspect[无锁 Inspect journal]
     Inspect -->|无 journal| Debug[可选 Debug]
-    Inspect -->|合法活动 journal| Warn[Warn 并提示 apm fix]
-    Inspect -->|损坏或不可读| Damaged[Warn journal 已损坏]
-    Debug --> ListInstalled{指定 --installed?}
-    Warn --> ListInstalled
-    Damaged --> ListInstalled
+    Inspect -->|合法活动 journal| WarnJournal[Warn 并提示 apm fix]
+    Inspect -->|损坏或不可读| WarnDamaged[Warn journal 已损坏]
+    Debug --> Mode{指定 --installed?}
+    WarnJournal --> Mode
+    WarnDamaged --> Mode
 
-    ListInstalled -->|否：Cloud| CloudList[Cloud List]
-    CloudList -->|失败| Fatal[返回 fatal error：不渲染业务输出]
-    CloudList -->|成功| CloudCompute[按可选 type 过滤；Type/Name/Version 排序]
-    CloudCompute --> CloudRender[CLI 渲染 `<type>/<name>@<version>`] --> CloudExit([退出])
+    Mode -->|是| Refresh[RefreshInstalled；不获取锁、不构造 Catalog/Cloud]
+    Refresh -->|失败| Fatal[返回 fatal error；不渲染业务输出]
+    Refresh -->|成功| ReadManifest[按具体 Agent 或 all 读取 manifest]
+    ReadManifest --> InstalledCompute[按可选 type 过滤并排序]
+    InstalledCompute -->|无 partial error| InstalledRender[渲染 agent/type/name@version]
+    InstalledCompute -->|all 存在 partial error| PartialRender[先渲染成功记录，再返回 partial error]
 
-    ListInstalled -->|是| Refresh[RefreshInstalled：复制注册 Agent、按字典序 Detect]
-    Refresh -->|失败| Fatal
-    Refresh -->|成功| Select{具体 Agent 或 all?}
-    Select -->|具体 Agent 不在快照| Fatal
-    Select -->|具体 Agent| ReadOne[Config.List]
-    ReadOne -->|失败| Fatal
-    ReadOne -->|成功| InstalledCompute[按可选 type 过滤并排序]
-    Select -->|all| ReadAll[按快照字典序读取全部 Config]
-    ReadAll --> PartialStore[保留逐 Agent失败并继续]
-    PartialStore --> InstalledCompute
-    InstalledCompute --> HasPartial{存在 all 的读取失败?}
-    HasPartial -->|否| InstalledRender[CLI 渲染 `<agent>/<type>/<name>@<version>`] --> InstalledExit([成功退出])
-    HasPartial -->|是| PartialRender[先渲染成功记录] --> PartialError[CLI 记录一次 partial error、usage、非零退出]
+    Mode -->|否：Cloud| Snapshot[CatalogManager.Snapshot]
+    Snapshot --> TryLock[非阻塞 Acquire apm.lock]
+    TryLock -->|已占用| Fatal
+    TryLock -->|成功| Load[严格加载 ~/.apm/catalog.json]
+    Load --> Version[匿名 GET /api/v1/resources/version]
+    Version --> Same{SHA-256 与有效本地文件相同?}
+    Same -->|是| Release[Release apm.lock]
+    Same -->|否| Download[匿名 GET /api/v1/resources 到私有临时文件]
+    Download --> Verify[验证 size/hash/schema 后 0600 原子替换]
+    Verify --> Release
+    Version -->|provider/update 失败且旧文件有效| Stale[返回旧 Snapshot + 一次 stale warning] --> Release
+    Download -->|provider/update 失败且旧文件有效| Stale
+    Verify -->|source 内容无效且旧文件有效| Stale
+    Version -->|无有效旧文件、取消或本地安全失败| ReleaseError[Release apm.lock]
+    Download -->|取消、无旧文件或本地目标失败| ReleaseError
+    Verify -->|无旧文件或 Repository 本地安全失败| ReleaseError
+    ReleaseError --> Fatal
+    Release --> Filter[从不可变 Snapshot 按 type 本地过滤]
+    Filter --> CloudRender[渲染 type/name@version]
