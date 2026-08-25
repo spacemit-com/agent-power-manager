@@ -38,6 +38,15 @@ func LockPath() (string, error) {
 	return filepath.Join(state, "apm.lock"), nil
 }
 
+// CatalogPath 返回全局唯一的持久化资源目录路径。
+func CatalogPath() (string, error) {
+	state, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(state, "catalog.json"), nil
+}
+
 // JournalPath 返回唯一活动事务日志路径。
 func JournalPath() (string, error) {
 	root, err := TransactionPath()
