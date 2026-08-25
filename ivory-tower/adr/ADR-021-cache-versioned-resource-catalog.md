@@ -32,6 +32,10 @@ fallback。同步失败时，有效旧 catalog 可供 stale list/search 和已�
 缓存不绑定 Provider 来源。来源变化后仍只比较 catalog SHA-256；相同字节直接复用，内容
 不同才原子更新。
 
+Uninstall 不读取 catalog。MCP 卸载只需 Agent CLI 中的名称和实际状态：卸载
+journal 不再携带 Server definition，恢复遇到 MCP 仍存在时继续删除，已不存在时
+提交 manifest 清理。安装和版本切换仍在 journal 保留必要 definition 以支持回滚。
+
 ## Consequences
 
 - 正面影响：APM 常规查询只需一次轻量 version 请求；APC 公开资源接口显著收敛；Local 与
@@ -44,6 +48,8 @@ fallback。同步失败时，有效旧 catalog 可供 stale list/search 和已�
   本地已有制品的版本；content 未缓存时仍会失败。
 - 代价与风险：list/search 为同步短时获取全局锁；这改变其原先全程无锁的实现，但不改变
   journal 只检查、不恢复的业务规则。
+- 代价与风险：MCP 卸载恢复不再因 `NotApplied` 后的外部漂移而重建原定义；
+  它始终收敛到用户请求的“已卸载”结果，与其他 Power 卸载方向一致。
 - 后续动作：实现 Feature 024，更新 APM/APC 当前文档并删除旧公开目录接口调用；实现完成
   后在 Changelog 中记录一次。
 

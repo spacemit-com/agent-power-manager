@@ -57,8 +57,11 @@ journal 和 Agent CLI 状态不进入 catalog。
 - `apm fix`；
 - install 的显式 Plugin 精确 manifest 全命中 `unchanged` 早退。
 
-Uninstall 继续以本地 manifest 为权威。MCP 卸载或恢复若按既有流程需要精确 definition，
-只读取精确 content，不触发完整目录同步。
+Uninstall 继续以本地 manifest 和目标 Agent 实际状态为权威。MCP 在 `present` 时
+只按名称调用 CLI remove，卸载 journal 不保存 Server definition；`absent` 时只清理
+manifest。卸载恢复按 CLI 实际状态收敛到“已卸载”，不重新添加 MCP。因此
+`uninstall` 始终不读取 catalog 或 MCP content。MCP 安装和版本切换 journal 仍保留
+新旧 definition，用于安装回滚。
 
 ### 3.2 stale fallback
 
@@ -381,7 +384,8 @@ GET /api/v1/resources/{type}/{name}/versions/{version}/content
 
 - list/search/install 每次至多一次 version；
 - type group 筛选、跨类型歧义、latest/显式版本解析；
-- installed list、uninstall、fix、Plugin unchanged 早退零 catalog 调用；
+- installed list、四类 uninstall、fix、Plugin unchanged 早退零 catalog 调用；
+- MCP present/absent/CLI 删除后崩溃的恢复全程零 definition 和 catalog 调用；
 - stale list/search；已有 artifact 离线 install；cache miss 下载失败；
 - warning 只出现一次且不污染 JSON stdout；
 - transaction Recover、manifest-first 和结果顺序无回归。
