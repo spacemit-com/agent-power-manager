@@ -507,6 +507,88 @@ func TestRepositoryReplaceRejectsOwnedBytesModifiedDuringExchange(t *testing.T) 
 	assertRepositoryFileBytes(t, path, oldData)
 }
 
+func TestRepositoryReplaceReconcilesTransientVerificationAndFailedRollbackAsCommitted(t *testing.T) {
+	oldData := validCatalogJSON()
+	newData := repositoryCatalogVariant(t, "replacement message")
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	source := writeRepositoryFile(t, root, "source.json", newData, 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	originalExchange := platform.ops.exchange
+	published := false
+	exchangeCalls := 0
+	platform.ops.exchange = func(directoryFD int, temporary, destination string) error {
+		exchangeCalls++
+		if exchangeCalls == 2 {
+			return errors.New("injected rollback exchange failure")
+		}
+		if err := originalExchange(directoryFD, temporary, destination); err != nil {
+			return err
+		}
+		published = true
+		return nil
+	}
+	originalReadBounded := platform.ops.readBounded
+	verificationFailed := false
+	platform.ops.readBounded = func(reader io.Reader, limit int64) ([]byte, error) {
+		if published && !verificationFailed {
+			verificationFailed = true
+			return nil, errors.New("injected transient post-publication read failure")
+		}
+		return originalReadBounded(reader, limit)
+	}
+
+	if _, err := repository.Replace(repositoryVersion(newData), source); err != nil {
+		t.Fatalf("Replace() error = %v, want reconciled committed success", err)
+	}
+	assertRepositoryFileBytes(t, path, newData)
+	if got := repositoryOwnedTemps(t, root); len(got) != 0 {
+		t.Fatalf("owned temporary entries after reconciled verification = %v, want none", got)
+	}
+}
+
+func TestRepositoryReplaceRejectsDifferentBytesDespiteMatchingVersionAndFailedRollback(t *testing.T) {
+	oldData := validCatalogJSON()
+	newData := repositoryCatalogVariant(t, "collision alpha")
+	differentData := repositoryCatalogVariant(t, "collision bravo")
+	if len(differentData) != len(newData) {
+		t.Fatalf("collision fixture size = %d, want %d", len(differentData), len(newData))
+	}
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	source := writeRepositoryFile(t, root, "source.json", newData, 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	expected := repositoryVersion(newData)
+	platform.ops.versionForBytes = func([]byte) domain.CatalogVersion { return expected }
+	originalExchange := platform.ops.exchange
+	exchangeCalls := 0
+	platform.ops.exchange = func(directoryFD int, temporary, destination string) error {
+		exchangeCalls++
+		if exchangeCalls == 2 {
+			return errors.New("injected first rollback exchange failure")
+		}
+		if err := originalExchange(directoryFD, temporary, destination); err != nil {
+			return err
+		}
+		if exchangeCalls == 1 {
+			if err := os.WriteFile(path, differentData, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return nil
+	}
+
+	if _, err := repository.Replace(expected, source); !errors.Is(err, ErrInvalidCatalog) {
+		t.Fatalf("Replace() error = %v, want exact-byte ErrInvalidCatalog", err)
+	}
+	assertRepositoryFileBytes(t, path, oldData)
+	if got := repositoryOwnedTemps(t, root); len(got) != 0 {
+		t.Fatalf("owned temporary entries after second rollback = %v, want none", got)
+	}
+}
+
 func TestRepositoryLoadRejectsRootOwnedStickyFinalParent(t *testing.T) {
 	root := trustedRepositoryDir(t)
 	path := writeRepositoryFile(t, root, "catalog.json", validCatalogJSON(), 0o600)
@@ -656,6 +738,39 @@ func TestRepositoryReplaceIdentityCleanupDoesNotDeleteSubstitutedEntry(t *testin
 	}
 	assertRepositoryFileBytes(t, path, newData)
 	assertRepositoryFileBytes(t, substitutedPath, substituteData)
+}
+
+func TestRepositoryReplaceDoesNotDeleteSubstituteInjectedImmediatelyBeforeUnlink(t *testing.T) {
+	oldData := validCatalogJSON()
+	newData := repositoryCatalogVariant(t, "replacement message")
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", oldData, 0o600)
+	source := writeRepositoryFile(t, root, "source.json", newData, 0o600)
+	repository := newTestRepository(t, path).(*filesystemRepository)
+	platform := repository.platform.(*unixRepositoryPlatform)
+	substituteData := []byte("final identity-check substitute")
+	var substitutedPath string
+	var preservedPath string
+	platform.ops.beforeUnlinkat = func(_ int, name string) {
+		if substitutedPath != "" || !strings.HasSuffix(name, ".owned") {
+			return
+		}
+		substitutedPath = filepath.Join(root, name)
+		preservedPath = substitutedPath + ".preserved"
+		if err := os.Rename(substitutedPath, preservedPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(substitutedPath, substituteData, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := repository.Replace(repositoryVersion(newData), source); err != nil {
+		t.Fatalf("Replace() error = %v, want committed success with fail-closed cleanup", err)
+	}
+	assertRepositoryFileBytes(t, path, newData)
+	assertRepositoryFileBytes(t, substitutedPath, substituteData)
+	assertRepositoryFileBytes(t, preservedPath, oldData)
 }
 
 func repositoryVersion(data []byte) domain.CatalogVersion {
