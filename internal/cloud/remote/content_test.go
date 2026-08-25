@@ -26,6 +26,115 @@ var (
 	remoteMCPRef   = domain.PowerRef{Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v1.2.3"}
 )
 
+func TestVerifyCatalogEntryContentAcceptsExactBytesWithKnownOrUnknownLength(t *testing.T) {
+	contents := []byte("schema_version: 1\nopaque:  value\n")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	for _, contentLength := range []int64{int64(len(contents)), -1} {
+		t.Run(fmt.Sprint(contentLength), func(t *testing.T) {
+			response := contentVerificationResponse(entry.ContentType, contentLength, bytes.NewReader(contents))
+			var destination bytes.Buffer
+
+			if err := verifyCatalogEntryContent(context.Background(), response, entry, &destination); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(destination.Bytes(), contents) {
+				t.Fatalf("verified contents = %q, want exact %q", destination.Bytes(), contents)
+			}
+		})
+	}
+}
+
+func TestVerifyCatalogEntryContentRejectsProtocolAndIntegrityFailures(t *testing.T) {
+	contents := []byte("verified entry bytes")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	tests := []struct {
+		name          string
+		contentType   string
+		contentLength int64
+		body          string
+		contentMD5    string
+		want          error
+	}{
+		{name: "missing content type", contentLength: int64(len(contents)), body: string(contents), want: cloud.ErrInvalidResponse},
+		{name: "wrong content type", contentType: "text/plain", contentLength: int64(len(contents)), body: string(contents), want: cloud.ErrInvalidResponse},
+		{name: "content type parameters", contentType: "application/yaml; charset=utf-8", contentLength: int64(len(contents)), body: string(contents), want: cloud.ErrInvalidResponse},
+		{name: "malformed content type", contentType: "application/yaml; charset", contentLength: int64(len(contents)), body: string(contents), want: cloud.ErrInvalidResponse},
+		{name: "invalid negative Content-Length", contentType: entry.ContentType, contentLength: -2, body: string(contents), want: cloud.ErrInvalidResponse},
+		{name: "Content-Length mismatch", contentType: entry.ContentType, contentLength: int64(len(contents) + 1), body: string(contents), want: cloud.ErrIntegrity},
+		{name: "short actual bytes", contentType: entry.ContentType, contentLength: int64(len(contents)), body: string(contents[:4]), want: cloud.ErrIntegrity},
+		{name: "trailing actual bytes", contentType: entry.ContentType, contentLength: int64(len(contents)), body: string(contents) + "!", want: cloud.ErrIntegrity},
+		{name: "MD5 mismatch", contentType: entry.ContentType, contentLength: int64(len(contents)), body: string(contents), contentMD5: md5Hex([]byte("different")), want: cloud.ErrIntegrity},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testEntry := entry
+			if tt.contentMD5 != "" {
+				testEntry.ContentMD5 = tt.contentMD5
+			}
+			response := contentVerificationResponse(tt.contentType, tt.contentLength, strings.NewReader(tt.body))
+
+			err := verifyCatalogEntryContent(context.Background(), response, testEntry, io.Discard)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("verifyCatalogEntryContent() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestVerifyCatalogEntryContentPreservesCancellation(t *testing.T) {
+	contents := []byte("verified entry bytes")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	response := contentVerificationResponse(entry.ContentType, int64(len(contents)), bytes.NewReader(contents))
+
+	err := verifyCatalogEntryContent(ctx, response, entry, io.Discard)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
+		t.Fatalf("verifyCatalogEntryContent() error = %v, want only context.Canceled classification", err)
+	}
+}
+
+func TestVerifyCatalogEntryContentClassifiesUnexpectedEOFAsIntegrity(t *testing.T) {
+	contents := []byte("verified entry bytes")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	response := contentVerificationResponse(
+		entry.ContentType,
+		entry.ContentSize,
+		io.MultiReader(strings.NewReader("partial"), readerError{err: io.ErrUnexpectedEOF}),
+	)
+
+	err := verifyCatalogEntryContent(context.Background(), response, entry, io.Discard)
+	if !errors.Is(err, cloud.ErrIntegrity) {
+		t.Fatalf("verifyCatalogEntryContent() error = %v, want short-stream ErrIntegrity", err)
+	}
+}
+
+func validRemoteCatalogEntry(ref domain.PowerRef, contents []byte) domain.CatalogEntry {
+	return domain.CatalogEntry{
+		Ref:         ref,
+		Description: "Remote fixture",
+		Message:     "published fixture",
+		ContentType: expectedContentType(ref.Type),
+		ContentSize: int64(len(contents)),
+		ContentMD5:  md5Hex(contents),
+		PublishedAt: testPublished,
+		Tags:        []string{},
+	}
+}
+
+func contentVerificationResponse(contentType string, contentLength int64, body io.Reader) *http.Response {
+	header := make(http.Header)
+	if contentType != "" {
+		header.Set("Content-Type", contentType)
+	}
+	return &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        header,
+		Body:          io.NopCloser(body),
+		ContentLength: contentLength,
+	}
+}
+
 func TestDownloadVerifiedContentStagesExactBytesWithPrivateMode(t *testing.T) {
 	contents := []byte("schema_version: 1\nopaque:  value\n")
 	var requests []string
