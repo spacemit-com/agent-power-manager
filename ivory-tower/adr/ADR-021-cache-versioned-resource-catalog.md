@@ -37,6 +37,17 @@ fail closed。该 pathname 安全模型明确把 current EUID 视为受信任主
 覆盖同凭据 Byzantine 写者，必须另行采用进程/目录隔离或具备 fd-bound conditional unlink
 能力的可信设施，不能把现有复验描述为该保证。
 
+Repository 的平台契约是决策的一部分，并与 Remote content 的发布能力分开治理：
+
+| 平台 | `Load` | `Replace` |
+| --- | --- | --- |
+| Linux、macOS | 支持 | 支持 |
+| FreeBSD | 支持 | 不支持；返回 `ENOTSUP` 并 fail closed |
+| Windows 与其它平台 | 不支持；fail closed | 不支持；fail closed |
+
+因此 FreeBSD 只可消费既有严格有效 catalog；需要首次落盘或 hash 变化时不能更新。Windows 与其它
+未实现平台不能加载旧 catalog，也不能发布新 catalog。
+
 缓存不绑定 Provider 来源。来源变化后仍只比较 catalog SHA-256；相同字节直接复用，内容
 不同才原子更新。
 
@@ -58,6 +69,8 @@ journal 不再携带 Server definition，恢复遇到 MCP 仍存在时继续删�
   journal 只检查、不恢复的业务规则。
 - 代价与风险：Repository 的目录项操作依赖 current-EUID trusted boundary；advisory lock 和
   identity 复验不构成对恶意同 EUID 写者的隔离保证。
+- 代价与风险：FreeBSD 只能读取既有有效 catalog，`Replace` 以 `ENOTSUP` fail closed；Windows 与
+  其它未实现平台的 `Load`/`Replace` 都 fail closed。扩展平台支持必须保留相同物理文件安全约束。
 - 代价与风险：MCP 卸载恢复不再因 `NotApplied` 后的外部漂移而重建原定义；
   它始终收敛到用户请求的“已卸载”结果，与其他 Power 卸载方向一致。
 - 后续动作：实现 Feature 024，更新 APM/APC 当前文档并删除旧公开目录接口调用；实现完成

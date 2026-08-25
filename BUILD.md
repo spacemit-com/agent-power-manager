@@ -59,6 +59,16 @@ version、下载、provider 协议或下载内容完整性失败时，若旧 `ca
 
 Catalog Repository 拒绝 symlink、hardlink、非 `0600` 文件、不可信目录链与所有可检测的目录项替换。其 pathname threat model 明确把 current EUID 视为受信任主体；parent advisory lock 只串行遵守 Repository 协议的发布者，不承诺隔离恶意同 EUID 进程在 POSIX 最终 `fstatat` 到 `unlinkat` 窄窗的替换。该边界及需要更强隔离时的要求记录在 ADR-021。
 
+Catalog Repository 的平台边界独立于下文 Remote content 发布能力，固定如下：
+
+| 平台 | `Load` | `Replace` |
+| --- | --- | --- |
+| Linux、macOS | 支持 | 支持 |
+| FreeBSD | 支持，可读取既有严格有效 catalog | 不支持，返回 `ENOTSUP` 并 fail closed |
+| Windows 与其它平台 | 不支持，fail closed | 不支持，fail closed |
+
+因此 FreeBSD 可以在 hash 相同且已有有效本地文件时继续查询，但不能首次发布或更新 catalog；Windows 与其它未实现平台不能加载或替换 catalog。
+
 四类 Power 通过同一 `cloud.Client` 获取，但保留各自的内容边界；四个内容方法都接收由同一 Catalog Snapshot 解析出的完整 `CatalogEntry`，禁止按 `PowerRef` 二次回源拼装 metadata：
 
 - Skill：Local 复制 canonical fixture 目录；Remote 获取 `application/gzip`，先验证精确 metadata、size 与 32 位小写 MD5，再安全解包到调用方私有目录。版本化 cache 的命中、下载临时目标、原子发布和公共 staging 全部由 Cache 的 `PrepareSkill` 管理。
@@ -262,7 +272,7 @@ cache/plugins/<logical-name>/<version>/
 
 所有 Agent 的 Plugin 运行时名称和 `PluginTarget` selector 都是逻辑 `<name>`，Plugin 叶子固定为 `plugins/<name>`；版本只由 `PowerRef`、APM manifest、缓存版本目录和原生 manifest 表达。`Artifact.MarketplaceFor(agent)` 为 Codex/Claude 返回同一共享根上的 Agent 原生 marketplace；Hermes/Bibit 通过 `StageFilesystem(ref)` 物化同一 Plugin 叶子。
 
-Install 在锁内恢复和 Agent 选择后先处理显式规范 Plugin ref：每个所选 Agent 的 manifest 都精确命中时直接返回 `unchanged`，不会调用 Cloud、Plugin Resource、Adapter 或 Transaction；任一不匹配则回到既有 Cloud 解析路径。普通 Plugin 路径对每个 Agent 先读取 manifest，再统一调用 `ResolvePlugin(agent)`，随后按 `DeploymentMode` 分支。marketplace 分支在检查 Agent 事实前 `Ensure(ctx, ref)` 目标 artifact、校验 artifact、取得 `MarketplaceFor(agent)`：无 manifest 时只检查目标 marketplace/Plugin，绝不 `Lookup` 旧版本；有 manifest 时先检查旧 marketplace、再检查旧 Plugin，二者都 absent 才移除 stale manifest 并转入目标事实检查，部分存在则 fail closed，二者都 present 才离线 `Lookup(previous)` 并核对旧 source/selector。filesystem 分支则先完成旧目标或新目标的本地事实与物理缺失校验，之后才 `Ensure(ctx, ref)` 和 `StageFilesystem(ref)`，再进入 transaction。marketplace 首装会注册目标 source、添加逻辑名 Plugin 并写 manifest；正常卸载会保留 marketplace，因此 exact name/source retained 且 Plugin absent 的重装直接复用 source，只添加 Plugin 并写 manifest；其正常提交、回滚与恢复不做多余的 unregister/register，仅在恢复方向已固定为 `rolling-back` 且 retained source 缺失时离线复验缓存并恢复 source。版本切换仍删除旧 Plugin、切换同名 marketplace source、重新添加逻辑名 Plugin 并写 manifest。Hermes/Bibit 使用同一个 `plugins/<name>` 目标执行可恢复 filesystem transaction；Hermes 保留 enable/disable，Bibit 不执行 Plugin CLI。
+Install 在锁内恢复和 Agent 选择后先处理显式规范 Plugin ref：每个所选 Agent 的 manifest 都精确命中时直接返回 `unchanged`，不会调用 Cloud、Plugin Resource、Adapter 或 Transaction；任一不匹配则回到既有 Cloud 解析路径。普通 Plugin 路径对每个 Agent 先读取 manifest，再统一调用 `ResolvePlugin(agent)`，随后按 `DeploymentMode` 分支。marketplace 分支在检查 Agent 事实前把同一 Snapshot 选出的目标 `CatalogEntry` 传给 `Ensure(ctx, entry)`，校验目标 artifact 并取得 `MarketplaceFor(agent)`：无 manifest 时只检查目标 marketplace/Plugin，绝不 `Lookup` 旧版本；有 manifest 时先检查旧 marketplace、再检查旧 Plugin，二者都 absent 才移除 stale manifest 并转入目标事实检查，部分存在则 fail closed，二者都 present 才离线 `Lookup(previous)` 并核对旧 source/selector。filesystem 分支则先完成旧目标或新目标的本地事实与物理缺失校验，之后才以目标 `CatalogEntry` 调用 `Ensure(ctx, entry)`，再执行 `StageFilesystem(ref)` 和 transaction。marketplace 首装会注册目标 source、添加逻辑名 Plugin 并写 manifest；正常卸载会保留 marketplace，因此 exact name/source retained 且 Plugin absent 的重装直接复用 source，只添加 Plugin 并写 manifest；其正常提交、回滚与恢复不做多余的 unregister/register，仅在恢复方向已固定为 `rolling-back` 且 retained source 缺失时离线复验缓存并恢复 source。版本切换仍删除旧 Plugin、切换同名 marketplace source、重新添加逻辑名 Plugin 并写 manifest。Hermes/Bibit 使用同一个 `plugins/<name>` 目标执行可恢复 filesystem transaction；Hermes 保留 enable/disable，Bibit 不执行 Plugin CLI。
 
 Uninstall 先从 manifest 取得精确版本；没有记录时直接返回未执行，不检查 Agent。Codex/Claude 先检查该 marketplace 与 Plugin，再离线 `Lookup` 并验证共享 artifact/source/selector，最后在 transaction 中移除 Plugin 和 manifest，正常路径保留 marketplace 与 artifact；Hermes/Bibit 只处理逻辑名目录与 manifest。部分存在、source 或 selector 不匹配、artifact 缺失或损坏、Agent 事实不可读以及非法 journal 都会保留 manifest、artifact 和 journal 并 fail closed。Plugin Resource 与 recovery 共用中立只读 Validator，拒绝 symlink/特殊文件，并按消费路径复验原生 manifest 与已生成 marketplace；`fix`/recovery 只读取 journal、Adapter、manifest 和既有共享 artifact，绝不连接 Cloud、调用 Plugin Resource 或重建缓存，因此支持离线恢复。
 

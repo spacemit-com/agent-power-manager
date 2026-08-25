@@ -18,18 +18,25 @@ flowchart TD
     Snapshot --> TryLock[非阻塞 Acquire apm.lock]
     TryLock -->|已占用| Fatal
     TryLock -->|成功| Load[严格加载 ~/.apm/catalog.json]
-    Load --> Version[匿名 GET /api/v1/resources/version]
+    Load -->|有效，或不存在/仅内容无效可远端修复| Version[匿名 GET /api/v1/resources/version]
+    Load -->|本地安全或不可修复完整性失败| ReleaseLoadError[Release apm.lock]
+    ReleaseLoadError --> Fatal
     Version --> Same{SHA-256 与有效本地文件相同?}
     Same -->|是| Release[Release apm.lock]
     Same -->|否| Download[匿名 GET /api/v1/resources 到私有临时文件]
     Download --> Verify[验证 size/hash/schema 后 0600 原子替换]
     Verify --> Release
-    Version -->|provider/update 失败且旧文件有效| Stale[返回旧 Snapshot + 一次 stale warning] --> Release
+    Version -->|provider/update 失败且旧文件有效| Stale[选择旧 Snapshot；尚未 warning]
     Download -->|provider/update 失败且旧文件有效| Stale
     Verify -->|source 内容无效且旧文件有效| Stale
-    Version -->|无有效旧文件、取消或本地安全失败| ReleaseError[Release apm.lock]
+    Stale --> ReleaseStale[Release apm.lock]
+    ReleaseStale -->|成功| WarnStale[一次 stderr/log stale warning]
+    ReleaseStale -->|失败| Fatal
+    Version -->|provider 失败且无有效旧文件，或取消| ReleaseError[Release apm.lock]
     Download -->|取消、无旧文件或本地目标失败| ReleaseError
     Verify -->|无旧文件或 Repository 本地安全失败| ReleaseError
     ReleaseError --> Fatal
-    Release --> Filter[从不可变 Snapshot 按 type 本地过滤]
+    Release -->|成功| Filter[从不可变 Snapshot 按 type 本地过滤]
+    Release -->|失败| Fatal
+    WarnStale --> Filter
     Filter --> CloudRender[渲染 type/name@version]
