@@ -66,6 +66,7 @@ func NewWithAPIKey(baseURL string, httpClient *http.Client, apiKey string) (*Cli
 	clientCopy := *httpClient
 	callerRedirect := httpClient.CheckRedirect
 	clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		anonymousCatalog := anonymousCatalogRedirect(req.Context())
 		if !validRedirectRequest(&normalized, req) {
 			return fmt.Errorf("remote redirect crosses configured origin: %w", cloud.ErrInvalidResponse)
 		}
@@ -76,15 +77,45 @@ func NewWithAPIKey(baseURL string, httpClient *http.Client, apiKey string) (*Cli
 			if !validRedirectRequest(&normalized, req) {
 				return fmt.Errorf("remote redirect policy changed configured origin: %w", cloud.ErrInvalidResponse)
 			}
-			return nil
-		}
-		if len(via) >= 10 {
+		} else if len(via) >= 10 {
 			return fmt.Errorf("remote request stopped after 10 redirects: %w", cloud.ErrInvalidResponse)
+		}
+		if anonymousCatalog {
+			for name, values := range req.Header {
+				if len(values) > 0 && isCredentialRequestHeader(name) {
+					return fmt.Errorf("remote anonymous catalog redirect contains credential header %q: %w", name, cloud.ErrInvalidResponse)
+				}
+			}
 		}
 		return nil
 	}
 
 	return &Client{baseURL: &normalized, http: &clientCopy, apiKey: apiKey}, nil
+}
+
+type anonymousCatalogRedirectContextKey struct{}
+
+func markAnonymousCatalogRedirect(ctx context.Context) context.Context {
+	return context.WithValue(ctx, anonymousCatalogRedirectContextKey{}, true)
+}
+
+func anonymousCatalogRedirect(ctx context.Context) bool {
+	marked, _ := ctx.Value(anonymousCatalogRedirectContextKey{}).(bool)
+	return marked
+}
+
+func isCredentialRequestHeader(name string) bool {
+	normalized := strings.ToLower(name)
+	switch normalized {
+	case "authorization", "proxy-authorization", "cookie", "cookie2", "api-key", "x-api-key", "x-auth-token", "x-access-token":
+		return true
+	}
+	return strings.HasSuffix(normalized, "-authorization") ||
+		strings.HasSuffix(normalized, "-api-key") ||
+		strings.HasSuffix(normalized, "-auth-token") ||
+		strings.HasSuffix(normalized, "-access-token") ||
+		strings.HasSuffix(normalized, "-credential") ||
+		strings.HasSuffix(normalized, "-secret")
 }
 
 func validRedirectRequest(baseURL *url.URL, request *http.Request) bool {

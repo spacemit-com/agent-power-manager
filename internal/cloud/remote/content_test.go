@@ -109,6 +109,22 @@ func TestVerifyCatalogEntryContentClassifiesUnexpectedEOFAsIntegrity(t *testing.
 	}
 }
 
+func TestVerifyCatalogEntryContentCancellationAfterCopyPrecedesIntegrity(t *testing.T) {
+	contents := []byte("verified entry bytes")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	ctx, cancel := context.WithCancel(context.Background())
+	response := contentVerificationResponse(
+		entry.ContentType,
+		entry.ContentSize,
+		&cancelAtEOFReader{data: []byte("short"), cancel: cancel},
+	)
+
+	err := verifyCatalogEntryContent(ctx, response, entry, io.Discard)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrIntegrity) {
+		t.Fatalf("verifyCatalogEntryContent() error = %v, want post-copy context.Canceled before integrity", err)
+	}
+}
+
 func validRemoteCatalogEntry(ref domain.PowerRef, contents []byte) domain.CatalogEntry {
 	return domain.CatalogEntry{
 		Ref:         ref,

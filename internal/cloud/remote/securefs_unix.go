@@ -528,18 +528,22 @@ func (staged *stagedContent) openRead() (*os.File, error) {
 }
 
 func (staged *stagedContent) prepareForClose(file *os.File, mode fs.FileMode) error {
-	if staged == nil || file == nil {
+	if staged == nil || staged.directory == nil || staged.directory.file == nil || file == nil {
 		return unsafeRemoteFilesystem("staged remote content descriptor is unavailable")
 	}
 	if err := file.Chmod(mode.Perm()); err != nil {
 		return fmt.Errorf("set staged remote content mode: %w", err)
 	}
-	stat, err := statUnixFile(int(file.Fd()))
-	if err != nil || unixNodeType(stat) != unix.S_IFREG || unixIdentity(stat) != staged.identity || uint64(stat.Nlink) != 1 || fs.FileMode(stat.Mode&0o777) != mode.Perm() {
-		if err == nil {
-			err = fs.ErrInvalid
+	descriptorStat, descriptorErr := statUnixFile(int(file.Fd()))
+	entryStat, entryErr := staged.directory.statEntry(staged.name)
+	if descriptorErr != nil || entryErr != nil || unixNodeType(descriptorStat) != unix.S_IFREG || unixNodeType(entryStat) != unix.S_IFREG ||
+		unixIdentity(descriptorStat) != staged.identity || unixIdentity(entryStat) != staged.identity ||
+		unixIdentity(descriptorStat) != unixIdentity(entryStat) || uint64(descriptorStat.Nlink) != 1 ||
+		fs.FileMode(descriptorStat.Mode&0o777) != mode.Perm() {
+		if descriptorErr == nil && entryErr == nil {
+			descriptorErr = fs.ErrInvalid
 		}
-		return fmt.Errorf("verify staged remote content descriptor before close: %w", errors.Join(cloud.ErrUnsafeContent, err))
+		return fmt.Errorf("verify staged remote content descriptor and name before close: %w", errors.Join(cloud.ErrUnsafeContent, descriptorErr, entryErr))
 	}
 	return nil
 }

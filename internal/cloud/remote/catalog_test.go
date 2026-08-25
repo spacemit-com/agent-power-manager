@@ -315,6 +315,210 @@ func TestDownloadCatalogRejectsProtocolAndSizeFailuresWithoutDestinationMarker(t
 	}
 }
 
+func TestDownloadCatalogRequiresSingleExplicitContentLengthHeader(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        int
+		headerValues  []string
+		contentLength int64
+		body          string
+		wantErr       bool
+	}{
+		{name: "explicit zero", status: http.StatusOK, headerValues: []string{"0"}, contentLength: 0},
+		{name: "missing zero on 200", status: http.StatusOK, contentLength: 0, wantErr: true},
+		{name: "missing zero on 204", status: http.StatusNoContent, contentLength: 0, wantErr: true},
+		{name: "missing positive", status: http.StatusOK, contentLength: 1, body: "x", wantErr: true},
+		{name: "multiple", status: http.StatusOK, headerValues: []string{"1", "1"}, contentLength: 1, body: "x", wantErr: true},
+		{name: "signed decimal", status: http.StatusOK, headerValues: []string{"+1"}, contentLength: 1, body: "x", wantErr: true},
+		{name: "comma joined", status: http.StatusOK, headerValues: []string{"1, 1"}, contentLength: 1, body: "x", wantErr: true},
+		{name: "differs from parsed response", status: http.StatusOK, headerValues: []string{"2"}, contentLength: 1, body: "x", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := newCatalogTransportClient(t, func(request *http.Request) *http.Response {
+				response := catalogHTTPResponse(request, tt.status, "application/json", tt.contentLength, strings.NewReader(tt.body))
+				response.Header.Del("Content-Length")
+				for _, value := range tt.headerValues {
+					response.Header.Add("Content-Length", value)
+				}
+				return response
+			})
+			destination := filepath.Join(trustedTestDir(t), "catalog.json")
+
+			err := client.DownloadCatalog(context.Background(), destination)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatal(err)
+				}
+				info, statErr := os.Stat(destination)
+				if statErr != nil || info.Size() != 0 || info.Mode().Perm() != 0o600 {
+					t.Fatalf("explicit zero destination = %+v, %v; want empty 0600 file", info, statErr)
+				}
+				return
+			}
+			if !errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrCatalogDestination) {
+				t.Fatalf("DownloadCatalog() error = %v, want only raw Content-Length ErrInvalidResponse", err)
+			}
+			if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("destination exists after invalid Content-Length: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestDownloadCatalogCancellationAfterCopyPrecedesIntegrity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := newCatalogTransportClient(t, func(request *http.Request) *http.Response {
+		body := &cancelAtEOFReader{data: []byte("short"), cancel: cancel}
+		return catalogHTTPResponse(request, http.StatusOK, "application/json", 6, body)
+	})
+	destination := filepath.Join(trustedTestDir(t), "catalog.json")
+
+	err := client.DownloadCatalog(ctx, destination)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrIntegrity) {
+		t.Fatalf("DownloadCatalog() error = %v, want post-copy context.Canceled before integrity", err)
+	}
+	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination exists after post-copy cancellation: %v", statErr)
+	}
+}
+
+func TestDownloadCatalogJoinsShortStreamWithAllCloseFailures(t *testing.T) {
+	outputErr := errors.New("catalog output close failed")
+	bodyErr := errors.New("catalog response close failed")
+	parentErr := errors.New("catalog parent close failed")
+	client := newCatalogTransportClient(t, func(request *http.Request) *http.Response {
+		return catalogHTTPResponse(request, http.StatusOK, "application/json", 6, strings.NewReader("short"))
+	})
+	destination := filepath.Join(trustedTestDir(t), "catalog.json")
+
+	err := client.downloadCatalogWithHooks(context.Background(), destination, catalogDownloadHooks{
+		closeOutput: func(file *os.File) error {
+			return errors.Join(file.Close(), outputErr)
+		},
+		closeResponse: func(_ context.Context, response *http.Response) error {
+			return errors.Join(response.Body.Close(), bodyErr)
+		},
+		closeParent: func(parent *pinnedDirectory) error {
+			return errors.Join(parent.close(), parentErr)
+		},
+	})
+	for _, want := range []error{cloud.ErrIntegrity, cloud.ErrCatalogDestination, outputErr, bodyErr, parentErr} {
+		if !errors.Is(err, want) {
+			t.Errorf("DownloadCatalog() error = %v, want identity %v", err, want)
+		}
+	}
+	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination remains after joined failures: %v", statErr)
+	}
+}
+
+func TestDownloadCatalogRejectsDestinationNameSubstitution(t *testing.T) {
+	contents := []byte("opaque catalog")
+	client := newCatalogTransportClient(t, func(request *http.Request) *http.Response {
+		return catalogHTTPResponse(request, http.StatusOK, "application/json", int64(len(contents)), strings.NewReader(string(contents)))
+	})
+	parent := trustedTestDir(t)
+	destination := filepath.Join(parent, "catalog.json")
+	ownedSibling := filepath.Join(parent, "catalog-owned")
+	substitute := []byte("caller-owned substitute")
+
+	err := client.downloadCatalogWithHooks(context.Background(), destination, catalogDownloadHooks{
+		beforeFinalize: func(*stagedContent) {
+			if renameErr := os.Rename(destination, ownedSibling); renameErr != nil {
+				t.Fatal(renameErr)
+			}
+			if writeErr := os.WriteFile(destination, substitute, 0o600); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+		},
+	})
+	if !errors.Is(err, cloud.ErrCatalogDestination) || !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("DownloadCatalog() error = %v, want destination substitution classification", err)
+	}
+	gotSubstitute, readErr := os.ReadFile(destination)
+	if readErr != nil || string(gotSubstitute) != string(substitute) {
+		t.Fatalf("substitute = %q, %v; want preserved %q", gotSubstitute, readErr, substitute)
+	}
+	gotOwned, readErr := os.ReadFile(ownedSibling)
+	if readErr != nil || string(gotOwned) != string(contents) {
+		t.Fatalf("owned sibling = %q, %v; want retained downloaded bytes %q", gotOwned, readErr, contents)
+	}
+}
+
+func TestCatalogRedirectRejectsCallerCredentialInjection(t *testing.T) {
+	credentialHeaders := []string{"Authorization", "Proxy-Authorization", "Cookie"}
+	operations := []struct {
+		name string
+		run  func(context.Context, *Client, string) error
+	}{
+		{
+			name: "version",
+			run: func(ctx context.Context, client *Client, _ string) error {
+				_, err := client.CatalogVersion(ctx)
+				return err
+			},
+		},
+		{
+			name: "catalog",
+			run: func(ctx context.Context, client *Client, destination string) error {
+				return client.DownloadCatalog(ctx, destination)
+			},
+		},
+	}
+	for _, operation := range operations {
+		for _, credentialHeader := range credentialHeaders {
+			t.Run(operation.name+"/"+credentialHeader, func(t *testing.T) {
+				var redirectedRequests atomic.Int32
+				var server *httptest.Server
+				server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if strings.HasPrefix(r.URL.Path, "/redirected-") {
+						redirectedRequests.Add(1)
+						if strings.HasSuffix(r.URL.Path, "version") {
+							w.Header().Set("Content-Type", "application/json")
+							_, _ = io.WriteString(w, validCatalogVersionJSON(1))
+							return
+						}
+						w.Header().Set("Content-Type", "application/json")
+						w.Header().Set("Content-Length", "1")
+						_, _ = io.WriteString(w, "x")
+						return
+					}
+					target := "/redirected-catalog"
+					if strings.HasSuffix(r.URL.Path, "/version") {
+						target = "/redirected-version"
+					}
+					http.Redirect(w, r, server.URL+target, http.StatusFound)
+				}))
+				defer server.Close()
+				client, err := New(server.URL, &http.Client{
+					Timeout: time.Second,
+					CheckRedirect: func(request *http.Request, _ []*http.Request) error {
+						request.Header.Set(credentialHeader, "injected-secret")
+						*request = *request.WithContext(context.Background())
+						return nil
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				destination := filepath.Join(trustedTestDir(t), "catalog.json")
+
+				err = operation.run(context.Background(), client, destination)
+				if !errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrCatalogDestination) {
+					t.Fatalf("%s error = %v, want anonymous redirect ErrInvalidResponse", operation.name, err)
+				}
+				if got := redirectedRequests.Load(); got != 0 {
+					t.Fatalf("redirected requests = %d, want credential rejected before target", got)
+				}
+				if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("catalog destination exists after redirect credential rejection: %v", statErr)
+				}
+			})
+		}
+	}
+}
+
 func TestDownloadCatalogAcceptsExactMaximumSize(t *testing.T) {
 	client := newCatalogTransportClient(t, func(request *http.Request) *http.Response {
 		body := io.LimitReader(repeatedByteReader('x'), catalog.MaxCatalogSize)
@@ -497,6 +701,24 @@ type readerError struct {
 
 func (readerError readerError) Read([]byte) (int, error) {
 	return 0, readerError.err
+}
+
+type cancelAtEOFReader struct {
+	data   []byte
+	cancel context.CancelFunc
+}
+
+func (reader *cancelAtEOFReader) Read(buffer []byte) (int, error) {
+	if len(reader.data) == 0 {
+		return 0, io.EOF
+	}
+	count := copy(buffer, reader.data)
+	reader.data = reader.data[count:]
+	if len(reader.data) == 0 {
+		reader.cancel()
+		return count, io.EOF
+	}
+	return count, nil
 }
 
 func TestListTraversesOneSnapshotAndSorts(t *testing.T) {

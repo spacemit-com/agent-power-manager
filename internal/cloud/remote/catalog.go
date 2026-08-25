@@ -9,8 +9,10 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +26,13 @@ import (
 var _ cloud.CatalogSource = (*Client)(nil)
 
 const remoteCatalogSchemaVersion = 1
+
+type catalogDownloadHooks struct {
+	beforeFinalize func(*stagedContent)
+	closeOutput    func(*os.File) error
+	closeResponse  func(context.Context, *http.Response) error
+	closeParent    func(*pinnedDirectory) error
+}
 
 // CatalogVersion 匿名读取 APC 的 catalog v1 内容标记；响应字段必须精确且目录大小不得超过本地上限。
 func (c *Client) CatalogVersion(ctx context.Context) (version domain.CatalogVersion, resultErr error) {
@@ -66,6 +75,10 @@ func (c *Client) CatalogVersion(ctx context.Context) (version domain.CatalogVers
 // DownloadCatalog 匿名下载完整 catalog 原始字节到调用方提供的尚不存在绝对路径；
 // 本方法只校验传输边界，不解析 catalog schema。
 func (c *Client) DownloadCatalog(ctx context.Context, destination string) (resultErr error) {
+	return c.downloadCatalogWithHooks(ctx, destination, catalogDownloadHooks{})
+}
+
+func (c *Client) downloadCatalogWithHooks(ctx context.Context, destination string, hooks catalogDownloadHooks) (resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("download remote catalog: %w", err)
 	}
@@ -73,73 +86,61 @@ func (c *Client) DownloadCatalog(ctx context.Context, destination string) (resul
 	if err != nil {
 		return err
 	}
+	var response *http.Response
+	var staged *stagedContent
+	var output *os.File
 	defer func() {
-		resultErr = errors.Join(resultErr, catalogDestinationFailure("close remote catalog destination parent", parent.close()))
+		if output != nil {
+			resultErr = errors.Join(resultErr, catalogDestinationFailure("close remote catalog destination", closeCatalogOutput(output, hooks)))
+		}
+		if response != nil {
+			resultErr = errors.Join(resultErr, closeCatalogDownloadResponse(ctx, response, hooks))
+		}
+		if staged != nil && resultErr != nil {
+			resultErr = errors.Join(resultErr, catalogDestinationFailure("cleanup remote catalog destination", staged.remove()))
+		}
+		resultErr = errors.Join(resultErr, catalogDestinationFailure("close remote catalog destination parent", closeCatalogParent(parent, hooks)))
 	}()
 
-	response, err := c.requestCatalogResponse(ctx, c.endpoint("api", "v1", "resources"))
+	response, err = c.requestCatalogResponse(ctx, c.endpoint("api", "v1", "resources"))
 	if err != nil {
 		return fmt.Errorf("download remote catalog: %w", err)
 	}
-	responseClosed := false
-	defer func() {
-		if !responseClosed {
-			resultErr = errors.Join(resultErr, closeCatalogResponse(ctx, response))
-		}
-	}()
 	if err := requireCatalogJSONContentType(response); err != nil {
 		return fmt.Errorf("download remote catalog: %w", err)
 	}
-	if response.ContentLength < 0 {
-		return fmt.Errorf("remote catalog Content-Length %d must be explicit and non-negative: %w", response.ContentLength, cloud.ErrInvalidResponse)
-	}
-	if response.ContentLength > catalog.MaxCatalogSize {
-		return fmt.Errorf("remote catalog Content-Length %d exceeds %d bytes: %w", response.ContentLength, catalog.MaxCatalogSize, cloud.ErrInvalidResponse)
+	contentLength, err := requireCatalogContentLength(response)
+	if err != nil {
+		return err
 	}
 
-	staged, output, err := parent.createNamedStaged(destinationName)
+	staged, output, err = parent.createNamedStaged(destinationName)
 	if err != nil {
 		return catalogDestinationFailure("create remote catalog destination", err)
 	}
-	outputClosed := false
-	defer func() {
-		if !outputClosed {
-			resultErr = errors.Join(resultErr, catalogDestinationFailure("close remote catalog destination", output.Close()))
-		}
-		if resultErr != nil {
-			resultErr = errors.Join(resultErr, catalogDestinationFailure("cleanup remote catalog destination", staged.remove()))
-		}
-	}()
 
 	written := &catalogDestinationWriter{writer: output}
-	actualSize, copyErr := io.Copy(written, io.LimitReader(&contextReader{ctx: ctx, reader: response.Body}, response.ContentLength+1))
+	actualSize, copyErr := io.Copy(written, io.LimitReader(&contextReader{ctx: ctx, reader: response.Body}, contentLength+1))
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("stream remote catalog: %w", ctxErr)
+	}
 	if copyErr != nil {
 		if written.err != nil {
 			return catalogDestinationFailure("write remote catalog destination", written.err)
 		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return fmt.Errorf("stream remote catalog: %w", ctxErr)
-		}
 		if errors.Is(copyErr, io.ErrUnexpectedEOF) {
-			return fmt.Errorf("remote catalog ended before Content-Length %d: %w", response.ContentLength, errors.Join(cloud.ErrIntegrity, copyErr))
+			return fmt.Errorf("remote catalog ended before Content-Length %d: %w", contentLength, errors.Join(cloud.ErrIntegrity, copyErr))
 		}
 		return fmt.Errorf("stream remote catalog: %w", classifyResponseReadError(ctx, copyErr))
 	}
+	if actualSize != contentLength {
+		return fmt.Errorf("remote catalog size %d does not match Content-Length %d: %w", actualSize, contentLength, cloud.ErrIntegrity)
+	}
+	if hooks.beforeFinalize != nil {
+		hooks.beforeFinalize(staged)
+	}
 	if prepareErr := staged.prepareForClose(output, 0o600); prepareErr != nil {
 		return catalogDestinationFailure("prepare remote catalog destination", prepareErr)
-	}
-	if closeErr := output.Close(); closeErr != nil {
-		outputClosed = true
-		return catalogDestinationFailure("close remote catalog destination", closeErr)
-	}
-	outputClosed = true
-	if closeErr := closeCatalogResponse(ctx, response); closeErr != nil {
-		responseClosed = true
-		return closeErr
-	}
-	responseClosed = true
-	if actualSize != response.ContentLength {
-		return fmt.Errorf("remote catalog size %d does not match Content-Length %d: %w", actualSize, response.ContentLength, cloud.ErrIntegrity)
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("download remote catalog: %w", err)
@@ -152,6 +153,7 @@ func (c *Client) requestCatalogResponse(ctx context.Context, endpoint fmt.String
 	if err != nil {
 		return nil, fmt.Errorf("create remote catalog request: %w", err)
 	}
+	request = request.WithContext(markAnonymousCatalogRedirect(request.Context()))
 	request.Header.Set("Accept", "application/json")
 	response, err := c.http.Do(request)
 	if err != nil {
@@ -185,14 +187,58 @@ func requireCatalogJSONContentType(response *http.Response) error {
 	return nil
 }
 
+func requireCatalogContentLength(response *http.Response) (int64, error) {
+	values := response.Header.Values("Content-Length")
+	if len(values) != 1 || values[0] == "" {
+		return 0, fmt.Errorf("remote catalog must contain one explicit Content-Length header: %w", cloud.ErrInvalidResponse)
+	}
+	for _, character := range []byte(values[0]) {
+		if character < '0' || character > '9' {
+			return 0, fmt.Errorf("remote catalog Content-Length %q is not unsigned decimal: %w", values[0], cloud.ErrInvalidResponse)
+		}
+	}
+	contentLength, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse remote catalog Content-Length %q: %w", values[0], errors.Join(cloud.ErrInvalidResponse, err))
+	}
+	if contentLength != response.ContentLength {
+		return 0, fmt.Errorf("remote catalog Content-Length header %d does not match parsed response length %d: %w", contentLength, response.ContentLength, cloud.ErrInvalidResponse)
+	}
+	if contentLength > catalog.MaxCatalogSize {
+		return 0, fmt.Errorf("remote catalog Content-Length %d exceeds %d bytes: %w", contentLength, catalog.MaxCatalogSize, cloud.ErrInvalidResponse)
+	}
+	return contentLength, nil
+}
+
 func closeCatalogResponse(ctx context.Context, response *http.Response) error {
 	if response == nil || response.Body == nil {
 		return nil
 	}
 	if err := response.Body.Close(); err != nil {
-		return fmt.Errorf("close remote catalog response: %w", classifyResponseReadError(ctx, err))
+		return fmt.Errorf("close remote catalog response: %w", errors.Join(classifyResponseReadError(ctx, err), err))
 	}
 	return nil
+}
+
+func closeCatalogOutput(output *os.File, hooks catalogDownloadHooks) error {
+	if hooks.closeOutput != nil {
+		return hooks.closeOutput(output)
+	}
+	return output.Close()
+}
+
+func closeCatalogDownloadResponse(ctx context.Context, response *http.Response, hooks catalogDownloadHooks) error {
+	if hooks.closeResponse != nil {
+		return hooks.closeResponse(ctx, response)
+	}
+	return closeCatalogResponse(ctx, response)
+}
+
+func closeCatalogParent(parent *pinnedDirectory, hooks catalogDownloadHooks) error {
+	if hooks.closeParent != nil {
+		return hooks.closeParent(parent)
+	}
+	return parent.close()
 }
 
 func decodeCatalogVersion(payload []byte) (domain.CatalogVersion, error) {

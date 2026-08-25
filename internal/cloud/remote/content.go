@@ -48,10 +48,10 @@ func verifyCatalogEntryContent(ctx context.Context, response *http.Response, ent
 
 	hash := md5.New()
 	actualSize, copyErr := io.Copy(io.MultiWriter(destination, hash), io.LimitReader(&contextReader{ctx: ctx, reader: response.Body}, entry.ContentSize+1))
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("stream remote catalog entry content: %w", ctxErr)
+	}
 	if copyErr != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return fmt.Errorf("stream remote catalog entry content: %w", ctxErr)
-		}
 		if errors.Is(copyErr, io.ErrUnexpectedEOF) {
 			return fmt.Errorf("remote catalog entry content ended before catalog size %d: %w", entry.ContentSize, errors.Join(cloud.ErrIntegrity, copyErr))
 		}
