@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -33,6 +32,13 @@ type manager struct {
 	repository Repository
 	locker     lock.Locker
 	tempRoot   string
+	ops        managerOps
+}
+
+type managerOps struct {
+	mkdirAll  func(string, os.FileMode) error
+	mkdirTemp func(string, string) (string, error)
+	removeAll func(string) error
 }
 
 // NewManager 创建只负责目录同步策略的 Manager；tempRoot 必须是绝对、规范的临时目录根路径。
@@ -49,7 +55,17 @@ func NewManager(source cloud.CatalogSource, repository Repository, locker lock.L
 	if tempRoot == "" || !filepath.IsAbs(tempRoot) || filepath.Clean(tempRoot) != tempRoot {
 		return nil, fmt.Errorf("catalog temporary root %q must be absolute and clean", tempRoot)
 	}
-	return &manager{source: source, repository: repository, locker: locker, tempRoot: tempRoot}, nil
+	return &manager{
+		source:     source,
+		repository: repository,
+		locker:     locker,
+		tempRoot:   tempRoot,
+		ops: managerOps{
+			mkdirAll:  os.MkdirAll,
+			mkdirTemp: os.MkdirTemp,
+			removeAll: os.RemoveAll,
+		},
+	}, nil
 }
 
 // Snapshot 非阻塞获取全局锁，并在释放后返回同步结果。
@@ -63,9 +79,10 @@ func (manager *manager) Snapshot(ctx context.Context) (snapshot Snapshot, status
 	}
 	defer func() {
 		if releaseErr := unlock.Release(); releaseErr != nil {
+			primaryErr := primaryResultError(status, resultErr)
 			snapshot = Snapshot{}
 			status = SyncStatus{}
-			resultErr = fmt.Errorf("release catalog synchronization lock: %w", releaseErr)
+			resultErr = errors.Join(primaryErr, fmt.Errorf("release catalog synchronization lock: %w", releaseErr))
 		}
 	}()
 	return manager.snapshotLocked(ctx)
@@ -76,22 +93,25 @@ func (manager *manager) SnapshotLocked(ctx context.Context) (Snapshot, SyncStatu
 	return manager.snapshotLocked(ctx)
 }
 
-func (manager *manager) snapshotLocked(ctx context.Context) (Snapshot, SyncStatus, error) {
+func (manager *manager) snapshotLocked(ctx context.Context) (snapshot Snapshot, status SyncStatus, resultErr error) {
 	if err := contextError(ctx); err != nil {
 		return Snapshot{}, SyncStatus{}, err
 	}
 
 	localSnapshot, localVersion, loadErr := manager.repository.Load()
+	if loadErr != nil && !repairableCatalogLoadError(loadErr) {
+		return Snapshot{}, SyncStatus{}, fmt.Errorf("load catalog: %w", loadErr)
+	}
 	hasLocalSnapshot := loadErr == nil
 	if err := contextError(ctx); err != nil {
 		return Snapshot{}, SyncStatus{}, err
 	}
 
 	remoteVersion, err := manager.source.CatalogVersion(ctx)
+	if contextErr := contextError(ctx); contextErr != nil {
+		return Snapshot{}, SyncStatus{}, contextErr
+	}
 	if err != nil {
-		if contextErr := contextError(ctx); contextErr != nil {
-			return Snapshot{}, SyncStatus{}, contextErr
-		}
 		return manager.providerFailure(localSnapshot, hasLocalSnapshot, err)
 	}
 	if err := remoteVersion.Validate(); err != nil {
@@ -108,37 +128,35 @@ func (manager *manager) snapshotLocked(ctx context.Context) (Snapshot, SyncStatu
 	if err != nil {
 		return Snapshot{}, SyncStatus{}, fmt.Errorf("create catalog temporary directory: %w", err)
 	}
+	defer func() {
+		if cleanupErr := manager.ops.removeAll(temporaryDirectory); cleanupErr != nil {
+			primaryErr := primaryResultError(status, resultErr)
+			snapshot = Snapshot{}
+			status = SyncStatus{}
+			resultErr = errors.Join(primaryErr, fmt.Errorf("cleanup catalog temporary directory: %w", cleanupErr))
+		}
+	}()
 	destination := filepath.Join(temporaryDirectory, "catalog.json")
 	downloadErr := manager.source.DownloadCatalog(ctx, destination)
 	if contextErr := contextError(ctx); contextErr != nil {
-		if cleanupErr := os.RemoveAll(temporaryDirectory); cleanupErr != nil {
-			return Snapshot{}, SyncStatus{}, fmt.Errorf("cleanup catalog temporary directory: %w", cleanupErr)
-		}
 		return Snapshot{}, SyncStatus{}, contextErr
 	}
 	if downloadErr != nil {
-		if cleanupErr := os.RemoveAll(temporaryDirectory); cleanupErr != nil {
-			return Snapshot{}, SyncStatus{}, fmt.Errorf("cleanup catalog temporary directory: %w", cleanupErr)
-		}
-		if localCatalogFailure(downloadErr) {
+		if errors.Is(downloadErr, cloud.ErrCatalogDestination) {
 			return Snapshot{}, SyncStatus{}, fmt.Errorf("download catalog: %w", downloadErr)
 		}
 		return manager.providerFailure(localSnapshot, hasLocalSnapshot, downloadErr)
 	}
 
-	// Replace 需要读取 staged 文件，因此临时目录只可在替换完成后清理。
-	snapshot, status, replaceErr := manager.replaceDownloaded(ctx, localSnapshot, hasLocalSnapshot, remoteVersion, destination)
-	if cleanupErr := os.RemoveAll(temporaryDirectory); cleanupErr != nil {
-		return Snapshot{}, SyncStatus{}, fmt.Errorf("cleanup catalog temporary directory: %w", cleanupErr)
-	}
-	return snapshot, status, replaceErr
+	// Replace 需要读取 staged 文件，因此 defer 在替换完成后才清理临时目录。
+	return manager.replaceDownloaded(ctx, localSnapshot, hasLocalSnapshot, remoteVersion, destination)
 }
 
 func (manager *manager) createTemporaryDirectory() (string, error) {
-	if err := os.MkdirAll(manager.tempRoot, 0o700); err != nil {
+	if err := manager.ops.mkdirAll(manager.tempRoot, 0o700); err != nil {
 		return "", err
 	}
-	return os.MkdirTemp(manager.tempRoot, ".catalog-")
+	return manager.ops.mkdirTemp(manager.tempRoot, ".catalog-")
 }
 
 func (manager *manager) replaceDownloaded(ctx context.Context, localSnapshot Snapshot, hasLocalSnapshot bool, version domain.CatalogVersion, sourcePath string) (Snapshot, SyncStatus, error) {
@@ -147,10 +165,10 @@ func (manager *manager) replaceDownloaded(ctx context.Context, localSnapshot Sna
 		return Snapshot{}, SyncStatus{}, contextErr
 	}
 	if replaceErr != nil {
-		if localCatalogFailure(replaceErr) {
-			return Snapshot{}, SyncStatus{}, fmt.Errorf("replace catalog: %w", replaceErr)
+		if errors.Is(replaceErr, ErrCatalogSourceInvalid) {
+			return manager.providerFailure(localSnapshot, hasLocalSnapshot, replaceErr)
 		}
-		return manager.providerFailure(localSnapshot, hasLocalSnapshot, replaceErr)
+		return Snapshot{}, SyncStatus{}, fmt.Errorf("replace catalog: %w", replaceErr)
 	}
 	return snapshot, SyncStatus{Updated: true}, nil
 }
@@ -169,11 +187,35 @@ func contextError(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func localCatalogFailure(err error) bool {
-	return errors.Is(err, fs.ErrInvalid) ||
-		errors.Is(err, fs.ErrPermission) ||
-		errors.Is(err, os.ErrNotExist) ||
-		errors.Is(err, cloud.ErrUnsafeContent)
+func repairableCatalogLoadError(err error) bool {
+	if hasMultipleErrorCauses(err) {
+		return false
+	}
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, ErrInvalidCatalog)
+}
+
+func hasMultipleErrorCauses(err error) bool {
+	for err != nil {
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			return len(joined.Unwrap()) > 1
+		}
+		wrapped, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = wrapped.Unwrap()
+	}
+	return false
+}
+
+func primaryResultError(status SyncStatus, resultErr error) error {
+	if resultErr != nil {
+		return resultErr
+	}
+	if status.Stale {
+		return status.Cause
+	}
+	return nil
 }
 
 var _ Manager = (*manager)(nil)

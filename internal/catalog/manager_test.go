@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
 
 	"apm/internal/cloud"
@@ -22,7 +23,7 @@ func TestManagerStateTable(t *testing.T) {
 	remoteSnapshot, remoteVersion := managerSnapshot(t, "remote message")
 	versionFailure := errors.New("version unavailable")
 	downloadFailure := errors.New("download unavailable")
-	replaceFailure := fmt.Errorf("catalog hash or schema mismatch: %w", ErrInvalidCatalog)
+	replaceFailure := fmt.Errorf("catalog hash or schema mismatch: %w", ErrCatalogSourceInvalid)
 
 	tests := []struct {
 		name          string
@@ -293,6 +294,203 @@ func TestManagerLocalReplacementFailureNeverUsesStale(t *testing.T) {
 	}
 }
 
+func TestManagerLoadOnlyRepairsMissingOrInvalidCatalog(t *testing.T) {
+	remoteSnapshot, remoteVersion := managerSnapshot(t, "remote")
+	closeErr := errors.New("catalog parent close failed")
+	for _, tt := range []struct {
+		name             string
+		loadErr          error
+		wantVersionCalls int
+		wantErr          error
+	}{
+		{name: "missing", loadErr: os.ErrNotExist, wantVersionCalls: 1},
+		{name: "invalid bytes", loadErr: ErrInvalidCatalog, wantVersionCalls: 1},
+		{name: "permission", loadErr: fs.ErrPermission, wantErr: fs.ErrPermission},
+		{name: "trust race", loadErr: fs.ErrInvalid, wantErr: fs.ErrInvalid},
+		{name: "invalid bytes plus close failure", loadErr: errors.Join(ErrInvalidCatalog, closeErr), wantErr: closeErr},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := &managerSource{version: remoteVersion, data: validCatalogJSON()}
+			repository := &managerRepository{loadErr: tt.loadErr, replaceSnapshot: remoteSnapshot}
+			manager := newManagerForTest(t, source, repository, &managerLocker{})
+
+			_, _, err := manager.SnapshotLocked(context.Background())
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("SnapshotLocked() error = %v, want %v", err, tt.wantErr)
+			}
+			if source.versionCalls != tt.wantVersionCalls {
+				t.Fatalf("CatalogVersion calls = %d, want %d", source.versionCalls, tt.wantVersionCalls)
+			}
+		})
+	}
+}
+
+func TestManagerReplaceStaleOnlyForProviderCatalogBytes(t *testing.T) {
+	localSnapshot, localVersion := managerSnapshot(t, "cached")
+	_, remoteVersion := managerSnapshot(t, "remote")
+	for _, tt := range []struct {
+		name       string
+		replaceErr error
+		wantStale  bool
+	}{
+		{name: "provider hash or schema", replaceErr: ErrCatalogSourceInvalid, wantStale: true},
+		{name: "io", replaceErr: syscall.EIO},
+		{name: "no space", replaceErr: syscall.ENOSPC},
+		{name: "rename exists", replaceErr: os.ErrExist},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := &managerSource{version: remoteVersion, data: validCatalogJSON()}
+			repository := &managerRepository{loadSnapshot: localSnapshot, loadVersion: localVersion, replaceErr: tt.replaceErr}
+			manager := newManagerForTest(t, source, repository, &managerLocker{})
+
+			_, status, err := manager.SnapshotLocked(context.Background())
+			if tt.wantStale {
+				if err != nil || !status.Stale || status.Cause != tt.replaceErr {
+					t.Fatalf("provider replace failure = status %+v, error %v", status, err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.replaceErr) || status != (SyncStatus{}) {
+				t.Fatalf("local replace failure = status %+v, error %v", status, err)
+			}
+		})
+	}
+}
+
+func TestManagerDownloadClassifiesOnlyExplicitDestinationFailureAsLocal(t *testing.T) {
+	localSnapshot, localVersion := managerSnapshot(t, "cached")
+	_, remoteVersion := managerSnapshot(t, "remote")
+	for _, tt := range []struct {
+		name        string
+		downloadErr error
+		wantStale   bool
+	}{
+		{name: "provider wraps not exist", downloadErr: fmt.Errorf("transport: %w", os.ErrNotExist), wantStale: true},
+		{name: "provider wraps invalid", downloadErr: fmt.Errorf("transport: %w", fs.ErrInvalid), wantStale: true},
+		{name: "destination local", downloadErr: cloud.ErrCatalogDestination},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := &managerSource{version: remoteVersion, data: validCatalogJSON(), downloadErr: tt.downloadErr}
+			repository := &managerRepository{loadSnapshot: localSnapshot, loadVersion: localVersion}
+			manager := newManagerForTest(t, source, repository, &managerLocker{})
+
+			_, status, err := manager.SnapshotLocked(context.Background())
+			if tt.wantStale {
+				if err != nil || !status.Stale || status.Cause != tt.downloadErr {
+					t.Fatalf("provider download failure = status %+v, error %v", status, err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.downloadErr) || status != (SyncStatus{}) {
+				t.Fatalf("destination failure = status %+v, error %v", status, err)
+			}
+		})
+	}
+}
+
+func TestManagerJoinsReleaseWithPrimaryFailure(t *testing.T) {
+	localSnapshot, localVersion := managerSnapshot(t, "cached")
+	providerErr := errors.New("version transport failed")
+	releaseErr := errors.New("unlock failed")
+	source := &managerSource{versionErr: providerErr}
+	repository := &managerRepository{loadSnapshot: localSnapshot, loadVersion: localVersion}
+	manager := newManagerForTest(t, source, repository, &managerLocker{releaseErr: releaseErr})
+
+	snapshot, status, err := manager.Snapshot(context.Background())
+	if !errors.Is(err, providerErr) || !errors.Is(err, releaseErr) || status != (SyncStatus{}) || len(snapshot.List("")) != 0 {
+		t.Fatalf("release plus provider failure = snapshot %#v, status %+v, error %v", snapshot.List(""), status, err)
+	}
+}
+
+func TestManagerJoinsCleanupWithPrimaryFailure(t *testing.T) {
+	localSnapshot, localVersion := managerSnapshot(t, "cached")
+	_, remoteVersion := managerSnapshot(t, "remote")
+	cleanupErr := errors.New("temporary cleanup failed")
+	providerErr := errors.New("download transport failed")
+	for _, tt := range []struct {
+		name        string
+		configure   func(context.CancelFunc, *managerSource, *managerRepository)
+		wantPrimary error
+	}{
+		{
+			name: "cancellation",
+			configure: func(cancel context.CancelFunc, source *managerSource, _ *managerRepository) {
+				source.download = func(context.Context, string) error {
+					cancel()
+					return context.Canceled
+				}
+			},
+			wantPrimary: context.Canceled,
+		},
+		{
+			name: "download",
+			configure: func(_ context.CancelFunc, source *managerSource, _ *managerRepository) {
+				source.downloadErr = providerErr
+			},
+			wantPrimary: providerErr,
+		},
+		{
+			name: "replace",
+			configure: func(_ context.CancelFunc, _ *managerSource, repository *managerRepository) {
+				repository.replaceErr = ErrCatalogSourceInvalid
+			},
+			wantPrimary: ErrCatalogSourceInvalid,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			source := &managerSource{version: remoteVersion, data: validCatalogJSON()}
+			repository := &managerRepository{loadSnapshot: localSnapshot, loadVersion: localVersion}
+			tt.configure(cancel, source, repository)
+			manager := newManagerImplementationForTest(t, source, repository, &managerLocker{})
+			manager.ops.removeAll = func(string) error { return cleanupErr }
+
+			snapshot, status, err := manager.SnapshotLocked(ctx)
+			if !errors.Is(err, tt.wantPrimary) || !errors.Is(err, cleanupErr) || status != (SyncStatus{}) || len(snapshot.List("")) != 0 {
+				t.Fatalf("cleanup plus %s failure = snapshot %#v, status %+v, error %v", tt.name, snapshot.List(""), status, err)
+			}
+		})
+	}
+}
+
+func TestManagerCancellationAfterVersionTakesPrecedence(t *testing.T) {
+	localSnapshot, localVersion := managerSnapshot(t, "cached")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	source := &managerSource{version: localVersion}
+	source.versionCall = func(context.Context) (domain.CatalogVersion, error) {
+		cancel()
+		return domain.CatalogVersion{SHA256: "invalid", Size: 1}, nil
+	}
+	repository := &managerRepository{loadSnapshot: localSnapshot, loadVersion: localVersion}
+	manager := newManagerForTest(t, source, repository, &managerLocker{})
+
+	_, status, err := manager.SnapshotLocked(ctx)
+	if !errors.Is(err, context.Canceled) || status != (SyncStatus{}) || source.downloadCalls != 0 {
+		t.Fatalf("mid-version cancellation = status %+v, error %v, downloads %d", status, err, source.downloadCalls)
+	}
+}
+
+func TestManagerCancellationAfterReplaceTakesPrecedence(t *testing.T) {
+	localSnapshot, localVersion := managerSnapshot(t, "cached")
+	_, remoteVersion := managerSnapshot(t, "remote")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	source := &managerSource{version: remoteVersion, data: validCatalogJSON()}
+	repository := &managerRepository{loadSnapshot: localSnapshot, loadVersion: localVersion}
+	repository.replace = func(domain.CatalogVersion, string) (Snapshot, error) {
+		cancel()
+		return Snapshot{}, ErrCatalogSourceInvalid
+	}
+	manager := newManagerForTest(t, source, repository, &managerLocker{})
+
+	_, status, err := manager.SnapshotLocked(ctx)
+	if !errors.Is(err, context.Canceled) || status != (SyncStatus{}) {
+		t.Fatalf("mid-replace cancellation = status %+v, error %v", status, err)
+	}
+}
+
 func TestManagerSnapshotLockProtocol(t *testing.T) {
 	remoteSnapshot, remoteVersion := managerSnapshot(t, "remote")
 	localSnapshot, localVersion := managerSnapshot(t, "local")
@@ -392,6 +590,7 @@ func TestNewManagerRejectsInvalidDependenciesAndTemporaryRoot(t *testing.T) {
 type managerSource struct {
 	version       domain.CatalogVersion
 	versionErr    error
+	versionCall   func(context.Context) (domain.CatalogVersion, error)
 	downloadErr   error
 	data          []byte
 	download      func(context.Context, string) error
@@ -400,9 +599,12 @@ type managerSource struct {
 	order         *[]string
 }
 
-func (source *managerSource) CatalogVersion(context.Context) (domain.CatalogVersion, error) {
+func (source *managerSource) CatalogVersion(ctx context.Context) (domain.CatalogVersion, error) {
 	source.versionCalls++
 	source.appendOrder("version")
+	if source.versionCall != nil {
+		return source.versionCall(ctx)
+	}
 	return source.version, source.versionErr
 }
 
@@ -430,6 +632,7 @@ type managerRepository struct {
 	loadErr         error
 	replaceSnapshot Snapshot
 	replaceErr      error
+	replace         func(domain.CatalogVersion, string) (Snapshot, error)
 	loadCalls       int
 	replaceCalls    int
 	order           *[]string
@@ -441,11 +644,14 @@ func (repository *managerRepository) Load() (Snapshot, domain.CatalogVersion, er
 	return repository.loadSnapshot, repository.loadVersion, repository.loadErr
 }
 
-func (repository *managerRepository) Replace(_ domain.CatalogVersion, sourcePath string) (Snapshot, error) {
+func (repository *managerRepository) Replace(version domain.CatalogVersion, sourcePath string) (Snapshot, error) {
 	repository.replaceCalls++
 	repository.appendOrder("replace")
 	if _, err := os.Stat(sourcePath); err != nil {
 		return Snapshot{}, fmt.Errorf("staged source is unavailable: %w", err)
+	}
+	if repository.replace != nil {
+		return repository.replace(version, sourcePath)
 	}
 	return repository.replaceSnapshot, repository.replaceErr
 }
@@ -512,4 +718,9 @@ func newManagerForTest(t *testing.T, source cloud.CatalogSource, repository Repo
 		t.Fatal(err)
 	}
 	return manager
+}
+
+func newManagerImplementationForTest(t *testing.T, source cloud.CatalogSource, repository Repository, locker lock.Locker) *manager {
+	t.Helper()
+	return newManagerForTest(t, source, repository, locker).(*manager)
 }

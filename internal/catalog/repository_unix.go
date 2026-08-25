@@ -118,10 +118,10 @@ func (platform *unixRepositoryPlatform) replace(path string, expected domain.Cat
 	}
 	actual := versionForCatalogBytes(data)
 	if actual != expected {
-		return Snapshot{}, fmt.Errorf("staged catalog version %#v does not match expected %#v: %w", actual, expected, ErrInvalidCatalog)
+		return Snapshot{}, fmt.Errorf("staged catalog version %#v does not match expected %#v: %w", actual, expected, errors.Join(ErrCatalogSourceInvalid, ErrInvalidCatalog))
 	}
 	if _, err = Decode(data); err != nil {
-		return Snapshot{}, fmt.Errorf("decode staged catalog %q: %w", sourcePath, err)
+		return Snapshot{}, fmt.Errorf("decode staged catalog %q: %w", sourcePath, errors.Join(ErrCatalogSourceInvalid, err))
 	}
 
 	parent, err := platform.openParent(filepath.Dir(path))

@@ -12,4 +12,6 @@ var (
 	ErrAmbiguous = errors.New("catalog entry type is ambiguous")
 	// ErrCatalogUnavailable 表示本地没有可用目录且本次同步未能完成。
 	ErrCatalogUnavailable = errors.New("catalog unavailable")
+	// ErrCatalogSourceInvalid 表示 provider 下载的目录字节与 version 标记不符或不满足目录 schema。
+	ErrCatalogSourceInvalid = errors.New("invalid downloaded catalog")
 )

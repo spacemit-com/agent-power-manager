@@ -15,6 +15,7 @@ type Catalog interface {
 }
 
 // CatalogSource 定义目录版本与完整目录下载边界；destination 必须由调用方提供、绝对且尚不存在。
+// DownloadCatalog 仅在 destination 本地无法安全使用或清理时包装 ErrCatalogDestination；传输、协议和内容错误不得使用该标记。
 type CatalogSource interface {
 	CatalogVersion(context.Context) (domain.CatalogVersion, error)
 	DownloadCatalog(context.Context, string) error

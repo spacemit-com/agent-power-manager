@@ -13,6 +13,8 @@ var (
 	ErrIntegrity = errors.New("cloud integrity failure")
 	// ErrUnsafeContent 表示提供方内容违反本地安全边界。
 	ErrUnsafeContent = errors.New("cloud unsafe content")
+	// ErrCatalogDestination 表示调用方提供的 catalog 下载 destination 无法在本地安全地使用或清理。
+	ErrCatalogDestination = errors.New("cloud catalog destination failure")
 	// ErrProviderConfig 表示提供方配置缺失或无效。
 	ErrProviderConfig = errors.New("cloud provider configuration error")
 	// ErrSubmissionUnsupported 表示 provider 不支持提交。
