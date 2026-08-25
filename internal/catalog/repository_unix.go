@@ -39,6 +39,7 @@ type unixRepositoryOps struct {
 	versionForBytes      func([]byte) domain.CatalogVersion
 	syncFile             func(*os.File) error
 	syncDirectory        func(*os.File) error
+	close                func(*os.File) error
 }
 
 type unixRepositoryPlatform struct {
@@ -82,6 +83,7 @@ func newRepositoryPlatform() repositoryPlatform {
 		versionForBytes: versionForCatalogBytes,
 		syncFile:        func(file *os.File) error { return file.Sync() },
 		syncDirectory:   func(file *os.File) error { return file.Sync() },
+		close:           func(file *os.File) error { return file.Close() },
 	}}
 }
 
@@ -114,7 +116,11 @@ func (platform *unixRepositoryPlatform) replace(path string, expected domain.Cat
 	data, err := sourceParent.readRegular(filepath.Base(sourcePath), true)
 	closeSourceErr := sourceParent.close()
 	if err != nil || closeSourceErr != nil {
-		return Snapshot{}, errors.Join(fmt.Errorf("read staged catalog %q: %w", sourcePath, err), closeSourceErr)
+		readErr := errors.Join(fmt.Errorf("read staged catalog %q: %w", sourcePath, err), closeSourceErr)
+		if err != nil && closeSourceErr == nil && errors.Is(err, ErrInvalidCatalog) {
+			return Snapshot{}, errors.Join(ErrCatalogSourceInvalid, readErr)
+		}
+		return Snapshot{}, readErr
 	}
 	actual := versionForCatalogBytes(data)
 	if actual != expected {
@@ -273,7 +279,7 @@ func (directory *pinnedRepositoryDirectory) close() error {
 	if directory == nil || directory.file == nil {
 		return nil
 	}
-	err := directory.file.Close()
+	err := directory.ops.close(directory.file)
 	directory.file = nil
 	return err
 }
