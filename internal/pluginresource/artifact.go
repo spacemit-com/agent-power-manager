@@ -23,6 +23,11 @@ type Manager interface {
 	StageFilesystem(domain.PowerRef) (string, error)
 }
 
+// ArtifactLookup 只读查询并复验已发布的精确 Plugin 制品；不提供下载或 staging 能力。
+type ArtifactLookup interface {
+	Lookup(domain.PowerRef) (Artifact, error)
+}
+
 // Marketplace 是 Plugin Resource 返回的 Agent marketplace 注册信息。
 // Lifecycle 负责在事务边界将其映射为 Adapter 的目标类型。
 type Marketplace struct {

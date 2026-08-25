@@ -70,7 +70,20 @@ func catalogEntryFromLocalProvider(t *testing.T, client *local.Client, ref domai
 }
 
 func catalogEntryForLocalTest(ref domain.PowerRef) domain.CatalogEntry {
-	return domain.CatalogEntry{Ref: ref}
+	contentType := "application/octet-stream"
+	switch ref.Type {
+	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+		contentType = "application/gzip"
+	case domain.PowerTypeMCP:
+		contentType = "application/json"
+	case domain.PowerTypeAgent:
+		contentType = "application/yaml"
+	}
+	return domain.CatalogEntry{
+		Ref: ref, Description: "test fixture", Message: "test fixture", ContentType: contentType,
+		ContentSize: 1, ContentMD5: "00000000000000000000000000000000",
+		PublishedAt: "1970-01-01T00:00:00Z", Tags: []string{},
+	}
 }
 
 func TestLocalCatalogIsDeterministicAndUsesAuthoritativeContent(t *testing.T) {

@@ -48,13 +48,24 @@ func New(downloader Downloader) (*Service, error) {
 	return newService(cacheRoot, cacheTempRoot, stagingRoot, stagingTempRoot, downloader, builtInBuilder()), nil
 }
 
-// NewLookup 使用默认缓存路径创建只读 Plugin 制品查询服务；不配置下载器或 staging 路径。
-func NewLookup() (*Service, error) {
+type artifactLookup struct {
+	service *Service
+}
+
+var _ ArtifactLookup = (*artifactLookup)(nil)
+
+// NewLookup 使用默认缓存路径创建只读 Plugin 制品查询服务；返回契约只暴露 Lookup。
+func NewLookup() (ArtifactLookup, error) {
 	cacheRoot, err := paths.CachePath()
 	if err != nil {
 		return nil, err
 	}
-	return newService(cacheRoot, "", "", "", nil, builtInBuilder()), nil
+	return &artifactLookup{service: newService(cacheRoot, "", "", "", nil, builtInBuilder())}, nil
+}
+
+// Lookup 具名委托共享 Service 的不可变缓存复验逻辑，不触发下载、构建或 staging。
+func (lookup *artifactLookup) Lookup(ref domain.PowerRef) (Artifact, error) {
+	return lookup.service.Lookup(ref)
 }
 
 func builtInBuilder() artifactBuilder {

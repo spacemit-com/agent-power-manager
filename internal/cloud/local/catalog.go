@@ -199,15 +199,21 @@ func (c *Client) loadCatalogContent(ctx context.Context, ref domain.PowerRef) (l
 
 // loadMatchingCatalogContent 从一次 fresh 物理快照同时取得内容与 metadata，并要求调用方 entry 完全一致。
 func (c *Client) loadMatchingCatalogContent(ctx context.Context, entry domain.CatalogEntry, powerType domain.PowerType) (localCatalogContent, error) {
+	if err := ctx.Err(); err != nil {
+		return localCatalogContent{}, err
+	}
 	if entry.Ref.Type != powerType {
 		return localCatalogContent{}, cloud.ErrNotFound
 	}
-	content, err := c.loadCatalogContent(ctx, entry.Ref)
-	if err != nil {
+	if _, err := c.catalogSourcePath(entry.Ref); err != nil {
 		return localCatalogContent{}, err
 	}
 	if err := entry.Validate(); err != nil {
 		return localCatalogContent{}, fmt.Errorf("validate Local content catalog entry: %w", errors.Join(cloud.ErrInvalidResponse, err))
+	}
+	content, err := c.loadCatalogContent(ctx, entry.Ref)
+	if err != nil {
+		return localCatalogContent{}, err
 	}
 	if !equalCatalogEntry(content.entry, entry) {
 		return localCatalogContent{}, fmt.Errorf("Local %s content no longer matches catalog entry %+v: %w", powerType, entry.Ref, cloud.ErrIntegrity)

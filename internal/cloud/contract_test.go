@@ -579,6 +579,25 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 			}
 		})
 	}
+	for _, powerType := range []domain.PowerType{
+		domain.PowerTypeSkill, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeAgent,
+	} {
+		ref := missingByType[powerType]
+		t.Run("exact_miss_invalid_metadata/"+string(powerType), func(t *testing.T) {
+			root := privateTestDir(t)
+			destination := filepath.Join(root, "destination")
+			entry := contractEntry(ref)
+			entry.Tags = nil
+			server, err := invokeContentEntry(context.Background(), client, entry, destination)
+			assertExclusiveContractError(t, err, cloud.ErrInvalidResponse)
+			if !reflect.DeepEqual(server, domain.MCPServer{}) {
+				t.Fatalf("%s(exact miss with invalid metadata) MCP result = %#v, want zero", powerType, server)
+			}
+			if powerType != domain.PowerTypeMCP {
+				assertNoDownloadResidue(t, root, destination)
+			}
+		})
+	}
 
 	for _, invalidName := range []string{"Bad_Name", "a--b", strings.Repeat("a", 65)} {
 		for _, operation := range []contractOperation{
@@ -605,6 +624,21 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 				}
 			})
 		}
+	}
+}
+
+func invokeContentEntry(ctx context.Context, client cloud.Client, entry domain.CatalogEntry, destination string) (domain.MCPServer, error) {
+	switch entry.Ref.Type {
+	case domain.PowerTypeSkill:
+		return domain.MCPServer{}, client.DownloadSkill(ctx, entry, destination)
+	case domain.PowerTypePlugin:
+		return domain.MCPServer{}, client.DownloadPlugin(ctx, entry, destination)
+	case domain.PowerTypeMCP:
+		return client.GetMCP(ctx, entry)
+	case domain.PowerTypeAgent:
+		return domain.MCPServer{}, client.DownloadAgent(ctx, entry, destination)
+	default:
+		return domain.MCPServer{}, fmt.Errorf("unsupported contract Power type %q", entry.Ref.Type)
 	}
 }
 

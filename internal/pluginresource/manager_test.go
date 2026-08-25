@@ -111,6 +111,57 @@ func TestNewLookupReadsArtifactPublishedByDefaultService(t *testing.T) {
 	}
 }
 
+type lookupOnlyContract interface {
+	Lookup(domain.PowerRef) (Artifact, error)
+}
+
+func TestNewLookupExposesOnlyLookup(t *testing.T) {
+	t.Setenv("APM_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	lookup, err := NewLookup()
+	if err != nil {
+		t.Fatalf("NewLookup() error = %v", err)
+	}
+	var _ lookupOnlyContract = lookup
+
+	lookupType := reflect.TypeOf(lookup)
+	if lookupType.NumMethod() != 1 || lookupType.Method(0).Name != "Lookup" {
+		methods := make([]string, 0, lookupType.NumMethod())
+		for index := 0; index < lookupType.NumMethod(); index++ {
+			methods = append(methods, lookupType.Method(index).Name)
+		}
+		t.Fatalf("NewLookup() concrete method set = %v, want [Lookup]", methods)
+	}
+}
+
+func TestNewLookupCannotWriteRelativeServiceDirectories(t *testing.T) {
+	t.Setenv("APM_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	working := t.TempDir()
+	t.Chdir(working)
+
+	lookup, err := NewLookup()
+	if err != nil {
+		t.Fatalf("NewLookup() error = %v", err)
+	}
+	mutable, exposesEnsure := any(lookup).(interface {
+		Ensure(context.Context, domain.CatalogEntry) (Artifact, error)
+	})
+	if exposesEnsure {
+		_, _ = mutable.Ensure(context.Background(), testPluginEntry())
+	}
+	entries, err := os.ReadDir(working)
+	if err != nil {
+		t.Fatalf("ReadDir(%q) error = %v", working, err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("NewLookup() mutable method wrote relative entries %v", entries)
+	}
+	if exposesEnsure {
+		t.Fatal("NewLookup() exposes Ensure")
+	}
+}
+
 func assertGeneratedCodexMarketplace(t *testing.T, path string) {
 	t.Helper()
 	contents, err := os.ReadFile(path)
