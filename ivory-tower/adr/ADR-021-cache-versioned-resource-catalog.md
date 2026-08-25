@@ -24,9 +24,10 @@ list/search/install 从 Manager 返回的不可变 Snapshot 完成目录查询�
 及公开 latest/series/exact-metadata 调用全部删除。
 
 Catalog 按 Skill、Plugin、MCP、Agent 分组，各组维护独立 schema version。Manager 复用
-`apm.lock` 串行同步：list/search 使用自加锁入口，已持完整生命周期锁的 install 使用显式
-locked 入口以避免死锁。同步失败时，有效旧 catalog 可供 stale list/search 和已有制品缓存
-的离线 install 使用，并输出一次 warning；无有效 catalog 或 caller 主动取消时失败。
+`apm.lock` 互斥同步：list/search 使用自加锁入口，已持完整生命周期锁的 install 使用显式
+locked 入口以避免死锁。锁继续采用非阻塞 Acquire，已占用时返回 `ErrLocked`，不等待或
+fallback。同步失败时，有效旧 catalog 可供 stale list/search 和已有制品缓存的离线 install
+使用，并输出一次 warning；无有效 catalog 或 caller 主动取消时失败。
 
 缓存不绑定 Provider 来源。来源变化后仍只比较 catalog SHA-256；相同字节直接复用，内容
 不同才原子更新。

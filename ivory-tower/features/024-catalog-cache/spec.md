@@ -142,6 +142,10 @@ Cache Manager、Plugin Resource 和 lifecycle 必须透传同一 entry，禁止�
 `SnapshotLocked` 是受约束接口，中文注释和测试必须明确调用方已持有 `apm.lock`。
 Manager 不执行 transaction Recover，不读取安装 manifest，也不操作制品缓存。
 
+全局锁继续使用既有非阻塞 `TryLock` 语义：若另一个进程已经持锁，list/search 的
+`Snapshot(ctx)` 返回 `lock.ErrLocked`，不等待、不使用 stale fallback。Stale fallback 只处理
+Provider/version/catalog 更新失败，不能绕过本地共享状态互斥失败。
+
 ### 4.4 Repository and Snapshot
 
 `internal/catalog.Repository` 负责：
@@ -249,8 +253,9 @@ APM 接受的 catalog 最大为 100 MiB。
 
 ## 7. Lock and Lifecycle Ordering
 
-List/Search 保留原有 journal 只读 Inspect 行为，不执行恢复。随后 `Snapshot(ctx)` 短时持有
-`apm.lock` 完成 version 检查/更新，释放锁后才做本地过滤和输出。
+List/Search 保留原有 journal 只读 Inspect 行为，不执行恢复。随后 `Snapshot(ctx)` 尝试短时
+持有 `apm.lock` 完成 version 检查/更新，释放锁后才做本地过滤和输出；锁已占用时保持既有
+`ErrLocked` 失败语义。
 
 Install 保留完整锁区间：
 
@@ -369,7 +374,7 @@ GET /api/v1/resources/{type}/{name}/versions/{version}/content
 - version/下载/hash/schema 失败的有缓存/无缓存矩阵；
 - 损坏缓存在线修复、离线拒绝；
 - caller cancellation 不 fallback；
-- 两个 list/search/install 进程通过全局锁串行；
+- 两个 list/search/install 进程通过全局锁互斥，后发的非阻塞 Acquire 返回 `ErrLocked`；
 - `SnapshotLocked` 不二次加锁且 install 无死锁。
 
 ### 11.3 Commands and lifecycle
