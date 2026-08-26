@@ -6,6 +6,16 @@
 
 分类：功能变更
 
+用户需求：为 skill-card.md 增加格式版本字段 `schema_version: 1`，同步更新 cloud resources 内全部 Skill/Plugin 夹具，并输出四类 Power 的提交格式校验说明与模板。
+
+解决方案或完成结果：`internal/submission` 的 `validateSkillCard` 现在要求 `skill-card.md` 首字节起为 YAML frontmatter，且 `schema_version` 必须为整数 `1`（缺失、非整数或非 1 均拒绝，未知键与 SKILL.md frontmatter 一致允许忽略）；`extractFrontmatter` 改为同时返回关闭标记之后的正文，供标题与章节校验复用。`internal/cloud/resources/` 下 15 个 skill-card.md（13 个独立 Skill 与 2 个 demo-plugin 内嵌 Skill）全部补齐 frontmatter。`docs/power-template/` 新增一份格式校验说明与 skill/plugin/mcp/agent 四份模板。
+
+验证结果或限制：`go test ./...` 全量通过；新增缺失/非 1/非整数 schema_version 的拒绝用例与未知键放行用例。旧格式（无 frontmatter）skill-card.md 不再被接受，与 ADR-020「旧格式不兼容」一致。
+
+## 2026-08-25
+
+分类：功能变更
+
 用户需求：为 APM 增加类似 apt 的资源目录缓存：APC 以一个无分页的确定性 Catalog 文件发布 Skill、Plugin、MCP、Agent 全部版本，并提供 SHA-256/size version 接口；APM 在 list/search/install 前按内容校验码同步本地目录，相同内容即复用，按 Power 分组 schema 在本地完成筛选和版本解析。收敛 APC 公开接口并清理不再需要的调用，同时保持 `apm.lock` 串行边界、有效旧目录的 stale 可用性和已有制品离线安装。Uninstall/Fix 不应依赖 Catalog 或 Cloud，MCP 卸载恢复也不应再为删除操作获取或持久化 definition。相关决策记录于 APM ADR-021 与相邻 APC 仓库的 ADR-004。
 
 相关提交：
