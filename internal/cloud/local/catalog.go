@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"apm/internal/catalog"
 	"apm/internal/agentartifact"
+	"apm/internal/catalog"
 	"apm/internal/cloud"
 	"apm/internal/domain"
 	"apm/internal/pluginartifact"

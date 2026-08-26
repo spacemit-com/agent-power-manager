@@ -115,9 +115,9 @@ func TestLocalDownloadAgentPublishesSanitizedModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectations := map[string]publishedNodeExpectation{
-		".":                              {mode: 0o755, directory: true},
-		"assets":                         {mode: 0o755, directory: true},
-		"agent.yaml":                     {mode: 0o644},
+		".":                                   {mode: 0o755, directory: true},
+		"assets":                              {mode: 0o755, directory: true},
+		"agent.yaml":                          {mode: 0o644},
 		filepath.Join("assets", "avatar.png"): {mode: 0o644},
 		filepath.Join("assets", "data.bin"):   {mode: 0o644},
 	}
