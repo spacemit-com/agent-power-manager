@@ -1,14 +1,18 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 
 	"apm/internal/adapter"
 	"apm/internal/cli"
 	"apm/internal/domain"
+	"apm/internal/logging"
 	"apm/internal/transaction"
 )
 
@@ -24,8 +28,8 @@ func TestInstallMCPFirstInstallOrdersCLIAndCloudWithoutCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"acquire", "recover", "refresh", "catalog:snapshot-locked", "resolve-mcp:codex",
-		"config:find:codex", "mcp:inspect:codex", "cloud:get-mcp:v1.0.0",
+		"acquire", "recover", "refresh", "catalog:snapshot-locked", "config:find:codex",
+		"resolve-mcp:codex", "mcp:inspect:codex", "cloud:get-mcp:v1.0.0",
 		"transaction:install-mcp:codex", "release",
 	}
 	if !reflect.DeepEqual(calls, want) {
@@ -36,47 +40,167 @@ func TestInstallMCPFirstInstallOrdersCLIAndCloudWithoutCache(t *testing.T) {
 	}})
 }
 
-func TestInstallMCPStateTableAvoidsUnneededCloudDefinitions(t *testing.T) {
+func TestInstallMCPStateTable(t *testing.T) {
+	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v2.0.0"}
+	previous := domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}
+	oldServer := domain.MCPServer{Transport: domain.MCPTransportStdio, Command: "old"}
+	newServer := domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://new.example/mcp"}
+
 	tests := []struct {
-		name      string
-		installed *domain.PowerRef
-		presence  adapter.MCPPresence
-		wantErr   error
-		outcome   cli.InstallOutcome
-		wantTxn   bool
+		name       string
+		installed  *domain.PowerRef
+		presence   adapter.MCPPresence
+		want       cli.InstallOutcome
+		wantErr    error
+		wantEvents []string
+		forbidden  []string
+		wantWarn   bool
+		check      func(*testing.T, []transaction.MCPInstallRequest, []transaction.MCPUninstallRequest)
 	}{
-		{name: "same present unchanged", installed: mcpRefPointer("v2.0.0"), presence: adapter.MCPPresent, outcome: cli.InstallOutcomeUnchanged},
-		{name: "unmanaged present conflict", presence: adapter.MCPPresent, wantErr: adapter.ErrMCPConflict},
-		{name: "same absent stale", installed: mcpRefPointer("v2.0.0"), presence: adapter.MCPAbsent, wantErr: transaction.ErrStaleManifest, wantTxn: true},
-		{name: "different absent stale", installed: mcpRefPointer("v1.0.0"), presence: adapter.MCPAbsent, wantErr: transaction.ErrStaleManifest, wantTxn: true},
+		{
+			name: "new absent installs",
+			want: cli.InstallOutcomeInstalled,
+			check: func(t *testing.T, installs []transaction.MCPInstallRequest, _ []transaction.MCPUninstallRequest) {
+				if len(installs) != 1 || installs[0].Previous != nil {
+					t.Fatalf("MCP install requests = %+v, want single first-install with nil Previous", installs)
+				}
+			},
+			wantEvents: []string{
+				"config:find:codex", "resolve-mcp:codex", "mcp:inspect:codex",
+				"cloud:get-mcp:v2.0.0", "transaction:install-mcp:codex",
+			},
+		},
+		{
+			name:     "new present conflicts",
+			presence: adapter.MCPPresent,
+			wantErr:  adapter.ErrTargetConflict,
+			wantEvents: []string{
+				"config:find:codex", "resolve-mcp:codex", "mcp:inspect:codex",
+			},
+			forbidden: []string{"cloud:get-mcp:v2.0.0", "transaction:install-mcp:codex", "transaction:uninstall-mcp:codex"},
+		},
+		{
+			name:      "same absent unchanged",
+			installed: &target,
+			presence:  adapter.MCPAbsent,
+			want:      cli.InstallOutcomeUnchanged,
+			wantEvents: []string{
+				"config:find:codex",
+			},
+			forbidden: []string{
+				"resolve-mcp:codex", "mcp:inspect:codex", "cloud:get-mcp:v1.0.0", "cloud:get-mcp:v2.0.0",
+				"transaction:install-mcp:codex", "transaction:uninstall-mcp:codex",
+			},
+		},
+		{
+			name:      "same present unchanged",
+			installed: &target,
+			presence:  adapter.MCPPresent,
+			want:      cli.InstallOutcomeUnchanged,
+			wantEvents: []string{
+				"config:find:codex",
+			},
+			forbidden: []string{
+				"resolve-mcp:codex", "mcp:inspect:codex", "cloud:get-mcp:v1.0.0", "cloud:get-mcp:v2.0.0",
+				"transaction:install-mcp:codex", "transaction:uninstall-mcp:codex",
+			},
+		},
+		{
+			name:      "different present replaces",
+			installed: &previous,
+			presence:  adapter.MCPPresent,
+			want:      cli.InstallOutcomeUpgraded,
+			wantEvents: []string{
+				"config:find:codex", "resolve-mcp:codex", "mcp:inspect:codex",
+				"cloud:get-mcp:v1.0.0", "cloud:get-mcp:v2.0.0", "transaction:install-mcp:codex",
+			},
+			forbidden: []string{"transaction:uninstall-mcp:codex"},
+		},
+		{
+			name:      "different absent repairs and installs",
+			installed: &previous,
+			presence:  adapter.MCPAbsent,
+			want:      cli.InstallOutcomeInstalled,
+			wantEvents: []string{
+				"config:find:codex", "resolve-mcp:codex", "mcp:inspect:codex",
+				"transaction:uninstall-mcp:codex", "cloud:get-mcp:v2.0.0", "transaction:install-mcp:codex",
+			},
+			forbidden: []string{"cloud:get-mcp:v1.0.0"},
+			wantWarn:  true,
+			check: func(t *testing.T, installs []transaction.MCPInstallRequest, uninstalls []transaction.MCPUninstallRequest) {
+				if len(installs) != 1 || installs[0].Previous != nil {
+					t.Fatalf("MCP install requests = %+v, want single first-install with nil Previous", installs)
+				}
+				if len(uninstalls) != 1 || uninstalls[0].Power != previous {
+					t.Fatalf("MCP uninstall requests = %+v, want single repair of %+v", uninstalls, previous)
+				}
+			},
+		},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			var calls []string
-			fixture := installMCPFixture("v2.0.0", map[domain.AgentID]adapter.MCPPresence{domain.AgentCodex: test.presence}, nil)
-			if test.installed != nil {
-				fixture.installed = map[domain.AgentID]domain.PowerRef{domain.AgentCodex: *test.installed}
+			var installRequests []transaction.MCPInstallRequest
+			var uninstallRequests []transaction.MCPUninstallRequest
+			var stdout, stderr bytes.Buffer
+			originalLogger := slog.Default()
+			slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
+			t.Cleanup(func() { slog.SetDefault(originalLogger) })
+
+			fixture := installFixture{
+				snapshot:                domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+				cloudRefs:               []domain.PowerRef{target},
+				selected:                target.Version,
+				mcpPresence:             map[domain.AgentID]adapter.MCPPresence{domain.AgentCodex: tt.presence},
+				mcpDefinitions:          map[string]domain.MCPServer{"v1.0.0": oldServer, "v2.0.0": newServer},
+				mcpRequestSink:          &installRequests,
+				mcpUninstallRequestSink: &uninstallRequests,
 			}
-			if test.wantTxn {
-				fixture.transactionMCPInstallErr = map[domain.AgentID]error{domain.AgentCodex: transaction.ErrStaleManifest}
+			if tt.installed != nil {
+				fixture.installed = map[domain.AgentID]domain.PowerRef{domain.AgentCodex: *tt.installed}
 			}
 			service := newInstallService(t, &calls, fixture)
+
 			result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "mcp", Name: "demo"})
-			if test.wantErr == nil {
+
+			if tt.wantErr != nil {
+				assertInstallBatchError(t, err, domain.AgentCodex, tt.wantErr)
+				if errors.Is(err, adapter.ErrMCPConflict) {
+					t.Fatalf("Install() error = %v, must not wrap ErrMCPConflict", err)
+				}
+				if len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeFailed {
+					t.Fatalf("Install().Items = %#v, want single failed item", result.Items)
+				}
+			} else {
 				if err != nil {
 					t.Fatal(err)
 				}
-				assertInstallItems(t, result, []cli.InstallItem{{Agent: domain.AgentCodex, Power: mcpRef("v2.0.0"), Outcome: test.outcome}})
-			} else if !errors.Is(err, test.wantErr) {
-				t.Fatalf("Install() error = %v, want %v", err, test.wantErr)
+				assertInstallItems(t, result, []cli.InstallItem{{Agent: domain.AgentCodex, Power: target, Outcome: tt.want}})
 			}
-			for _, call := range calls {
-				if call == "cloud:get-mcp:v2.0.0" || call == "cloud:get-mcp:v1.0.0" || call == "cache:prepare-skill:codex" {
-					t.Fatalf("calls = %v, want no MCP definition/cache call", calls)
+			if tt.wantEvents != nil {
+				assertEventSubsequence(t, calls, tt.wantEvents)
+			}
+			for _, forbidden := range tt.forbidden {
+				if containsEvent(calls, forbidden) {
+					t.Fatalf("calls = %v, must not contain %q", calls, forbidden)
 				}
 			}
-			if containsEvent(calls, "transaction:install-mcp:codex") != test.wantTxn {
-				t.Fatalf("calls = %v, transaction wanted %v", calls, test.wantTxn)
+			if tt.check != nil {
+				tt.check(t, installRequests, uninstallRequests)
+			}
+			if tt.wantWarn {
+				if strings.Count(stderr.String(), "level=WARN") != 1 {
+					t.Fatalf("stderr = %q, want exactly one warning", stderr.String())
+				}
+				for _, want := range []string{
+					`msg="installed power target is missing"`, "operation=install", "agent=codex",
+					"type=mcp", "power=demo", "version=v1.0.0",
+				} {
+					if !strings.Contains(stderr.String(), want) {
+						t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+					}
+				}
 			}
 		})
 	}
@@ -156,9 +280,4 @@ func installMCPFixture(version string, presence map[domain.AgentID]adapter.MCPPr
 
 func mcpRef(version string) domain.PowerRef {
 	return domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: version}
-}
-
-func mcpRefPointer(version string) *domain.PowerRef {
-	ref := mcpRef(version)
-	return &ref
 }

@@ -40,6 +40,8 @@ type installFixture struct {
 	mcpDefinitions           map[string]domain.MCPServer
 	mcpGetErrors             map[string]error
 	mcpRequests              []transaction.MCPInstallRequest
+	mcpRequestSink           *[]transaction.MCPInstallRequest
+	mcpUninstallRequestSink  *[]transaction.MCPUninstallRequest
 	pluginFact               adapter.PluginFact
 	pluginFacts              map[string]adapter.PluginFact
 	pluginInspectErrors      map[string]error
@@ -206,6 +208,9 @@ func (m *installFakeTransactions) InstallAgent(_ context.Context, request transa
 func (m *installFakeTransactions) InstallMCP(_ context.Context, request transaction.MCPInstallRequest) error {
 	*m.calls = append(*m.calls, "transaction:install-mcp:"+string(request.Agent))
 	m.fixture.mcpRequests = append(m.fixture.mcpRequests, request)
+	if m.fixture.mcpRequestSink != nil {
+		*m.fixture.mcpRequestSink = append(*m.fixture.mcpRequestSink, request)
+	}
 	return m.fixture.transactionMCPInstallErr[request.Agent]
 }
 
@@ -219,7 +224,11 @@ func (m *installFakeTransactions) UninstallAgent(_ context.Context, request tran
 	return transaction.UninstallResult{}, nil
 }
 
-func (*installFakeTransactions) UninstallMCP(context.Context, transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
+func (m *installFakeTransactions) UninstallMCP(_ context.Context, request transaction.MCPUninstallRequest) (transaction.UninstallResult, error) {
+	*m.calls = append(*m.calls, "transaction:uninstall-mcp:"+string(request.Agent))
+	if m.fixture.mcpUninstallRequestSink != nil {
+		*m.fixture.mcpUninstallRequestSink = append(*m.fixture.mcpUninstallRequestSink, request)
+	}
 	return transaction.UninstallResult{}, nil
 }
 func (m *installFakeTransactions) InstallPlugin(_ context.Context, request transaction.PluginInstallRequest) error {
