@@ -159,7 +159,7 @@ func TestDownloadVerifiedContentStagesExactBytesWithPrivateMode(t *testing.T) {
 		serveValidContent(t, w, r, remoteAgentRef, contents)
 	})
 	directory := openTestPinnedDirectory(t, trustedTestDir(t))
-	temporary, err := client.downloadVerifiedContent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), "application/yaml", directory, 0o600)
+	temporary, err := client.downloadVerifiedContent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), "application/gzip", directory, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 			name: "Content-Length differs from metadata",
 			serve: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/content") {
-					w.Header().Set("Content-Type", "application/yaml")
+					w.Header().Set("Content-Type", "application/gzip")
 					w.Header().Set("Content-Length", "99")
 					return
 				}
@@ -240,7 +240,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 			name: "actual bytes shorter than metadata",
 			serve: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/content") {
-					w.Header().Set("Content-Type", "application/yaml")
+					w.Header().Set("Content-Type", "application/gzip")
 					w.Header().Set("Content-Length", fmt.Sprint(len(contents)))
 					_, _ = w.Write(contents[:4])
 					return
@@ -252,7 +252,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 			name: "actual bytes longer than metadata",
 			serve: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/content") {
-					w.Header().Set("Content-Type", "application/yaml")
+					w.Header().Set("Content-Type", "application/gzip")
 					w.(http.Flusher).Flush()
 					_, _ = w.Write(append(append([]byte(nil), contents...), '!'))
 					return
@@ -264,7 +264,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 			name: "MD5 differs from metadata",
 			serve: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/content") {
-					w.Header().Set("Content-Type", "application/yaml")
+					w.Header().Set("Content-Type", "application/gzip")
 					_, _ = w.Write([]byte("tampered bytes"))
 					return
 				}
@@ -280,7 +280,7 @@ func TestDownloadVerifiedContentRejectsIntegrityFailuresAndCleansTemporaryFile(t
 			client := newContentClient(t, remoteAgentRef, contents, func(w http.ResponseWriter, r *http.Request) {
 				tt.serve(t, w, r)
 			})
-			_, err := client.downloadVerifiedContent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), "application/yaml", directory, 0o600)
+			_, err := client.downloadVerifiedContent(context.Background(), validRemoteCatalogEntry(remoteAgentRef, contents), "application/gzip", directory, 0o600)
 			if !errors.Is(err, cloud.ErrIntegrity) {
 				t.Fatalf("downloadVerifiedContent() error = %v, want ErrIntegrity", err)
 			}
@@ -338,7 +338,7 @@ func TestDownloadVerifiedContentRejectsInvalidCatalogEntryAndProtocol(t *testing
 				}
 				http.Error(w, "metadata lookup forbidden", http.StatusTeapot)
 			})
-			_, err := client.downloadVerifiedContent(context.Background(), entry, "application/yaml", directory, 0o600)
+			_, err := client.downloadVerifiedContent(context.Background(), entry, "application/gzip", directory, 0o600)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("downloadVerifiedContent() error = %v, want %v", err, tt.want)
 			}
@@ -368,7 +368,7 @@ func TestDownloadVerifiedContentClassifiesContentLengthSentinels(t *testing.T) {
 				Timeout: time.Second,
 				Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 					body := string(contents)
-					contentType := "application/yaml"
+					contentType := "application/gzip"
 					contentLength := tt.contentLength
 					return &http.Response{
 						StatusCode:    http.StatusOK,
@@ -384,7 +384,7 @@ func TestDownloadVerifiedContentClassifiesContentLengthSentinels(t *testing.T) {
 			}
 			parent := trustedTestDir(t)
 			directory := openTestPinnedDirectory(t, parent)
-			temporary, err := client.downloadVerifiedContent(context.Background(), entry, "application/yaml", directory, 0o600)
+			temporary, err := client.downloadVerifiedContent(context.Background(), entry, "application/gzip", directory, 0o600)
 			if tt.want == nil {
 				if err != nil {
 					t.Fatal(err)
@@ -409,7 +409,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		directory := openTestPinnedDirectory(t, trustedTestDir(t))
-		_, err := client.downloadVerifiedContent(ctx, entry, "application/yaml", directory, 0o600)
+		_, err := client.downloadVerifiedContent(ctx, entry, "application/gzip", directory, 0o600)
 		if !errors.Is(err, context.Canceled) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
 			t.Fatalf("downloadVerifiedContent() error = %v, want only context.Canceled classification", err)
 		}
@@ -422,7 +422,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 				rejectRemovedMetadata(t, w)
 				return
 			}
-			w.Header().Set("Content-Type", "application/yaml")
+			w.Header().Set("Content-Type", "application/gzip")
 			w.Header().Set("Content-Length", "10")
 			_, _ = w.Write([]byte("0"))
 			w.(http.Flusher).Flush()
@@ -437,7 +437,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() {
-			_, err := client.downloadVerifiedContent(ctx, entry, "application/yaml", directory, 0o600)
+			_, err := client.downloadVerifiedContent(ctx, entry, "application/gzip", directory, 0o600)
 			done <- err
 		}()
 		<-started
@@ -465,7 +465,7 @@ func TestDownloadVerifiedContentPreservesCancellationAndTransportErrors(t *testi
 			t.Fatal(err)
 		}
 		directory := openTestPinnedDirectory(t, trustedTestDir(t))
-		_, err = client.downloadVerifiedContent(context.Background(), entry, "application/yaml", directory, 0o600)
+		_, err = client.downloadVerifiedContent(context.Background(), entry, "application/gzip", directory, 0o600)
 		if !errors.Is(err, transportErr) || errors.Is(err, cloud.ErrInvalidResponse) || errors.Is(err, cloud.ErrIntegrity) {
 			t.Fatalf("downloadVerifiedContent() error = %v, want only transport identity", err)
 		}
@@ -496,7 +496,7 @@ func expectedContentTypeForTest(powerType domain.PowerType) string {
 	case domain.PowerTypeMCP:
 		return "application/json"
 	case domain.PowerTypeAgent:
-		return "application/yaml"
+		return "application/gzip"
 	default:
 		return ""
 	}

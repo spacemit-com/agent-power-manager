@@ -33,6 +33,16 @@ const (
 
 var errArchiveDecompressedLimit = errors.New("remote archive decompressed byte limit exceeded")
 
+// archivePolicy 定义归档内容与解包目录树的校验策略：
+// validateFile 在扫描与提取两个阶段对每个普通文件调用（path 为规范相对路径，
+// body 为已读取正文）；validateTree 在仍为私有的解包输出句柄上对完整目录树
+// 调用（fd 相对，路径可被并发重定向而句柄边界不可）。任一校验失败都会丢弃
+// 私有输出并保持目标目录缺席；nil 表示使用 Skill/Plugin 的文本-only 默认行为。
+type archivePolicy struct {
+	validateFile func(path string, body []byte) error
+	validateTree func(directory *os.File) error
+}
+
 type archiveNode struct {
 	name      string
 	directory bool
@@ -100,6 +110,19 @@ func (c *Client) extractArchive(ctx context.Context, archive *stagedContent, des
 	return c.extractArchiveWithHooks(ctx, archive, destination, archiveHooks{}, requiredMarkers...)
 }
 
+// extractArchiveWithPolicy 使用调用方归档策略解包到目标目录；policy 为 nil 时
+// 保持 Skill/Plugin 的文本-only 默认行为。
+func (c *Client) extractArchiveWithPolicy(ctx context.Context, archive *stagedContent, destination string, policy *archivePolicy, requiredMarkers ...string) (resultErr error) {
+	prepared, err := prepareArchiveDestination(destination)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		resultErr = errors.Join(resultErr, prepared.close())
+	}()
+	return c.extractArchiveIntoWithPolicy(ctx, archive, prepared, archiveHooks{}, policy, requiredMarkers...)
+}
+
 func (c *Client) extractArchiveWithHooks(ctx context.Context, archive *stagedContent, destination string, hooks archiveHooks, requiredMarkers ...string) (resultErr error) {
 	prepared, err := prepareArchiveDestination(destination)
 	if err != nil {
@@ -108,10 +131,16 @@ func (c *Client) extractArchiveWithHooks(ctx context.Context, archive *stagedCon
 	defer func() {
 		resultErr = errors.Join(resultErr, prepared.close())
 	}()
-	return c.extractArchiveInto(ctx, archive, prepared, hooks, requiredMarkers...)
+	return c.extractArchiveIntoWithPolicy(ctx, archive, prepared, hooks, nil, requiredMarkers...)
 }
 
 func (c *Client) extractArchiveInto(ctx context.Context, archive *stagedContent, destination *archiveDestination, hooks archiveHooks, requiredMarkers ...string) (resultErr error) {
+	return c.extractArchiveIntoWithPolicy(ctx, archive, destination, hooks, nil, requiredMarkers...)
+}
+
+// extractArchiveIntoWithPolicy 是解包链核心：以调用方策略扫描与提取，并在发布前
+// 对仍为私有的输出目录树执行 validateTree；任何失败都会经 defer 清理私有输出。
+func (c *Client) extractArchiveIntoWithPolicy(ctx context.Context, archive *stagedContent, destination *archiveDestination, hooks archiveHooks, policy *archivePolicy, requiredMarkers ...string) (resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("extract remote archive: %w", err)
 	}
@@ -139,7 +168,7 @@ func (c *Client) extractArchiveInto(ctx context.Context, archive *stagedContent,
 	if hooks.beforeInspect != nil {
 		hooks.beforeInspect()
 	}
-	manifest, err := scanArchive(ctx, opened, compressedSize)
+	manifest, err := scanArchiveWithPolicy(ctx, opened, compressedSize, policy)
 	if err != nil {
 		return err
 	}
@@ -178,7 +207,7 @@ func (c *Client) extractArchiveInto(ctx context.Context, archive *stagedContent,
 	if err != nil {
 		return err
 	}
-	if err := c.extractArchiveFiles(ctx, opened, compressedSize, manifest, directoryIndex, &files, hooks); err != nil {
+	if err := c.extractArchiveFilesWithPolicy(ctx, opened, compressedSize, manifest, directoryIndex, &files, hooks, policy); err != nil {
 		return err
 	}
 	closeArchiveErr := opened.Close()
@@ -191,6 +220,15 @@ func (c *Client) extractArchiveInto(ctx context.Context, archive *stagedContent,
 			return unsafeRemoteFilesystem("invalid required remote archive marker %q", marker)
 		}
 		if err := output.directory.requireRegular(marker); err != nil {
+			return err
+		}
+	}
+	if policy != nil && policy.validateTree != nil {
+		directory, err := output.openDirectoryHandle()
+		if err != nil {
+			return err
+		}
+		if err := policy.validateTree(directory); err != nil {
 			return err
 		}
 	}
@@ -225,6 +263,10 @@ func (c *Client) extractArchiveInto(ctx context.Context, archive *stagedContent,
 }
 
 func scanArchive(ctx context.Context, archive *os.File, compressedSize int64) (*archiveManifest, error) {
+	return scanArchiveWithPolicy(ctx, archive, compressedSize, nil)
+}
+
+func scanArchiveWithPolicy(ctx context.Context, archive *os.File, compressedSize int64, policy *archivePolicy) (*archiveManifest, error) {
 	manifest := &archiveManifest{nodes: make(map[string]archiveNode)}
 	actualTotal := int64(0)
 	err := walkArchive(ctx, archive, compressedSize, func(header *tar.Header, input io.Reader) error {
@@ -262,7 +304,11 @@ func scanArchive(ctx context.Context, archive *os.File, compressedSize int64) (*
 		if exceedsArchiveRatio(actualTotal, compressedSize) {
 			return unsafeRemoteFilesystem("remote archive extraction ratio exceeds %d", maxArchiveRatio)
 		}
-		if contentpolicy.IsUnsafeText(contents.Bytes()) {
+		if policy != nil && policy.validateFile != nil {
+			if err := policy.validateFile(node.name, contents.Bytes()); err != nil {
+				return err
+			}
+		} else if contentpolicy.IsUnsafeText(contents.Bytes()) {
 			return unsafeRemoteFilesystem("remote archive file %q contains unsafe non-text content", node.name)
 		}
 		manifest.headers = append(manifest.headers, node)
@@ -412,6 +458,19 @@ func (c *Client) extractArchiveFiles(
 	created *[]*stagedContent,
 	hooks archiveHooks,
 ) error {
+	return c.extractArchiveFilesWithPolicy(ctx, archive, compressedSize, manifest, directories, created, hooks, nil)
+}
+
+func (c *Client) extractArchiveFilesWithPolicy(
+	ctx context.Context,
+	archive *os.File,
+	compressedSize int64,
+	manifest *archiveManifest,
+	directories map[string]*ownedDirectory,
+	created *[]*stagedContent,
+	hooks archiveHooks,
+	policy *archivePolicy,
+) error {
 	headerIndex := 0
 	actualTotal := int64(0)
 	err := walkArchive(ctx, archive, compressedSize, func(header *tar.Header, input io.Reader) error {
@@ -454,7 +513,11 @@ func (c *Client) extractArchiveFiles(
 			}
 			return classifyArchiveError(ctx, fmt.Sprintf("extract remote archive file %q", node.name), errors.Join(copyErr, prepareErr, closeErr))
 		}
-		if contentpolicy.IsUnsafeText(contents.Bytes()) {
+		if policy != nil && policy.validateFile != nil {
+			if err := policy.validateFile(node.name, contents.Bytes()); err != nil {
+				return err
+			}
+		} else if contentpolicy.IsUnsafeText(contents.Bytes()) {
 			return unsafeRemoteFilesystem("remote archive file %q changed to unsafe non-text content during extraction", node.name)
 		}
 		if actual > maxArchiveTreeSize-actualTotal {

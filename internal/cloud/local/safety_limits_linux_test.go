@@ -43,12 +43,12 @@ func TestSkillAcceptsExactFileAndTreeSizeLimits(t *testing.T) {
 	}
 }
 
-func TestAgentAndMCPAcceptExactTwentyMiBLimit(t *testing.T) {
+func TestAgentAcceptsExactTreeFileLimitAndMCPExactTwentyMiB(t *testing.T) {
 	root := t.TempDir()
 	agentRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
 	agentPath := filepath.Join(root, "agents", agentRef.Name, agentRef.Version, "agent.yaml")
-	agentPrefix := "schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n#"
-	agentContents := agentPrefix + strings.Repeat("x", int(maxSingleSize)-len(agentPrefix)-1) + "\n"
+	agentPrefix := "schema_version: 1\nagent: {id: demo, name: demo, version: v1.0.0, description: demo, soul: help safely}\n#"
+	agentContents := agentPrefix + strings.Repeat("x", int(maxTreeFileSize)-len(agentPrefix)-1) + "\n"
 	writeTestFile(t, agentPath, agentContents)
 	mcpPath := filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json")
 	validJSON := []byte(`{"schema_version":1,"name":"demo","version":"v1.0.0","description":"Demo MCP server","definition":{"transport":"stdio","command":"npx"}}`)
@@ -71,12 +71,12 @@ func TestAgentAndMCPAcceptExactTwentyMiBLimit(t *testing.T) {
 	if _, err := client.GetMCP(context.Background(), mcpContent.entry); err != nil {
 		t.Fatalf("GetMCP(exact limit) error = %v", err)
 	}
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	destination := filepath.Join(t.TempDir(), "agent")
 	if err := client.DownloadAgent(context.Background(), agentContent.entry, destination); err != nil {
-		t.Fatalf("DownloadAgent(exact limit) error = %v", err)
+		t.Fatalf("DownloadAgent(exact tree file limit) error = %v", err)
 	}
-	if info, err := os.Stat(destination); err != nil || info.Size() != maxSingleSize {
-		t.Fatalf("Agent destination = %v, %v, want %d bytes", info, err, maxSingleSize)
+	if info, err := os.Stat(filepath.Join(destination, "agent.yaml")); err != nil || info.Size() != maxTreeFileSize {
+		t.Fatalf("Agent agent.yaml = %v, %v, want %d bytes", info, err, maxTreeFileSize)
 	}
 }
 
@@ -139,7 +139,7 @@ func TestMCPAndAgentRejectHardlinkBinaryAndArchiveContent(t *testing.T) {
 					}
 					return
 				}
-				destination := filepath.Join(t.TempDir(), "agent.yaml")
+				destination := filepath.Join(t.TempDir(), "agent")
 				err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
 				assertUnsafeNoDownloadResidue(t, err, destination)
 			})

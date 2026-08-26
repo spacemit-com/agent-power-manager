@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"apm/internal/catalog"
+	"apm/internal/agentartifact"
 	"apm/internal/cloud"
 	"apm/internal/domain"
 	"apm/internal/pluginartifact"
@@ -174,8 +175,8 @@ func (c *Client) loadCatalogContent(ctx context.Context, ref domain.PowerRef) (l
 		description, contents, err = c.loadCatalogMCP(ctx, ref)
 		contentType = "application/json"
 	case domain.PowerTypeAgent:
-		description, contents, err = c.loadCatalogAgent(ctx, ref)
-		contentType = "application/yaml"
+		description, contents, tree, err = c.loadCatalogAgent(ctx, ref)
+		contentType = "application/gzip"
 	default:
 		return localCatalogContent{}, cloud.ErrNotFound
 	}
@@ -309,25 +310,38 @@ func (c *Client) loadCatalogMCP(ctx context.Context, ref domain.PowerRef) (strin
 	return resource.Description, contents, nil
 }
 
-func (c *Client) loadCatalogAgent(ctx context.Context, ref domain.PowerRef) (string, []byte, error) {
-	source := filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version, "agent.yaml")
-	if _, err := os.Lstat(source); errors.Is(err, fs.ErrNotExist) {
-		return "", nil, cloud.ErrNotFound
-	} else if err != nil {
-		return "", nil, fmt.Errorf("stat Local Agent resource %q: %w", source, err)
+// loadCatalogAgent 固定版本目录树，先按 Agent 内容策略捕获（agent.yaml 必须文本、
+// assets/ 允许二进制），再转成 artifact Entries 做权威语义校验，最后构建确定性
+// gzip 归档；返回描述、归档字节与已校验快照树。
+func (c *Client) loadCatalogAgent(ctx context.Context, ref domain.PowerRef) (string, []byte, *treeSnapshot, error) {
+	source := filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version)
+	info, err := os.Lstat(source)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil, nil, cloud.ErrNotFound
 	}
-	raw, _, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, fmt.Errorf("stat Local Agent package %q: %w", source, err)
 	}
-	config, err := domain.DecodeAgentConfigYAML(raw)
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", nil, nil, unsafeContent("Local Agent package %q is not a physical directory", source)
+	}
+	snapshot, err := capturePhysicalTreeWithPolicy(ctx, c.resourcesRoot, source, agentLocalTreeContentPolicy, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
-		return "", nil, unsafeContent("decode Local Agent resource %s/%s: %v", ref.Name, ref.Version, err)
+		return "", nil, nil, err
 	}
-	if err := config.ValidatePowerRef(ref); err != nil {
-		return "", nil, unsafeContent("validate Local Agent resource %s/%s: %v", ref.Name, ref.Version, err)
+	entries := make([]agentartifact.Entry, 0, len(snapshot.nodes))
+	for _, node := range snapshot.nodes {
+		entries = append(entries, agentartifact.Entry{
+			Path: filepath.ToSlash(node.relative), Directory: node.directory,
+			Mode: node.mode, Data: node.contents,
+		})
 	}
-	return config.Agent.Description, append([]byte(nil), raw...), nil
+	validated, err := agentartifact.Validate(entries, &ref)
+	if err != nil {
+		return "", nil, nil, unsafeContent("validate Local Agent snapshot %s/%s: %v", ref.Name, ref.Version, err)
+	}
+	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
+	return validated.Config.Agent.Description, contents, snapshot, err
 }
 
 func (snapshot *treeSnapshot) regularFile(relative string) ([]byte, error) {
@@ -516,7 +530,7 @@ func (c *Client) catalogSourcePath(ref domain.PowerRef) (string, error) {
 	case domain.PowerTypeMCP:
 		return filepath.Join(c.resourcesRoot, "mcps", ref.Name, ref.Version, "MCP.json"), nil
 	case domain.PowerTypeAgent:
-		return filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version, "agent.yaml"), nil
+		return filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version), nil
 	default:
 		return "", cloud.ErrNotFound
 	}

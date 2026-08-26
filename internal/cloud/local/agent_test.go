@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +27,37 @@ func newAgentTestClient(t *testing.T) *Client {
 	return client
 }
 
-func TestLocalDownloadAgentWritesDestinationWithoutGlobalCache(t *testing.T) {
+// localAgentFixtureYAML 是 V0.5 有效的 Agent fixture 模板：id 为 Bibit 内部身份，
+// name 与版本目录一致，avatar 指向 assets/avatar.png。
+const localAgentFixtureYAML = "schema_version: 1\nagent:\n  id: bibit-internal-demo\n  name: demo\n  version: v1.0.0\n  description: demo agent\n  soul: help safely\n  metadata:\n    avatar: assets/avatar.png\n"
+
+// writeLocalAgentFixture 写出版本目录结构的 Agent fixture，并通过 mutate 追加或改写。
+func writeLocalAgentFixture(t *testing.T, root string, mutate func(*testing.T, string)) domain.PowerRef {
+	t.Helper()
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	source := filepath.Join(root, "agents", ref.Name, ref.Version)
+	writeTestBytes(t, filepath.Join(source, "agent.yaml"), []byte(localAgentFixtureYAML))
+	writeTestBytes(t, filepath.Join(source, "assets", "avatar.png"), testPNGBytes(t, 128))
+	if mutate != nil {
+		mutate(t, source)
+	}
+	return ref
+}
+
+func testPNGBytes(t *testing.T, side int) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	canvas := image.NewNRGBA(image.Rect(0, 0, side, side))
+	for index := 0; index < len(canvas.Pix); index += 4 {
+		canvas.Pix[index+3] = 0xff
+	}
+	if err := png.Encode(&output, canvas); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func TestLocalDownloadAgentPublishesDirectoryTreeWithoutGlobalCache(t *testing.T) {
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	client := newAgentTestClient(t)
@@ -34,209 +66,200 @@ func TestLocalDownloadAgentWritesDestinationWithoutGlobalCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := content.entry
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := client.DownloadAgent(context.Background(), entry, destination); err != nil {
+	if content.entry.ContentType != "application/gzip" {
+		t.Fatalf("Agent catalog content type = %q, want application/gzip", content.entry.ContentType)
+	}
+	destination := filepath.Join(t.TempDir(), "agent")
+	if err := client.DownloadAgent(context.Background(), content.entry, destination); err != nil {
 		t.Fatal(err)
 	}
-	contents, err := os.ReadFile(destination)
+	raw, err := os.ReadFile(filepath.Join(destination, "agent.yaml"))
+	if err != nil || len(raw) == 0 {
+		t.Fatalf("downloaded agent.yaml = %q, %v; want non-empty", raw, err)
+	}
+	config, err := domain.DecodeAgentConfigYAML(raw)
 	if err != nil {
-		t.Fatalf("read cached agent: %v", err)
+		t.Fatalf("decode downloaded agent.yaml: %v", err)
 	}
-	if len(contents) == 0 {
-		t.Fatal("cached agent is empty")
+	if config.Agent.Name != ref.Name || config.Agent.Version != ref.Version {
+		t.Fatalf("downloaded identity = %s@%s, want %s@%s", config.Agent.Name, config.Agent.Version, ref.Name, ref.Version)
 	}
-	if _, err := os.Stat(destination); err != nil {
-		t.Fatalf("agent destination missing: %v", err)
+	avatar, err := os.ReadFile(filepath.Join(destination, "assets", "avatar.png"))
+	if err != nil {
+		t.Fatalf("read downloaded avatar: %v", err)
+	}
+	if !bytes.HasPrefix(avatar, []byte{0x89, 'P', 'N', 'G'}) {
+		t.Fatalf("downloaded avatar is not a PNG")
 	}
 	if _, err := os.Lstat(filepath.Join(cacheHome, "apm")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Local provider touched global cache: %v", err)
 	}
 }
 
-func TestLocalDownloadAgentSanitizesTemporaryModeBeforePublication(t *testing.T) {
-	wantContents := []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n")
+func TestLocalDownloadAgentPublishesSanitizedModes(t *testing.T) {
 	root := t.TempDir()
-	source := filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml")
-	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(source, wantContents, 0o677); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(source, 0o677); err != nil {
-		t.Fatal(err)
-	}
+	ref := writeLocalAgentFixture(t, root, func(t *testing.T, source string) {
+		writeTestBytes(t, filepath.Join(source, "assets", "data.bin"), []byte{'a', 0, 'b'})
+	})
 	client, err := New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
-	observedBeforeWrite := false
-	client.beforeAgentWrite = func(temporary *os.File) {
-		observedBeforeWrite = true
-		assertPrivateAgentStaging(t, temporary)
-	}
-	observedAfterWrite := false
-	client.agentTemporaryChmod = func(temporary *os.File, mode os.FileMode) error {
-		observedAfterWrite = true
-		assertCompletePrivateAgentStaging(t, temporary, wantContents)
-		return temporary.Chmod(mode)
-	}
-	client.beforeAgentPublish = func() {
-		matches, globErr := filepath.Glob(filepath.Join(filepath.Dir(destination), ".agent.yaml.tmp-*"))
-		if globErr != nil {
-			t.Fatal(globErr)
-		}
-		if len(matches) != 1 {
-			t.Fatalf("staged Agent files = %v, want one", matches)
-		}
-		assertPublishedAgentFile(t, matches[0])
-	}
-	t.Cleanup(func() {
-		client.beforeAgentWrite = nil
-		client.agentTemporaryChmod = nil
-		client.beforeAgentPublish = nil
-	})
-
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
 	content, err := client.loadCatalogContent(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
+	destination := filepath.Join(t.TempDir(), "agent")
 	if err := client.DownloadAgent(context.Background(), content.entry, destination); err != nil {
-		t.Fatalf("DownloadAgent() error = %v", err)
+		t.Fatal(err)
 	}
-	if !observedBeforeWrite {
-		t.Fatal("Agent temporary file was not observed before write")
+	expectations := map[string]publishedNodeExpectation{
+		".":                              {mode: 0o755, directory: true},
+		"assets":                         {mode: 0o755, directory: true},
+		"agent.yaml":                     {mode: 0o644},
+		filepath.Join("assets", "avatar.png"): {mode: 0o644},
+		filepath.Join("assets", "data.bin"):   {mode: 0o644},
 	}
-	if !observedAfterWrite {
-		t.Fatal("Agent temporary file was not observed after write")
-	}
-	assertPublishedAgentFile(t, destination)
+	assertPublishedTree(t, destination, expectations)
 }
 
-func TestLocalDownloadAgentCleansTemporaryAfterChmodFailure(t *testing.T) {
-	wantContents := []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n")
+func TestLocalDownloadAgentAllowsBinaryNonAvatarAsset(t *testing.T) {
 	root := t.TempDir()
-	source := filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml")
-	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(source, wantContents, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	ref := writeLocalAgentFixture(t, root, func(t *testing.T, source string) {
+		writeTestBytes(t, filepath.Join(source, "assets", "payload.bin"), []byte{0x00, 0x01, 0xfe, 0xff})
+	})
 	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := client.loadCatalogContent(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "agent")
+	if err := client.DownloadAgent(context.Background(), content.entry, destination); err != nil {
+		t.Fatalf("DownloadAgent() with binary non-avatar asset error = %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(destination, "assets", "payload.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, []byte{0x00, 0x01, 0xfe, 0xff}) {
+		t.Fatalf("published binary asset = %v, want original bytes", got)
+	}
+}
+
+func TestLocalDownloadAgentRejectsInvalidAvatarWithoutDestination(t *testing.T) {
+	root := t.TempDir()
+	writeLocalAgentFixture(t, root, func(t *testing.T, source string) {
+		writeTestBytes(t, filepath.Join(source, "assets", "avatar.png"), []byte("not a png"))
+	})
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "agent")
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+	assertUnsafeNoDownloadResidue(t, err, destination)
+}
+
+func TestLocalDownloadAgentRejectsExtraRootFileWithoutDestination(t *testing.T) {
+	root := t.TempDir()
+	writeLocalAgentFixture(t, root, func(t *testing.T, source string) {
+		writeTestFile(t, filepath.Join(source, "README.md"), "extra")
+	})
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "agent")
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+	assertUnsafeNoDownloadResidue(t, err, destination)
+}
+
+func TestLocalDownloadAgentCancellationBeforePublishLeavesNoDestination(t *testing.T) {
+	root := t.TempDir()
+	ref := writeLocalAgentFixture(t, root, nil)
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := client.loadCatalogContent(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	client.beforeAgentPublish = cancel
+	t.Cleanup(func() { client.beforeAgentPublish = nil })
+	destination := filepath.Join(t.TempDir(), "agent")
+
+	err = client.DownloadAgent(ctx, content.entry, destination)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("DownloadAgent() error = %v, want context.Canceled", err)
+	}
+	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination stat error = %v, want absent", statErr)
+	}
+	assertNoSiblingTemps(t, destination)
+}
+
+func TestLocalDownloadAgentRejectsExistingNonEmptyDestination(t *testing.T) {
+	root := t.TempDir()
+	ref := writeLocalAgentFixture(t, root, nil)
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := client.loadCatalogContent(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parent := t.TempDir()
-	destination := filepath.Join(parent, "agent.yaml")
-	chmodErr := errors.New("chmod failed")
-	client.agentTemporaryChmod = func(temporary *os.File, _ os.FileMode) error {
-		assertCompletePrivateAgentStaging(t, temporary, wantContents)
-		return chmodErr
+	destination := filepath.Join(parent, "agent")
+	if err := os.Mkdir(destination, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { client.agentTemporaryChmod = nil })
+	if err := os.WriteFile(filepath.Join(destination, "keep"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = client.DownloadAgent(context.Background(), content.entry, destination)
+	if !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("DownloadAgent() error = %v, want ErrUnsafeContent", err)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(destination, "keep")); readErr != nil || string(got) != "keep" {
+		t.Fatalf("pre-existing destination changed: %q, %v", got, readErr)
+	}
+	assertNoSiblingTemps(t, destination)
+}
 
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+func TestLocalDownloadAgentAcceptsExistingEmptyDestination(t *testing.T) {
+	root := t.TempDir()
+	ref := writeLocalAgentFixture(t, root, nil)
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	content, err := client.loadCatalogContent(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.DownloadAgent(context.Background(), content.entry, destination)
-	if !errors.Is(err, chmodErr) {
-		t.Fatalf("DownloadAgent() error = %v, want chmod failure", err)
-	}
-	entries, readErr := os.ReadDir(parent)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("Agent chmod failure cleanup left entries: %v", entries)
-	}
-}
-
-func assertCompletePrivateAgentStaging(t *testing.T, temporary *os.File, want []byte) {
-	t.Helper()
-	assertPrivateAgentStaging(t, temporary)
-	info, err := temporary.Stat()
-	if err != nil {
+	destination := filepath.Join(t.TempDir(), "agent")
+	if err := os.Mkdir(destination, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if info.Size() != int64(len(want)) {
-		t.Fatalf("Agent temporary size at chmod = %d, want %d", info.Size(), len(want))
+	if err := client.DownloadAgent(context.Background(), content.entry, destination); err != nil {
+		t.Fatal(err)
 	}
-	got := make([]byte, len(want))
-	n, err := temporary.ReadAt(got, 0)
-	if err != nil {
-		t.Fatalf("read Agent temporary at chmod: %v", err)
-	}
-	if n != len(want) {
-		t.Fatalf("Agent temporary bytes read at chmod = %d, want %d", n, len(want))
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("Agent temporary contents at chmod = %q, want %q", got, want)
+	if _, err := os.Stat(filepath.Join(destination, "agent.yaml")); err != nil {
+		t.Fatalf("published into existing empty destination: %v", err)
 	}
 }
 
 func TestLocalClientDownloadAgentRejectsWrongType(t *testing.T) {
 	client := newAgentTestClient(t)
 	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
-	if err := client.DownloadAgent(context.Background(), domain.CatalogEntry{Ref: ref}, filepath.Join(t.TempDir(), "agent.yaml")); !errors.Is(err, cloud.ErrNotFound) {
+	if err := client.DownloadAgent(context.Background(), domain.CatalogEntry{Ref: ref}, filepath.Join(t.TempDir(), "agent")); !errors.Is(err, cloud.ErrNotFound) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrNotFound", err)
-	}
-}
-
-func TestLocalDownloadAgentDoesNotReplaceConcurrentDestination(t *testing.T) {
-	client := newAgentTestClient(t)
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
-	reachedPublish := make(chan struct{})
-	allowPublish := make(chan struct{})
-	client.beforeAgentPublish = func() {
-		close(reachedPublish)
-		<-allowPublish
-	}
-	t.Cleanup(func() { client.beforeAgentPublish = nil })
-	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	content, err := client.loadCatalogContent(context.Background(), ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result := make(chan error, 1)
-	go func() {
-		result <- client.DownloadAgent(context.Background(), content.entry, destination)
-	}()
-	<-reachedPublish
-	if err := os.WriteFile(destination, []byte("racer"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	close(allowPublish)
-	if err := <-result; err == nil {
-		t.Fatal("DownloadAgent() error = nil, want no-replace publication error")
-	}
-	if got, err := os.ReadFile(destination); err != nil || string(got) != "racer" {
-		t.Fatalf("concurrent destination = %q, %v, want racer", got, err)
-	}
-}
-
-func TestLocalDownloadAgentRejectsExistingDestination(t *testing.T) {
-	client := newAgentTestClient(t)
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := os.WriteFile(destination, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	content, err := client.loadCatalogContent(context.Background(), ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = client.DownloadAgent(context.Background(), content.entry, destination)
-	if err == nil {
-		t.Fatal("DownloadAgent() error = nil, want existing destination error")
-	}
-	if got, err := os.ReadFile(destination); err != nil || string(got) != "old" {
-		t.Fatalf("destination changed = %q, %v", got, err)
 	}
 }

@@ -30,6 +30,7 @@ type linkSnapshotWorkspace struct {
 
 type linkSnapshotTreeCaptureState struct {
 	ctx            context.Context
+	policy         localTreeContentPolicy
 	beforeFileOpen func(string)
 	afterDataOpen  func(string)
 	workspace      *linkSnapshotWorkspace
@@ -39,6 +40,12 @@ type linkSnapshotTreeCaptureState struct {
 
 // capturePhysicalTreeLinkSnapshot 通过私有硬链接固定待读取的普通文件，供 Darwin 后端安全快照使用。
 func capturePhysicalTreeLinkSnapshot(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (snapshot *treeSnapshot, resultErr error) {
+	return capturePhysicalTreeLinkSnapshotWithPolicy(ctx, resourcesRoot, source, defaultLocalTreeContentPolicy, beforeSnapshot, beforeFileOpen, afterDataOpen)
+}
+
+// capturePhysicalTreeLinkSnapshotWithPolicy 使用调用方内容策略固定物理树快照；
+// policy 为 nil 时退化为默认文本-only 策略。
+func capturePhysicalTreeLinkSnapshotWithPolicy(ctx context.Context, resourcesRoot, source string, policy localTreeContentPolicy, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (snapshot *treeSnapshot, resultErr error) {
 	root, relative, err := openLinkSnapshotResourcesRoot(resourcesRoot, source)
 	if err != nil {
 		return nil, err
@@ -70,6 +77,7 @@ func capturePhysicalTreeLinkSnapshot(ctx context.Context, resourcesRoot, source 
 	}()
 	state := &linkSnapshotTreeCaptureState{
 		ctx:            ctx,
+		policy:         policy,
 		beforeFileOpen: beforeFileOpen,
 		afterDataOpen:  afterDataOpen,
 		workspace:      workspace,
@@ -112,7 +120,7 @@ func capturePhysicalFileLinkSnapshot(ctx context.Context, resourcesRoot, source 
 	if linkSnapshotNodeType(expected) != unix.S_IFREG {
 		return nil, 0, unsafeContent("source file %q is not a physical regular file", source)
 	}
-	return captureLinkSnapshotRegular(ctx, workspace, parent, name, relative, source, expected, sizeLimit, beforeFileOpen, afterDataOpen)
+	return captureLinkSnapshotRegular(ctx, workspace, parent, name, relative, source, expected, sizeLimit, beforeFileOpen, afterDataOpen, defaultLocalTreeContentPolicy)
 }
 
 func openLinkSnapshotResourcesRoot(resourcesRoot, source string) (*os.File, string, error) {
@@ -418,6 +426,7 @@ func (state *linkSnapshotTreeCaptureState) captureDirectory(directory *os.File, 
 				maxTreeFileSize,
 				state.beforeFileOpen,
 				state.afterDataOpen,
+				state.policy,
 			)
 			if err != nil {
 				return err
@@ -447,7 +456,7 @@ func (state *linkSnapshotTreeCaptureState) validateNodePath(relative string) err
 	return nil
 }
 
-func captureLinkSnapshotRegular(ctx context.Context, workspace *linkSnapshotWorkspace, directory *os.File, name, relative, displayPath string, expected unix.Stat_t, sizeLimit int64, beforeFileOpen func(string), afterDataOpen func(string)) (contents []byte, mode fs.FileMode, resultErr error) {
+func captureLinkSnapshotRegular(ctx context.Context, workspace *linkSnapshotWorkspace, directory *os.File, name, relative, displayPath string, expected unix.Stat_t, sizeLimit int64, beforeFileOpen func(string), afterDataOpen func(string), policy localTreeContentPolicy) (contents []byte, mode fs.FileMode, resultErr error) {
 	linkSnapshotPinMu.Lock()
 	pinLocked := true
 	defer func() {
@@ -518,7 +527,11 @@ func captureLinkSnapshotRegular(ctx context.Context, workspace *linkSnapshotWork
 	if err != nil {
 		return nil, 0, err
 	}
-	if isUnsafePayload(contents) {
+	if policy != nil {
+		if policyErr := policy(relative, contents); policyErr != nil {
+			return nil, 0, policyErr
+		}
+	} else if isUnsafePayload(contents) {
 		return nil, 0, unsafeContent("source file %q contains binary or archive content", displayPath)
 	}
 	return contents, fs.FileMode(dataStat.Mode & 0o777), nil

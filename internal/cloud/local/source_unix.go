@@ -17,6 +17,7 @@ import (
 
 type treeCaptureState struct {
 	ctx            context.Context
+	policy         localTreeContentPolicy
 	beforeFileOpen func(string)
 	afterDataOpen  func(string)
 	nodes          []treeNodeSnapshot
@@ -24,10 +25,20 @@ type treeCaptureState struct {
 }
 
 func capturePhysicalTree(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (*treeSnapshot, error) {
-	return capturePhysicalTreeOpenat(ctx, resourcesRoot, source, beforeSnapshot, beforeFileOpen, afterDataOpen)
+	return capturePhysicalTreeWithPolicy(ctx, resourcesRoot, source, defaultLocalTreeContentPolicy, beforeSnapshot, beforeFileOpen, afterDataOpen)
 }
 
 func capturePhysicalTreeOpenat(ctx context.Context, resourcesRoot, source string, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (*treeSnapshot, error) {
+	return capturePhysicalTreeOpenatWithPolicy(ctx, resourcesRoot, source, defaultLocalTreeContentPolicy, beforeSnapshot, beforeFileOpen, afterDataOpen)
+}
+
+// capturePhysicalTreeWithPolicy 使用调用方内容策略固定物理树快照；
+// policy 为 nil 时退化为默认文本-only 策略。
+func capturePhysicalTreeWithPolicy(ctx context.Context, resourcesRoot, source string, policy localTreeContentPolicy, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (*treeSnapshot, error) {
+	return capturePhysicalTreeOpenatWithPolicy(ctx, resourcesRoot, source, policy, beforeSnapshot, beforeFileOpen, afterDataOpen)
+}
+
+func capturePhysicalTreeOpenatWithPolicy(ctx context.Context, resourcesRoot, source string, policy localTreeContentPolicy, beforeSnapshot func(), beforeFileOpen func(string), afterDataOpen func(string)) (*treeSnapshot, error) {
 	root, relative, err := openResourcesRootOpenat(resourcesRoot, source)
 	if err != nil {
 		return nil, err
@@ -48,7 +59,7 @@ func capturePhysicalTreeOpenat(ctx context.Context, resourcesRoot, source string
 	if err != nil || !info.IsDir() {
 		return nil, unsafeContent("stat physical source tree %q: %v", source, err)
 	}
-	state := &treeCaptureState{ctx: ctx, beforeFileOpen: beforeFileOpen, afterDataOpen: afterDataOpen}
+	state := &treeCaptureState{ctx: ctx, policy: policy, beforeFileOpen: beforeFileOpen, afterDataOpen: afterDataOpen}
 	if err := state.captureDirectory(sourceDirectory, ""); err != nil {
 		return nil, err
 	}
@@ -335,7 +346,11 @@ func (state *treeCaptureState) captureDirectory(directory *os.File, parent strin
 			if readErr != nil || closeErr != nil {
 				return errors.Join(readErr, closeErr)
 			}
-			if isUnsafePayload(contents) {
+			if state.policy != nil {
+				if policyErr := state.policy(relative, contents); policyErr != nil {
+					return policyErr
+				}
+			} else if isUnsafePayload(contents) {
 				return unsafeContent("source file %q contains binary or archive content", relative)
 			}
 			state.totalSize += int64(len(contents))

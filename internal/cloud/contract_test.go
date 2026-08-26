@@ -284,13 +284,14 @@ func canonicalLocalCatalog(t *testing.T, root string) []byte {
 			content, err = submission.CanonicalizeJSON(raw)
 			contentType = "application/json"
 		case domain.PowerTypeAgent:
-			content = readCanonicalFile(t, filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml"))
-			config, decodeErr := domain.DecodeAgentConfigYAML(content)
+			source := filepath.Join(root, "agents", ref.Name, ref.Version)
+			content, err = submission.BuildTarGz(source)
+			config, decodeErr := domain.DecodeAgentConfigYAML(readCanonicalFile(t, filepath.Join(source, "agent.yaml")))
 			if decodeErr != nil {
 				t.Fatal(decodeErr)
 			}
 			description = config.Agent.Description
-			contentType = "application/yaml"
+			contentType = "application/gzip"
 		default:
 			t.Fatalf("unsupported canonical Local type %q", ref.Type)
 		}
@@ -370,7 +371,7 @@ func contractEntry(ref domain.PowerRef) domain.CatalogEntry {
 		domain.PowerTypeSkill:  "application/gzip",
 		domain.PowerTypePlugin: "application/gzip",
 		domain.PowerTypeMCP:    "application/json",
-		domain.PowerTypeAgent:  "application/yaml",
+		domain.PowerTypeAgent:  "application/gzip",
 	}[ref.Type]
 	return domain.CatalogEntry{
 		Ref: ref, Description: "contract fixture", Message: "contract fixture",
@@ -457,7 +458,7 @@ func assertPowerReadable(t *testing.T, client cloud.Client, entry domain.Catalog
 			t.Fatalf("GetMCP(%+v): %v", ref, err)
 		}
 	case domain.PowerTypeAgent:
-		if err := client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent.yaml")); err != nil {
+		if err := client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent")); err != nil {
 			t.Fatalf("DownloadAgent(%+v): %v", ref, err)
 		}
 	default:
@@ -477,7 +478,7 @@ func assertMismatchedCatalogMetadataRejected(t *testing.T, client cloud.Client, 
 	case domain.PowerTypeMCP:
 		_, err = client.GetMCP(context.Background(), entry)
 	case domain.PowerTypeAgent:
-		err = client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent.yaml"))
+		err = client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent"))
 	default:
 		t.Fatalf("unsupported Power type %q", entry.Ref.Type)
 	}
@@ -498,7 +499,7 @@ func assertInvalidCatalogMetadataRejected(t *testing.T, client cloud.Client, ent
 	case domain.PowerTypeMCP:
 		_, err = client.GetMCP(context.Background(), entry)
 	case domain.PowerTypeAgent:
-		err = client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent.yaml"))
+		err = client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent"))
 	default:
 		t.Fatalf("unsupported Power type %q", entry.Ref.Type)
 	}
@@ -748,17 +749,17 @@ func comparePowerOutcome(t *testing.T, localClient, remoteClient cloud.Client, l
 			t.Fatalf("MCP parity for %+v: local=%#v/%v remote=%#v/%v", ref, localServer, localErr, remoteServer, remoteErr)
 		}
 	case domain.PowerTypeAgent:
-		localTarget := filepath.Join(privateTestDir(t), "agent.yaml")
-		remoteTarget := filepath.Join(privateTestDir(t), "agent.yaml")
+		localTarget := filepath.Join(privateTestDir(t), "local")
+		remoteTarget := filepath.Join(privateTestDir(t), "remote")
 		localErr := localClient.DownloadAgent(context.Background(), localEntry, localTarget)
 		remoteErr := remoteClient.DownloadAgent(context.Background(), remoteEntry, remoteTarget)
 		if localErr != nil || remoteErr != nil {
 			t.Fatalf("Agent parity for %+v: local=%v remote=%v", ref, localErr, remoteErr)
 		}
-		localFile := normalizedFile(t, localTarget, "agent.yaml")
-		remoteFile := normalizedFile(t, remoteTarget, "agent.yaml")
-		if !reflect.DeepEqual(localFile, remoteFile) {
-			t.Fatalf("Agent parity for %+v: local=%#v remote=%#v", ref, localFile, remoteFile)
+		localTree := normalizedTree(t, localTarget)
+		remoteTree := normalizedTree(t, remoteTarget)
+		if !reflect.DeepEqual(localTree, remoteTree) {
+			t.Fatalf("Agent tree parity for %+v:\nlocal:  %#v\nremote: %#v", ref, localTree, remoteTree)
 		}
 	}
 }
@@ -877,9 +878,9 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 		},
 		{
 			powerType: domain.PowerTypeAgent,
-			path:      filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0", "agent.yaml"),
+			path:      filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0"),
 			name:      "bianbu-agent-default", version: "v1.0.0",
-			description: "Project-local Bianbu agent", contentType: "application/yaml",
+			description: "Project-local Bianbu agent", contentType: "application/gzip",
 		},
 	}
 	for _, test := range submissions {
@@ -941,7 +942,7 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 	server.mu.Unlock()
 	_, err = submitService.Submit(context.Background(), cli.Flags{
 		Type: "agent", Message: "quota probe",
-	}, []string{filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0", "agent.yaml")})
+	}, []string{filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0")})
 	if !errors.Is(err, cloud.ErrTooManyActiveSubmissions) || !errors.Is(err, cloud.ErrSubmissionConflict) ||
 		!strings.Contains(err.Error(), "TOO_MANY_ACTIVE_SUBMISSIONS") {
 		t.Fatalf("Submit() quota error = %v, want typed TOO_MANY_ACTIVE_SUBMISSIONS conflict", err)

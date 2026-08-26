@@ -18,10 +18,12 @@ func (c *Client) DownloadSkill(ctx context.Context, entry domain.CatalogEntry, d
 	if ref.Type != domain.PowerTypeSkill || !validResolveQuery(ref) || ref.Version == "" {
 		return fmt.Errorf("download invalid remote Skill identity: %w", cloud.ErrNotFound)
 	}
-	return c.downloadArchivePower(ctx, entry, destination, "SKILL.md", "skill-card.md")
+	return c.downloadArchivePower(ctx, entry, destination, nil, "SKILL.md", "skill-card.md")
 }
 
-func (c *Client) downloadArchivePower(ctx context.Context, entry domain.CatalogEntry, destination string, requiredMarkers ...string) (resultErr error) {
+// downloadArchivePower 是 Skill/Plugin/Agent 共享的目录下载流：验证并下载 gzip 归档，
+// 按调用方策略解包到私有输出并发布；policy 为 nil 时保持文本-only 默认行为。
+func (c *Client) downloadArchivePower(ctx context.Context, entry domain.CatalogEntry, destination string, policy *archivePolicy, requiredMarkers ...string) (resultErr error) {
 	ref := entry.Ref
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("download remote %s: %w", ref.Type, err)
@@ -40,7 +42,7 @@ func (c *Client) downloadArchivePower(ctx context.Context, entry domain.CatalogE
 	defer func() {
 		resultErr = errors.Join(resultErr, archive.remove())
 	}()
-	if err := c.extractArchiveInto(ctx, archive, prepared, archiveHooks{}, requiredMarkers...); err != nil {
+	if err := c.extractArchiveIntoWithPolicy(ctx, archive, prepared, archiveHooks{}, policy, requiredMarkers...); err != nil {
 		return fmt.Errorf("extract remote %s archive: %w", ref.Type, err)
 	}
 	return nil

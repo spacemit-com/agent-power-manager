@@ -134,6 +134,67 @@ func ValidatePhysicalTree(root string) error {
 	return nil
 }
 
+// ValidatePhysicalTreeFd 与 ValidatePhysicalTree 语义一致，但在调用方持有的固定目录
+// 句柄（如 securefs pinned 边界内的私有输出）上以 fd 相对方式遍历：路径可被并发
+// 重定向，而句柄边界不可，因此任何可被竞态攻击的校验都必须使用本入口。
+func ValidatePhysicalTreeFd(directory *os.File) error {
+	info, err := directory.Stat()
+	if err != nil {
+		return fmt.Errorf("stat Plugin artifact directory handle: %w", errors.Join(ErrInvalid, err))
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("Plugin artifact directory handle is not a physical directory: %w", ErrInvalid)
+	}
+	return validatePhysicalTreeFdWalk(directory, "")
+}
+
+func validatePhysicalTreeFdWalk(directory *os.File, relative string) error {
+	entries, err := directory.ReadDir(-1)
+	if err != nil {
+		return fmt.Errorf("read Plugin artifact directory %q: %w", relative, errors.Join(ErrInvalid, err))
+	}
+	for _, entry := range entries {
+		childRelative := entry.Name()
+		if relative != "" {
+			childRelative = relative + "/" + entry.Name()
+		}
+		entryType := entry.Type()
+		switch {
+		case entryType&fs.ModeSymlink != 0 || (!entryType.IsDir() && !entryType.IsRegular()):
+			return fmt.Errorf("Plugin artifact path %q is not a physical directory or regular file: %w", childRelative, ErrInvalid)
+		case entryType.IsRegular():
+			child, err := openChildFd(directory, entry.Name())
+			if err != nil {
+				return fmt.Errorf("open Plugin artifact path %q: %w", childRelative, errors.Join(ErrInvalid, err))
+			}
+			info, statErr := child.Stat()
+			closeErr := child.Close()
+			if statErr != nil || closeErr != nil || !info.Mode().IsRegular() {
+				return fmt.Errorf("inspect Plugin artifact path %q: %w", childRelative, errors.Join(ErrInvalid, statErr, closeErr))
+			}
+			if err := requireUniqueLink(info, childRelative); err != nil {
+				return err
+			}
+		case entryType.IsDir():
+			child, err := openChildFd(directory, entry.Name())
+			if err != nil {
+				return fmt.Errorf("open Plugin artifact directory %q: %w", childRelative, errors.Join(ErrInvalid, err))
+			}
+			info, statErr := child.Stat()
+			if statErr != nil || !info.IsDir() {
+				_ = child.Close()
+				return fmt.Errorf("inspect Plugin artifact directory %q: %w", childRelative, errors.Join(ErrInvalid, statErr))
+			}
+			walkErr := validatePhysicalTreeFdWalk(child, childRelative)
+			closeErr := child.Close()
+			if walkErr != nil || closeErr != nil {
+				return errors.Join(walkErr, closeErr)
+			}
+		}
+	}
+	return nil
+}
+
 // ValidateRawPackage 复验 canonical 权威索引，并仅允许根 marker 与已声明 Skill 子树。
 func ValidateRawPackage(ref domain.PowerRef, pluginPath string) error {
 	manifest, err := LoadAPCPluginManifest(ref, pluginPath)

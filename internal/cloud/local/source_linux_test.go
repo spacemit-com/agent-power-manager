@@ -172,7 +172,7 @@ func TestDownloadAgentRejectsFIFOSwapBeforeAnyDataOpen(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	destination := filepath.Join(t.TempDir(), "agent")
 
 	err = client.DownloadAgent(context.Background(), catalogEntryForTest(ref), destination)
 

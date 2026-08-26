@@ -1,9 +1,11 @@
 schema_version: 1
 agent:
-  id: bianbu-agent-default
+  # Bibit 内部身份；外部身份使用 name + version。
+  id: bibit-internal-bianbu-agent-default
+  name: bianbu-agent-default
   version: v1.0.0
-  name: Bianbu Agent
   description: Project-local Bianbu agent
+  soul: Help the user complete practical work safely, using installed Tools and Skills only when relevant.
   instructions: Help the user complete practical work safely. Use installed Tools
     and Skills only when they are relevant.
   model:
@@ -17,5 +19,5 @@ agent:
   - '*'
   hooks: []
   metadata:
-    avatar: 🤖
+    avatar: assets/avatar.png
     is_default: true

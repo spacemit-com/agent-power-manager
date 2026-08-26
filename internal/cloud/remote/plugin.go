@@ -16,5 +16,5 @@ func (c *Client) DownloadPlugin(ctx context.Context, entry domain.CatalogEntry, 
 	if ref.Type != domain.PowerTypePlugin || !validResolveQuery(ref) || ref.Version == "" {
 		return fmt.Errorf("download invalid remote Plugin identity: %w", cloud.ErrNotFound)
 	}
-	return c.downloadArchivePower(ctx, entry, destination, "apc-plugin.json")
+	return c.downloadArchivePower(ctx, entry, destination, nil, "apc-plugin.json")
 }

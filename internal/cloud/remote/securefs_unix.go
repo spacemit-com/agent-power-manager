@@ -54,6 +54,12 @@ type ownedDirectory struct {
 	identity  fileIdentity
 }
 
+// openDirectoryHandle 暴露私有输出目录句柄，供归档策略对仍为私有的输出树做
+// fd 相对校验；路径可被并发重定向，而句柄边界不可。
+func (owned *ownedDirectory) openDirectoryHandle() (*os.File, error) {
+	return owned.directory.file, nil
+}
+
 type pinnedEmptyDirectory struct {
 	parent    *pinnedDirectory
 	directory *pinnedDirectory

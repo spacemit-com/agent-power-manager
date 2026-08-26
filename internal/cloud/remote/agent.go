@@ -2,65 +2,47 @@ package remote
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"path/filepath"
+	"os"
 
+	"apm/internal/agentartifact"
 	"apm/internal/cloud"
+	"apm/internal/cloud/contentpolicy"
 	"apm/internal/domain"
 )
 
 var _ cloud.AgentSource = (*Client)(nil)
 
-// DownloadAgent 验证精确版本 Agent 的原始字节，并通过同目录临时文件原子发布到尚不存在的绝对目标。
-func (c *Client) DownloadAgent(ctx context.Context, entry domain.CatalogEntry, destination string) (resultErr error) {
-	ref := entry.Ref
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("download remote Agent: %w", err)
+// agentArchivePolicy 构造 Remote Agent 的归档策略：agent.yaml 必须为安全文本，
+// 其余路径（assets/ 资产）允许二进制；解包后在仍为私有的输出目录句柄上执行
+// agentartifact 语义校验（fd 相对，不经过可被重定向的路径），失败时清理私有
+// 输出并保持目标目录缺席。
+func agentArchivePolicy(ctx context.Context, ref domain.PowerRef) *archivePolicy {
+	return &archivePolicy{
+		validateFile: func(path string, body []byte) error {
+			if path != "agent.yaml" {
+				return nil
+			}
+			if contentpolicy.IsUnsafeText(body) {
+				return unsafeRemoteFilesystem("remote Agent agent.yaml contains unsafe non-text content")
+			}
+			return nil
+		},
+		validateTree: func(directory *os.File) error {
+			if _, err := agentartifact.ValidateDirectoryFd(ctx, directory, &ref); err != nil {
+				return err
+			}
+			return nil
+		},
 	}
-	if ref.Type != domain.PowerTypeAgent || !validResolveQuery(ref) || ref.Version == "" {
-		return fmt.Errorf("download invalid remote Agent identity: %w", cloud.ErrNotFound)
-	}
-	parentPath, destinationName, err := splitRemoteAgentDestination(destination)
-	if err != nil {
-		return err
-	}
-	parent, err := openPinnedDirectory(parentPath)
-	if err != nil {
-		return fmt.Errorf("open remote Agent destination parent: %w", err)
-	}
-	defer func() {
-		resultErr = errors.Join(resultErr, parent.close())
-	}()
-	if err := parent.requireAbsent(destinationName); err != nil {
-		return err
-	}
-	temporary, err := c.downloadVerifiedContent(ctx, entry, "application/yaml", parent, 0o644)
-	if err != nil {
-		return fmt.Errorf("download remote Agent content: %w", err)
-	}
-	defer func() {
-		resultErr = errors.Join(resultErr, temporary.remove())
-	}()
-	if c.beforeAgentPublish != nil {
-		c.beforeAgentPublish(temporary)
-	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("publish remote Agent: %w", err)
-	}
-	if err := temporary.publishNoReplace(destinationName); err != nil {
-		return fmt.Errorf("publish remote Agent destination %q: %w", destination, err)
-	}
-	return nil
 }
 
-func splitRemoteAgentDestination(destination string) (string, string, error) {
-	if destination == "" || !filepath.IsAbs(destination) || filepath.Clean(destination) != destination {
-		return "", "", fmt.Errorf("remote Agent destination %q must be an absolute clean path: %w", destination, cloud.ErrUnsafeContent)
+// DownloadAgent 验证精确版本 Agent 归档（application/gzip）与根 agent.yaml marker，
+// 解包后在私有输出上执行 agentartifact 语义校验，再以不覆盖语义发布到调用方的
+// 物理空目录；任何失败都不留下可见目标。
+func (c *Client) DownloadAgent(ctx context.Context, entry domain.CatalogEntry, destination string) error {
+	if entry.Ref.Type != domain.PowerTypeAgent || !validResolveQuery(entry.Ref) || entry.Ref.Version == "" {
+		return fmt.Errorf("download invalid remote Agent identity: %w", cloud.ErrNotFound)
 	}
-	name := filepath.Base(destination)
-	if !validSecureEntryName(name) {
-		return "", "", fmt.Errorf("remote Agent destination %q has invalid base name: %w", destination, cloud.ErrUnsafeContent)
-	}
-	return filepath.Dir(destination), name, nil
+	return c.downloadArchivePower(ctx, entry, destination, agentArchivePolicy(ctx, entry.Ref), "agent.yaml")
 }

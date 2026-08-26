@@ -84,7 +84,7 @@ func canonicalRemoteContent(t *testing.T, root string, ref domain.PowerRef) (str
 	case domain.PowerTypeMCP:
 		return "application/json", readCanonicalFile(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
 	case domain.PowerTypeAgent:
-		return "application/yaml", readCanonicalFile(t, filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml"))
+		return "application/gzip", deterministicArchive(t, filepath.Join(root, "agents", ref.Name, ref.Version))
 	default:
 		t.Fatalf("unsupported canonical resource type %q", ref.Type)
 		return "", nil
@@ -263,7 +263,7 @@ func canonicalContentType(powerType domain.PowerType) string {
 	case domain.PowerTypeMCP:
 		return "application/json"
 	case domain.PowerTypeAgent:
-		return "application/yaml"
+		return "application/gzip"
 	default:
 		return ""
 	}

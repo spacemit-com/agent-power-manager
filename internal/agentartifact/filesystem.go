@@ -34,9 +34,7 @@ func ValidateDirectory(ctx context.Context, root string, ref *domain.PowerRef) (
 	if err := pluginartifact.ValidatePhysicalTree(root); err != nil {
 		return Snapshot{}, err
 	}
-	entries := make([]Entry, 0)
-	var totalBytes int64
-	nodeCount := 0
+	entries, totalBytes, nodeCount := make([]Entry, 0), int64(0), 0
 	err := filepath.WalkDir(root, func(current string, dirEntry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -92,6 +90,114 @@ func ValidateDirectory(ctx context.Context, root string, ref *domain.PowerRef) (
 		return Snapshot{}, err
 	}
 	return Validate(entries, ref)
+}
+
+// ValidateDirectoryFd 与 ValidateDirectory 语义一致，但在调用方持有的固定目录句柄
+// 上以 fd 相对方式遍历（先经 pluginartifact.ValidatePhysicalTreeFd 物理检查）：
+// 路径可被并发重定向而句柄边界不可，因此 Remote 解包私有输出的校验必须使用本入口。
+func ValidateDirectoryFd(ctx context.Context, directory *os.File, ref *domain.PowerRef) (Snapshot, error) {
+	if err := pluginartifact.ValidatePhysicalTreeFd(directory); err != nil {
+		return Snapshot{}, err
+	}
+	// ReadDir 从句柄当前偏移读取；物理检查已消费根目录流，数据遍历必须使用
+	// 指向同一目录的新句柄（fd 相对，不重新解析路径）。
+	walkDirectory, err := openChildFd(directory, ".")
+	if err != nil {
+		return Snapshot{}, agentError("reopen agent artifact directory handle: %v", err)
+	}
+	defer walkDirectory.Close()
+	entries := make([]Entry, 0)
+	var totalBytes int64
+	nodeCount := 0
+	if err := validateDirectoryFdWalk(ctx, walkDirectory, "", &entries, &totalBytes, &nodeCount); err != nil {
+		return Snapshot{}, err
+	}
+	return Validate(entries, ref)
+}
+
+func validateDirectoryFdWalk(ctx context.Context, directory *os.File, parent string, entries *[]Entry, totalBytes *int64, nodeCount *int) error {
+	children, err := directory.ReadDir(-1)
+	if err != nil {
+		return agentError("read agent artifact directory %q: %v", parent, err)
+	}
+	for _, child := range children {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		relative := child.Name()
+		if parent != "" {
+			relative = parent + "/" + child.Name()
+		}
+		portable := filepath.ToSlash(relative)
+		*nodeCount++
+		if *nodeCount > maxNodeCount {
+			return agentError("agent artifact exceeds %d nodes", maxNodeCount)
+		}
+		if len([]byte(portable)) > maxRelativePathBytes {
+			return agentError("agent artifact path %q exceeds %d bytes", portable, maxRelativePathBytes)
+		}
+		if strings.Count(portable, "/")+1 > maxDepth {
+			return agentError("agent artifact path %q exceeds depth %d", portable, maxDepth)
+		}
+		entryType := child.Type()
+		switch {
+		case entryType&fs.ModeSymlink != 0 || (!entryType.IsDir() && !entryType.IsRegular()):
+			return agentError("agent artifact path %q is not a regular file or directory", portable)
+		case entryType.IsDir():
+			opened, err := openChildFd(directory, child.Name())
+			if err != nil {
+				return agentError("open agent artifact directory %q: %v", portable, err)
+			}
+			info, statErr := opened.Stat()
+			if statErr != nil || !info.IsDir() {
+				_ = opened.Close()
+				return agentError("inspect agent artifact directory %q: %v", portable, statErr)
+			}
+			*entries = append(*entries, Entry{Path: portable, Directory: true, Mode: info.Mode()})
+			walkErr := validateDirectoryFdWalk(ctx, opened, relative, entries, totalBytes, nodeCount)
+			closeErr := opened.Close()
+			if walkErr != nil || closeErr != nil {
+				return errors.Join(walkErr, closeErr)
+			}
+		case entryType.IsRegular():
+			opened, err := openChildFd(directory, child.Name())
+			if err != nil {
+				return agentError("open agent artifact file %q: %v", portable, err)
+			}
+			info, statErr := opened.Stat()
+			if statErr != nil || !info.Mode().IsRegular() {
+				_ = opened.Close()
+				return agentError("inspect agent artifact file %q: %v", portable, statErr)
+			}
+			if info.Size() > maxFileBytes {
+				_ = opened.Close()
+				return agentError("agent artifact file %q exceeds %d bytes", portable, maxFileBytes)
+			}
+			data, readErr := readBoundedFileHandle(opened, maxFileBytes)
+			closeErr := opened.Close()
+			if readErr != nil || closeErr != nil {
+				return agentError("read agent artifact file %q: %v", portable, errors.Join(readErr, closeErr))
+			}
+			*totalBytes += int64(len(data))
+			if *totalBytes > maxTotalBytes {
+				return agentError("agent artifact content exceeds %d bytes total", maxTotalBytes)
+			}
+			*entries = append(*entries, Entry{Path: portable, Directory: false, Mode: info.Mode(), Data: data})
+		}
+	}
+	return nil
+}
+
+// readBoundedFileHandle 从已打开的固定句柄读取普通文件；正文超过 limit 字节时拒绝。
+func readBoundedFileHandle(file *os.File, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New("file exceeds byte limit")
+	}
+	return data, nil
 }
 
 // readBoundedFile 读取普通文件；正文超过 limit 字节时拒绝，不把超限文件读入内存。

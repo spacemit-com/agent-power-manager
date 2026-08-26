@@ -24,7 +24,7 @@ func TestDarwinLocalClientRetrievesEveryResourceKind(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "plugins", "demo", "v1.0.0", "skills", "demo", "skill-card.md"), "card")
 	writeTestFile(t, filepath.Join(root, "plugins", "demo", "v1.0.0", "skills", "demo", "README.md"), "plugin")
 	writeTestFile(t, filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json"), `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo","definition":{"transport":"stdio","command":"npx"}}`)
-	writeTestFile(t, filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml"), "schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n")
+	writeTestFile(t, filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml"), "schema_version: 1\nagent: {id: bibit-demo, name: demo, version: v1.0.0, description: demo, soul: help safely}\n")
 	client, err := New(root)
 	if err != nil {
 		t.Fatal(err)
@@ -71,11 +71,11 @@ func TestDarwinLocalClientRetrievesEveryResourceKind(t *testing.T) {
 		t.Fatalf("GetMCP() = %+v, %v", server, err)
 	}
 
-	agentDestination := filepath.Join(t.TempDir(), "agent.yaml")
+	agentDestination := filepath.Join(t.TempDir(), "agent")
 	if err := client.DownloadAgent(context.Background(), agentContent.entry, agentDestination); err != nil {
 		t.Fatalf("DownloadAgent() error = %v", err)
 	}
-	if got, err := os.ReadFile(agentDestination); err != nil || string(got) != "schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n" {
+	if got, err := os.ReadFile(filepath.Join(agentDestination, "agent.yaml")); err != nil || string(got) != "schema_version: 1\nagent: {id: bibit-demo, name: demo, version: v1.0.0, description: demo, soul: help safely}\n" {
 		t.Fatalf("downloaded Agent = %q, %v", got, err)
 	}
 	assertNoLinkSnapshotWorkspaceResidue(t, root)
@@ -130,7 +130,7 @@ func TestDarwinSnapshotRejectsHardlinkedSingleFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	destination := filepath.Join(t.TempDir(), "agent")
 
 	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
 

@@ -3,6 +3,7 @@ package agentartifact
 import (
 	"bytes"
 	"image"
+	_ "image/png" // 注册 PNG 解码器，确保本包的 avatar 校验不依赖调用方间接导入。
 	"strings"
 
 	"apm/internal/domain"

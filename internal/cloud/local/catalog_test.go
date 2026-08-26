@@ -80,7 +80,7 @@ func catalogEntryForLocalTest(ref domain.PowerRef) domain.CatalogEntry {
 	case domain.PowerTypeMCP:
 		contentType = "application/json"
 	case domain.PowerTypeAgent:
-		contentType = "application/yaml"
+		contentType = "application/gzip"
 	}
 	return domain.CatalogEntry{
 		Ref: ref, Description: "test fixture", Message: "test fixture", ContentType: contentType,
@@ -142,17 +142,21 @@ func TestLocalCatalogIsDeterministicAndUsesAuthoritativeContent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Metadata(%+v) error = %v", fixture.ref, err)
 		}
+		if entry.Description != fixture.description {
+			t.Errorf("Metadata(%+v).Description = %q, want authoritative %q", fixture.ref, entry.Description, fixture.description)
+		}
+		if entry.Message != "local fixture" || entry.PublishedAt != "1970-01-01T00:00:00Z" || entry.Tags == nil || len(entry.Tags) != 0 {
+			t.Errorf("Metadata(%+v) fixed fields = message %q published %q tags %#v", fixture.ref, entry.Message, entry.PublishedAt, entry.Tags)
+		}
+		if fixture.ref.Type == domain.PowerTypeAgent {
+			assertLocalCatalogAgentContent(t, entry, fixture)
+			continue
+		}
 		prepared, err := submission.Prepare(context.Background(), submission.Request{
 			Type: fixture.ref.Type, Path: fixture.path, Message: "local fixture",
 		})
 		if err != nil {
 			t.Fatalf("prepare authoritative fixture %+v: %v", fixture.ref, err)
-		}
-		if entry.Description != fixture.description || entry.Description != prepared.Description {
-			t.Errorf("Metadata(%+v).Description = %q, want authoritative %q", fixture.ref, entry.Description, fixture.description)
-		}
-		if entry.Message != "local fixture" || entry.PublishedAt != "1970-01-01T00:00:00Z" || entry.Tags == nil || len(entry.Tags) != 0 {
-			t.Errorf("Metadata(%+v) fixed fields = message %q published %q tags %#v", fixture.ref, entry.Message, entry.PublishedAt, entry.Tags)
 		}
 		if entry.ContentType != prepared.ContentType || entry.ContentSize != int64(len(prepared.Bytes)) || entry.ContentMD5 != prepared.MD5 {
 			t.Errorf("Metadata(%+v) content = %q/%d/%q, want %q/%d/%q", fixture.ref, entry.ContentType, entry.ContentSize, entry.ContentMD5, prepared.ContentType, len(prepared.Bytes), prepared.MD5)
@@ -160,7 +164,7 @@ func TestLocalCatalogIsDeterministicAndUsesAuthoritativeContent(t *testing.T) {
 	}
 
 	assertLocalCatalogMCPUsesCompleteJCS(t, snapshot)
-	assertLocalCatalogAgentUsesRawYAML(t, snapshot, firstFixtures)
+	assertLocalCatalogAgentUsesArchive(t, snapshot, firstFixtures)
 }
 
 func TestLocalContentRejectsCatalogEntryMetadataDrift(t *testing.T) {
@@ -182,7 +186,7 @@ func TestLocalContentRejectsCatalogEntryMetadataDrift(t *testing.T) {
 			case domain.PowerTypeMCP:
 				_, err = client.GetMCP(context.Background(), entry)
 			case domain.PowerTypeAgent:
-				err = client.DownloadAgent(context.Background(), entry, filepath.Join(t.TempDir(), "agent.yaml"))
+				err = client.DownloadAgent(context.Background(), entry, filepath.Join(t.TempDir(), "agent"))
 			}
 			if !errors.Is(err, cloud.ErrIntegrity) {
 				t.Fatalf("content operation with drifted entry error = %v, want ErrIntegrity", err)
@@ -415,24 +419,32 @@ func assertLocalCatalogMCPUsesCompleteJCS(t *testing.T, snapshot catalog.Snapsho
 	}
 }
 
-func assertLocalCatalogAgentUsesRawYAML(t *testing.T, snapshot catalog.Snapshot, fixtures []localCatalogFixture) {
+func assertLocalCatalogAgentContent(t *testing.T, entry domain.CatalogEntry, fixture localCatalogFixture) {
+	t.Helper()
+	archive, err := submission.BuildTarGz(fixture.path)
+	if err != nil {
+		t.Fatalf("build authoritative Agent archive %+v: %v", fixture.ref, err)
+	}
+	digest := md5.Sum(archive)
+	if entry.ContentType != "application/gzip" || entry.ContentSize != int64(len(archive)) || entry.ContentMD5 != hex.EncodeToString(digest[:]) {
+		t.Errorf("Metadata(%+v) content = %q/%d/%q, want gzip archive %d bytes MD5 %x", fixture.ref, entry.ContentType, entry.ContentSize, entry.ContentMD5, len(archive), digest)
+	}
+}
+
+func assertLocalCatalogAgentUsesArchive(t *testing.T, snapshot catalog.Snapshot, fixtures []localCatalogFixture) {
 	t.Helper()
 	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "catalog-agent", Version: "v2.0.0"}
 	entry, err := snapshot.Metadata(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var raw []byte
 	for _, fixture := range fixtures {
 		if fixture.ref == ref {
-			raw = fixture.raw
-			break
+			assertLocalCatalogAgentContent(t, entry, fixture)
+			return
 		}
 	}
-	digest := md5.Sum(raw)
-	if entry.ContentSize != int64(len(raw)) || entry.ContentMD5 != hex.EncodeToString(digest[:]) {
-		t.Fatalf("Agent metadata = size %d MD5 %q, want raw YAML size %d MD5 %x", entry.ContentSize, entry.ContentMD5, len(raw), digest)
-	}
+	t.Fatalf("fixture oracle lacks %+v", ref)
 }
 
 func writeLocalCatalogFixtureTree(t *testing.T, reverse bool) (string, []localCatalogFixture) {
@@ -477,9 +489,9 @@ func writeLocalCatalogPower(t *testing.T, root string, powerType domain.PowerTyp
 		raw = []byte("{\n  \"version\": \"" + version + "\",\n  \"name\": \"" + name + "\",\n  \"schema_version\": 1,\n  \"definition\": {\"transport\": \"stdio\", \"args\": [\"--version\", \"" + version + "\"], \"command\": \"catalog-mcp\"},\n  \"description\": \"" + description + "\"\n}\n")
 		writeLocalCatalogFile(t, sourcePath, raw)
 	case domain.PowerTypeAgent:
-		sourcePath = filepath.Join(root, "agents", name, version, "agent.yaml")
-		raw = []byte("# preserved raw YAML\nschema_version: 1\nagent:\n  id: " + name + "\n  version: " + version + "\n  description: " + description + "\n  tools: ['*']\n")
-		writeLocalCatalogFile(t, sourcePath, raw)
+		sourcePath = filepath.Join(root, "agents", name, version)
+		raw = []byte("# preserved raw YAML\nschema_version: 1\nagent:\n  id: bibit-catalog\n  name: " + name + "\n  version: " + version + "\n  description: " + description + "\n  soul: help safely\n")
+		writeLocalCatalogFile(t, filepath.Join(sourcePath, "agent.yaml"), raw)
 	default:
 		t.Fatalf("unsupported fixture type %q", powerType)
 	}

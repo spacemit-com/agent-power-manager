@@ -19,8 +19,6 @@ import (
 // Client 从绝对本地目录读取能力资源，不拥有缓存、staging 或用户目录。
 type Client struct {
 	resourcesRoot                string
-	beforeAgentWrite             func(*os.File)
-	agentTemporaryChmod          func(*os.File, os.FileMode) error
 	beforeAgentPublish           func()
 	beforeTreeSnapshot           func()
 	beforeSnapshotFileOpen       func(string)

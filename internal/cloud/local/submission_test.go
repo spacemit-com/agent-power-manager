@@ -31,7 +31,7 @@ func TestLocalAgentReadWorksWhileSubmissionUnsupported(t *testing.T) {
 	client := newAgentTestClient(t)
 	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
 
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	destination := filepath.Join(t.TempDir(), "agent")
 	content, err := client.loadCatalogContent(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestLocalAgentReadWorksWhileSubmissionUnsupported(t *testing.T) {
 	if err := client.DownloadAgent(context.Background(), content.entry, destination); err != nil {
 		t.Fatalf("DownloadAgent() error = %v", err)
 	}
-	contents, err := os.ReadFile(destination)
+	contents, err := os.ReadFile(filepath.Join(destination, "agent.yaml"))
 	if err != nil || len(contents) == 0 {
 		t.Fatalf("DownloadAgent() content = %d bytes, %v; want non-empty agent.yaml", len(contents), err)
 	}

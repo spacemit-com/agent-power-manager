@@ -106,12 +106,10 @@ func isCatalogPowerType(powerType PowerType) bool {
 
 func catalogContentType(powerType PowerType) string {
 	switch powerType {
-	case PowerTypeSkill, PowerTypePlugin:
+	case PowerTypeSkill, PowerTypePlugin, PowerTypeAgent:
 		return "application/gzip"
 	case PowerTypeMCP:
 		return "application/json"
-	case PowerTypeAgent:
-		return "application/yaml"
 	default:
 		return ""
 	}

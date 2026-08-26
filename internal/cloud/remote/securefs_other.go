@@ -25,6 +25,10 @@ type ownedDirectory struct {
 	name      string
 }
 
+func (owned *ownedDirectory) openDirectoryHandle() (*os.File, error) {
+	return nil, unsafeRemoteFilesystem("descriptor-relative Remote tree validation is unsupported on %s", runtime.GOOS)
+}
+
 type pinnedEmptyDirectory struct{}
 
 func openPinnedDirectory(path string) (*pinnedDirectory, error) {

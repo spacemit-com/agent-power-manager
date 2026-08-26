@@ -24,7 +24,7 @@ func catalogEntryForTest(ref domain.PowerRef) domain.CatalogEntry {
 	case domain.PowerTypeMCP:
 		contentType = "application/json"
 	case domain.PowerTypeAgent:
-		contentType = "application/yaml"
+		contentType = "application/gzip"
 	}
 	return domain.CatalogEntry{
 		Ref: ref, Description: "test fixture", Message: "test fixture", ContentType: contentType,
@@ -260,15 +260,17 @@ func TestDownloadSkillRejectsOverlappingAndNonEmptyDestination(t *testing.T) {
 	})
 }
 
-func TestMCPAndAgentRejectContentOverTwentyMiB(t *testing.T) {
+func TestMCPRejectsContentOverTwentyMiBAndAgentOverTreeFileLimit(t *testing.T) {
 	root := t.TempDir()
 	mcpPath := filepath.Join(root, "mcps", "demo", "v1.0.0", "MCP.json")
 	agentPath := filepath.Join(root, "agents", "demo", "v1.0.0", "agent.yaml")
-	for _, path := range []string{mcpPath, agentPath} {
-		writeTestFile(t, path, "x")
-		if err := os.Truncate(path, 20<<20+1); err != nil {
-			t.Fatal(err)
-		}
+	writeTestFile(t, mcpPath, "x")
+	if err := os.Truncate(mcpPath, 20<<20+1); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, agentPath, "x")
+	if err := os.Truncate(agentPath, maxTreeFileSize+1); err != nil {
+		t.Fatal(err)
 	}
 	client, err := New(root)
 	if err != nil {
@@ -277,7 +279,7 @@ func TestMCPAndAgentRejectContentOverTwentyMiB(t *testing.T) {
 	if _, err := client.GetMCP(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"})); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
 	}
-	destination := filepath.Join(t.TempDir(), "agent.yaml")
+	destination := filepath.Join(t.TempDir(), "agent")
 	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
 	assertUnsafeNoDownloadResidue(t, err, destination)
 }

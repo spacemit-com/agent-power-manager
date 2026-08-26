@@ -18,6 +18,8 @@ import (
 	"testing"
 
 	"apm/internal/cloud"
+	"apm/internal/cloud/contentpolicy"
+	"apm/internal/domain"
 )
 
 type testTarEntry struct {
@@ -950,6 +952,94 @@ func assertUnsafeWithoutDestination(t *testing.T, err error, destination string)
 	}
 	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("destination remains after unsafe archive: %v", statErr)
+	}
+	assertDirectoryEmpty(t, filepath.Dir(destination))
+}
+
+func TestExtractArchiveWithPolicyAllowsBinaryAndValidatesTree(t *testing.T) {
+	archive := stageTarGz(t,
+		testTarEntry{name: "agent.yaml", body: []byte("text yaml")},
+		testTarEntry{name: "assets", typeflag: tar.TypeDir, mode: 0o755},
+		testTarEntry{name: "assets/avatar.bin", body: []byte{0x00, 0xff}},
+	)
+	validated := false
+	policy := &archivePolicy{
+		validateFile: func(path string, body []byte) error {
+			if path == "agent.yaml" && contentpolicy.IsUnsafeText(body) {
+				return unsafeRemoteFilesystem("remote archive file %q contains unsafe non-text content", path)
+			}
+			return nil
+		},
+		validateTree: func(directory *os.File) error {
+			validated = true
+			children, err := directory.ReadDir(-1)
+			if err != nil {
+				return err
+			}
+			for _, child := range children {
+				if child.IsDir() && child.Name() == "assets" {
+					return nil
+				}
+			}
+			return errors.New("extracted output is missing assets directory")
+		},
+	}
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	if err := new(Client).extractArchiveWithPolicy(context.Background(), archive, destination, policy); err != nil {
+		t.Fatal(err)
+	}
+	if !validated {
+		t.Fatal("validateTree was not invoked on the extracted output")
+	}
+	assertFileContentsAndMode(t, filepath.Join(destination, "assets", "avatar.bin"), "\x00\xff", 0o644)
+}
+
+func TestExtractArchiveWithPolicyFileFailureCleansOutput(t *testing.T) {
+	archive := stageTarGz(t,
+		testTarEntry{name: "agent.yaml", body: []byte("text yaml")},
+		testTarEntry{name: "assets/bad.bin", body: []byte{0x00, 0xff}},
+	)
+	policy := &archivePolicy{
+		validateFile: func(path string, body []byte) error {
+			if path == "assets/bad.bin" {
+				return errors.New("policy rejects this file")
+			}
+			return nil
+		},
+	}
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	err := new(Client).extractArchiveWithPolicy(context.Background(), archive, destination, policy)
+	if err == nil || !strings.Contains(err.Error(), "policy rejects this file") {
+		t.Fatalf("extractArchiveWithPolicy() error = %v, want policy file rejection", err)
+	}
+	assertPolicyFailureCleansDestination(t, err, destination)
+}
+
+func TestExtractArchiveWithPolicyTreeFailureCleansPrivateOutput(t *testing.T) {
+	archive := stageTarGz(t,
+		testTarEntry{name: "agent.yaml", body: []byte("text yaml")},
+		testTarEntry{name: "assets/avatar.png", body: []byte("not a png")},
+	)
+	policy := &archivePolicy{
+		validateFile: func(path string, body []byte) error { return nil },
+		validateTree: func(directory *os.File) error {
+			return domain.ErrInvalidAgent
+		},
+	}
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	err := new(Client).extractArchiveWithPolicy(context.Background(), archive, destination, policy)
+	if !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("extractArchiveWithPolicy() error = %v, want ErrInvalidAgent from tree policy", err)
+	}
+	assertPolicyFailureCleansDestination(t, err, destination)
+}
+
+// assertPolicyFailureCleansDestination 断言策略失败后私有输出被清理、目标目录保持缺席，
+// 不要求特定错误分类（策略可返回任何语义错误）。
+func assertPolicyFailureCleansDestination(t *testing.T, err error, destination string) {
+	t.Helper()
+	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination remains after policy failure: %v", statErr)
 	}
 	assertDirectoryEmpty(t, filepath.Dir(destination))
 }
