@@ -918,6 +918,34 @@ func TestPluginAcceptanceFirstRepeatUninstallAndIsolation(t *testing.T) {
 	}
 }
 
+func TestPluginAcceptanceDifferentVersionReinstallWithoutMarketplaceConflict(t *testing.T) {
+	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
+		t.Run(string(agent), func(t *testing.T) {
+			h := newPluginAcceptanceHarness(t, agent)
+			if result, err := h.installRef("demo-plugin", "v0.0.1"); err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+				t.Fatalf("first Install() = %+v, %v", result, err)
+			}
+			if uninstalled, err := h.uninstallRef("demo-plugin"); err != nil || len(uninstalled.Items) != 1 || uninstalled.Items[0].Outcome != cli.UninstallOutcomeCompleted {
+				t.Fatalf("Uninstall() = %+v, %v", uninstalled, err)
+			}
+			h.assertManifest("demo-plugin", "", false)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(h.artifact("demo-plugin", "v0.0.1")), false)
+			h.assertPlugins()
+
+			result, err := h.installRef("demo-plugin", "v0.1.0")
+			if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+				t.Fatalf("different-version reinstall = %+v, %v", result, err)
+			}
+			artifact := h.artifact("demo-plugin", "v0.1.0")
+			h.assertManifest("demo-plugin", "v0.1.0", true)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+			h.assertPlugins("demo-plugin")
+			assertAcceptanceMarketplaceDocument(t, agent, artifact, "demo-plugin")
+			h.assertOnlyFakeExecutables()
+		})
+	}
+}
+
 func TestPluginAcceptanceUpgradeDowngradeAndMultiPluginIsolation(t *testing.T) {
 	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
 		t.Run(string(agent), func(t *testing.T) {

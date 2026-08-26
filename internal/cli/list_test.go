@@ -417,6 +417,13 @@ func assertOneErrorAndUsage(t *testing.T, stderr string) {
 	}
 }
 
+func assertOneErrorNoUsage(t *testing.T, stderr string) {
+	t.Helper()
+	if strings.Count(stderr, "level=ERROR") != 1 || strings.Contains(stderr, "Usage:") {
+		t.Fatalf("stderr = %q, want one Error and no Usage", stderr)
+	}
+}
+
 type listPrefixWriter struct {
 	bytes.Buffer
 	writesBeforeError int

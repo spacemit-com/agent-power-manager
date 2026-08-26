@@ -180,7 +180,7 @@ func TestInstallFatalFailureSuppressesResult(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	assertOneErrorAndUsage(t, stderr.String())
+	assertOneErrorNoUsage(t, stderr.String())
 }
 
 func TestInstallBatchFailureRendersResultThenReturnsError(t *testing.T) {
@@ -207,7 +207,7 @@ func TestInstallBatchFailureRendersResultThenReturnsError(t *testing.T) {
 	if got, want := stdout.String(), "codex/skill/demo@v1.0.0 failed\nhermes-agent/skill/demo@v1.0.0 unexecuted\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
-	assertOneErrorAndUsage(t, stderr.String())
+	assertOneErrorNoUsage(t, stderr.String())
 }
 
 func TestInstallRenderFailurePreservesCompletedPrefix(t *testing.T) {
@@ -363,6 +363,60 @@ func TestInstallDoesNotInvokeUninstallFactory(t *testing.T) {
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("output = stdout %q, stderr %q; want empty", stdout.String(), stderr.String())
 	}
+}
+
+func TestInstallStdoutNewlineCountEqualsItemCount(t *testing.T) {
+	result := cli.InstallResult{Items: []cli.InstallItem{
+		{Agent: domain.AgentCodex, Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, Outcome: cli.InstallOutcomeInstalled},
+		{Agent: domain.AgentClaudeCode, Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, Outcome: cli.InstallOutcomeUpgraded},
+		{Agent: domain.AgentHermes, Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, Outcome: cli.InstallOutcomeUnchanged},
+	}}
+	var stdout, stderr bytes.Buffer
+	entry := newInstallEntry(t, &stdout, &stderr, func() (cli.InstallLifecycle, error) {
+		return &recordingInstallLifecycle{result: result}, nil
+	})
+
+	if err := entry.Execute([]string{"install", "demo", "--agent=all"}); err != nil {
+		t.Fatalf("Execute(install) error = %v", err)
+	}
+	if got, want := strings.Count(stdout.String(), "\n"), len(result.Items); got != want {
+		t.Fatalf("stdout newlines = %d, want %d (stdout %q)", got, want, stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+type warningFatalInstallLifecycle struct {
+	warning string
+	err     error
+}
+
+func (l *warningFatalInstallLifecycle) Install(_ context.Context, _ cli.Flags) (cli.InstallResult, error) {
+	slog.Warn(l.warning, slog.String("operation", "install"))
+	return cli.InstallResult{}, l.err
+}
+
+func TestInstallReleaseFailureSuppressesStdoutAndPreservesWarning(t *testing.T) {
+	fatalErr := errors.New("release install lock: injected")
+	var stdout, stderr bytes.Buffer
+	entry := newInstallEntry(t, &stdout, &stderr, func() (cli.InstallLifecycle, error) {
+		return &warningFatalInstallLifecycle{warning: "installed power target is missing", err: fatalErr}, nil
+	})
+
+	err := entry.Execute([]string{"install", "demo", "--agent=all"})
+	if !errors.Is(err, fatalErr) {
+		t.Fatalf("Execute(install) error = %v, want %v", err, fatalErr)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want suppressed", stdout.String())
+	}
+	for _, want := range []string{`msg="installed power target is missing"`, "operation=install", "level=WARN"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+		}
+	}
+	assertOneErrorNoUsage(t, stderr.String())
 }
 
 type installPrefixWriter struct {

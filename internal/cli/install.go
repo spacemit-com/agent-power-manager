@@ -43,12 +43,12 @@ func newInstallCommand(newLifecycle InstallLifecycleFactory) *cobra.Command {
 			}
 			var batch *InstallBatchError
 			if !errors.As(err, &batch) {
-				return err
+				return &runtimeFailure{cause: err}
 			}
 			if renderErr := renderInstall(command.OutOrStdout(), result); renderErr != nil {
 				return errors.Join(err, renderErr)
 			}
-			return err
+			return &runtimeFailure{cause: err}
 		},
 	}
 	bindCommonFlags(command, &flags)

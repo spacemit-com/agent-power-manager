@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -245,8 +246,11 @@ func TestMCPIntegrationHTTPConflictAndStaleRepair(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "mcp", Name: "filesystem", Version: "v0.0.1"})
-		if !errors.Is(err, adapter.ErrMCPConflict) {
-			t.Fatalf("Install() error = %v, want ErrMCPConflict", err)
+		if !errors.Is(err, adapter.ErrTargetConflict) {
+			t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
+		}
+		if errors.Is(err, adapter.ErrMCPConflict) {
+			t.Fatalf("Install() error = %v, must not expose ErrMCPConflict", err)
 		}
 		harness.assertManagedMCP(domain.AgentCodex, "filesystem", "", true)
 		harness.assertMCPOnlyPathsAbsent()
@@ -262,16 +266,25 @@ func TestMCPIntegrationHTTPConflictAndStaleRepair(t *testing.T) {
 		if err := harness.repository.Set(domain.AgentCodex, keep); err != nil {
 			t.Fatal(err)
 		}
-		_, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "mcp", Name: "filesystem", Version: "v0.0.1"})
-		if !errors.Is(err, transaction.ErrStaleManifest) {
-			t.Fatalf("Install() error = %v, want ErrStaleManifest", err)
+		var stdout, stderr bytes.Buffer
+		uninstallTestLogger(t, &stdout, &stderr, false)
+		result, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "mcp", Name: "filesystem", Version: "v0.1.0"})
+		if err != nil {
+			t.Fatalf("Install() error = %v, want repair and fresh install", err)
 		}
-		if _, found, err := harness.repository.Find(domain.AgentCodex, stale.Type, stale.Name); err != nil || found {
-			t.Fatalf("stale entry found/error = %v/%v", found, err)
+		if len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+			t.Fatalf("Install().Items = %#v, want single installed item", result.Items)
+		}
+		if strings.Count(stderr.String(), "level=WARN") != 1 || !strings.Contains(stderr.String(), `msg="installed power target is missing"`) {
+			t.Fatalf("stderr = %q, want exactly one missing-target warning", stderr.String())
+		}
+		if got, found, err := harness.repository.Find(domain.AgentCodex, stale.Type, stale.Name); err != nil || !found || got.Version != "v0.1.0" {
+			t.Fatalf("repaired entry = %+v, %v, %v; want v0.1.0", got, found, err)
 		}
 		if got, found, err := harness.repository.Find(domain.AgentCodex, keep.Type, keep.Name); err != nil || !found || got != keep {
 			t.Fatalf("keep entry = %+v, %v, %v", got, found, err)
 		}
+		harness.assertManagedMCP(domain.AgentCodex, "filesystem", "v0.1.0", true)
 		harness.assertMCPOnlyPathsAbsent()
 	})
 }

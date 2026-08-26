@@ -184,7 +184,7 @@ func TestUninstallFatalFailureSuppressesResult(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	assertOneErrorAndUsage(t, stderr.String())
+	assertOneErrorNoUsage(t, stderr.String())
 }
 
 func TestUninstallBatchFailureRendersResultThenReturnsCause(t *testing.T) {
@@ -211,7 +211,7 @@ func TestUninstallBatchFailureRendersResultThenReturnsCause(t *testing.T) {
 	if got, want := stdout.String(), "codex/skill/demo@v1.0.0 failed\nhermes-agent unexecuted\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
-	assertOneErrorAndUsage(t, stderr.String())
+	assertOneErrorNoUsage(t, stderr.String())
 }
 
 func TestUninstallRenderFailurePreservesCompletedPrefix(t *testing.T) {
@@ -353,6 +353,60 @@ func TestUninstallRepeatedExecutionDoesNotLeakFlagsLoggerOrService(t *testing.T)
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("second output = stdout %q, stderr %q; want no leaked verbose state", stdout.String(), stderr.String())
 	}
+}
+
+func TestUninstallStdoutNewlineCountEqualsItemCount(t *testing.T) {
+	result := cli.UninstallResult{Items: []cli.UninstallItem{
+		{Agent: domain.AgentCodex, Power: &domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, Outcome: cli.UninstallOutcomeCompleted},
+		{Agent: domain.AgentClaudeCode, Power: &domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, Outcome: cli.UninstallOutcomeCompleted},
+		{Agent: domain.AgentHermes, Outcome: cli.UninstallOutcomeUnexecuted},
+	}}
+	var stdout, stderr bytes.Buffer
+	entry := newUninstallEntry(t, &stdout, &stderr, func() (cli.UninstallLifecycle, error) {
+		return &recordingUninstallLifecycle{result: result}, nil
+	})
+
+	if err := entry.Execute([]string{"uninstall", "demo", "--agent=all"}); err != nil {
+		t.Fatalf("Execute(uninstall) error = %v", err)
+	}
+	if got, want := strings.Count(stdout.String(), "\n"), len(result.Items); got != want {
+		t.Fatalf("stdout newlines = %d, want %d (stdout %q)", got, want, stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+type warningFatalUninstallLifecycle struct {
+	warning string
+	err     error
+}
+
+func (l *warningFatalUninstallLifecycle) Uninstall(_ context.Context, _ cli.Flags) (cli.UninstallResult, error) {
+	slog.Warn(l.warning, slog.String("operation", "uninstall"))
+	return cli.UninstallResult{}, l.err
+}
+
+func TestUninstallReleaseFailureSuppressesStdoutAndPreservesWarning(t *testing.T) {
+	fatalErr := errors.New("release uninstall lock: injected")
+	var stdout, stderr bytes.Buffer
+	entry := newUninstallEntry(t, &stdout, &stderr, func() (cli.UninstallLifecycle, error) {
+		return &warningFatalUninstallLifecycle{warning: "installed power target is missing", err: fatalErr}, nil
+	})
+
+	err := entry.Execute([]string{"uninstall", "demo", "--agent=all"})
+	if !errors.Is(err, fatalErr) {
+		t.Fatalf("Execute(uninstall) error = %v, want %v", err, fatalErr)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want suppressed", stdout.String())
+	}
+	for _, want := range []string{`msg="installed power target is missing"`, "operation=uninstall", "level=WARN"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+		}
+	}
+	assertOneErrorNoUsage(t, stderr.String())
 }
 
 type uninstallPrefixWriter struct {

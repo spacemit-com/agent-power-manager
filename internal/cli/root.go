@@ -2,12 +2,22 @@
 package cli
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"reflect"
 
 	"github.com/spf13/cobra"
 )
+
+// runtimeFailure 标记生命周期运行时失败（如 batch 失败或锁释放失败）。
+// Execute 对这类失败只记录一次 Error，不再打印 usage；参数错误与 writer 错误仍保持打印 usage。
+type runtimeFailure struct {
+	cause error
+}
+
+func (e *runtimeFailure) Error() string { return e.cause.Error() }
+func (e *runtimeFailure) Unwrap() error { return e.cause }
 
 // SetupLoggingFunc 安装与 verbose 设置匹配的默认日志器。
 type SetupLoggingFunc func(verbose bool)
@@ -52,7 +62,10 @@ func (entry *CLIEntry) Execute(args []string) error {
 	executed, err := root.ExecuteC()
 	if err != nil {
 		slog.Error("command failed", slog.Any("error", err))
-		executed.PrintErr(executed.UsageString())
+		var runtime *runtimeFailure
+		if !errors.As(err, &runtime) {
+			executed.PrintErr(executed.UsageString())
+		}
 	}
 	return err
 }
