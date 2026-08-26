@@ -232,8 +232,9 @@ func validatePluginMarketplaceJournal(journal Journal, payload PluginJournalPayl
 		}
 		return validatePluginMarketplaceSource(*journal.Previous, marketplace.PreviousSource, ErrInvalidJournal)
 	case OperationUninstall:
-		if journal.Previous != nil || payload.Previous != nil || payload.PreviousPresent || !payload.TargetPresent ||
-			marketplace.PreviousSource != "" || marketplace.PreviousPresent || !validMarketplaceUninstallPhase(journal.Phase) {
+		if journal.Previous != nil || payload.Previous != nil || payload.PreviousPresent ||
+			marketplace.PreviousSource != "" || marketplace.PreviousPresent ||
+			(!payload.TargetPresent && !marketplace.TargetPresent) || !validMarketplaceUninstallPhase(journal.Phase) {
 			return fmt.Errorf("invalid marketplace Plugin uninstall state: %w", ErrInvalidJournal)
 		}
 		return nil
@@ -288,7 +289,7 @@ func validMarketplaceUpgradePhase(phase Phase) bool {
 }
 
 func validMarketplaceUninstallPhase(phase Phase) bool {
-	return phase == PhaseRemovingPlugin || phase == PhaseRollingBack || phase == PhaseCommitting
+	return phase == PhaseRemovingPlugin || phase == PhaseUnregisteringMarketplace || phase == PhaseCommitting
 }
 
 // samePluginAdapterInstance 保证 Plugin 与 marketplace 写操作共享同一个 Agent 客户端实例；不可比较的值按无效请求处理。

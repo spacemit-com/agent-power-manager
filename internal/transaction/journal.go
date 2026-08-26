@@ -53,6 +53,8 @@ const (
 	PhaseAddingNewPlugin Phase = "adding-new-plugin"
 	// PhaseRemovingPlugin 表示卸载即将移除当前 Plugin，但保留 marketplace。
 	PhaseRemovingPlugin Phase = "removing-plugin"
+	// PhaseUnregisteringMarketplace 表示卸载即将注销专用 marketplace。
+	PhaseUnregisteringMarketplace Phase = "unregistering-marketplace"
 	// PhaseRollingBack 表示事务方向已固定为回滚。
 	PhaseRollingBack Phase = "rolling-back"
 	// PhaseCommitting 表示事务方向已固定为完成提交。
@@ -92,6 +94,7 @@ type PluginMarketplaceJournalPayload struct {
 	PreviousSource  string `json:"previous_source,omitempty"`
 	PreviousPresent bool   `json:"previous_present"`
 	TargetSource    string `json:"target_source"`
+	TargetPresent   bool   `json:"target_present"`
 }
 
 // PluginJournalPayload 保存 Plugin 恢复所需的部署模式、实际名和 CLI selector。
@@ -134,18 +137,19 @@ const (
 type RecoveryActionKind string
 
 const (
-	RecoveryActionRestoreTarget        RecoveryActionKind = "restore-target"
-	RecoveryActionSetManifest          RecoveryActionKind = "set-manifest"
-	RecoveryActionRemoveManifest       RecoveryActionKind = "remove-manifest"
-	RecoveryActionRemoveBackup         RecoveryActionKind = "remove-backup"
-	RecoveryActionRemoveQuarantine     RecoveryActionKind = "remove-quarantine"
-	RecoveryActionRemoveStaging        RecoveryActionKind = "remove-staging"
-	RecoveryActionRemoveTransactionDir RecoveryActionKind = "remove-transaction-dir"
-	RecoveryActionAddMCP               RecoveryActionKind = "add-mcp"
-	RecoveryActionRemoveMCP            RecoveryActionKind = "remove-mcp"
-	RecoveryActionAddPlugin            RecoveryActionKind = "add-plugin"
-	RecoveryActionRemovePlugin         RecoveryActionKind = "remove-plugin"
-	RecoveryActionRestorePlugin        RecoveryActionKind = "restore-plugin"
+	RecoveryActionRestoreTarget         RecoveryActionKind = "restore-target"
+	RecoveryActionSetManifest           RecoveryActionKind = "set-manifest"
+	RecoveryActionRemoveManifest        RecoveryActionKind = "remove-manifest"
+	RecoveryActionRemoveBackup          RecoveryActionKind = "remove-backup"
+	RecoveryActionRemoveQuarantine      RecoveryActionKind = "remove-quarantine"
+	RecoveryActionRemoveStaging         RecoveryActionKind = "remove-staging"
+	RecoveryActionRemoveTransactionDir  RecoveryActionKind = "remove-transaction-dir"
+	RecoveryActionAddMCP                RecoveryActionKind = "add-mcp"
+	RecoveryActionRemoveMCP             RecoveryActionKind = "remove-mcp"
+	RecoveryActionAddPlugin             RecoveryActionKind = "add-plugin"
+	RecoveryActionRemovePlugin          RecoveryActionKind = "remove-plugin"
+	RecoveryActionRestorePlugin         RecoveryActionKind = "restore-plugin"
+	RecoveryActionUnregisterMarketplace RecoveryActionKind = "unregister-marketplace"
 )
 
 // RecoveryAction 描述一次已完成的结构化恢复动作。

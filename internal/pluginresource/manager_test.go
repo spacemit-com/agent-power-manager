@@ -162,6 +162,97 @@ func TestNewLookupCannotWriteRelativeServiceDirectories(t *testing.T) {
 	}
 }
 
+func TestLocateReturnsExpectedArtifactWithoutReadingCache(t *testing.T) {
+	// 捕获错误变更：Locate 只构造路径身份，读取缓存或校验制品内容都属于越界。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	service.files.lstat = func(string) (os.FileInfo, error) {
+		t.Fatal("Locate must not read the cache")
+		return nil, nil
+	}
+
+	artifact, err := service.Locate(testPluginRef())
+	if err != nil {
+		t.Fatalf("Locate() error = %v", err)
+	}
+	wantRoot := filepath.Join(roots.cache, "plugins", "demo", "v0.1.0")
+	if artifact.Root != wantRoot {
+		t.Fatalf("Locate().Root = %q, want %q", artifact.Root, wantRoot)
+	}
+	if artifact.PluginPath != filepath.Join(wantRoot, "plugins", "demo") {
+		t.Fatalf("Locate().PluginPath = %q, want %q", artifact.PluginPath, filepath.Join(wantRoot, "plugins", "demo"))
+	}
+}
+
+func TestExistsReportsOnlyPhysicalRootPresence(t *testing.T) {
+	// 捕获错误变更：Exists 误报缺失/symlink/非目录，或调用 artifact builder 复验内容。
+	ref := testPluginRef()
+	newServiceFn := func(roots testRoots) *Service {
+		return newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, nil, panicBuilder{})
+	}
+
+	t.Run("missing root", func(t *testing.T) {
+		exists, err := newServiceFn(newTestRoots(t)).Exists(ref)
+		if err != nil || exists {
+			t.Fatalf("Exists() = %t, %v; want false, nil", exists, err)
+		}
+	})
+	t.Run("physical directory", func(t *testing.T) {
+		roots := newTestRoots(t)
+		root := filepath.Join(roots.cache, "plugins", "demo", "v0.1.0")
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		exists, err := newServiceFn(roots).Exists(ref)
+		if err != nil || !exists {
+			t.Fatalf("Exists() = %t, %v; want true, nil", exists, err)
+		}
+	})
+	t.Run("symlink root", func(t *testing.T) {
+		roots := newTestRoots(t)
+		root := filepath.Join(roots.cache, "plugins", "demo", "v0.1.0")
+		outside := filepath.Join(t.TempDir(), "outside")
+		if err := os.MkdirAll(outside, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, root); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newServiceFn(roots).Exists(ref); err == nil {
+			t.Fatal("Exists() error = nil, want symlink rejection")
+		}
+	})
+	t.Run("non-directory root", func(t *testing.T) {
+		roots := newTestRoots(t)
+		root := filepath.Join(roots.cache, "plugins", "demo", "v0.1.0")
+		if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(root, []byte("file"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newServiceFn(roots).Exists(ref); err == nil {
+			t.Fatal("Exists() error = nil, want non-directory rejection")
+		}
+	})
+	t.Run("lstat error", func(t *testing.T) {
+		service := newServiceFn(newTestRoots(t))
+		injected := errors.New("injected lstat failure")
+		service.files.lstat = func(string) (os.FileInfo, error) { return nil, injected }
+		if _, err := service.Exists(ref); !errors.Is(err, injected) {
+			t.Fatalf("Exists() error = %v, want injected lstat failure", err)
+		}
+	})
+}
+
+type panicBuilder struct{}
+
+func (panicBuilder) Build(domain.PowerRef, string, string) error { panic("artifact builder invoked") }
+func (panicBuilder) Validate(domain.PowerRef, string) error      { panic("artifact builder invoked") }
+
 func assertGeneratedCodexMarketplace(t *testing.T, path string) {
 	t.Helper()
 	contents, err := os.ReadFile(path)

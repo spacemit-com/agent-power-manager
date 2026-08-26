@@ -28,6 +28,13 @@ type ArtifactLookup interface {
 	Lookup(domain.PowerRef) (Artifact, error)
 }
 
+// ArtifactLocator 只按 Ref 构造 Plugin artifact 身份与预期根路径，不做任何缓存读取或制品内容复验。
+// Exists 仅报告预期根是否为物理目录，供需要窄范围、无 I/O 定位的调用方使用。
+type ArtifactLocator interface {
+	Locate(domain.PowerRef) (Artifact, error)
+	Exists(domain.PowerRef) (bool, error)
+}
+
 // Marketplace 是 Plugin Resource 返回的 Agent marketplace 注册信息。
 // Lifecycle 负责在事务边界将其映射为 Adapter 的目标类型。
 type Marketplace struct {

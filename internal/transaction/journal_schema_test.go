@@ -110,7 +110,7 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 		Target:        adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 		TargetPresent: true,
 		Marketplace: &PluginMarketplaceJournalPayload{
-			Name: "apm-demo", TargetSource: targetSource,
+			Name: "apm-demo", TargetSource: targetSource, TargetPresent: true,
 		},
 	}
 
@@ -121,7 +121,7 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 	}{
 		{name: "first install", journal: firstInstall, phases: []Phase{PhaseRegisteringMarketplace, PhaseAddingNewPlugin, PhaseRollingBack, PhaseCommitting}},
 		{name: "upgrade", journal: upgrade, phases: []Phase{PhaseRemovingOldPlugin, PhaseUnregisteringOldMarketplace, PhaseRegisteringNewMarketplace, PhaseAddingNewPlugin, PhaseRollingBack, PhaseCommitting}},
-		{name: "uninstall", journal: uninstall, phases: []Phase{PhaseRemovingPlugin, PhaseRollingBack, PhaseCommitting}},
+		{name: "uninstall", journal: uninstall, phases: []Phase{PhaseRemovingPlugin, PhaseUnregisteringMarketplace, PhaseCommitting}},
 	}
 	for _, test := range tests {
 		for _, phase := range test.phases {
@@ -141,7 +141,7 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 	}{
 		{name: "first install", journal: firstInstall, phases: []Phase{PhaseRemovingOldPlugin, PhaseUnregisteringOldMarketplace, PhaseRegisteringNewMarketplace, PhaseRemovingPlugin}},
 		{name: "upgrade", journal: upgrade, phases: []Phase{PhaseRegisteringMarketplace, PhaseRemovingPlugin}},
-		{name: "uninstall", journal: uninstall, phases: []Phase{PhaseRegisteringMarketplace, PhaseRemovingOldPlugin, PhaseUnregisteringOldMarketplace, PhaseRegisteringNewMarketplace, PhaseAddingNewPlugin}},
+		{name: "uninstall", journal: uninstall, phases: []Phase{PhaseRegisteringMarketplace, PhaseRemovingOldPlugin, PhaseUnregisteringOldMarketplace, PhaseRegisteringNewMarketplace, PhaseAddingNewPlugin, PhaseRollingBack}},
 	}
 	oldAndUnknownPhases := []Phase{PhasePreparing, PhasePublishing, PhaseRemovingOld, PhaseAddingNew, PhaseRemoving, Phase("unknown")}
 	for _, test := range []struct {
@@ -208,7 +208,7 @@ func TestPluginMarketplaceJournalRejectsMissingPayloadInEveryOperation(t *testin
 		Target:        adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
 		TargetPresent: true,
 		Marketplace: &PluginMarketplaceJournalPayload{
-			Name: "apm-demo", TargetSource: targetSource,
+			Name: "apm-demo", TargetSource: targetSource, TargetPresent: true,
 		},
 	}
 

@@ -51,7 +51,7 @@ func (s *Service) recoverLocalMarketplacePlugin(ctx context.Context, journal Jou
 	case OperationInstall:
 		return s.recoverLocalMarketplacePluginInstall(ctx, journal, facts, marketplaceAdapter, result)
 	case OperationUninstall:
-		return s.recoverLocalMarketplacePluginUninstall(journal, facts, result)
+		return s.recoverLocalMarketplacePluginUninstall(ctx, journal, facts, marketplaceAdapter, result)
 	default:
 		return fmt.Errorf("marketplace Plugin recovery operation %q: %w", journal.Operation, ErrIndeterminateState)
 	}
@@ -80,7 +80,12 @@ func inspectMarketplaceRecoveryFacts(ctx context.Context, journal Journal, marke
 		case marketplaceRecoveryPrevious:
 			facts.previousPresent = true
 		case marketplaceRecoveryAbsent:
-			return marketplaceRecoveryFacts{}, fmt.Errorf("logical Plugin is present without its marketplace during recovery: %w", ErrIndeterminateState)
+			// 卸载 journal 记录的 Plugin-only 状态（marketplace 从未注册）是可达的；安装 journal 仍拒绝该状态。
+			if journal.Operation == OperationUninstall {
+				facts.targetPresent = true
+			} else {
+				return marketplaceRecoveryFacts{}, fmt.Errorf("logical Plugin is present without its marketplace during recovery: %w", ErrIndeterminateState)
+			}
 		}
 	}
 	return facts, nil
@@ -289,51 +294,45 @@ func (s *Service) rollbackRecoveredMarketplacePlugin(ctx context.Context, journa
 	return s.deleteRecoveredJournal(journal)
 }
 
-func (s *Service) recoverLocalMarketplacePluginUninstall(journal Journal, facts marketplaceRecoveryFacts, result *RecoveryResult) error {
-	if facts.marketplace != marketplaceRecoveryTarget {
-		return fmt.Errorf("uninstall marketplace source changed or disappeared: %w", ErrIndeterminateState)
+// recoverLocalMarketplacePluginUninstall 固定收敛为移除：幂等移除残余 Plugin 与 marketplace，
+// 再持久化 committing、移除 manifest、删除 journal；绝不 Add/Register 或复验 artifact。
+func (s *Service) recoverLocalMarketplacePluginUninstall(ctx context.Context, journal Journal, facts marketplaceRecoveryFacts, marketplaceAdapter adapter.MarketplacePluginAdapter, result *RecoveryResult) error {
+	payload := journal.Plugin
+	marketplace := payload.Marketplace
+	if facts.marketplace != marketplaceRecoveryTarget && facts.marketplace != marketplaceRecoveryAbsent {
+		return fmt.Errorf("uninstall marketplace selection %d: %w", facts.marketplace, ErrIndeterminateState)
 	}
-	switch journal.Phase {
-	case PhaseCommitting:
-		if facts.targetPresent {
-			return fmt.Errorf("committing Plugin uninstall target is still present: %w", ErrIndeterminateState)
-		}
-		result.Direction = RecoveryCommit
-		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
-			return err
-		}
-		return s.commitRecoveredPlugin(journal, result)
-	case PhaseRollingBack:
-		if !facts.targetPresent {
-			return fmt.Errorf("rolled-back Plugin uninstall target is absent: %w", ErrIndeterminateState)
-		}
-		result.Direction = RecoveryRollback
-		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
-			return err
-		}
-		return s.deleteRecoveredJournal(journal)
-	case PhaseRemovingPlugin:
-		if facts.targetPresent {
-			result.Direction = RecoveryRollback
-			if err := s.persistRecoveryDirection(&journal, PhaseRollingBack); err != nil {
-				return err
-			}
-			if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
-				return err
-			}
-			return s.deleteRecoveredJournal(journal)
-		}
-		result.Direction = RecoveryCommit
-		if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
-			return err
-		}
-		if err := s.validateMarketplaceRecoveryArtifact(journal.Agent, journal.Power, journal.Plugin.Marketplace.TargetSource); err != nil {
-			return err
-		}
-		return s.commitRecoveredPlugin(journal, result)
-	default:
-		return fmt.Errorf("marketplace Plugin uninstall phase %q: %w", journal.Phase, ErrIndeterminateState)
+	// 依据记录的 presence bit 拒绝不可达漂移；未被记录为存在的 Plugin/marketplace 重新出现即失败闭合。
+	if facts.targetPresent && !payload.TargetPresent {
+		return fmt.Errorf("marketplace Plugin uninstall target reappeared: %w", ErrIndeterminateState)
 	}
+	if facts.marketplace == marketplaceRecoveryTarget && !marketplace.TargetPresent {
+		return fmt.Errorf("marketplace Plugin uninstall marketplace reappeared: %w", ErrIndeterminateState)
+	}
+	// 联合首装时移除顺序固定为 Plugin 先于 marketplace，marketplace 先消失而 Plugin 仍在属不可达。
+	if payload.TargetPresent && marketplace.TargetPresent && facts.targetPresent && facts.marketplace == marketplaceRecoveryAbsent {
+		return fmt.Errorf("marketplace Plugin uninstall marketplace disappeared before Plugin removal: %w", ErrIndeterminateState)
+	}
+
+	result.Direction = RecoveryCommit
+	if facts.targetPresent {
+		mutation, err := marketplaceAdapter.Remove(ctx, payload.Target)
+		if err := requireAppliedPluginMutation("remove remaining Plugin during uninstall recovery", mutation, err); err != nil {
+			return err
+		}
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionRemovePlugin})
+	}
+	if facts.marketplace == marketplaceRecoveryTarget {
+		mutation, err := marketplaceAdapter.UnregisterMarketplace(ctx, adapter.MarketplaceTarget{Name: marketplace.Name, Source: marketplace.TargetSource})
+		if err := requireAppliedPluginMutation("unregister remaining marketplace during uninstall recovery", mutation, err); err != nil {
+			return err
+		}
+		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionUnregisterMarketplace})
+	}
+	if err := s.persistRecoveryDirection(&journal, PhaseCommitting); err != nil {
+		return err
+	}
+	return s.commitRecoveredPlugin(journal, result)
 }
 
 // validateMarketplaceRecoveryArtifact 只复验当前收敛动作实际依赖的完整持久 artifact，避免无关历史版本阻断既定方向。

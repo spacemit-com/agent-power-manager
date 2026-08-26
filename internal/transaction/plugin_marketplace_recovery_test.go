@@ -189,6 +189,7 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 	}
 	if operation == OperationUninstall {
 		journal.Plugin.TargetPresent = true
+		journal.Plugin.Marketplace.TargetPresent = true
 	}
 	if upgrade {
 		journal.Previous = &previousRef
@@ -1126,41 +1127,69 @@ func TestRecoverMarketplacePluginRollbackValidatesOnlyRequiredCache(t *testing.T
 	}
 }
 
-func TestRecoverMarketplacePluginUninstallDirectionAndConvergence(t *testing.T) {
+func TestRecoverMarketplacePluginUninstallConvergesToRemoval(t *testing.T) {
 	tests := []struct {
-		name          string
-		phase         Phase
-		pluginPresent bool
-		wantDirection RecoveryDirection
-		wantWrites    []string
-		wantRemoved   bool
+		name       string
+		phase      Phase
+		configure  func(*marketplaceRecoveryFixture)
+		wantWrites []string
 	}{
 		{
-			name: "removing with Plugin absent commits", phase: PhaseRemovingPlugin,
-			wantDirection: RecoveryCommit, wantWrites: []string{"manifest:remove", "delete:journal"}, wantRemoved: true,
+			name:  "pre-remove removes Plugin and marketplace",
+			phase: PhaseRemovingPlugin,
+			configure: func(f *marketplaceRecoveryFixture) {
+				f.setMarketplace(f.targetSource)
+				f.setPlugin(f.target, adapter.PluginPresent)
+			},
+			wantWrites: []string{"remove-plugin", "unregister-marketplace", "manifest:remove", "delete:journal"},
 		},
 		{
-			name: "removing with Plugin present rolls back", phase: PhaseRemovingPlugin, pluginPresent: true,
-			wantDirection: RecoveryRollback, wantWrites: []string{"delete:journal"},
+			name:  "Plugin removed unregisters marketplace",
+			phase: PhaseRemovingPlugin,
+			configure: func(f *marketplaceRecoveryFixture) {
+				f.setMarketplace(f.targetSource)
+			},
+			wantWrites: []string{"unregister-marketplace", "manifest:remove", "delete:journal"},
 		},
 		{
-			name: "persisted rollback keeps manifest", phase: PhaseRollingBack, pluginPresent: true,
-			wantDirection: RecoveryRollback, wantWrites: []string{"delete:journal"},
+			name:       "marketplace removed commits",
+			phase:      PhaseUnregisteringMarketplace,
+			wantWrites: []string{"manifest:remove", "delete:journal"},
 		},
 		{
-			name: "persisted commit removes manifest", phase: PhaseCommitting,
-			wantDirection: RecoveryCommit, wantWrites: []string{"manifest:remove", "delete:journal"}, wantRemoved: true,
+			name:       "committing removes manifest",
+			phase:      PhaseCommitting,
+			wantWrites: []string{"manifest:remove", "delete:journal"},
+		},
+		{
+			name:  "marketplace only unregisters marketplace",
+			phase: PhaseRemovingPlugin,
+			configure: func(f *marketplaceRecoveryFixture) {
+				f.journal.Plugin.TargetPresent = false
+				f.store.journal.Plugin.TargetPresent = false
+				f.setMarketplace(f.targetSource)
+			},
+			wantWrites: []string{"unregister-marketplace", "manifest:remove", "delete:journal"},
+		},
+		{
+			name:  "Plugin only removes Plugin",
+			phase: PhaseRemovingPlugin,
+			configure: func(f *marketplaceRecoveryFixture) {
+				f.journal.Plugin.Marketplace.TargetPresent = false
+				f.store.journal.Plugin.Marketplace.TargetPresent = false
+				f.setPlugin(f.target, adapter.PluginPresent)
+			},
+			wantWrites: []string{"remove-plugin", "manifest:remove", "delete:journal"},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newMarketplaceRecoveryFixture(t, OperationUninstall, test.phase, false)
-			fixture.setMarketplace(fixture.targetSource)
-			if test.pluginPresent {
-				fixture.setPlugin(fixture.target, adapter.PluginPresent)
+			if test.configure != nil {
+				test.configure(fixture)
 			}
 			result, err := fixture.recover()
-			if err != nil || !result.Recovered || result.Direction != test.wantDirection {
+			if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
 				t.Fatalf("Recover() = %+v, %v", result, err)
 			}
 			if got := marketplaceRecoveryWrites(fixture.events); !reflect.DeepEqual(got, test.wantWrites) {
@@ -1169,56 +1198,56 @@ func TestRecoverMarketplacePluginUninstallDirectionAndConvergence(t *testing.T) 
 			if fixture.store.found {
 				t.Fatal("uninstall recovery left journal")
 			}
-			removed := fixture.manifests.removed == (domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin})
-			if removed != test.wantRemoved {
-				t.Fatalf("manifest removed = %t, want %t", removed, test.wantRemoved)
+			if fixture.manifests.removed != (domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin}) {
+				t.Fatalf("manifest removed = %+v, want demo Plugin", fixture.manifests.removed)
 			}
 			for _, event := range fixture.events {
-				if strings.HasPrefix(event, "register-marketplace:") || strings.HasPrefix(event, "unregister-marketplace:") ||
-					strings.HasPrefix(event, "add-plugin:") || strings.HasPrefix(event, "remove-plugin:") {
-					t.Fatalf("uninstall recovery changed Agent state: %v", fixture.events)
+				if strings.HasPrefix(event, "register-marketplace:") || strings.HasPrefix(event, "add-plugin:") {
+					t.Fatalf("uninstall recovery added Agent state: %v", fixture.events)
 				}
 			}
 		})
 	}
 }
 
-func TestRecoverMarketplacePluginUninstallRejectsChangedState(t *testing.T) {
+func TestRecoverMarketplacePluginUninstallRejectsUnreachableState(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*marketplaceRecoveryFixture)
 	}{
-		{name: "marketplace absent", mutate: func(*marketplaceRecoveryFixture) {}},
 		{
-			name: "marketplace changed",
+			name: "marketplace changed source",
 			mutate: func(f *marketplaceRecoveryFixture) {
 				f.setMarketplace(filepath.Join(filepath.Dir(f.targetSource), "v9.9.9"))
 			},
 		},
 		{
-			name: "rollback Plugin absent",
+			name: "Plugin selector conflict",
 			mutate: func(f *marketplaceRecoveryFixture) {
-				f.journal.Phase = PhaseRollingBack
-				f.store.journal.Phase = PhaseRollingBack
 				f.setMarketplace(f.targetSource)
+				f.setPlugin(adapter.PluginTarget{ActualName: "demo", Selector: "other"}, adapter.PluginPresent)
 			},
 		},
 		{
-			name: "commit Plugin present",
+			name: "Plugin reappeared without recorded presence",
 			mutate: func(f *marketplaceRecoveryFixture) {
-				f.journal.Phase = PhaseCommitting
-				f.store.journal.Phase = PhaseCommitting
-				f.setMarketplace(f.targetSource)
+				f.journal.Plugin.TargetPresent = false
+				f.store.journal.Plugin.TargetPresent = false
 				f.setPlugin(f.target, adapter.PluginPresent)
 			},
 		},
 		{
-			name: "cache source missing",
+			name: "marketplace reappeared without recorded presence",
 			mutate: func(f *marketplaceRecoveryFixture) {
+				f.journal.Plugin.Marketplace.TargetPresent = false
+				f.store.journal.Plugin.Marketplace.TargetPresent = false
 				f.setMarketplace(f.targetSource)
-				if err := os.RemoveAll(f.targetSource); err != nil {
-					f.t.Fatal(err)
-				}
+			},
+		},
+		{
+			name: "marketplace disappeared before Plugin removal",
+			mutate: func(f *marketplaceRecoveryFixture) {
+				f.setPlugin(f.target, adapter.PluginPresent)
 			},
 		},
 	}
@@ -1230,15 +1259,77 @@ func TestRecoverMarketplacePluginUninstallRejectsChangedState(t *testing.T) {
 			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered {
 				t.Fatalf("Recover() = %+v, %v", result, err)
 			}
-			if !fixture.store.found {
-				t.Fatalf("invalid uninstall state removed journal: events=%v", fixture.events)
+			if !fixture.store.found || hasMarketplaceRecoveryWrite(fixture.events) {
+				t.Fatalf("unreachable uninstall state caused writes: found=%t events=%v", fixture.store.found, fixture.events)
 			}
-			if test.name == "cache source missing" {
-				if fixture.store.journal.Phase != PhaseCommitting || len(marketplaceRecoveryWrites(fixture.events)) != 0 {
-					t.Fatalf("missing cache did not stop after direction persistence: phase=%q events=%v", fixture.store.journal.Phase, fixture.events)
+		})
+	}
+}
+
+func TestRecoverMarketplacePluginUninstallMutationMatrix(t *testing.T) {
+	operationErr := errors.New("CLI write failed")
+	tests := []struct {
+		name              string
+		configure         func(*marketplaceRecoveryFixture)
+		wantIndeterminate bool
+	}{
+		{
+			name: "remove Plugin not applied",
+			configure: func(f *marketplaceRecoveryFixture) {
+				f.setMarketplace(f.targetSource)
+				f.setPlugin(f.target, adapter.PluginPresent)
+				f.adapter.mutationAnswers["remove-plugin:demo"] = []pluginMutationAnswer{
+					{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: operationErr},
 				}
-			} else if hasMarketplaceRecoveryWrite(fixture.events) {
-				t.Fatalf("invalid uninstall state caused writes: found=%t events=%v", fixture.store.found, fixture.events)
+			},
+		},
+		{
+			name: "remove Plugin unknown",
+			configure: func(f *marketplaceRecoveryFixture) {
+				f.setMarketplace(f.targetSource)
+				f.setPlugin(f.target, adapter.PluginPresent)
+				f.adapter.mutationAnswers["remove-plugin:demo"] = []pluginMutationAnswer{
+					{result: adapter.PluginMutationResult{State: adapter.PluginMutationUnknown}, err: operationErr},
+				}
+			},
+			wantIndeterminate: true,
+		},
+		{
+			name: "unregister marketplace not applied",
+			configure: func(f *marketplaceRecoveryFixture) {
+				f.setMarketplace(f.targetSource)
+				f.adapter.mutationAnswers["unregister-marketplace:"+f.targetSource] = []pluginMutationAnswer{
+					{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: operationErr},
+				}
+			},
+		},
+		{
+			name: "unregister marketplace unknown",
+			configure: func(f *marketplaceRecoveryFixture) {
+				f.setMarketplace(f.targetSource)
+				f.adapter.mutationAnswers["unregister-marketplace:"+f.targetSource] = []pluginMutationAnswer{
+					{result: adapter.PluginMutationResult{State: adapter.PluginMutationUnknown}, err: operationErr},
+				}
+			},
+			wantIndeterminate: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMarketplaceRecoveryFixture(t, OperationUninstall, PhaseRemovingPlugin, false)
+			test.configure(fixture)
+			result, err := fixture.recover()
+			if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, operationErr) || result.Recovered {
+				t.Fatalf("Recover() = %+v, %v", result, err)
+			}
+			if errors.Is(err, ErrIndeterminateState) != test.wantIndeterminate {
+				t.Fatalf("Recover() indeterminate = %t, want %t; err=%v", errors.Is(err, ErrIndeterminateState), test.wantIndeterminate, err)
+			}
+			if !fixture.store.found {
+				t.Fatal("failed uninstall mutation dropped journal")
+			}
+			if fixture.manifests.removed != (domain.PowerRef{}) {
+				t.Fatalf("failed uninstall mutation removed manifest: %+v", fixture.manifests.removed)
 			}
 		})
 	}
@@ -1666,19 +1757,23 @@ func TestRecoverMarketplacePluginRollbackValidatesCompletePreviousArtifactBefore
 	assertRequiredArtifactFailureRetainedState(t, fixture, PhaseRollingBack)
 }
 
-func TestRecoverMarketplacePluginUninstallValidatesRetainedArtifactBeforeCommit(t *testing.T) {
-	// 捕获错误变更：卸载恢复删除 manifest 前不验证仍被 marketplace 保留引用的完整 target artifact。
+func TestRecoverMarketplacePluginUninstallDoesNotValidateArtifact(t *testing.T) {
+	// 捕获错误变更：卸载恢复复验或依赖不可变共享 artifact，而卸载只移除运行时事实，绝不依赖缓存内容。
 	fixture := newMarketplaceRecoveryFixture(t, OperationUninstall, PhaseCommitting, false)
-	fixture.setMarketplace(fixture.targetSource)
-	if err := os.Remove(filepath.Join(fixture.targetSource, ".agents", "plugins", "marketplace.json")); err != nil {
+	if err := os.RemoveAll(fixture.targetSource); err != nil {
 		t.Fatal(err)
 	}
 
 	result, err := fixture.recover()
-	if !errors.Is(err, ErrRecoveryFailed) || !errors.Is(err, ErrIndeterminateState) || result.Recovered || result.Direction != RecoveryCommit {
-		t.Fatalf("Recover() = %+v, %v, want indeterminate uninstall commit", result, err)
+	if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
+		t.Fatalf("Recover() = %+v, %v, want removal commit without artifact", result, err)
 	}
-	assertRequiredArtifactFailureRetainedState(t, fixture, PhaseCommitting)
+	if fixture.store.found {
+		t.Fatal("uninstall recovery left journal")
+	}
+	if fixture.manifests.removed != (domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin}) {
+		t.Fatalf("manifest removed = %+v, want demo Plugin", fixture.manifests.removed)
+	}
 }
 
 func TestRecoverMarketplacePluginUnknownCollectionRetainsDirectionAndState(t *testing.T) {
@@ -1692,7 +1787,7 @@ func TestRecoverMarketplacePluginUnknownCollectionRetainsDirectionAndState(t *te
 		{name: "install persisted rollback", operation: OperationInstall, phase: PhaseRollingBack},
 		{name: "install persisted commit", operation: OperationInstall, phase: PhaseCommitting},
 		{name: "uninstall before direction", operation: OperationUninstall, phase: PhaseRemovingPlugin},
-		{name: "uninstall persisted rollback", operation: OperationUninstall, phase: PhaseRollingBack},
+		{name: "uninstall persisted unregistering", operation: OperationUninstall, phase: PhaseUnregisteringMarketplace},
 		{name: "uninstall persisted commit", operation: OperationUninstall, phase: PhaseCommitting},
 	}
 	for _, test := range tests {

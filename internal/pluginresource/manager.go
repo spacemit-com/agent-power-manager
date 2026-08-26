@@ -36,6 +36,8 @@ type serviceFiles struct {
 	removeAll func(string) error
 }
 
+var _ ArtifactLocator = (*Service)(nil)
+
 // artifactBuilder 在下载后的同一个 artifact 根目录中构建并复验共享派生内容。
 type artifactBuilder interface {
 	Build(domain.PowerRef, string, string) error
@@ -206,6 +208,30 @@ func (service *Service) Lookup(ref domain.PowerRef) (Artifact, error) {
 		return Artifact{}, err
 	}
 	return artifact, nil
+}
+
+// Locate 只构造并返回精确 Ref 的 artifact 身份与预期根，不读取缓存、不复验制品内容。
+func (service *Service) Locate(ref domain.PowerRef) (Artifact, error) {
+	return service.artifactFor(ref)
+}
+
+// Exists 只报告预期根是否为物理目录：缺失返回 false，symlink、非目录或不可读返回错误，绝不校验制品内容。
+func (service *Service) Exists(ref domain.PowerRef) (bool, error) {
+	artifact, err := service.artifactFor(ref)
+	if err != nil {
+		return false, err
+	}
+	info, err := service.files.lstat(artifact.Root)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect plugin artifact root %q: %w", artifact.Root, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false, fmt.Errorf("plugin artifact root %q is not a physical directory: %w", artifact.Root, ErrInvalidArtifact)
+	}
+	return true, nil
 }
 
 // StageFilesystem 将共享 Plugin 叶子原子物化为 filesystem Agent 共用的无版本 staging 目录。

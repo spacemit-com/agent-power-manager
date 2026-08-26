@@ -619,79 +619,134 @@ func marketplacePluginUninstallRequest(fixture *marketplacePluginFixture) Plugin
 	}
 }
 
-func TestMarketplacePluginUninstallRemovesOnlyPlugin(t *testing.T) {
-	fixture := newMarketplacePluginFixture(t)
-	fixture.adapter.marketplaceFact = adapter.MarketplaceFact{
-		Presence: adapter.MarketplacePresent,
-		Name:     fixture.request.Marketplace.Target.Name,
-		Source:   fixture.request.Marketplace.Target.Source,
+func TestMarketplacePluginUninstallRemovesPartialTargetsAndMarketplace(t *testing.T) {
+	applied := pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}
+	tests := []struct {
+		name              string
+		configure         func(*marketplacePluginFixture)
+		wantEvents        []string
+		wantTargetMissing bool
+		wantRemovePlugin  bool
+		wantUnregister    bool
+	}{
+		{
+			name: "both present removes Plugin and marketplace",
+			configure: func(fixture *marketplacePluginFixture) {
+				fixture.adapter.marketplaceFact = adapter.MarketplaceFact{
+					Presence: adapter.MarketplacePresent,
+					Name:     fixture.request.Marketplace.Target.Name,
+					Source:   fixture.request.Marketplace.Target.Source,
+				}
+				fixture.adapter.pluginFacts[fixture.request.Target.ActualName] = adapter.PluginFact{
+					Presence: adapter.PluginPresent, ActualName: fixture.request.Target.ActualName, Selector: fixture.request.Target.Selector,
+				}
+				fixture.adapter.removeAnswers = []pluginMutationAnswer{applied}
+				fixture.adapter.unregisterAnswers = []pluginMutationAnswer{applied}
+			},
+			wantEvents: []string{
+				"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin",
+				"update:unregistering-marketplace", "unregister-marketplace",
+				"update:committing", "remove-manifest", "delete-journal",
+			},
+			wantRemovePlugin: true, wantUnregister: true,
+		},
+		{
+			name: "marketplace only unregisters marketplace",
+			configure: func(fixture *marketplacePluginFixture) {
+				fixture.adapter.marketplaceFact = adapter.MarketplaceFact{
+					Presence: adapter.MarketplacePresent,
+					Name:     fixture.request.Marketplace.Target.Name,
+					Source:   fixture.request.Marketplace.Target.Source,
+				}
+				fixture.adapter.unregisterAnswers = []pluginMutationAnswer{applied}
+			},
+			wantEvents: []string{
+				"inspect-marketplace", "inspect-plugin", "create:removing-plugin",
+				"update:unregistering-marketplace", "unregister-marketplace",
+				"update:committing", "remove-manifest", "delete-journal",
+			},
+			wantTargetMissing: true, wantUnregister: true,
+		},
+		{
+			name: "Plugin only removes Plugin",
+			configure: func(fixture *marketplacePluginFixture) {
+				fixture.adapter.pluginFacts[fixture.request.Target.ActualName] = adapter.PluginFact{
+					Presence: adapter.PluginPresent, ActualName: fixture.request.Target.ActualName, Selector: fixture.request.Target.Selector,
+				}
+				fixture.adapter.removeAnswers = []pluginMutationAnswer{applied}
+			},
+			wantEvents: []string{
+				"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin",
+				"update:unregistering-marketplace",
+				"update:committing", "remove-manifest", "delete-journal",
+			},
+			wantTargetMissing: true, wantRemovePlugin: true,
+		},
+		{
+			name: "both absent removes only manifest",
+			wantEvents: []string{
+				"inspect-marketplace", "inspect-plugin", "remove-manifest",
+			},
+			wantTargetMissing: true,
+		},
 	}
-	fixture.adapter.pluginFacts[fixture.request.Target.ActualName] = adapter.PluginFact{
-		Presence: adapter.PluginPresent, ActualName: fixture.request.Target.ActualName, Selector: fixture.request.Target.Selector,
-	}
-	fixture.adapter.removeAnswers = []pluginMutationAnswer{{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}}
-
-	result, err := fixture.service.UninstallPlugin(context.Background(), marketplacePluginUninstallRequest(fixture))
-	if err != nil || result.TargetMissing {
-		t.Fatalf("UninstallPlugin() = %+v, %v", result, err)
-	}
-	want := []string{
-		"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin",
-		"update:committing", "remove-manifest", "delete-journal",
-	}
-	if !reflect.DeepEqual(fixture.events, want) {
-		t.Fatalf("events = %v, want %v", fixture.events, want)
-	}
-	if len(fixture.adapter.registered) != 0 || len(fixture.adapter.unregistered) != 0 {
-		t.Fatalf("uninstall changed marketplace: register=%+v unregister=%+v", fixture.adapter.registered, fixture.adapter.unregistered)
-	}
-	if got := fixture.adapter.removed; len(got) != 1 || got[0] != fixture.request.Target {
-		t.Fatalf("removed = %+v", got)
-	}
-	if got := fixture.adapter.marketplaceNames; !reflect.DeepEqual(got, []string{"apm-demo"}) {
-		t.Fatalf("inspected marketplace names = %v, want [apm-demo]", got)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newMarketplacePluginFixture(t)
+			if test.configure != nil {
+				test.configure(fixture)
+			}
+			result, err := fixture.service.UninstallPlugin(context.Background(), marketplacePluginUninstallRequest(fixture))
+			if err != nil {
+				t.Fatalf("UninstallPlugin() error = %v", err)
+			}
+			if result.TargetMissing != test.wantTargetMissing {
+				t.Fatalf("TargetMissing = %t, want %t", result.TargetMissing, test.wantTargetMissing)
+			}
+			if !reflect.DeepEqual(fixture.events, test.wantEvents) {
+				t.Fatalf("events = %v, want %v", fixture.events, test.wantEvents)
+			}
+			if fixture.journals.found {
+				t.Fatal("journal remains after successful uninstall")
+			}
+			if fixture.manifests.removed != (domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin}) {
+				t.Fatalf("manifest removed = %+v, want demo Plugin", fixture.manifests.removed)
+			}
+			if len(fixture.adapter.registered) != 0 {
+				t.Fatalf("uninstall registered a marketplace: %+v", fixture.adapter.registered)
+			}
+			var wantRemoved []adapter.PluginTarget
+			if test.wantRemovePlugin {
+				wantRemoved = []adapter.PluginTarget{fixture.request.Target}
+			}
+			if !reflect.DeepEqual(fixture.adapter.removed, wantRemoved) {
+				t.Fatalf("removed = %+v, want %+v", fixture.adapter.removed, wantRemoved)
+			}
+			var wantUnregistered []adapter.MarketplaceTarget
+			if test.wantUnregister {
+				wantUnregistered = []adapter.MarketplaceTarget{fixture.request.Marketplace.Target}
+			}
+			if !reflect.DeepEqual(fixture.adapter.unregistered, wantUnregistered) {
+				t.Fatalf("unregistered = %+v, want %+v", fixture.adapter.unregistered, wantUnregistered)
+			}
+		})
 	}
 }
 
-func TestMarketplacePluginUninstallDoubleAbsentRemovesOnlyManifest(t *testing.T) {
-	fixture := newMarketplacePluginFixture(t)
-	result, err := fixture.service.UninstallPlugin(context.Background(), marketplacePluginUninstallRequest(fixture))
-	if err != nil || !result.TargetMissing {
-		t.Fatalf("UninstallPlugin() = %+v, %v", result, err)
-	}
-	want := []string{"inspect-marketplace", "inspect-plugin", "remove-manifest"}
-	if !reflect.DeepEqual(fixture.events, want) {
-		t.Fatalf("events = %v, want %v", fixture.events, want)
-	}
-	if fixture.journals.found || len(fixture.adapter.removed) != 0 || len(fixture.adapter.registered) != 0 || len(fixture.adapter.unregistered) != 0 {
-		t.Fatalf("missing target caused writes: journal=%v removed=%+v register=%+v unregister=%+v", fixture.journals.found, fixture.adapter.removed, fixture.adapter.registered, fixture.adapter.unregistered)
-	}
-}
-
-func TestMarketplacePluginUninstallPartialOrConflictingStateFailsClosed(t *testing.T) {
+func TestMarketplacePluginUninstallRejectsWrongSourceOrSelector(t *testing.T) {
 	tests := []struct {
 		name            string
 		marketplaceFact adapter.MarketplaceFact
 		pluginFact      adapter.PluginFact
 	}{
 		{
-			name:            "marketplace only",
-			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent},
+			name:            "marketplace source conflict",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Source: "/other/cache"},
 			pluginFact:      adapter.PluginFact{Presence: adapter.PluginAbsent},
 		},
 		{
-			name:            "Plugin only",
-			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent},
-		},
-		{
-			name:            "marketplace source conflict",
-			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Source: "/other/cache"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent},
-		},
-		{
 			name:            "Plugin selector conflict",
-			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent},
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent},
 			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, Selector: "other"},
 		},
 	}
@@ -713,34 +768,62 @@ func TestMarketplacePluginUninstallPartialOrConflictingStateFailsClosed(t *testi
 			if !errors.Is(err, ErrIndeterminateState) || result.TargetMissing {
 				t.Fatalf("UninstallPlugin() = %+v, %v; want indeterminate", result, err)
 			}
-			if fixture.journals.found || fixture.manifests.removed != (domain.PowerRef{}) || len(fixture.adapter.removed) != 0 {
-				t.Fatalf("partial state changed resources: journal=%v manifest=%+v removed=%+v", fixture.journals.found, fixture.manifests.removed, fixture.adapter.removed)
+			if fixture.journals.found || fixture.manifests.removed != (domain.PowerRef{}) ||
+				len(fixture.adapter.removed) != 0 || len(fixture.adapter.unregistered) != 0 {
+				t.Fatalf("conflicting state changed resources: journal=%v manifest=%+v removed=%+v unregistered=%+v",
+					fixture.journals.found, fixture.manifests.removed, fixture.adapter.removed, fixture.adapter.unregistered)
 			}
 		})
 	}
 }
 
 func TestMarketplacePluginUninstallMutationDirections(t *testing.T) {
-	operationErr := errors.New("remove failed")
+	operationErr := errors.New("CLI write failed")
+	applied := pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}}
 	tests := []struct {
 		name              string
-		answer            pluginMutationAnswer
+		removeAnswer      pluginMutationAnswer
+		unregisterAnswer  pluginMutationAnswer
 		wantFound         bool
 		wantPhase         Phase
 		wantIndeterminate bool
-		wantTail          []string
+		wantEvents        []string
 	}{
 		{
-			name: "not-applied", answer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: operationErr},
-			wantTail: []string{"remove-plugin", "update:rolling-back", "delete-journal"},
+			name:         "remove Plugin not applied",
+			removeAnswer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: operationErr},
+			wantFound:    true, wantPhase: PhaseRemovingPlugin,
+			wantEvents: []string{"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin"},
 		},
 		{
-			name: "unknown", answer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationUnknown}, err: operationErr},
-			wantFound: true, wantPhase: PhaseRemovingPlugin, wantIndeterminate: true, wantTail: []string{"remove-plugin"},
+			name:         "remove Plugin unknown",
+			removeAnswer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationUnknown}, err: operationErr},
+			wantFound:    true, wantPhase: PhaseRemovingPlugin, wantIndeterminate: true,
+			wantEvents: []string{"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin"},
 		},
 		{
-			name: "applied plus error", answer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, err: operationErr},
-			wantFound: true, wantPhase: PhaseCommitting, wantTail: []string{"remove-plugin", "update:committing"},
+			name:         "remove Plugin applied with error",
+			removeAnswer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, err: operationErr},
+			wantFound:    true, wantPhase: PhaseUnregisteringMarketplace,
+			wantEvents: []string{"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin", "update:unregistering-marketplace"},
+		},
+		{
+			name:             "unregister marketplace not applied",
+			unregisterAnswer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationNotApplied}, err: operationErr},
+			wantFound:        true, wantPhase: PhaseUnregisteringMarketplace,
+			wantEvents: []string{"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin", "update:unregistering-marketplace", "unregister-marketplace"},
+		},
+		{
+			name:             "unregister marketplace unknown",
+			unregisterAnswer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationUnknown}, err: operationErr},
+			wantFound:        true, wantPhase: PhaseUnregisteringMarketplace, wantIndeterminate: true,
+			wantEvents: []string{"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin", "update:unregistering-marketplace", "unregister-marketplace"},
+		},
+		{
+			name:             "unregister marketplace applied with error",
+			unregisterAnswer: pluginMutationAnswer{result: adapter.PluginMutationResult{State: adapter.PluginMutationApplied}, err: operationErr},
+			wantFound:        true, wantPhase: PhaseCommitting,
+			wantEvents: []string{"inspect-marketplace", "inspect-plugin", "create:removing-plugin", "remove-plugin", "update:unregistering-marketplace", "unregister-marketplace", "update:committing"},
 		},
 	}
 	for _, test := range tests {
@@ -752,7 +835,16 @@ func TestMarketplacePluginUninstallMutationDirections(t *testing.T) {
 			fixture.adapter.pluginFacts[fixture.request.Target.ActualName] = adapter.PluginFact{
 				Presence: adapter.PluginPresent, ActualName: fixture.request.Target.ActualName, Selector: fixture.request.Target.Selector,
 			}
-			fixture.adapter.removeAnswers = []pluginMutationAnswer{test.answer}
+			removeAnswer := test.removeAnswer
+			if removeAnswer.result.State == "" {
+				removeAnswer = applied
+			}
+			unregisterAnswer := test.unregisterAnswer
+			if unregisterAnswer.result.State == "" {
+				unregisterAnswer = applied
+			}
+			fixture.adapter.removeAnswers = []pluginMutationAnswer{removeAnswer}
+			fixture.adapter.unregisterAnswers = []pluginMutationAnswer{unregisterAnswer}
 
 			_, err := fixture.service.UninstallPlugin(context.Background(), marketplacePluginUninstallRequest(fixture))
 			if !errors.Is(err, operationErr) || errors.Is(err, ErrIndeterminateState) != test.wantIndeterminate {
@@ -761,12 +853,11 @@ func TestMarketplacePluginUninstallMutationDirections(t *testing.T) {
 			if fixture.journals.found != test.wantFound || test.wantFound && fixture.journals.journal.Phase != test.wantPhase {
 				t.Fatalf("journal = found %v phase %q, want %v/%q", fixture.journals.found, fixture.journals.journal.Phase, test.wantFound, test.wantPhase)
 			}
-			got := fixture.events[len(fixture.events)-len(test.wantTail):]
-			if !reflect.DeepEqual(got, test.wantTail) {
-				t.Fatalf("events tail = %v, want %v; events=%v", got, test.wantTail, fixture.events)
+			if !reflect.DeepEqual(fixture.events, test.wantEvents) {
+				t.Fatalf("events = %v, want %v", fixture.events, test.wantEvents)
 			}
-			if fixture.manifests.removed != (domain.PowerRef{}) || len(fixture.adapter.registered) != 0 || len(fixture.adapter.unregistered) != 0 {
-				t.Fatalf("failed uninstall changed manifest/marketplace: manifest=%+v register=%+v unregister=%+v", fixture.manifests.removed, fixture.adapter.registered, fixture.adapter.unregistered)
+			if fixture.manifests.removed != (domain.PowerRef{}) {
+				t.Fatalf("failed uninstall changed manifest: %+v", fixture.manifests.removed)
 			}
 		})
 	}

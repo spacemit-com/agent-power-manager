@@ -276,7 +276,8 @@ func (s *Service) newLocalMarketplacePluginInstallJournal(request PluginInstallR
 	}, nil
 }
 
-// uninstallLocalMarketplacePlugin 只移除 manifest 所指向的精确 Plugin；正常卸载不得改变或重新注册 marketplace。
+// uninstallLocalMarketplacePlugin 以提交为导向移除 Plugin 与专用 marketplace：先复核两个事实，
+// 双缺省直接清理 manifest；否则按观察到的 pre-state 记录 presence bit 后幂等移除残留目标，绝不回滚或重新注册。
 func (s *Service) uninstallLocalMarketplacePlugin(ctx context.Context, request PluginUninstallRequest) (UninstallResult, error) {
 	result := UninstallResult{}
 	marketplaceFact, err := request.MarketplaceAdapter.InspectMarketplace(ctx, request.Marketplace.Name)
@@ -287,8 +288,12 @@ func (s *Service) uninstallLocalMarketplacePlugin(ctx context.Context, request P
 	if err != nil {
 		return result, fmt.Errorf("inspect Plugin before uninstall: %w", err)
 	}
+	marketplacePresent := marketplaceFact.Presence == adapter.MarketplacePresent
 	marketplaceAbsent := marketplaceFact.Presence == adapter.MarketplaceAbsent
+	pluginPresent := pluginFact.Presence == adapter.PluginPresent
 	pluginAbsent := pluginFact.Presence == adapter.PluginAbsent
+
+	// 双缺省无需 journal：只清理残留 manifest，且不产生任何 Agent 写操作。
 	if marketplaceAbsent && pluginAbsent {
 		result.TargetMissing = true
 		if err := s.manifests.Remove(request.Agent, domain.PowerTypePlugin, request.Power.Name); err != nil {
@@ -296,21 +301,62 @@ func (s *Service) uninstallLocalMarketplacePlugin(ctx context.Context, request P
 		}
 		return result, nil
 	}
-	if marketplaceFact.Presence != adapter.MarketplacePresent || marketplaceFact.Name != request.Marketplace.Name || marketplaceFact.Source != request.Marketplace.Source ||
-		pluginFact.Presence != adapter.PluginPresent || pluginFact.ActualName != request.Target.ActualName || pluginFact.Selector != request.Target.Selector {
+	// 任何现存事实必须精确匹配，否则在 journal 创建前失败闭合，保证零写入。
+	if marketplacePresent && (marketplaceFact.Name != request.Marketplace.Name || marketplaceFact.Source != request.Marketplace.Source) {
 		return result, fmt.Errorf("marketplace Plugin uninstall pre-state is partial or conflicting: %w", ErrIndeterminateState)
 	}
+	if pluginPresent && (pluginFact.ActualName != request.Target.ActualName || pluginFact.Selector != request.Target.Selector) {
+		return result, fmt.Errorf("marketplace Plugin uninstall pre-state is partial or conflicting: %w", ErrIndeterminateState)
+	}
+	if (!marketplaceAbsent && !marketplacePresent) || (!pluginAbsent && !pluginPresent) {
+		return result, fmt.Errorf("marketplace Plugin uninstall pre-state is indeterminate: %w", ErrIndeterminateState)
+	}
+	result.TargetMissing = !pluginPresent || !marketplacePresent
 
-	journal, err := s.newLocalMarketplacePluginUninstallJournal(request)
+	journal, err := s.newLocalMarketplacePluginUninstallJournal(request, pluginPresent, marketplacePresent)
 	if err != nil {
 		return result, err
 	}
 	if err := s.journals.Create(journal); err != nil {
 		return result, fmt.Errorf("create marketplace Plugin uninstall journal: %w", err)
 	}
-	mutation, mutationErr := request.Adapter.Remove(ctx, request.Target)
-	switch mutation.State {
-	case adapter.PluginMutationApplied:
+
+	if pluginPresent {
+		mutation, mutationErr := request.Adapter.Remove(ctx, request.Target)
+		switch mutation.State {
+		case adapter.PluginMutationApplied:
+		case adapter.PluginMutationNotApplied:
+			return result, pluginMutationError("remove Plugin", mutationErr)
+		case adapter.PluginMutationUnknown:
+			return result, indeterminatePluginMutation("remove Plugin", mutationErr)
+		default:
+			return result, indeterminatePluginMutation(fmt.Sprintf("remove Plugin returned state %q", mutation.State), mutationErr)
+		}
+		journal.Phase = PhaseUnregisteringMarketplace
+		if err := s.journals.Update(journal); err != nil {
+			return result, errors.Join(mutationErr, fmt.Errorf("persist marketplace Plugin uninstall unregister intent: %w", err))
+		}
+		if mutationErr != nil {
+			return result, mutationErr
+		}
+	} else {
+		journal.Phase = PhaseUnregisteringMarketplace
+		if err := s.journals.Update(journal); err != nil {
+			return result, fmt.Errorf("persist marketplace Plugin uninstall unregister intent: %w", err)
+		}
+	}
+
+	if marketplacePresent {
+		mutation, mutationErr := request.MarketplaceAdapter.UnregisterMarketplace(ctx, *request.Marketplace)
+		switch mutation.State {
+		case adapter.PluginMutationApplied:
+		case adapter.PluginMutationNotApplied:
+			return result, pluginMutationError("unregister marketplace", mutationErr)
+		case adapter.PluginMutationUnknown:
+			return result, indeterminatePluginMutation("unregister marketplace", mutationErr)
+		default:
+			return result, indeterminatePluginMutation(fmt.Sprintf("unregister marketplace returned state %q", mutation.State), mutationErr)
+		}
 		journal.Phase = PhaseCommitting
 		if err := s.journals.Update(journal); err != nil {
 			return result, errors.Join(mutationErr, fmt.Errorf("persist marketplace Plugin uninstall committing: %w", err))
@@ -318,13 +364,13 @@ func (s *Service) uninstallLocalMarketplacePlugin(ctx context.Context, request P
 		if mutationErr != nil {
 			return result, mutationErr
 		}
-	case adapter.PluginMutationNotApplied:
-		return result, s.finishPluginRollbackWithoutMutation(journal, pluginMutationError("remove Plugin", mutationErr))
-	case adapter.PluginMutationUnknown:
-		return result, indeterminatePluginMutation("remove Plugin", mutationErr)
-	default:
-		return result, indeterminatePluginMutation(fmt.Sprintf("remove Plugin returned state %q", mutation.State), mutationErr)
+	} else {
+		journal.Phase = PhaseCommitting
+		if err := s.journals.Update(journal); err != nil {
+			return result, fmt.Errorf("persist marketplace Plugin uninstall committing: %w", err)
+		}
 	}
+
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -337,7 +383,7 @@ func (s *Service) uninstallLocalMarketplacePlugin(ctx context.Context, request P
 	return result, nil
 }
 
-func (s *Service) newLocalMarketplacePluginUninstallJournal(request PluginUninstallRequest) (Journal, error) {
+func (s *Service) newLocalMarketplacePluginUninstallJournal(request PluginUninstallRequest, pluginPresent, marketplacePresent bool) (Journal, error) {
 	id, err := s.newID()
 	if err != nil {
 		return Journal{}, err
@@ -353,9 +399,11 @@ func (s *Service) newLocalMarketplacePluginUninstallJournal(request PluginUninst
 		Plugin: &PluginJournalPayload{
 			Deployment:    domain.PluginDeploymentMarketplace,
 			Target:        request.Target,
-			TargetPresent: true,
+			TargetPresent: pluginPresent,
 			Marketplace: &PluginMarketplaceJournalPayload{
-				Name: request.Marketplace.Name, TargetSource: request.Marketplace.Source,
+				Name:          request.Marketplace.Name,
+				TargetSource:  request.Marketplace.Source,
+				TargetPresent: marketplacePresent,
 			},
 		},
 	}, nil
