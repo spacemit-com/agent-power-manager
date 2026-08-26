@@ -15,7 +15,7 @@ const (
 )
 
 // Prepare 校验源并确定性构建各资源内容，计算 MD5 并组装 Content；
-// Agent 保留原始 YAML，其余类型执行确定性归档或 JCS 规范化，全程不写临时文件。
+// Skill/Plugin/Agent 执行确定性归档，MCP 执行 JCS 规范化，全程不写临时文件。
 func Prepare(ctx context.Context, request Request) (Content, error) {
 	message := strings.TrimSpace(request.Message)
 	if message == "" {

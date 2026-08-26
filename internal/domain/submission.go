@@ -31,7 +31,7 @@ type SubmissionRequest struct {
 	Version        string
 	Description    string
 	Message        string
-	ContentType    string // "application/gzip"、"application/json" 或 "application/yaml"
+	ContentType    string // "application/gzip" 或 "application/json"
 	Content        []byte
 	ContentMD5     string
 	IdempotencyKey string
