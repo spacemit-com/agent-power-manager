@@ -295,6 +295,22 @@ func assertUnsafeNoDownloadResidue(t *testing.T, err error, destination string) 
 	assertNoSiblingTemps(t, destination)
 }
 
+// assertInvalidAgentNoDownloadResidue 断言 Agent 语义校验失败归类为
+// domain.ErrInvalidAgent（与 Remote provider 对齐），且不留下任何可见输出。
+func assertInvalidAgentNoDownloadResidue(t *testing.T, err error, destination string) {
+	t.Helper()
+	if !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("download error = %v, want ErrInvalidAgent classification", err)
+	}
+	if errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("download error = %v, must not classify semantic failure as ErrUnsafeContent", err)
+	}
+	if _, statErr := os.Lstat(destination); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination exists after semantic rejection: %v", statErr)
+	}
+	assertNoSiblingTemps(t, destination)
+}
+
 func assertNoSiblingTemps(t *testing.T, destination string) {
 	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(filepath.Dir(destination), "."+filepath.Base(destination)+".tmp-*"))

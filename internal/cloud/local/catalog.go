@@ -338,7 +338,9 @@ func (c *Client) loadCatalogAgent(ctx context.Context, ref domain.PowerRef) (str
 	}
 	validated, err := agentartifact.Validate(entries, &ref)
 	if err != nil {
-		return "", nil, nil, unsafeContent("validate Local Agent snapshot %s/%s: %v", ref.Name, ref.Version, err)
+		// agentartifact.Validate 的语义失败已包裹 domain.ErrInvalidAgent，必须原样保留
+		// 在错误链中（与 Remote provider 对齐），不得再归类为 cloud.ErrUnsafeContent。
+		return "", nil, nil, fmt.Errorf("validate Local Agent snapshot %s/%s: %w", ref.Name, ref.Version, err)
 	}
 	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
 	return validated.Config.Agent.Description, contents, snapshot, err

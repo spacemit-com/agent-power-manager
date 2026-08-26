@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"apm/internal/cloud"
@@ -160,7 +161,7 @@ func TestLocalDownloadAgentRejectsInvalidAvatarWithoutDestination(t *testing.T) 
 	}
 	destination := filepath.Join(t.TempDir(), "agent")
 	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
-	assertUnsafeNoDownloadResidue(t, err, destination)
+	assertInvalidAgentNoDownloadResidue(t, err, destination)
 }
 
 func TestLocalDownloadAgentRejectsExtraRootFileWithoutDestination(t *testing.T) {
@@ -174,7 +175,22 @@ func TestLocalDownloadAgentRejectsExtraRootFileWithoutDestination(t *testing.T) 
 	}
 	destination := filepath.Join(t.TempDir(), "agent")
 	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
-	assertUnsafeNoDownloadResidue(t, err, destination)
+	assertInvalidAgentNoDownloadResidue(t, err, destination)
+}
+
+func TestLocalDownloadAgentRejectsIdentityMismatchWithoutDestination(t *testing.T) {
+	root := t.TempDir()
+	writeLocalAgentFixture(t, root, func(t *testing.T, source string) {
+		mismatched := strings.Replace(localAgentFixtureYAML, "name: demo", "name: other", 1)
+		writeTestBytes(t, filepath.Join(source, "agent.yaml"), []byte(mismatched))
+	})
+	client, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "agent")
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+	assertInvalidAgentNoDownloadResidue(t, err, destination)
 }
 
 func TestLocalDownloadAgentCancellationBeforePublishLeavesNoDestination(t *testing.T) {
