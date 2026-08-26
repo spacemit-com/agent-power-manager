@@ -306,6 +306,43 @@ func TestValidateRejectsRootClosedSetViolations(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsMultiSegmentPathsOutsideClosedSet 验证根闭集同样适用于多段路径：
+// 首段既非 agent.yaml 也非 assets 的条目（即使没有父目录条目）必须被拒绝；
+// assets/ 下的深层文件（无需父目录条目）仍然通过。
+func TestValidateRejectsMultiSegmentPathsOutsideClosedSet(t *testing.T) {
+	yaml := minimalAgentYAML("bibit-internal-42", "demo-agent", "v1.0.0")
+	cases := map[string][]agentartifact.Entry{
+		"docs/readme.md without parent entry": {
+			fileEntry("agent.yaml", yaml),
+			fileEntry("docs/readme.md", []byte("x")),
+		},
+		"assets2/x without parent entry": {
+			fileEntry("agent.yaml", yaml),
+			fileEntry("assets2/x", []byte("x")),
+		},
+		"deep outside assets": {
+			fileEntry("agent.yaml", yaml),
+			fileEntry("docs/sub/readme.md", []byte("x")),
+		},
+	}
+	for name, entries := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := agentartifact.Validate(entries, nil); !errors.Is(err, domain.ErrInvalidAgent) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidAgent", err)
+			}
+		})
+	}
+	t.Run("assets subpath without parent entry", func(t *testing.T) {
+		entries := []agentartifact.Entry{
+			fileEntry("agent.yaml", yaml),
+			fileEntry("assets/deep/nested/file.txt", []byte("x")),
+		}
+		if _, err := agentartifact.Validate(entries, nil); err != nil {
+			t.Fatalf("Validate() error = %v, want pass", err)
+		}
+	})
+}
+
 // TestValidateRejectsExecutableFiles 验证可执行普通文件被拒绝。
 func TestValidateRejectsExecutableFiles(t *testing.T) {
 	yaml := minimalAgentYAML("bibit-internal-42", "demo-agent", "v1.0.0")

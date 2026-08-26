@@ -78,6 +78,11 @@ func Validate(entries []Entry, ref *domain.PowerRef) (Snapshot, error) {
 			default:
 				failures = append(failures, agentError("root entry %q is outside the closed set", entry.Path))
 			}
+		} else {
+			first, _, _ := strings.Cut(entry.Path, "/")
+			if first != "agent.yaml" && first != "assets" {
+				failures = append(failures, agentError("entry %q is outside the root closed set", entry.Path))
+			}
 		}
 		index[entry.Path] = entry
 	}
