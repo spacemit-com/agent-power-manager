@@ -92,13 +92,13 @@ classDiagram
     class CallerPrivateDirectory {
         <<Skill or Plugin destination>>
     }
-    class CallerPrivateAgentFile {
-        <<agent.yaml destination>>
+    class CallerPrivateAgentDirectory {
+        <<Agent 目录 destination（agent.yaml + assets/）>>
     }
     CatalogSource --> CallerCatalogFile : writes exact opaque JSON bytes
     SkillSource --> CallerPrivateDirectory : writes verified Skill tree
     PluginSource --> CallerPrivateDirectory : writes canonical Plugin tree
-    AgentSource --> CallerPrivateAgentFile : writes original YAML bytes
+    AgentSource --> CallerPrivateAgentDirectory : writes verified Agent directory tree
 
     class MCPResource {
         +SchemaVersion int

@@ -20,7 +20,7 @@ flowchart TD
 
     Type -->|Agent| AgentFact[ResolveAgent + manifest fact]
     AgentFact -->|同版本| Unchanged
-    AgentFact -->|变更| AgentCache[PrepareAgent entry；hit/miss 均校验 agent.yaml 身份]
+    AgentFact -->|变更| AgentCache[PrepareAgent entry；hit/miss 均校验完整 Agent 目录]
     AgentCache --> AgentTx[filesystem InstallAgent transaction]
 
     Type -->|MCP| MCPFact[ResolveMCP + manifest + CLI Inspect]

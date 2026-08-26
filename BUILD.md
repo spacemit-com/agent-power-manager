@@ -72,11 +72,11 @@ Catalog Repository 的平台边界独立于下文 Remote content 发布能力，
 四类 Power 通过同一 `cloud.Client` 获取，但保留各自的内容边界；四个内容方法都接收由同一 Catalog Snapshot 解析出的完整 `CatalogEntry`，禁止按 `PowerRef` 二次回源拼装 metadata：
 
 - Skill：Local 复制 canonical fixture 目录；Remote 获取 `application/gzip`，先验证精确 metadata、size 与 32 位小写 MD5，再安全解包到调用方私有目录。版本化 cache 的命中、下载临时目标、原子发布和公共 staging 全部由 Cache 的 `PrepareSkill` 管理。
-- Agent：Local/Remote 都把单个 `agent.yaml` 原始字节写到调用方私有文件；Remote content type 为 `application/yaml`。版本化 cache 与 staging 由 `PrepareAgent` 管理，安装前仍由 Bibit Agent Adapter 校验 YAML 身份和最小 schema。
+- Agent：Local/Remote 都把资源根目录（`agent.yaml` + 可选 `assets/`）的完整目录树写到调用方私有目录；Remote content type 为 `application/gzip`，解包后执行权威 Agent 目录校验（[ADR-023](ivory-tower/adr/ADR-023-package-agent-with-assets.md)，云端契约见 APC ADR-006）。版本化 cache 与 staging 由 `PrepareAgent` 管理，安装前仍由 Bibit Agent Adapter 对完整目录执行同一权威校验。
 - MCP：Local/Remote 都严格解码 `application/json` 并返回克隆的 `MCPServer` 领域对象，不建立文件 cache；公共 HTTP endpoint 只允许无 userinfo 的绝对 HTTPS URL。
 - Plugin：Local fixture 与 Remote 解包结果只包含 `apc-plugin.json + skills/...`。`apc-plugin.json` 是唯一权威索引；Plugin Resource 严格复验 canonical 闭集，先确定性生成 Codex、Claude、Hermes 原生配置，再由 Codex/Claude marketplace builder 读取并复验对应原生 manifest 后生成 marketplace，最后一次原子发布共享 artifact。当前权威决策是 [ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)；[ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅保留为被取代的历史背景。
 
-Remote 的精确 content 受 20 MiB 客户端上限约束；Skill/Plugin 解包还限制为总大小 100 MiB、单文件 10 MiB、最多 1,000 个节点、深度 16、路径 255 字节和 100 倍解压倍率，并拒绝路径逃逸、链接、特殊节点、嵌套归档扩展名以及已知归档/可执行文件签名。Linux 与 macOS 支持完整的 descriptor-relative Skill/Plugin 目录发布、Agent 文件发布和 MCP 临时 staging；FreeBSD 支持 descriptor-relative staging、Agent 文件发布和 MCP，但 Skill/Plugin 的目录发布以 `ENOTSUP` fail closed。Windows 及其它未实现平台的 Remote content 操作 fail closed；catalog 中存在条目不因此被描述为该平台可安装。
+Remote 的精确 content 受 20 MiB 客户端上限约束；Skill/Plugin/Agent 解包还限制为总大小 100 MiB、单文件 10 MiB、最多 1,000 个节点、深度 16、路径 255 字节和 100 倍解压倍率，并拒绝路径逃逸、链接、特殊节点、嵌套归档扩展名以及已知归档/可执行文件签名。Linux 与 macOS 支持完整的 descriptor-relative Skill/Plugin/Agent 目录发布和 MCP 临时 staging；FreeBSD 支持 descriptor-relative staging 和 MCP，但 Skill/Plugin/Agent 的目录发布以 `ENOTSUP` fail closed。Windows 及其它未实现平台的 Remote content 操作 fail closed；catalog 中存在条目不因此被描述为该平台可安装。
 
 Remote descriptor-relative 操作要求 destination/MCP 临时目录链上的普通物理目录都由 root 或当前 euid 拥有，且 `(mode & 0022) == 0`。root-owned sticky 目录可出现在受信链中；继续遍历时，其直接子目录必须由当前 euid 拥有且仍不可被 group/other 写入，后续目录继续遵守 owner/mode 约束。root-owned sticky 目录本身是终点时，直接条目创建使用独占语义，发布使用 no-replace 语义。该边界不隔离能够以同一 euid 主动篡改目录的进程，device/inode 复验只用于发现变化，不能提升为跨同一用户进程的安全隔离保证。
 
@@ -154,7 +154,7 @@ apm submission get <submission-id> [--output text|json]
 - Skill：原始目录，身份和描述来自 `SKILL.md` frontmatter，content 是确定性 tar.gz。
 - Plugin：原始目录，身份和描述来自 `apc-plugin.json`，content 是确定性 tar.gz。
 - MCP：单个完整 v1 `MCP.json`，包含 `schema_version/name/version/description/definition`，完整资源经 RFC 8785 JCS 规范化。
-- Agent：单个原始 `agent.yaml`，不打包、不重序列化；身份和描述分别来自 `agent.id`/`agent.version`/`agent.description`。
+- Agent：资源根目录，身份和描述分别来自 `agent.name`/`agent.version`/`agent.description`，content 是确定性 tar.gz（根含 `agent.yaml` 与可选 `assets/`）。
 
 `validate` 完全离线，只接收 path、type 与可选 JSON 输出，也不读取 API Key、访问网络。`submit` 对四类 Power 统一要求 trim 后非空的 `--message`；校验通过后构造 content、计算原始字节 MD5 并经 `POST /api/v1/submissions` 上传，每次逻辑提交生成 UUID 幂等键。message 属于 Submission，不写入 Power content，也不参与 MD5。身份校验沿 domain parser → cache → adapter `ValidateArtifact` → recovery 四层加固。
 
@@ -210,7 +210,7 @@ Fix 是显式恢复命令。它不接受位置参数或 Agent/Type 等命令专�
 
 没有活动 journal 时普通模式静默成功，verbose 模式在 stderr 输出 Debug；恢复成功时输出 `transaction recovered` Warn。损坏、未知或不可读 journal 无法自动修复，Fix 会保留原文件和现场、记录 Error 并非零退出；不要手工删除 journal，除非已人工确认事务状态和数据所有权。
 
-Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、`SnapshotLocked` 和串行 Transaction；Snapshot 一次解析出精确 `CatalogEntry`，该 entry 的 Ref 交给 Adapter/Transaction/manifest，完整 metadata 则原样传给四类内容边界。Skill 与 Agent 分别由 Cache 的 `PrepareSkill(entry)`/`PrepareAgent(entry)` 管理下载、版本化 cache 和 staging（Agent 为单文件、原样字节发布，仅 Bibit），MCP 通过 `GetMCP(entry)` 读取定义并调用目标 Agent CLI。Plugin 当前语义见 [Feature 020](ivory-tower/features/020-cloud-client-providers/spec.md)、[ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 与 [ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md)：Plugin Resource 通过 `DownloadPlugin(entry, destination)` 下载 canonical APC Plugin，从 `apc-plugin.json` 派生并原子发布共享制品，再由目标 Agent 消费 marketplace 或 filesystem staging。只有成功 Release 后 CLI 才渲染。
+Install 已实现完整生命周期：显式版本必须是规范 `vMAJOR.MINOR.PATCH`，Name 按区分大小写的原始值精确匹配；同名候选跨 Type 时必须在版本选择前提供 `--type`。Install 从一次 Acquire 开始，持锁完成 Recover、Warn、Agent 刷新、`SnapshotLocked` 和串行 Transaction；Snapshot 一次解析出精确 `CatalogEntry`，该 entry 的 Ref 交给 Adapter/Transaction/manifest，完整 metadata 则原样传给四类内容边界。Skill 与 Agent 分别由 Cache 的 `PrepareSkill(entry)`/`PrepareAgent(entry)` 管理下载、版本化 cache 和 staging（Agent 为完整目录发布，仅 Bibit），MCP 通过 `GetMCP(entry)` 读取定义并调用目标 Agent CLI。Plugin 当前语义见 [Feature 020](ivory-tower/features/020-cloud-client-providers/spec.md)、[ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 与 [ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md)：Plugin Resource 通过 `DownloadPlugin(entry, destination)` 下载 canonical APC Plugin，从 `apc-plugin.json` 派生并原子发布共享制品，再由目标 Agent 消费 marketplace 或 filesystem staging。只有成功 Release 后 CLI 才渲染。
 
 四类 Power 的安装入口状态语义由 [Feature 025](ivory-tower/features/025-unified-lifecycle-state-semantics/spec.md) 与 [ADR-022](ivory-tower/adr/ADR-022-unify-lifecycle-entry-state-semantics.md) 统一：同版本在目标探测前直接返回 `unchanged`；不同版本且目标完整时原子替换为 `upgraded`/`downgraded`；不同版本且目标缺失或不完整时记录一次 `installed power target is missing` warning，先经 repair transaction 清理仍存在的受管残留并删除旧清单，再以首次安装语义安装新版本，成功只输出 `installed`；无清单但存在运行目标时拒绝接管，唯一公共业务原因是 `adapter.ErrTargetConflict`。显式规范 Type/Name/Version 在所有目标 Agent 清单精确命中时四类 Power 都直接返回 `unchanged`，不访问 catalog、Cloud、cache、Plugin Resource、Adapter 或 Transaction。
 
@@ -246,14 +246,14 @@ MCP 支持 Bibit、Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互�
 
 | Agent ID | Skill | MCP | Plugin | Agent |
 | --- | --- | --- | --- | --- |
-| `bibit` | `<BIANBU_AGENT_HOME>/skills/<name>` | 独立 `bianbu-agent mcp` Adapter | `<BIANBU_AGENT_HOME>/plugins/<name>`；目录发布，不调用 Plugin CLI | `<BIANBU_AGENT_HOME>/agents/<agent.id>/agent.yaml`；单文件、原样字节 |
+| `bibit` | `<BIANBU_AGENT_HOME>/skills/<name>` | 独立 `bianbu-agent mcp` Adapter | `<BIANBU_AGENT_HOME>/plugins/<name>`；目录发布，不调用 Plugin CLI | `<BIANBU_AGENT_HOME>/agents/<name>`；完整目录（`agent.yaml` + `assets/`） |
 | `claude-code` | `<CLAUDE_CONFIG_DIR>/skills/<name>` | Claude CLI user scope | 共享制品中的 Claude 本地 marketplace | 不支持 |
 | `codex` | `<CODEX_HOME>/skills/<name>` | Codex CLI | 共享制品中的 Codex 本地 marketplace | 不支持 |
 | `hermes-agent` | `<HERMES_HOME>/skills/<name>` | Hermes CLI | `<HERMES_HOME>/plugins/<name>`；Hermes CLI enable/disable | 不支持 |
 
 Bibit profile 根优先使用 `BIANBU_AGENT_HOME`，未设置时为 `<有效 HOME>/.bianbu-agent`；根目录存在且为目录才进入本次命令的已安装 Agent 快照。Bibit 接口与路径约束见 [Feature 018](ivory-tower/features/018-bibit-agent/spec.md)，当前 Plugin canonical/派生边界见 [ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
-Agent Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-power/spec.md) 与 [ADR-015](ivory-tower/adr/ADR-015-agent-power-bibit.md)）：Local canonical fixture 布局为 `agents/<name>/<version>/agent.yaml`，Remote exact content 为 `application/yaml` 原始字节。Cache 的 `PrepareAgent` 将单个 `agent.yaml` 按精确版本发布到 `cache/agents/<name>/<version>/agent.yaml` 并物化 staging；本地安装到 `<bibit根>/agents/<agent.id>/agent.yaml`（单文件、原样字节，本地不版本化，版本仅记 manifest）。`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`；`list --installed` 省略 `--agent` 时默认 `bibit`；`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`。显式 `--agent bibit` 允许，其它值（含 `all`）报错。例如 `./apm install bianbu-agent-default=v1.0.0 --type agent`。
+Agent Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-power/spec.md) 与 [ADR-015](ivory-tower/adr/ADR-015-agent-power-bibit.md)；当前打包与目录契约见 [Feature 026](ivory-tower/features/026-agent-package-assets/spec.md) 与 [ADR-023](ivory-tower/adr/ADR-023-package-agent-with-assets.md)，云端契约见 APC ADR-006）：Agent 权威 content 是确定性 `.tar.gz`，归档根即资源根（必需 `agent.yaml` + 可选 `assets/`，无版本包裹目录）；Local canonical fixture 布局为 `agents/<name>/<version>/agent.yaml + assets/`，Remote exact content 为 `application/gzip` 归档，解包后执行权威 Agent 目录校验。Cache 的 `PrepareAgent` 把完整目录按精确版本发布到 `cache/agents/<name>/<version>` 并物化 `staging/agents/<name>`；本地安装到 `<bibit根>/agents/<name>`（完整目录、不含版本层级，版本仅记 manifest）。外部身份使用 `agent.name`，`agent.id` 仅供 Bibit 内部区分。`agent.metadata.avatar` 可选：存在时必须引用 `assets/` 下真实 PNG 普通文件——大小 ≤ 1 MiB、宽高均为 128..1024 像素且为正方形。`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`；`list --installed` 省略 `--agent` 时默认 `bibit`；`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`。显式 `--agent bibit` 允许，其它值（含 `all`）报错。例如 `./apm install bianbu-agent-default=v1.0.0 --type agent`。
 
 ### Plugin 共享 artifact 与操作顺序
 

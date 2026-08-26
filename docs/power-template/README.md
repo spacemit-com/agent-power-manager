@@ -16,10 +16,10 @@
 | 版本 | 严格 `vMAJOR.MINOR.PATCH`（semver strict，拒绝 prerelease 与 metadata） |
 | 描述 | trim 后非空 |
 | 物理安全 | 拒绝符号链接、硬链接（link count ≠ 1）、设备/FIFO/socket 等非普通文件；读取前后校验 inode 与大小一致 |
-| 内容安全 | 拒绝可执行二进制、嵌套压缩包、非 UTF-8、NUL 与控制字符 |
+| 内容安全 | 拒绝可执行二进制、嵌套压缩包、非 UTF-8、NUL 与控制字符（Agent 的 `assets/` 允许二进制普通文件，仅 `agent.yaml` 走文本内容策略） |
 | 上传上限 | 打包后 ≤ 20 MiB；gzip 类型另校验解压倍率 ≤ 100× |
 
-源目录阈值（Skill/Plugin）：总量 ≤ 100 MiB、单文件 ≤ 10 MiB、≤ 1000 文件、深度 ≤ 16、路径 ≤ 255 字节。
+源目录阈值（Skill/Plugin/Agent）：总量 ≤ 100 MiB、单文件 ≤ 10 MiB、≤ 1000 节点、深度 ≤ 16、路径 ≤ 255 字节。
 
 ## 各类型专属格式检验
 
@@ -43,11 +43,14 @@
   - stdio：`command` 非空，禁止 `url`；`args` 可选。
   - http：`url` 为绝对 HTTPS 地址（host 非空、无 userinfo），禁止 `command`/`args`。
 
-### Agent（单个原始 `agent.yaml`）
+### Agent（资源根目录）
 
+- 根闭集为必需普通文件 `agent.yaml` 与可选 `assets/` 目录；不允许其它根条目，不包裹 `<name>/` 版本目录。
 - 单文档、所有 mapping key 为字符串且无重复、根为 mapping。
-- `schema_version` 为整数 `1`；`agent` 为 mapping。
-- `agent.id` 为 canonical 名称且是安全单路径段（拒绝 `/`、`\`、绝对路径、`.`、`..`）；`agent.version` 为 `vMAJOR.MINOR.PATCH`；`agent.description` 非空。
+- 五个必填字段：整数 `schema_version: 1`；`agent.id`/`agent.name`/`agent.version`/`agent.description`/`agent.soul` 均为 trim 后非空字符串。
+- `agent.name` 为 canonical Power name；`agent.version` 为 `vMAJOR.MINOR.PATCH`；`agent.id` 仅供 Bibit 内部区分，不与 PowerRef name 比较。
+- `metadata.avatar` 可选：存在时必须为 `assets/` 下规范相对路径、以 `.png` 结尾的真实普通文件，大小 `1..1 MiB`，宽高 `128..1024` 且为正方形。
+- `agent.yaml` 使用文本内容策略；`assets/` 允许二进制普通文件，APM 不校验未被 avatar 引用的 asset 业务格式。
 - 其余字段原样透传，不重序列化。
 
 ## 确定性产物约定
@@ -56,6 +59,6 @@
 | --- | --- | --- |
 | Skill / Plugin | 确定性 `tar.gz` | 归档根即资源根；条目按路径升序；uid/gid=0、mtime 固定；gzip 头无时间戳/文件名；目录 mode 0755，文件保留执行位否则 0644，清除 setuid/setgid/sticky |
 | MCP | 完整文件 JCS 规范化字节 | RFC 8785：键按 UTF-16 码元升序、字符串最小转义、数字按 ECMAScript 最短表示 |
-| Agent | 原始字节透传 | 不打包、不重序列化，MD5 针对原始字节 |
+| Agent | 确定性 `tar.gz` | 根含 `agent.yaml` 与可选 `assets/`；MD5 针对归档原始字节 |
 
 `submit` 对四类统一计算打包/规范化后的字节 MD5，并在任何网络请求前拦截本地错误；`message` 属于一次 Submission，不写入资源文件、不参与 MD5。

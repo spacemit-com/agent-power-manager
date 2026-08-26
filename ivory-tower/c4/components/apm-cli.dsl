@@ -18,12 +18,12 @@ lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install�
         "fixLifecycle" "apm-cli-lifecycle-diagrams/fix.mmd"
     }
 }
-submission = component "Submission Validation" "internal/submission 对四类 Power 提供完全离线的 Validate 与 Prepare：Skill/Plugin 确定性 tar.gz、MCP JCS 规范化、Agent 单个原始 agent.yaml 原样字节（Content-Type application/yaml、MD5 针对原始字节）。" "internal/submission (Go)" {
+submission = component "Submission Validation" "internal/submission 对四类 Power 提供完全离线的 Validate 与 Prepare：Skill/Plugin/Agent 确定性 tar.gz（Agent 根含 agent.yaml 与可选 assets/）、MCP JCS 规范化（Agent Content-Type application/gzip、MD5 针对归档原始字节）。" "internal/submission (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/core-lifecycle.mmd"
     }
 }
-domain = component "Domain Model" "internal/domain 是共享领域契约：DecodeAgentConfigYAML/Validate/ValidatePowerRef 是 Agent 稳定 schema 的唯一权威；SubmissionOutcome/SubmissionResult 承载 accepted/replayed 分流。" "internal/domain (Go)" {
+domain = component "Domain Model" "internal/domain 是共享领域契约：agentartifact 的 Agent 目录权威校验复用 DecodeAgentConfigYAML/Validate/ValidatePowerRef 作为 YAML 最小边界；SubmissionOutcome/SubmissionResult 承载 accepted/replayed 分流。" "internal/domain (Go)" {
 }
 adapterRegistry = component "Adapter Registry" "管理 Bibit、Codex、Claude Code、Hermes 四个内置 Agent；分别 ResolveSkill、ResolveAgent、ResolveMCP、ResolvePlugin。AgentAdapter 增加只读 ValidateArtifact 身份校验。Codex/Claude Plugin 使用 marketplace，Hermes/Bibit 使用 filesystem（ADR-015/017/019）。" "internal/adapter (Go)" {
     properties {
@@ -42,7 +42,7 @@ lockManager = component "Lock Manager" "基于 flock 实现非阻塞、防重入
 }
 catalogManager = component "Catalog Manager" "internal/catalog.Manager 通过 Snapshot/SnapshotLocked 编排 version 检查、必要下载、stale 状态和一次不可变 Snapshot；不读取 manifest 或恢复 journal（ADR-021）。" "internal/catalog (Go)"
 catalogRepository = component "Catalog Repository" "严格读取、验证并以 0600 原子发布唯一 catalog.json；拒绝链接与可检测替换，pathname 操作信任 current EUID（ADR-021）。" "internal/catalog (Go)"
-cacheManager = component "Cache Manager" "internal/cache 通过 Source 注入 Cloud Client；PrepareSkill/PrepareAgent 完整透传同一 CatalogEntry，独占命中复验、私有下载目标、精确版本原子 cache 发布与公共 staging。" "internal/cache (Go)" {
+cacheManager = component "Cache Manager" "internal/cache 通过 Source 注入 Cloud Client；PrepareSkill/PrepareAgent 完整透传同一 CatalogEntry，独占命中复验、私有下载目标、精确版本原子 cache 发布与公共 staging（Agent 为完整目录）。" "internal/cache (Go)" {
     properties {
         "classDiagram" "apm-cli-diagrams/cache-manager.mmd"
     }
@@ -83,7 +83,7 @@ cloudComposition -> remoteProvider "import remote 并注册构造 closure"
 providerRegistry -> cloudClient "Open 选择 factory 并返回 Client 或 error"
 localProvider -> cloudClient "implements internal/cloud.Client"
 remoteProvider -> cloudClient "implements internal/cloud.Client"
-remoteProvider -> apc "读取 catalog SHA-256/size、完整确定性对象与精确版本 content" "HTTPS/loopback HTTP + JSON/YAML/gzip"
+remoteProvider -> apc "读取 catalog SHA-256/size、完整确定性对象与精确版本 content" "HTTPS/loopback HTTP + JSON + gzip"
 cloudComposition -> catalogManager "惰性注入选中 CatalogSource"
 cloudComposition -> lifecycle "Install content 与 Submission 命令注入选中 Client"
 cloudComposition -> cacheManager "Install 将同一选中 Client 作为 Source 注入"
@@ -97,13 +97,13 @@ lifecycle -> cloudClient "Install 以 CatalogEntry 获取精确 MCP/Skill/Agent/
 lifecycle -> pluginResource "Plugin Install 用 Ensure / Lookup / StageFilesystem，Uninstall 用只读 Locate/Exists 分类；返回的 Artifact 再由调用方 MarketplaceFor(agent)"
 lifecycle -> transactionManager "Install/Uninstall/Fix 的可恢复事务；Install 缺失修复→首次安装两阶段，Plugin 卸载清除 Plugin+marketplace+manifest"
 lifecycle -> submission "Validate/Submit 对四类 Power 调用 Validate/Prepare；Submit 结果再经 cloud.Submit 上传"
-submission -> domain "Agent 原始 YAML 严格解析与身份校验（DecodeAgentConfigYAML/Validate/ValidatePowerRef）"
+submission -> domain "Agent 目录权威校验（agentartifact：根闭集、avatar PNG 与 DecodeAgentConfigYAML/Validate/ValidatePowerRef 身份）"
 catalogManager -> lockManager "Snapshot 非阻塞 Acquire/Release；SnapshotLocked 不再次获取"
 catalogManager -> cloudClient "CatalogVersion + DownloadCatalog；匿名且每次同步至多一次"
 catalogManager -> catalogRepository "Load 严格旧快照；Replace 验证 hash/size/schema 后原子发布"
 catalogRepository -> apm.catalogCache "读取/替换唯一 0600 catalog.json"
 cacheManager -> cloudClient "Source.DownloadSkill/DownloadAgent 完整透传 CatalogEntry 并写私有目标"
-cacheManager -> domain "PrepareAgent 首次下载与缓存命中均校验 Agent 身份（DecodeAgentConfigYAML + ValidatePowerRef）"
+cacheManager -> domain "PrepareAgent 首次下载与缓存命中均校验完整 Agent 目录（agentartifact + ValidatePowerRef）"
 pluginResource -> cloudClient "DownloadPlugin(ctx, entry, destination) 到临时 canonical Plugin 叶子"
 pluginResource -> rawPluginDestination "创建并控制空的 canonical destination"
 cloudClient -> rawPluginDestination "只写 apc-plugin.json + skills，不生成 Agent 配置/marketplace"
@@ -112,8 +112,8 @@ pluginResource -> pluginArtifactValidator "严格解析 canonical，构建后与
 pluginResource -> nativeManifestGenerator "先从复验后的 canonical manifest 生成 Codex、Claude、Hermes 原生 manifest"
 pluginResource -> codexMarketplaceBuilder "随后读取并校验已生成的 Codex 原生 manifest，仅构建 Codex 单条目 marketplace"
 pluginResource -> claudeMarketplaceBuilder "再读取并校验已生成的 Claude 原生 manifest，仅构建 Claude 单条目 marketplace"
-transactionManager -> adapterRegistry "Plugin marketplace/Plugin 与 filesystem 变更；Agent recovery 经 AgentAdapterResolver 校验 target/backup/quarantine"
-adapterRegistry -> domain "AgentAdapter.ValidateArtifact 只读身份校验（DecodeAgentConfigYAML + ValidatePowerRef）"
+transactionManager -> adapterRegistry "Plugin marketplace/Plugin 与 filesystem 变更；Agent recovery 经 AgentAdapterResolver 校验 target/backup/quarantine 完整目录"
+adapterRegistry -> domain "AgentAdapter.ValidateArtifact 只读校验完整目录（agentartifact）"
 transactionManager -> journalStore "create/update/delete schema v1 journal"
 transactionManager -> configModel "commit/rollback manifest Set/Remove"
 transactionManager -> pluginArtifactValidator "recovery 仅复验固定方向实际需要的 target/previous artifact"

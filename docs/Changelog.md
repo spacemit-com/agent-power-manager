@@ -6,6 +6,29 @@
 
 分类：功能变更
 
+用户需求：将 Agent 从单个原始 `agent.yaml` 升级为与 Skill、Plugin 一致的确定性 `.tar.gz` 目录资源，使 Agent 可以携带可选 assets，并以 `agent.metadata.avatar` 引用包内 PNG；同时把 Agent 的外部资源身份从 `agent.id` 修正为 `agent.name`（`agent.id` 只供 Bibit 内部区分）。`validate`/`submit` 只接受 Agent 资源根目录（根闭集为必需 `agent.yaml` 与可选 `assets/`，无版本包裹目录）；五个必填字段为整数 `schema_version: 1` 与非空字符串 `agent.id`/`agent.name`/`agent.version`/`agent.description`/`agent.soul`；可选 `metadata.avatar` 必须引用 `assets/` 下真实方形 PNG（大小 1..1 MiB、宽高 128..1024）。Agent 内容类型统一为 `application/gzip`，MD5 针对归档原始字节；cache 保存完整目录 `cache/agents/<name>/<version>`，Bibit 活动目标为 `agents/<name>`。字段源为 `agent_yaml_配置模板_V0.5.yaml`，契约见 [Feature 026](ivory-tower/features/026-agent-package-assets/spec.md) 与 [ADR-023](ivory-tower/adr/ADR-023-package-agent-with-assets.md)。
+
+相关提交：
+
+- `572fb17 feat(agent): parse v0.5 resource identity`
+- `1bde00f feat(agent): validate packaged assets`
+- `640e661 fix(agent): enforce root closed set for multi-segment paths`
+- `e3922f3 feat(submission): upload packaged agent assets`
+- `c9643d1 feat(cloud): download agent archives as directories`
+- `9c12432 fix(cloud): align local agent semantic errors with ErrInvalidAgent`
+- `a230bde feat(cache): cache complete agent directories`
+- `ddfe097 feat(agent): publish complete bibit agent directories`
+- `8357241 test(agent): enforce packaged lifecycle contract`
+- `29ed248 test(lifecycle): align agent catalog fixture content type`
+
+解决方案或完成结果：`internal/domain` 的 AgentConfig 扩展 V0.5 稳定字段（`agent.name`/`agent.soul`/`metadata.avatar`），`ValidatePowerRef` 改为以 `agent.name`/`agent.version` 与请求身份比较，`agent.id` 只要求非空且不再与 PowerRef name 比较；五个必填字段缺失、空白或错误类型统一拒绝 `domain.ErrInvalidAgent`。新增 `internal/agentartifact` 作为 Agent 目录的唯一权威只读校验器（根闭集、可执行/嵌套归档/路径安全、avatar PNG、身份），submission、Local/Remote Cloud 下载、cache、Bibit Adapter 与 transaction recovery 全部复用，不再各自维护字段或 avatar 规则。`internal/submission` 的 Agent Loader 只接受资源根目录并固定整棵树的不可变物理快照，拒绝单个 YAML、预制归档与远程 URL；Build 输出确定性 `.tar.gz`（稳定路径排序、固定 mtime/uid/gid 与 gzip header），Content-Type 为 `application/gzip`，MD5 针对归档原始字节，multipart content filename 为 `<name>-<version>.tar.gz`，metadata 身份来自已校验的 `agent.name`/`agent.version`/`agent.description`。`internal/cloud` 的 `DownloadAgent` 以私有目录为目标：Remote 校验 HTTP type/length、Catalog size/MD5 与归档安全后解包并执行权威目录校验，Local 复制 canonical fixture 目录（`agents/<name>/<version>/agent.yaml + assets/`）后执行同一校验，任一失败不留下可见 destination。`internal/cache` 的 `PrepareAgent` cache hit 复验完整目录、miss 下载到唯一临时目录、原子发布 `cache/agents/<name>/<version>` 并物化 `staging/agents/<name>`；损坏或不匹配 fail closed 并保留现场。Bibit Adapter 的 `TargetPath` 改为 `<bibit根>/agents/<name>` 完整目录，Install 从 staging 复验后以不覆盖语义原子发布；filesystem journal schema 不变，backup/quarantine/recovery 对整目录操作并执行完整身份校验。avatar 存在时必须为 `assets/` 下规范相对路径的真实 PNG 普通文件：大小 1..1 MiB、PNG 签名有效、宽高 128..1024 且为正方形，不校验 DPI/色彩/透明度，缺省时不要求 `assets/` 存在。`assets/` 允许二进制普通文件（仅 `agent.yaml` 走文本内容策略），其余 asset 只受公共物理树与归档阈值约束。Feature 025 的 lifecycle 入口状态、单次 warning、同版本不探测与唯一公共 `adapter.ErrTargetConflict` 均保持不变。这是不兼容迁移：所有本地 fixture 与开发数据直接替换，不保留 `application/yaml`、单文件输入、`agents/<agent.id>` 目标或 `agent.id == PowerRef.name` 兼容分支；Agent 内容身份闭环与 Submission 治理沿用 ADR-019/Feature 022 中未被取代的部分。
+
+验证结果或限制：`go test ./... -count=1` 全量通过，`go vet ./...` 与 `git diff --check` 均以退出码 0 通过，`git status --short` 只包含本次 Task 8 文档变更。这是不兼容迁移：旧 `application/yaml` Agent content、单文件 validate/submit 输入、`agents/<agent.id>` 单文件 cache/staging/target 与 `agent.id == PowerRef.name` 身份均不再被接受并 fail closed；avatar 之外的 asset 业务格式不校验；Remote Agent 目录发布在 FreeBSD 与 Skill/Plugin 一样以 `ENOTSUP` fail closed；Agent 整目录事务的备份/恢复体积高于单文件，但仍受 100 MiB 总量限制。
+
+## 2026-08-26
+
+分类：功能变更
+
 用户需求：统一 Skill、Agent、MCP 与 Plugin 在 `install`/`uninstall` 中面对相同入口状态时的宏观行为——同版本不探测即 `unchanged`；不同版本加缺失/不完整目标记录一次 warning 后同次修复并全新安装；无清单目标冲突只暴露公共 `adapter.ErrTargetConflict`；Plugin 卸载同时清除 Plugin 与专属 marketplace 并保留 artifact cache；显式精确 manifest 全命中快速路径扩展到四类 Power；CLI 运行时失败只记录一次 Error 不再打印 usage。契约见 [Feature 025](ivory-tower/features/025-unified-lifecycle-state-semantics/spec.md) 与 [ADR-022](ivory-tower/adr/ADR-022-unify-lifecycle-entry-state-semantics.md)。
 
 相关提交：

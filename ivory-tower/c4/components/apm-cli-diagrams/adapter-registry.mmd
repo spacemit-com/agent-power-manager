@@ -37,7 +37,7 @@ classDiagram
         +RegisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
         +UnregisterMarketplace(Context, MarketplaceTarget) (PluginMutationResult, error)
     }
-    note for AgentAdapter "仅 Bibit 的 agent.yaml 单文件发布；TargetPath 为 <bibit根>/agents/<agent.id>/agent.yaml，Install 原样字节原子发布（ADR-015）。ValidateArtifact 只读校验 staging/target/backup/quarantine 的 agent.yaml 身份与 ref 完全一致（ADR-019）"
+    note for AgentAdapter "仅 Bibit 的完整目录发布（agent.yaml + assets/）；TargetPath 为 <bibit根>/agents/<ref.Name>，Install 从 staging 复验完整目录后原子发布（ADR-015/023）。ValidateArtifact 只读校验 staging/target/backup/quarantine 的完整目录身份与 ref 完全一致（ADR-019）"
     class AgentAdapter {
         <<interface>>
         +TargetPath(PowerRef) (string, error)

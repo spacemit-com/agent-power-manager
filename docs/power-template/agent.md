@@ -1,25 +1,74 @@
 # Agent 模板
 
-Agent 提交对象是**单个原始 `agent.yaml` 文件**，APM 只解析最小字段，其余字段安装时原样透传。
+Agent 提交对象是**资源根目录**，APM 把整棵树打包为确定性 `.tar.gz`；目录根闭集为必需普通文件 `agent.yaml` 与可选 `assets/` 目录，不接受单个原始 `agent.yaml`、用户预制归档或远程 URL。字段源为 `agent_yaml_配置模板_V0.5.yaml`。
+
+```text
+bibit-edge-assistant/
+├── agent.yaml
+└── assets/               # 可选
+    └── avatar.png        # 可选，被 metadata.avatar 引用
+```
 
 ```yaml
 schema_version: 1
 
 agent:
-  id: my-agent
-  version: v1.0.0
-  description: 一句话说明这个 Agent 做什么。
-  # 以下为示例扩展字段，按需保留，APM 原样透传。
-  model: your-model
-  tools:
-    - "*"
+  # ---- 必填基础信息 ----
+  id: e5249d373e67                  # Bibit 内部唯一 ID，非外部资源名称
+  version: v1.2.0                   # vMAJOR.MINOR.PATCH
+  name: bibit-edge-assistant        # 外部资源名称（canonical），不允许包含空格
+  description: Edge-first assistant powered by Bibit Intent for device operations and general tasks
+  soul: |-
+    你是 Bibit 端侧优先智能助手，负责在 Bianbu 设备上帮助用户完成系统查询、
+    设备控制、故障排查和通用任务。
+
+  # ---- 以下为可选扩展字段示例，APM 不校验、安装时原样透传 ----
+  zh_name: Bibit端侧智能助手
+  model: # [可选]
+    provider: custom:chat
+    name: deepseek-v4-flash
+  tools: # [可选]
+    - browser_navigate
+  skills: # [可选]
+    - test-driven-development
+  mcps: # [可选]
+    - fileSystem
+  hooks: # [可选]
+    - bianbu.audit/audit.after_tool
+  permissions: # [可选]
+    capabilities:
+      - name: file.read
+        description: Read user documents
+        domain: resource
+        risk: L2
+        confirmation: once_per_session
+        scope: "~/Documents"
+    resource_limits:
+      tokens:
+        per_session: 100000
+        per_day: 500000
+        on_exceeded: pause_and_notify
+    network:
+      mode: allowlist
+      domains:
+        - api.openai.com
+    data_protection:
+      personal_data:
+        - type: email
+          risk: L2
+          action: audit_only
+
+  metadata:
+    avatar: assets/avatar.png       # [可选]：assets/ 下真实方形 PNG
 ```
 
 约束：
 
+- 输入必须是资源根**目录**；`validate`/`submit` 不接受单个 `agent.yaml` 文件、预制 `.tar.gz` 或符号链接。
+- 根闭集为必需普通文件 `agent.yaml` 与可选 `assets/` 目录，不允许其它根条目；`assets/` 内只允许普通文件与目录；归档根不额外包裹 `<name>/` 版本目录。
 - 单文档，所有 mapping 键为字符串且无重复，根与 `agent` 均为 mapping。
-- `schema_version` 为整数 `1`。
-- `agent.id` 为 canonical 名称且是安全单路径段（拒绝 `/`、`\`、绝对路径、`.`、`..`）。
-- `agent.version` 为 `vMAJOR.MINOR.PATCH`。
-- `agent.description` 非空。
-- 其余字段原样透传，提交时不做重序列化，MD5 针对原始字节。
+- 五个必填字段：整数 `schema_version: 1`；`agent.id`/`agent.name`/`agent.version`/`agent.description`/`agent.soul` 均为 trim 后非空字符串。
+- `agent.name` 是外部 PowerRef 名称（canonical Power name）；`agent.version` 为 `vMAJOR.MINOR.PATCH`；`agent.id` 仅供 Bibit 内部区分，不与 PowerRef name 比较。
+- `metadata.avatar` 可选：存在时必须引用 `assets/` 下以 `.png` 结尾的真实普通文件，大小 `1..1 MiB`、宽高均为 `128..1024` 像素且为正方形；不校验 DPI、色彩空间或透明度。
+- 其余字段原样透传；APM 不校验 model/tools/skills/mcps/hooks/permissions 等扩展字段的业务枚举与约束。
+- 提交 content 为确定性 `tar.gz`，Content-Type 为 `application/gzip`，MD5 针对归档原始字节。

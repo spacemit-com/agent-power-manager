@@ -57,7 +57,7 @@ classDiagram
     FilesystemCache --> CacheSource : forwards one authoritative entry on miss
     FilesystemCache --> VersionedPowerCache : validates immutable exact version
     FilesystemCache --> PublicStaging : atomically materializes staging
-    note for FilesystemCache "cache hit 复验 identity；损坏或不匹配时 fail closed，不下载覆盖。Agent hit/miss 都校验 agent.yaml 与 entry.Ref"
+    note for FilesystemCache "cache hit 复验 identity；损坏或不匹配时 fail closed，不下载覆盖。Agent hit/miss 都校验完整目录与 entry.Ref"
 
     class PluginResource {
         <<internal/pluginresource.Manager>>
