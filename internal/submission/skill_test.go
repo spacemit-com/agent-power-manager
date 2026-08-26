@@ -32,7 +32,10 @@ description: does things
 Details here.
 `
 
-const validSkillCardMarkdown = `# Skill Card: Demo
+const validSkillCardMarkdown = `---
+schema_version: 1
+---
+# Skill Card: Demo
 
 ## Capability
 does things
@@ -131,6 +134,45 @@ func TestValidateSkillRequiresSkillCard(t *testing.T) {
 	}
 }
 
+func TestValidateSkillRejectsMissingSkillCardSchemaVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "SKILL.md"), validSkillMarkdown)
+	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "# Skill Card: Demo\n\n## Capability\nx\n\n## Use Cases\nx\n\n## Inputs and Outputs\nx\n\n## Dependencies\nx\n\n## Limitations\nx\n\n## Maintainer\nOwner: platform\nContact: team@example.com\n")
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestValidateSkillRejectsNonOneSkillCardSchemaVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "SKILL.md"), validSkillMarkdown)
+	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "---\nschema_version: 2\n---\n# Skill Card: Demo\n\n## Capability\nx\n\n## Use Cases\nx\n\n## Inputs and Outputs\nx\n\n## Dependencies\nx\n\n## Limitations\nx\n\n## Maintainer\nOwner: platform\nContact: team@example.com\n")
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestValidateSkillRejectsNonIntegerSkillCardSchemaVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "SKILL.md"), validSkillMarkdown)
+	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "---\nschema_version: \"1\"\n---\n# Skill Card: Demo\n\n## Capability\nx\n\n## Use Cases\nx\n\n## Inputs and Outputs\nx\n\n## Dependencies\nx\n\n## Limitations\nx\n\n## Maintainer\nOwner: platform\nContact: team@example.com\n")
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestValidateSkillAcceptsExtraSkillCardFrontmatterKey(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "SKILL.md"), validSkillMarkdown)
+	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "---\nschema_version: 1\nfuture: true\n---\n# Skill Card: Demo\n\n## Capability\nx\n\n## Use Cases\nx\n\n## Inputs and Outputs\nx\n\n## Dependencies\nx\n\n## Limitations\nx\n\n## Maintainer\nOwner: platform\nContact: team@example.com\n")
+	if _, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir}); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
 func TestValidateSkillRejectsFrontmatterNotAtStart(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "SKILL.md"), "# Title\n---\nname: demo\ndescription: x\n---\n")
@@ -198,7 +240,7 @@ func TestValidateSkillRejectsEmptyDescription(t *testing.T) {
 func TestValidateSkillRejectsMissingSection(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "SKILL.md"), validSkillMarkdown)
-	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "# Skill Card: Demo\n\n## Capability\nx\n")
+	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "---\nschema_version: 1\n---\n# Skill Card: Demo\n\n## Capability\nx\n")
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -208,7 +250,7 @@ func TestValidateSkillRejectsMissingSection(t *testing.T) {
 func TestValidateSkillRejectsPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "SKILL.md"), validSkillMarkdown)
-	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "# Skill Card: Demo\n\n## Capability\nx\n\n## Use Cases\nx\n\n## Inputs and Outputs\nx\n\n## Dependencies\nx\n\n## Limitations\nx\n\n## Maintainer\nOwner: REPLACE_OWNER\nContact: team@example.com\n")
+	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "---\nschema_version: 1\n---\n# Skill Card: Demo\n\n## Capability\nx\n\n## Use Cases\nx\n\n## Inputs and Outputs\nx\n\n## Dependencies\nx\n\n## Limitations\nx\n\n## Maintainer\nOwner: REPLACE_OWNER\nContact: team@example.com\n")
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -218,7 +260,7 @@ func TestValidateSkillRejectsPlaceholder(t *testing.T) {
 func TestValidateSkillRejectsMissingOwner(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "SKILL.md"), validSkillMarkdown)
-	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "# Skill Card: Demo\n\n## Capability\nx\n\n## Use Cases\nx\n\n## Inputs and Outputs\nx\n\n## Dependencies\nx\n\n## Limitations\nx\n\n## Maintainer\nContact: team@example.com\n")
+	writeTestFile(t, filepath.Join(dir, "skill-card.md"), "---\nschema_version: 1\n---\n# Skill Card: Demo\n\n## Capability\nx\n\n## Use Cases\nx\n\n## Inputs and Outputs\nx\n\n## Dependencies\nx\n\n## Limitations\nx\n\n## Maintainer\nContact: team@example.com\n")
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)

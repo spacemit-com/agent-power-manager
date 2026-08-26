@@ -8,7 +8,7 @@ import (
 
 const lifecycleSkillMarkdown = "---\nname: demo\ndescription: does things\n---\n# Demo Skill\n\nDetails here.\n"
 
-const lifecycleSkillCard = "# Skill Card: Demo\n\n## Capability\ndoes things\n\n## Use Cases\nwhen needed\n\n## Inputs and Outputs\ntext\n\n## Dependencies\nnone\n\n## Limitations\nnone\n\n## Maintainer\nOwner: platform\nContact: platform@example.com\n"
+const lifecycleSkillCard = "---\nschema_version: 1\n---\n# Skill Card: Demo\n\n## Capability\ndoes things\n\n## Use Cases\nwhen needed\n\n## Inputs and Outputs\ntext\n\n## Dependencies\nnone\n\n## Limitations\nnone\n\n## Maintainer\nOwner: platform\nContact: platform@example.com\n"
 
 func writeLifecycleSkill(t *testing.T, dir string) {
 	t.Helper()

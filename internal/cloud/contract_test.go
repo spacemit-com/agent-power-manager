@@ -968,7 +968,10 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 	}
 }
 
-const contractSkillCard = `# Skill Card: Contract Fixture
+const contractSkillCard = `---
+schema_version: 1
+---
+# Skill Card: Contract Fixture
 
 ## Capability
 Cross-layer contract verification.

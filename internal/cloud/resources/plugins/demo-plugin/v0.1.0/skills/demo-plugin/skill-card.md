@@ -1,3 +1,6 @@
+---
+schema_version: 1
+---
 # Skill Card: Demo Plugin
 
 ## Capability

@@ -1,3 +1,6 @@
+---
+schema_version: 1
+---
 # Skill Card: Test Case Namer
 
 ## Capability

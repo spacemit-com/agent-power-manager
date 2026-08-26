@@ -19,7 +19,10 @@ import (
 	"apm/internal/submission"
 )
 
-const localCatalogSkillCard = `# Skill Card: Catalog fixture
+const localCatalogSkillCard = `---
+schema_version: 1
+---
+# Skill Card: Catalog fixture
 
 ## Capability
 tests catalogs
