@@ -9,6 +9,8 @@ import (
 
 // Source 定义 Cache 获取精确版本 Skill 和 Agent 到私有目标的最小边界。
 // CatalogEntry 已由目录快照验证且是内容元数据的唯一权威，调用链不得按 Ref 重建或回源查询 metadata。
+// DownloadSkill 的 destination 是单个 SKILL.md 文件路径；DownloadAgent 的 destination
+// 是物理空目录，实现必须在其下写入完整的 agent.yaml + assets/ 目录树。
 type Source interface {
 	DownloadSkill(context.Context, domain.CatalogEntry, string) error
 	DownloadAgent(context.Context, domain.CatalogEntry, string) error

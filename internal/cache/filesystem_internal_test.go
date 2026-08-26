@@ -1,8 +1,11 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,21 +22,33 @@ func (stagingFailureSource) DownloadSkill(_ context.Context, entry domain.Catalo
 }
 
 func (stagingFailureSource) DownloadAgent(_ context.Context, entry domain.CatalogEntry, destination string) error {
-	return os.WriteFile(destination, []byte(stagingAgentYAML(entry.Ref)), 0o644)
+	if err := os.MkdirAll(filepath.Join(destination, "assets"), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(destination, "agent.yaml"), []byte(stagingAgentYAML(entry.Ref)), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(destination, "assets", "avatar.png"), internalTestAgentAvatarPNG, 0o644)
 }
 
+// stagingAgentYAML 返回与 ref 身份一致、avatar 指向 assets/avatar.png 的有效 Agent fixture。
 func stagingAgentYAML(ref domain.PowerRef) string {
-	return "schema_version: 1\nagent: {id: " + ref.Name + ", version: " + ref.Version + ", description: demo}\n"
+	return "schema_version: 1\nagent: {id: " + ref.Name + ", name: " + ref.Name + ", version: " + ref.Version + ", description: demo, soul: demo, metadata: {avatar: assets/avatar.png}}\n"
 }
+
+// internalTestAgentAvatarPNG 是 128x128 有效 PNG，满足 avatar 校验。
+var internalTestAgentAvatarPNG = func() []byte {
+	var output bytes.Buffer
+	if err := png.Encode(&output, image.NewNRGBA(image.Rect(0, 0, 128, 128))); err != nil {
+		panic("encode test agent avatar PNG: " + err.Error())
+	}
+	return output.Bytes()
+}()
 
 func internalCacheEntry(ref domain.PowerRef) domain.CatalogEntry {
-	contentType := "application/gzip"
-	if ref.Type == domain.PowerTypeAgent {
-		contentType = "application/yaml"
-	}
 	return domain.CatalogEntry{
 		Ref: ref, Description: "catalog description", Message: "catalog message",
-		ContentType: contentType, ContentSize: 17,
+		ContentType: "application/gzip", ContentSize: 17,
 		ContentMD5:  "0123456789abcdef0123456789abcdef",
 		PublishedAt: "2026-08-25T12:34:56Z", Tags: []string{},
 	}
@@ -69,9 +84,14 @@ func TestPrepareAgentStagingFailureRetainsPreviousStaging(t *testing.T) {
 	if _, err := store.PrepareAgent(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"})); err != nil {
 		t.Fatal(err)
 	}
-	store.readFile = func(string) ([]byte, error) { return nil, errors.New("read staging candidate") }
+	store.copyDir = func(string, string) error { return errors.New("copy staging candidate") }
 	if _, err := store.PrepareAgent(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"})); err == nil {
-		t.Fatal("PrepareAgent() error = nil, want staging read error")
+		t.Fatal("PrepareAgent() error = nil, want staging copy error")
+	}
+	for _, relative := range []string{"agent.yaml", "assets/avatar.png"} {
+		if _, err := os.Stat(filepath.Join(store.stagingPath, "agents", "demo", relative)); err != nil {
+			t.Fatalf("previous staging %q: %v", relative, err)
+		}
 	}
 	want := stagingAgentYAML(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"})
 	if got, err := os.ReadFile(filepath.Join(store.stagingPath, "agents", "demo", "agent.yaml")); err != nil || string(got) != want {
@@ -108,6 +128,9 @@ func TestPrepareAgentReturnsCleanupFailureAfterAtomicPublication(t *testing.T) {
 	want := stagingAgentYAML(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"})
 	if got, readErr := os.ReadFile(filepath.Join(staging, "agents", "demo", "agent.yaml")); readErr != nil || string(got) != want {
 		t.Fatalf("new staging = %q, %v, want %q", got, readErr, want)
+	}
+	if _, err := os.Stat(filepath.Join(staging, "agents", "demo", "assets", "avatar.png")); err != nil {
+		t.Fatalf("new staging avatar: %v", err)
 	}
 }
 

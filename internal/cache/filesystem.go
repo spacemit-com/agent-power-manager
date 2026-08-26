@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"apm/internal/agentartifact"
 	"apm/internal/domain"
 	"apm/internal/paths"
 	"apm/internal/utils/filesystem"
@@ -26,7 +27,6 @@ type FilesystemCache struct {
 	stagingPath     string
 	stagingTempPath string
 	copyDir         func(string, string) error
-	readFile        func(string) ([]byte, error)
 	removeAll       func(string) error
 
 	locksMu   sync.Mutex
@@ -57,7 +57,6 @@ func NewFilesystem(source Source) (*FilesystemCache, error) {
 		stagingPath:     stagingPath,
 		stagingTempPath: stagingTempPath,
 		copyDir:         filesystem.CopyDir,
-		readFile:        os.ReadFile,
 		removeAll:       os.RemoveAll,
 		pathLocks:       make(map[string]*sync.Mutex),
 	}, nil
@@ -114,7 +113,7 @@ func (c *FilesystemCache) PrepareAgent(ctx context.Context, entry domain.Catalog
 	lock := c.lockFor(final)
 	lock.Lock()
 	defer lock.Unlock()
-	if hit, err := cachedAgent(final, ref); err != nil {
+	if hit, err := cachedAgent(ctx, final, ref); err != nil {
 		return "", err
 	} else if !hit {
 		if err := c.downloadAgent(ctx, entry, final); err != nil {
@@ -123,7 +122,7 @@ func (c *FilesystemCache) PrepareAgent(ctx context.Context, entry domain.Catalog
 	}
 	c.stagingMu.Lock()
 	defer c.stagingMu.Unlock()
-	return c.stageAgent(ref)
+	return c.stageAgent(ctx, ref)
 }
 
 func validExactCacheRef(ref domain.PowerRef, powerType domain.PowerType) bool {
@@ -189,15 +188,15 @@ func (c *FilesystemCache) downloadAgent(ctx context.Context, entry domain.Catalo
 			resultErr = errors.Join(resultErr, fmt.Errorf("remove Agent temporary version %q: %w", temporary, err))
 		}
 	}()
-	destination := filepath.Join(temporary, "agent.yaml")
-	if err := c.source.DownloadAgent(ctx, entry, destination); err != nil {
+	// Source 在临时目录下写入完整的 agent.yaml + assets/ 目录树；缓存只接受完整目录。
+	if err := c.source.DownloadAgent(ctx, entry, temporary); err != nil {
 		return fmt.Errorf("download Agent %+v: %w", ref, err)
 	}
-	if hit, err := cachedAgent(temporary, ref); err != nil || !hit {
+	if hit, err := cachedAgent(ctx, temporary, ref); err != nil || !hit {
 		if err != nil {
 			return err
 		}
-		return errors.New("downloaded Agent has no physical agent.yaml")
+		return errors.New("downloaded Agent directory is not a physical directory")
 	}
 	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
 		return fmt.Errorf("create Agent cache parent %q: %w", filepath.Dir(final), err)
@@ -295,41 +294,18 @@ func cachedSkillIdentity(raw []byte) (string, string, error) {
 	return document.Name, document.Version, nil
 }
 
-// cachedAgent 报告 root 是否为身份与 ref 完全一致的已发布 Agent 版本。
-// 先保留现有物理目录/marker 检查，再严格解析 agent.yaml 并校验其 id/version 与 ref 一致；
-// 解析或身份不匹配时返回错误，由调用方 fail closed，绝不删除或覆盖现有缓存。
-func cachedAgent(root string, ref domain.PowerRef) (bool, error) {
-	info, err := os.Lstat(root)
-	if errors.Is(err, os.ErrNotExist) {
+// cachedAgent 报告 root 是否为身份与 ref 完全一致的已发布 Agent 版本目录。
+// 缺失根目录视为 miss；已存在的目录必须通过 agentartifact.ValidateDirectory
+// 的完整目录校验（物理树安全、根闭集、avatar PNG 与 PowerRef 身份）。
+// 校验失败返回错误，由调用方 fail closed：绝不删除或联网替换现有缓存。
+func cachedAgent(ctx context.Context, root string, ref domain.PowerRef) (bool, error) {
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		return false, nil
-	}
-	if err != nil {
+	} else if err != nil {
 		return false, fmt.Errorf("stat Agent cache %q: %w", root, err)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return false, fmt.Errorf("Agent cache %q is not a physical directory", root)
-	}
-	marker := filepath.Join(root, "agent.yaml")
-	info, err = os.Lstat(marker)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, fmt.Errorf("Agent cache %q has no agent.yaml", root)
-	}
-	if err != nil {
-		return false, fmt.Errorf("stat Agent cache marker %q: %w", marker, err)
-	}
-	if !info.Mode().IsRegular() {
-		return false, fmt.Errorf("Agent cache marker %q is not a physical regular file", marker)
-	}
-	raw, err := os.ReadFile(marker)
-	if err != nil {
-		return false, fmt.Errorf("read Agent cache %q: %w", marker, err)
-	}
-	config, err := domain.DecodeAgentConfigYAML(raw)
-	if err != nil {
+	if _, err := agentartifact.ValidateDirectory(ctx, root, &ref); err != nil {
 		return false, fmt.Errorf("validate Agent cache %q for %+v: %w", root, ref, err)
-	}
-	if err := config.ValidatePowerRef(ref); err != nil {
-		return false, fmt.Errorf("validate Agent cache identity %q for %+v: %w", root, ref, err)
 	}
 	return true, nil
 }
@@ -355,7 +331,10 @@ func (c *FilesystemCache) stageSkill(ref domain.PowerRef) (stagingRoot string, r
 	return c.stagingPath, nil
 }
 
-func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (stagingRoot string, resultErr error) {
+// stageAgent 把已校验的完整 Agent 缓存目录物化为 staging/agents/<name>：
+// 整目录复制到 staging candidate 后，发布前对副本执行权威目录校验，
+// 校验或发布失败时保留旧 staging 现场。
+func (c *FilesystemCache) stageAgent(ctx context.Context, ref domain.PowerRef) (stagingRoot string, resultErr error) {
 	candidate, err := c.newStagingCandidate()
 	if err != nil {
 		return "", err
@@ -365,17 +344,13 @@ func (c *FilesystemCache) stageAgent(ref domain.PowerRef) (stagingRoot string, r
 			resultErr = errors.Join(resultErr, fmt.Errorf("clean staging candidate %q: %w", candidate, err))
 		}
 	}()
-	source := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version, "agent.yaml")
-	contents, err := c.readFile(source)
-	if err != nil {
-		return "", fmt.Errorf("read cache path %q: %w", source, err)
-	}
+	source := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version)
 	target := filepath.Join(candidate, "agents", ref.Name)
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return "", fmt.Errorf("create staging target %q: %w", target, err)
+	if err := c.copyDir(source, target); err != nil {
+		return "", fmt.Errorf("copy cache path %q to staging path %q: %w", source, target, err)
 	}
-	if err := os.WriteFile(filepath.Join(target, "agent.yaml"), contents, 0o644); err != nil {
-		return "", fmt.Errorf("write staging agent %q: %w", filepath.Join(target, "agent.yaml"), err)
+	if _, err := agentartifact.ValidateDirectory(ctx, target, &ref); err != nil {
+		return "", fmt.Errorf("validate staged Agent %q for %+v: %w", target, ref, err)
 	}
 	if err := c.publishStagingCandidate(candidate); err != nil {
 		return "", err
