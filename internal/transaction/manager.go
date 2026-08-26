@@ -14,6 +14,7 @@ import (
 type Manager interface {
 	Inspector
 	Recoverer
+	InspectFilesystemTarget(domain.PowerRef, FilesystemTarget) (TargetPresence, error)
 	InstallSkill(context.Context, SkillInstallRequest) error
 	UninstallSkill(context.Context, SkillUninstallRequest) (UninstallResult, error)
 	InstallAgent(context.Context, AgentInstallRequest) error
@@ -23,6 +24,21 @@ type Manager interface {
 	InstallPlugin(context.Context, PluginInstallRequest) error
 	UninstallPlugin(context.Context, PluginUninstallRequest) (UninstallResult, error)
 }
+
+// FilesystemTarget 提供文件型 Power 的最终目标路径，供只读目标探针使用。
+type FilesystemTarget interface {
+	TargetPath(domain.PowerRef) (string, error)
+}
+
+// TargetPresence 表示文件型 Power 目标路径的存在状态。
+type TargetPresence string
+
+const (
+	// TargetAbsent 表示目标路径不存在。
+	TargetAbsent TargetPresence = "absent"
+	// TargetPresent 表示目标路径存在。
+	TargetPresent TargetPresence = "present"
+)
 
 // MCPAdapterResolver 根据 journal 中的 Agent 动态解析恢复所需的 MCP Adapter。
 type MCPAdapterResolver interface {

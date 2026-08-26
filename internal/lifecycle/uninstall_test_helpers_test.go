@@ -99,6 +99,11 @@ func (m *uninstallFakeTransactions) Recover(context.Context) (transaction.Recove
 	return m.fixture.recovery, m.fixture.recoverErr
 }
 
+func (m *uninstallFakeTransactions) InspectFilesystemTarget(ref domain.PowerRef, _ transaction.FilesystemTarget) (transaction.TargetPresence, error) {
+	recordUninstallEvent(m.calls, m.fixture, "transaction:inspect-target:"+string(ref.Type))
+	return transaction.TargetAbsent, nil
+}
+
 func (*uninstallFakeTransactions) InstallSkill(context.Context, transaction.SkillInstallRequest) error {
 	return nil
 }

@@ -1,13 +1,18 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 
+	"apm/internal/adapter"
 	"apm/internal/cli"
 	"apm/internal/domain"
+	"apm/internal/logging"
 	"apm/internal/transaction"
 )
 
@@ -50,7 +55,7 @@ func TestInstallPreparesCacheBeforeTransaction(t *testing.T) {
 	}
 	wantCalls := []string{
 		"acquire", "recover", "refresh", "catalog:snapshot-locked", "resolve:codex", "config:find:codex",
-		"cache:prepare-skill:codex", "transaction:install:codex", "release",
+		"transaction:inspect-target:codex:skill", "cache:prepare-skill:codex", "transaction:install:codex", "release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want %v", calls, wantCalls)
@@ -111,6 +116,9 @@ func TestInstallClassifiesUpgradeAndDowngradeBySemVer(t *testing.T) {
 				installed: map[domain.AgentID]domain.PowerRef{
 					domain.AgentCodex: {Name: "demo", Type: domain.PowerTypeSkill, Version: tt.previous},
 				},
+				targetPresence: map[domain.AgentID]transaction.TargetPresence{
+					domain.AgentCodex: transaction.TargetPresent,
+				},
 			})
 
 			result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "skill", Name: "demo"})
@@ -150,6 +158,128 @@ func TestInstallConcreteFailureReturnsFailedItemAndMarkerAfterRelease(t *testing
 	assertInstallBatchError(t, err, domain.AgentCodex, cause)
 	if !containsEvent(calls, "release") {
 		t.Fatalf("calls = %v, want release", calls)
+	}
+}
+
+func TestInstallSkillStateTable(t *testing.T) {
+	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}
+	previous := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
+
+	tests := []struct {
+		name       string
+		installed  *domain.PowerRef
+		presence   transaction.TargetPresence
+		want       cli.InstallOutcome
+		wantErr    error
+		wantEvents []string
+		forbidden  []string
+		wantWarn   bool
+	}{
+		{
+			name: "new absent installs",
+			want: cli.InstallOutcomeInstalled,
+			wantEvents: []string{
+				"config:find:codex", "transaction:inspect-target:codex:skill",
+				"cache:prepare-skill:codex", "transaction:install:codex",
+			},
+		},
+		{
+			name:     "new present conflicts",
+			presence: transaction.TargetPresent,
+			wantErr:  adapter.ErrTargetConflict,
+			wantEvents: []string{
+				"config:find:codex", "transaction:inspect-target:codex:skill",
+			},
+			forbidden: []string{"cache:prepare-skill:codex", "transaction:install:codex"},
+		},
+		{
+			name:      "same version returns unchanged with zero probe",
+			installed: &target,
+			want:      cli.InstallOutcomeUnchanged,
+			forbidden: []string{
+				"transaction:inspect-target:codex:skill", "cache:prepare-skill:codex",
+				"transaction:install:codex", "transaction:uninstall:codex",
+			},
+		},
+		{
+			name:      "different present upgrades",
+			installed: &previous,
+			presence:  transaction.TargetPresent,
+			want:      cli.InstallOutcomeUpgraded,
+			wantEvents: []string{
+				"config:find:codex", "transaction:inspect-target:codex:skill",
+				"cache:prepare-skill:codex", "transaction:install:codex",
+			},
+			forbidden: []string{"transaction:uninstall:codex"},
+		},
+		{
+			name:      "different missing repairs and installs",
+			installed: &previous,
+			want:      cli.InstallOutcomeInstalled,
+			wantEvents: []string{
+				"config:find:codex", "transaction:inspect-target:codex:skill",
+				"transaction:uninstall:codex", "cache:prepare-skill:codex", "transaction:install:codex",
+			},
+			wantWarn: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			var stdout, stderr bytes.Buffer
+			originalLogger := slog.Default()
+			slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
+			t.Cleanup(func() { slog.SetDefault(originalLogger) })
+
+			fixture := installFixture{
+				snapshot:  domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+				cloudRefs: []domain.PowerRef{target},
+				selected:  target.Version,
+			}
+			if tt.installed != nil {
+				fixture.installed = map[domain.AgentID]domain.PowerRef{domain.AgentCodex: *tt.installed}
+			}
+			if tt.presence != "" {
+				fixture.targetPresence = map[domain.AgentID]transaction.TargetPresence{domain.AgentCodex: tt.presence}
+			}
+			service := newInstallService(t, &calls, fixture)
+
+			result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "skill", Name: "demo"})
+
+			if tt.wantErr != nil {
+				assertInstallBatchError(t, err, domain.AgentCodex, tt.wantErr)
+				if len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeFailed {
+					t.Fatalf("Install().Items = %#v, want single failed item", result.Items)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertInstallItems(t, result, []cli.InstallItem{{Agent: domain.AgentCodex, Power: target, Outcome: tt.want}})
+			}
+			if tt.wantEvents != nil {
+				assertEventSubsequence(t, calls, tt.wantEvents)
+			}
+			for _, forbidden := range tt.forbidden {
+				if containsEvent(calls, forbidden) {
+					t.Fatalf("calls = %v, must not contain %q", calls, forbidden)
+				}
+			}
+			if tt.wantWarn {
+				if strings.Count(stderr.String(), "level=WARN") != 1 {
+					t.Fatalf("stderr = %q, want exactly one warning", stderr.String())
+				}
+				for _, want := range []string{
+					`msg="installed power target is missing"`, "operation=install", "agent=codex",
+					"type=skill", "power=demo", "version=v1.0.0",
+				} {
+					if !strings.Contains(stderr.String(), want) {
+						t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+					}
+				}
+			}
+		})
 	}
 }
 

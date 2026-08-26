@@ -52,6 +52,7 @@ type installFixture struct {
 	pluginResources          *fakePluginResources
 	configRemoveErr          error
 	versionErr               error
+	targetPresence           map[domain.AgentID]transaction.TargetPresence
 
 	currentAgent domain.AgentID
 	cacheCalls   map[domain.AgentID]int
@@ -183,6 +184,15 @@ func (m *installFakeTransactions) Recover(context.Context) (transaction.Recovery
 	return m.fixture.recovery, m.fixture.recoverErr
 }
 
+func (m *installFakeTransactions) InspectFilesystemTarget(ref domain.PowerRef, _ transaction.FilesystemTarget) (transaction.TargetPresence, error) {
+	agent := m.fixture.currentAgent
+	*m.calls = append(*m.calls, "transaction:inspect-target:"+string(agent)+":"+string(ref.Type))
+	if presence, ok := m.fixture.targetPresence[agent]; ok {
+		return presence, nil
+	}
+	return transaction.TargetAbsent, nil
+}
+
 func (m *installFakeTransactions) InstallSkill(_ context.Context, request transaction.SkillInstallRequest) error {
 	*m.calls = append(*m.calls, "transaction:install:"+string(request.Agent))
 	return m.fixture.transactionInstallErr[request.Agent]
@@ -199,11 +209,13 @@ func (m *installFakeTransactions) InstallMCP(_ context.Context, request transact
 	return m.fixture.transactionMCPInstallErr[request.Agent]
 }
 
-func (*installFakeTransactions) UninstallSkill(context.Context, transaction.SkillUninstallRequest) (transaction.UninstallResult, error) {
+func (m *installFakeTransactions) UninstallSkill(_ context.Context, request transaction.SkillUninstallRequest) (transaction.UninstallResult, error) {
+	*m.calls = append(*m.calls, "transaction:uninstall:"+string(request.Agent))
 	return transaction.UninstallResult{}, nil
 }
 
-func (*installFakeTransactions) UninstallAgent(context.Context, transaction.AgentUninstallRequest) (transaction.UninstallResult, error) {
+func (m *installFakeTransactions) UninstallAgent(_ context.Context, request transaction.AgentUninstallRequest) (transaction.UninstallResult, error) {
+	*m.calls = append(*m.calls, "transaction:uninstall-agent:"+string(request.Agent))
 	return transaction.UninstallResult{}, nil
 }
 

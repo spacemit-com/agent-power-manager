@@ -39,10 +39,10 @@ func TestInstallAllUsesSnapshotOrderAndFetchesSeparatelyPerChangedAgent(t *testi
 	}
 	wantCalls := []string{
 		"acquire", "recover", "refresh", "catalog:snapshot-locked",
-		"resolve:bibit", "config:find:bibit", "cache:prepare-skill:bibit", "transaction:install:bibit",
-		"resolve:claude-code", "config:find:claude-code", "cache:prepare-skill:claude-code", "transaction:install:claude-code",
+		"resolve:bibit", "config:find:bibit", "transaction:inspect-target:bibit:skill", "cache:prepare-skill:bibit", "transaction:install:bibit",
+		"resolve:claude-code", "config:find:claude-code", "transaction:inspect-target:claude-code:skill", "cache:prepare-skill:claude-code", "transaction:install:claude-code",
 		"resolve:codex", "config:find:codex",
-		"resolve:hermes-agent", "config:find:hermes-agent", "cache:prepare-skill:hermes-agent", "transaction:install:hermes-agent",
+		"resolve:hermes-agent", "config:find:hermes-agent", "transaction:inspect-target:hermes-agent:skill", "cache:prepare-skill:hermes-agent", "transaction:install:hermes-agent",
 		"release",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
