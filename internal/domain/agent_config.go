@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -16,17 +15,26 @@ import (
 // ErrInvalidAgent 表示 Agent 配置不满足安装约束。
 var ErrInvalidAgent = errors.New("invalid agent")
 
-// AgentConfig 表示 agent.yaml 中 APM 需要的最小字段；其余字段由安装流程原样透传。
+// AgentConfig 表示 agent.yaml 中 APM 需要校验的最小 V0.5 字段；其余字段由安装流程原样透传。
 type AgentConfig struct {
 	SchemaVersion int       `yaml:"schema_version"`
 	Agent         AgentInfo `yaml:"agent"`
 }
 
-// AgentInfo 表示 agent.yaml 的 agent 区块标识字段。
+// AgentInfo 表示 agent.yaml 的 agent 区块稳定字段。id 仅供 Bibit 内部区分，
+// 外部身份必须使用 name+version；description 与 soul 只要求 trim 后非空。
 type AgentInfo struct {
-	ID          string `yaml:"id"`
-	Version     string `yaml:"version"`
-	Description string `yaml:"description"`
+	ID          string        `yaml:"id"`
+	Name        string        `yaml:"name"`
+	Version     string        `yaml:"version"`
+	Description string        `yaml:"description"`
+	Soul        string        `yaml:"soul"`
+	Metadata    AgentMetadata `yaml:"metadata"`
+}
+
+// AgentMetadata 表示 agent 区块的可选元数据。avatar 为 assets/ 下 PNG 的包内相对路径（可选）。
+type AgentMetadata struct {
+	Avatar *string `yaml:"avatar"`
 }
 
 // Validate 校验 Agent 配置的最小边界，不清洗或改写原始值。
@@ -34,17 +42,20 @@ func (config AgentConfig) Validate() error {
 	if config.SchemaVersion != 1 {
 		return fmt.Errorf("agent schema version %d must be 1: %w", config.SchemaVersion, ErrInvalidAgent)
 	}
-	if !IsCanonicalPowerName(config.Agent.ID) {
-		return fmt.Errorf("agent id %q must be a canonical power name: %w", config.Agent.ID, ErrInvalidAgent)
+	if strings.TrimSpace(config.Agent.ID) == "" {
+		return fmt.Errorf("agent id must be non-empty: %w", ErrInvalidAgent)
 	}
-	if !isSafeAgentID(config.Agent.ID) {
-		return fmt.Errorf("agent id %q must be a safe path segment: %w", config.Agent.ID, ErrInvalidAgent)
+	if !IsCanonicalPowerName(config.Agent.Name) {
+		return fmt.Errorf("agent name %q must be a canonical power name: %w", config.Agent.Name, ErrInvalidAgent)
 	}
 	if _, err := canonicalAgentVersion(config.Agent.Version); err != nil {
 		return err
 	}
 	if strings.TrimSpace(config.Agent.Description) == "" {
 		return fmt.Errorf("agent description must be non-empty: %w", ErrInvalidAgent)
+	}
+	if strings.TrimSpace(config.Agent.Soul) == "" {
+		return fmt.Errorf("agent soul must be non-empty: %w", ErrInvalidAgent)
 	}
 	return nil
 }
@@ -67,7 +78,7 @@ func DecodeAgentConfigYAML(raw []byte) (AgentConfig, error) {
 	if err := validateUniqueYAMLMappingKeys(&document); err != nil {
 		return AgentConfig{}, err
 	}
-	// 使用聚焦 helper 取得根 schema_version 与 agent mapping 的三个字符串字段。
+	// 使用聚焦 helper 取得根 schema_version 与 agent mapping 的稳定字段。
 	config, err := decodeAgentConfigNode(&document)
 	if err != nil {
 		return AgentConfig{}, err
@@ -79,12 +90,12 @@ func DecodeAgentConfigYAML(raw []byte) (AgentConfig, error) {
 }
 
 // ValidatePowerRef 校验 config 自身合法且与 ref 的 type/name/version 完全一致，
-// 用于缓存、安装与恢复时确认内容身份未被替换。
+// 用于缓存、安装与恢复时确认内容身份未被替换；name 对应 agent.name，而非 agent.id。
 func (config AgentConfig) ValidatePowerRef(ref PowerRef) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
-	if ref.Type != PowerTypeAgent || ref.Name != config.Agent.ID || ref.Version != config.Agent.Version {
+	if ref.Type != PowerTypeAgent || ref.Name != config.Agent.Name || ref.Version != config.Agent.Version {
 		return fmt.Errorf("agent identity does not match power %+v: %w", ref, ErrInvalidAgent)
 	}
 	return nil
@@ -123,7 +134,8 @@ func validateUniqueYAMLMappingKeys(node *yaml.Node) error {
 }
 
 // decodeAgentConfigNode 从已通过重复键检查的 document 节点读取稳定字段，
-// 要求根与 agent 均为 mapping，schema_version 为整数，id/version/description 为字符串 scalar。
+// 要求根与 agent 均为 mapping，schema_version 为整数，id/name/version/description/soul
+// 为字符串 scalar，可选 metadata 为 mapping 且 avatar 为字符串 scalar。
 func decodeAgentConfigNode(document *yaml.Node) (AgentConfig, error) {
 	if document == nil || document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
 		return AgentConfig{}, fmt.Errorf("agent YAML must be a single mapping document: %w", ErrInvalidAgent)
@@ -154,15 +166,21 @@ func decodeAgentConfigNode(document *yaml.Node) (AgentConfig, error) {
 	}
 
 	var info AgentInfo
-	var idNode, versionNode, descriptionNode *yaml.Node
+	var idNode, nameNode, versionNode, descriptionNode, soulNode, metadataNode *yaml.Node
 	for i := 0; i+1 < len(agentNode.Content); i += 2 {
 		switch agentNode.Content[i].Value {
 		case "id":
 			idNode = agentNode.Content[i+1]
+		case "name":
+			nameNode = agentNode.Content[i+1]
 		case "version":
 			versionNode = agentNode.Content[i+1]
 		case "description":
 			descriptionNode = agentNode.Content[i+1]
+		case "soul":
+			soulNode = agentNode.Content[i+1]
+		case "metadata":
+			metadataNode = agentNode.Content[i+1]
 		}
 	}
 	for _, field := range []struct {
@@ -171,26 +189,35 @@ func decodeAgentConfigNode(document *yaml.Node) (AgentConfig, error) {
 		target *string
 	}{
 		{"id", idNode, &info.ID},
+		{"name", nameNode, &info.Name},
 		{"version", versionNode, &info.Version},
 		{"description", descriptionNode, &info.Description},
+		{"soul", soulNode, &info.Soul},
 	} {
 		if field.node == nil || field.node.Kind != yaml.ScalarNode || field.node.Tag != "!!str" {
 			return AgentConfig{}, fmt.Errorf("agent YAML agent.%s must be a string: %w", field.name, ErrInvalidAgent)
 		}
 		*field.target = field.node.Value
 	}
+	if metadataNode != nil {
+		if metadataNode.Kind != yaml.MappingNode {
+			return AgentConfig{}, fmt.Errorf("agent YAML agent.metadata must be a mapping: %w", ErrInvalidAgent)
+		}
+		var avatarNode *yaml.Node
+		for i := 0; i+1 < len(metadataNode.Content); i += 2 {
+			if metadataNode.Content[i].Value == "avatar" {
+				avatarNode = metadataNode.Content[i+1]
+			}
+		}
+		if avatarNode != nil {
+			if avatarNode.Kind != yaml.ScalarNode || avatarNode.Tag != "!!str" {
+				return AgentConfig{}, fmt.Errorf("agent YAML agent.metadata.avatar must be a string: %w", ErrInvalidAgent)
+			}
+			avatar := avatarNode.Value
+			info.Metadata.Avatar = &avatar
+		}
+	}
 	return AgentConfig{SchemaVersion: schemaVersion, Agent: info}, nil
-}
-
-// isSafeAgentID 报告 agent id 是否为安全且未经清洗的单个路径段。
-func isSafeAgentID(id string) bool {
-	if strings.TrimSpace(id) == "" || id == "." || id == ".." {
-		return false
-	}
-	if filepath.IsAbs(id) || strings.ContainsAny(id, `/\\`) {
-		return false
-	}
-	return filepath.Clean(id) == id
 }
 
 func canonicalAgentVersion(version string) (string, error) {
