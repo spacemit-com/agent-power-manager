@@ -39,15 +39,18 @@ func (c *recordingSubmissionClient) ListSubmissions(_ context.Context, query dom
 	return c.list, c.listErr
 }
 
-// lifecycleAgentYAML 是 submit 生命周期测试共用的最小合法 agent.yaml。
-const lifecycleAgentYAML = "schema_version: 1\nagent:\n  id: demo-agent\n  version: v1.2.3\n  description: Demo agent\n"
+// lifecycleAgentYAML 是 submit 生命周期测试共用的最小合法 V0.5 agent.yaml：
+// 目录型 Agent 资源的根闭集只允许 agent.yaml 与可选 assets/，且必须携带
+// name/soul 等稳定字段（V0.4 单文件形式已被 ValidateDirectory 拒绝）。
+const lifecycleAgentYAML = "schema_version: 1\nagent:\n  id: bibit-internal-demo\n  name: demo-agent\n  version: v1.0.0\n  description: demo\n  soul: help safely\n"
 
-// writeLifecycleAgent 写入 agent.yaml 并返回其路径。
+// writeLifecycleAgent 在 dir 下写入合法 V0.5 目录型 Agent 资源根（agent.yaml），
+// 并返回该资源根目录路径，供 Submit/Validate 按目录语义消费。
 func writeLifecycleAgent(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "agent.yaml")
 	if err := os.WriteFile(path, []byte(lifecycleAgentYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return path
+	return dir
 }

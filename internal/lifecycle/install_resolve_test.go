@@ -31,8 +31,6 @@ func catalogEntryForInstallTest(ref domain.PowerRef, message string) domain.Cata
 	contentType := "application/gzip"
 	if ref.Type == domain.PowerTypeMCP {
 		contentType = "application/json"
-	} else if ref.Type == domain.PowerTypeAgent {
-		contentType = "application/yaml"
 	}
 	return domain.CatalogEntry{
 		Ref: ref, Description: "test entry", Message: message, ContentType: contentType,

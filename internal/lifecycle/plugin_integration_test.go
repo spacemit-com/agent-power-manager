@@ -1196,7 +1196,7 @@ func lifecycleFixtureContent(t *testing.T, root string, ref domain.PowerRef) (st
 	case domain.PowerTypeMCP:
 		return "application/json", lifecycleReadFixture(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
 	case domain.PowerTypeAgent:
-		return "application/yaml", lifecycleReadFixture(t, filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml"))
+		return "application/gzip", lifecycleDeterministicArchive(t, filepath.Join(root, "agents", ref.Name, ref.Version))
 	default:
 		t.Fatalf("unsupported lifecycle fixture type %q", ref.Type)
 		return "", nil
@@ -1383,12 +1383,10 @@ func lifecycleEscapedPath(segments ...string) string {
 
 func lifecycleExpectedContentType(powerType domain.PowerType) string {
 	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeAgent:
 		return "application/gzip"
 	case domain.PowerTypeMCP:
 		return "application/json"
-	case domain.PowerTypeAgent:
-		return "application/yaml"
 	default:
 		return ""
 	}

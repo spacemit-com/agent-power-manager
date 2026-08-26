@@ -1,9 +1,12 @@
 package lifecycle
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -94,6 +97,44 @@ func writeVersionedLifecycleSkill(t *testing.T, dir string) {
 	}
 }
 
+// assertLifecycleAgentArchive 校验目录型 Agent 的确定性 gzip 归档内容：
+// 恰好一个普通文件条目 agent.yaml，正文与源 fixture 完全一致。
+func assertLifecycleAgentArchive(t *testing.T, content []byte) {
+	t.Helper()
+	gzipReader, err := gzip.NewReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("agent submission is not a gzip archive: %v", err)
+	}
+	tarReader := tar.NewReader(gzipReader)
+	files := 0
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read agent submission tar: %v", err)
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		files++
+		if files != 1 || header.Name != "agent.yaml" {
+			t.Fatalf("agent submission tar entry %d = %q, want exactly agent.yaml", files, header.Name)
+		}
+		body, err := io.ReadAll(tarReader)
+		if err != nil {
+			t.Fatalf("read agent.yaml from submission tar: %v", err)
+		}
+		if !bytes.Equal(body, []byte(lifecycleAgentYAML)) {
+			t.Fatalf("agent.yaml in submission = %q, want %q", body, lifecycleAgentYAML)
+		}
+	}
+	if files != 1 {
+		t.Fatalf("agent submission tar file entries = %d, want 1", files)
+	}
+}
+
 func TestSubmitAgentMapsAcceptedOutcome(t *testing.T) {
 	client := &recordingSubmissionClient{
 		receipt: domain.SubmissionResult{Outcome: domain.SubmissionAccepted, SubmissionID: "sub_1", Status: domain.SubmissionReceived},
@@ -115,12 +156,13 @@ func TestSubmitAgentMapsAcceptedOutcome(t *testing.T) {
 		t.Fatalf("cloud Submit calls = %d, want 1", len(client.submitCalls))
 	}
 	request := client.submitCalls[0]
-	if request.Type != domain.PowerTypeAgent || request.Name != "demo-agent" || request.Version != "v1.2.3" || request.Message != "first release" || request.ContentType != "application/yaml" {
+	if request.Type != domain.PowerTypeAgent || request.Name != "demo-agent" || request.Version != "v1.0.0" || request.Message != "first release" || request.ContentType != "application/gzip" {
 		t.Fatalf("SubmissionRequest = %#v", request)
 	}
-	if !bytes.Equal(request.Content, []byte(lifecycleAgentYAML)) || request.ContentMD5 == "" || request.IdempotencyKey == "" {
+	if request.ContentMD5 == "" || request.IdempotencyKey == "" {
 		t.Fatalf("SubmissionRequest missing content fields: %#v", request)
 	}
+	assertLifecycleAgentArchive(t, request.Content)
 }
 
 func TestSubmitAgentMapsReplayedOutcome(t *testing.T) {
@@ -154,7 +196,7 @@ func TestSubmitAgentIgnoresVersionOverrideAtLifecycleBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if len(client.submitCalls) != 1 || client.submitCalls[0].Version != "v1.2.3" {
-		t.Fatalf("cloud Submit calls = %#v, want source-owned version v1.2.3", client.submitCalls)
+	if len(client.submitCalls) != 1 || client.submitCalls[0].Version != "v1.0.0" {
+		t.Fatalf("cloud Submit calls = %#v, want source-owned version v1.0.0", client.submitCalls)
 	}
 }

@@ -78,8 +78,5 @@ func catalogEntry(powerType domain.PowerType, name, version string) domain.Catal
 	if powerType == domain.PowerTypeMCP {
 		contentType = "application/json"
 	}
-	if powerType == domain.PowerTypeAgent {
-		contentType = "application/yaml"
-	}
 	return domain.CatalogEntry{Ref: domain.PowerRef{Type: powerType, Name: name, Version: version}, Description: "description", Message: "message", ContentType: contentType, ContentSize: 1, ContentMD5: "0123456789abcdef0123456789abcdef", PublishedAt: "2026-08-25T12:34:56Z", Tags: []string{"tag"}}
 }

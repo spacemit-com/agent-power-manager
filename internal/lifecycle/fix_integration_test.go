@@ -286,11 +286,14 @@ func TestFixIntegrationAgentIdentityMismatchFailsClosedThenConverges(t *testing.
 		},
 	}
 
+	// Agent 目标是完整目录（root/agents/<name>）；fail-closed 阶段写入不合法身份
+	// 的目录型 agent.yaml（缺少 name/soul，无法通过 ValidateDirectory），
+	// 恢复器必须拒绝提交而不是把它当作可清理的缺失目标。
 	const wrongYAML = "schema_version: 1\nagent:\n  id: other-agent\n  version: v9.9.9\n  description: wrong identity\n"
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+	if err := os.MkdirAll(target, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(target, []byte(wrongYAML), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(target, "agent.yaml"), []byte(wrongYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	journalPath := writeIntegrationJournal(t, journal)
@@ -305,13 +308,13 @@ func TestFixIntegrationAgentIdentityMismatchFailsClosedThenConverges(t *testing.
 		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
 	}
 	assertJournalBytes(t, journalPath, originalJournal)
-	assertFileContents(t, target, wrongYAML)
+	assertFileContents(t, filepath.Join(target, "agent.yaml"), wrongYAML)
 	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || found {
 		t.Fatalf("manifest after failed Fix = %+v, found=%v err=%v, want absent", got, found, err)
 	}
 
-	const legalYAML = "schema_version: 1\nagent:\n  id: demo-agent\n  version: v1.0.0\n  description: Demo agent\n"
-	if err := os.WriteFile(target, []byte(legalYAML), 0o600); err != nil {
+	const legalYAML = "schema_version: 1\nagent:\n  id: bibit-internal-demo\n  name: demo-agent\n  version: v1.0.0\n  description: demo\n  soul: help safely\n"
+	if err := os.WriteFile(filepath.Join(target, "agent.yaml"), []byte(legalYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := newIntegrationFixer(t, harnessTransactions(t, harness)).Fix(context.Background()); err != nil {
@@ -321,7 +324,7 @@ func TestFixIntegrationAgentIdentityMismatchFailsClosedThenConverges(t *testing.
 	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got != ref {
 		t.Fatalf("recovered manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
-	assertFileContents(t, target, legalYAML)
+	assertFileContents(t, filepath.Join(target, "agent.yaml"), legalYAML)
 	manifestPath, err := paths.ManifestPath(domain.AgentBibit)
 	if err != nil {
 		t.Fatal(err)

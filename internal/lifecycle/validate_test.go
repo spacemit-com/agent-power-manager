@@ -60,7 +60,7 @@ func TestValidateAgentOfflineMapsResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if result.Type != string(domain.PowerTypeAgent) || result.Name != "demo-agent" || result.Version != "v1.2.3" || result.Description != "Demo agent" {
+	if result.Type != string(domain.PowerTypeAgent) || result.Name != "demo-agent" || result.Version != "v1.0.0" || result.Description != "demo" {
 		t.Fatalf("Validate() = %#v", result)
 	}
 	if result.FileCount != 1 || result.ContentSize != int64(len(lifecycleAgentYAML)) {

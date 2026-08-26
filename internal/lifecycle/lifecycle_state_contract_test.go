@@ -76,6 +76,20 @@ func TestLifecycleStateContract(t *testing.T) {
 						wantInstall: cli.InstallOutcomeInstalled, wantWarning: "installed power target is missing",
 					})
 				}
+				if power.powerType == domain.PowerTypeAgent {
+					// 目录型 Agent 的文件级缺陷（缺 agent.yaml / 缺被引用 avatar / 多余
+					// 或不一致资源）都收敛为同一个"缺失/不完整受管目标"：
+					// 一次 target-missing 告警 + 首次安装语义 publish，outcome 仍为 installed，
+					// 绝不产生第二条告警或降级为 missing。
+					cases = append(cases,
+						lifecycleContractCase{name: "different version over missing agent.yaml warns and installs", manifest: "different", target: "incomplete",
+							wantInstall: cli.InstallOutcomeInstalled, wantWarning: "installed power target is missing"},
+						lifecycleContractCase{name: "different version over missing referenced avatar warns and installs", manifest: "different", target: "incomplete",
+							wantInstall: cli.InstallOutcomeInstalled, wantWarning: "installed power target is missing"},
+						lifecycleContractCase{name: "different version over extra inconsistent assets warns and installs", manifest: "different", target: "incomplete",
+							wantInstall: cli.InstallOutcomeInstalled, wantWarning: "installed power target is missing"},
+					)
+				}
 				for _, tc := range cases {
 					tc := tc
 					t.Run(tc.name, func(t *testing.T) {
@@ -90,6 +104,18 @@ func TestLifecycleStateContract(t *testing.T) {
 						name: "present manifest incomplete target warns and completes", manifest: "present", target: "incomplete",
 						wantUninstall: cli.UninstallOutcomeCompleted, wantWarning: "installed power target is missing",
 					})
+				}
+				if power.powerType == domain.PowerTypeAgent {
+					// 与 install 方向一致：目录型缺陷在卸载方向同样只产生一次
+					// target-missing 告警，并清理 manifest 后以 completed 收敛。
+					cases = append(cases,
+						lifecycleContractCase{name: "present manifest missing agent.yaml warns and completes", manifest: "present", target: "incomplete",
+							wantUninstall: cli.UninstallOutcomeCompleted, wantWarning: "installed power target is missing"},
+						lifecycleContractCase{name: "present manifest missing referenced avatar warns and completes", manifest: "present", target: "incomplete",
+							wantUninstall: cli.UninstallOutcomeCompleted, wantWarning: "installed power target is missing"},
+						lifecycleContractCase{name: "present manifest extra inconsistent assets warns and completes", manifest: "present", target: "incomplete",
+							wantUninstall: cli.UninstallOutcomeCompleted, wantWarning: "installed power target is missing"},
+					)
 				}
 				for _, tc := range cases {
 					tc := tc
@@ -175,8 +201,14 @@ func contractInstallFixture(power contractPower, manifest, target string) instal
 
 	switch power.powerType {
 	case domain.PowerTypeSkill, domain.PowerTypeAgent:
-		if target == "present" || target == "complete" {
+		// 目录型目标（Skill 的 SKILL.md、Agent 的 agent.yaml+assets）在生命周期层
+		// 只探测位置存在性；文件级缺陷（缺清单/缺 avatar/多余资源）一律建模为
+		// TargetAbsent，与共享状态策略的 incomplete 分支收敛为同一条缺失告警路径。
+		switch target {
+		case "present", "complete":
 			fixture.targetPresence = map[domain.AgentID]transaction.TargetPresence{power.agent: transaction.TargetPresent}
+		default:
+			fixture.targetPresence = map[domain.AgentID]transaction.TargetPresence{power.agent: transaction.TargetAbsent}
 		}
 	case domain.PowerTypeMCP:
 		fixture.mcpDefinitions = map[string]domain.MCPServer{
@@ -226,6 +258,8 @@ func contractUninstallFixture(power contractPower, manifest, target string) unin
 		fixture.groups = map[domain.AgentID]domain.PowerGroups{
 			power.agent: {power.powerType: {ref}},
 		}
+		// 目录型缺陷（缺 agent.yaml / 缺 avatar / 多余资源）与位置缺失一样
+		// 建模为 TargetMissing，卸载方向只产生一次告警并收敛为 completed。
 		targetMissing := target == "absent" || target == "incomplete"
 		switch power.powerType {
 		case domain.PowerTypeMCP:
