@@ -267,12 +267,9 @@ func catalogSnapshotFromRefs(t *testing.T, refs []domain.PowerRef) catalog.Snaps
 }
 
 func catalogEntryFromRef(ref domain.PowerRef) domain.CatalogEntry {
-	contentType := "application/json"
-	switch ref.Type {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin:
-		contentType = "application/gzip"
-	case domain.PowerTypeAgent:
-		contentType = "application/yaml"
+	contentType := "application/gzip"
+	if ref.Type == domain.PowerTypeMCP {
+		contentType = "application/json"
 	}
 	return domain.CatalogEntry{
 		Ref: ref, Description: "test power", Message: "test message", ContentType: contentType,
