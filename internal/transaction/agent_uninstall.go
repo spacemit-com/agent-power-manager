@@ -111,12 +111,13 @@ func (s *Service) UninstallAgent(ctx context.Context, request AgentUninstallRequ
 	return result, nil
 }
 
-// pruneEmptyAgentDirs 尽力移除已空的 agents/<id>/ 与 agents/ 父目录；目录非空或不存在时忽略。
+// pruneEmptyAgentDirs 尽力移除已空的 agents/ 父目录；目录非空或不存在时忽略。
+// 只清理 target 的直接父目录（root/agents），绝不尝试删除 Agent 根目录（Bibit root）。
 func pruneEmptyAgentDirs(files fileOps, target string) error {
-	for _, dir := range []string{filepath.Dir(target), filepath.Dir(filepath.Dir(target))} {
-		if err := files.remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
-			break
-		}
+	parent := filepath.Dir(target)
+	if err := files.remove(parent); err != nil && !errors.Is(err, os.ErrNotExist) {
+		// agents/ 非空或不可移除时保留原状，卸载仍视为完成。
+		return nil
 	}
 	return nil
 }

@@ -1,18 +1,21 @@
 package adapter
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
+	"apm/internal/agentartifact"
 	"apm/internal/domain"
 )
 
-// bibitAgentAdapter 实现从公共 staging 到 Bibit agents 目录的单文件 Agent 安装流程。
+// bibitAgentAdapter 实现从公共 staging 到 Bibit agents 目录的完整目录 Agent 安装流程。
 type bibitAgentAdapter struct {
 	profile   agentProfile
-	readFile  func(string) ([]byte, error)
+	copyDir   func(string, string) error
 	mkdirAll  func(string, os.FileMode) error
 	rename    func(string, string) error
 	removeAll func(string) error
@@ -21,14 +24,15 @@ type bibitAgentAdapter struct {
 func newBibitAgentAdapter(profile agentProfile) *bibitAgentAdapter {
 	return &bibitAgentAdapter{
 		profile:   profile,
-		readFile:  os.ReadFile,
+		copyDir:   copyAgentDirNormalized,
 		mkdirAll:  os.MkdirAll,
 		rename:    os.Rename,
 		removeAll: os.RemoveAll,
 	}
 }
 
-// TargetPath 返回指定 Agent 的最终安装文件路径；目录名使用 ref.Name（Cloud 保证等于 agent.id）。
+// TargetPath 返回指定 Agent 的最终安装目录路径 root/agents/<ref.Name>；
+// 目录名使用 ref.Name（外部身份），不含版本目录，亦无 agent.yaml 后缀。
 func (a *bibitAgentAdapter) TargetPath(ref domain.PowerRef) (string, error) {
 	if ref.Type != domain.PowerTypeAgent || !isSafeSkillName(ref.Name) {
 		return "", fmt.Errorf("target path for agent %q power %q: %w", a.profile.id, ref.Name, ErrInvalidAgent)
@@ -37,41 +41,22 @@ func (a *bibitAgentAdapter) TargetPath(ref domain.PowerRef) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "agents", ref.Name, "agent.yaml"), nil
+	return filepath.Join(root, "agents", ref.Name), nil
 }
 
-// ValidateArtifact 只读校验 artifact 的 agent.yaml 身份与 ref 完全一致；
-// 拒绝非普通文件或符号链接，不发布或改写任何文件。
+// ValidateArtifact 只读校验完整 Agent 目录：物理安全、根闭集、avatar PNG 以及
+// agent.name/version 身份与 ref 完全一致，可作用于 staging/target/backup/
+// quarantine 目录，不发布或改写任何文件。
 func (a *bibitAgentAdapter) ValidateArtifact(ref domain.PowerRef, path string) error {
-	_, err := a.validateArtifactRaw(ref, path)
-	return err
+	if _, err := agentartifact.ValidateDirectory(context.Background(), path, &ref); err != nil {
+		return err
+	}
+	return nil
 }
 
-// validateArtifactRaw 读取并校验 agent.yaml，返回通过校验的原始字节；
-// Install 复用这份字节发布，避免校验后再次读取到不同内容。
-func (a *bibitAgentAdapter) validateArtifactRaw(ref domain.PowerRef, path string) ([]byte, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, fmt.Errorf("stat Agent artifact %q: %w", path, err)
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("Agent artifact %q is not physical: %w", path, ErrInvalidAgent)
-	}
-	raw, err := a.readFile(path)
-	if err != nil {
-		return nil, err
-	}
-	config, err := domain.DecodeAgentConfigYAML(raw)
-	if err != nil {
-		return nil, err
-	}
-	if err := config.ValidatePowerRef(ref); err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-// Install 从公共 staging 读取并校验 agent.yaml，再原子发布单文件到 Bibit agents 目录。
+// Install 从公共 staging 校验完整 Agent 目录（staging/agents/<ref.Name>），
+// 复制到 Bibit agents 目录下的私有目录并再次校验，最后以不覆盖语义原子发布
+// 到 root/agents/<ref.Name>；任何发布前失败都清理私有与 staging 路径。
 func (a *bibitAgentAdapter) Install(ref domain.PowerRef, staging string) (result AgentInstallResult, resultErr error) {
 	stagingRoot, err := validateStagingIdentity(staging)
 	if err != nil {
@@ -95,41 +80,44 @@ func (a *bibitAgentAdapter) Install(ref domain.PowerRef, staging string) (result
 		return result, a.installError(ref, "detection", root, err)
 	}
 
-	source := filepath.Join(stagingRoot, "agents", ref.Name, "agent.yaml")
-	raw, err := a.validateArtifactRaw(ref, source)
-	if err != nil {
+	source := filepath.Join(stagingRoot, "agents", ref.Name)
+	if _, err := agentartifact.ValidateDirectory(context.Background(), source, &ref); err != nil {
 		return result, a.installError(ref, "validation", source, err)
 	}
 
-	target := filepath.Join(root, "agents", ref.Name, "agent.yaml")
+	target := filepath.Join(root, "agents", ref.Name)
 	if err := ensureAgentTargetAbsent(target); err != nil {
 		return result, a.installError(ref, "detection", target, err)
 	}
-	if err := a.mkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return result, a.installError(ref, "directory", filepath.Dir(target), err)
+	agentsRoot := filepath.Dir(target)
+	if err := a.mkdirAll(agentsRoot, 0o755); err != nil {
+		return result, a.installError(ref, "directory", agentsRoot, err)
 	}
-	temp, err := os.CreateTemp(filepath.Dir(target), ".apm-"+ref.Name+"-*")
+	tempDir, err := os.MkdirTemp(agentsRoot, ".apm-"+ref.Name+"-*")
 	if err != nil {
-		return result, a.installError(ref, "temporary", filepath.Dir(target), err)
+		return result, a.installError(ref, "temporary", agentsRoot, err)
 	}
-	tempName := temp.Name()
-	cleanupTemp := func() {
-		if tempName != "" {
-			_ = os.Remove(tempName)
+	defer func() {
+		if tempDir != "" {
+			if err := a.removeAll(tempDir); err != nil {
+				resultErr = errors.Join(resultErr, a.installError(ref, "cleanup", tempDir, err))
+			}
 		}
+	}()
+
+	if err := a.copyDir(source, tempDir); err != nil {
+		return result, a.installError(ref, "copy", source, fmt.Errorf("copy to %q: %w", tempDir, err))
 	}
-	defer cleanupTemp()
-	if _, err := temp.Write(raw); err != nil {
-		temp.Close()
-		return result, a.installError(ref, "write", tempName, err)
+	if _, err := agentartifact.ValidateDirectory(context.Background(), tempDir, &ref); err != nil {
+		return result, a.installError(ref, "validation", tempDir, err)
 	}
-	if err := temp.Close(); err != nil {
-		return result, a.installError(ref, "write", tempName, err)
-	}
-	if err := a.rename(tempName, target); err != nil {
+	if err := ensureAgentTargetAbsent(target); err != nil {
 		return result, a.installError(ref, "publication", target, err)
 	}
-	tempName = ""
+	if err := a.rename(tempDir, target); err != nil {
+		return result, a.installError(ref, "publication", target, err)
+	}
+	tempDir = ""
 	result.Published = true
 	return result, nil
 }
@@ -153,7 +141,7 @@ func ensureBibitAgentRoot(root string) error {
 	return nil
 }
 
-// ensureAgentTargetAbsent 确保最终目标文件不存在任何文件系统条目。
+// ensureAgentTargetAbsent 确保最终目标目录不存在任何文件系统条目。
 func ensureAgentTargetAbsent(target string) error {
 	_, err := os.Lstat(target)
 	if err == nil {
@@ -163,6 +151,59 @@ func ensureAgentTargetAbsent(target string) error {
 		return nil
 	}
 	return fmt.Errorf("lstat agent target %q: %w", target, err)
+}
+
+// copyAgentDirNormalized 递归复制目录树，文件统一 0644、目录统一 0755。
+func copyAgentDirNormalized(source, destination string) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		return fmt.Errorf("stat source directory %q: %w", source, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("source %q is not a directory", source)
+	}
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return fmt.Errorf("create destination directory %q: %w", destination, err)
+	}
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		return fmt.Errorf("read source directory %q: %w", source, err)
+	}
+	for _, entry := range entries {
+		sourcePath := filepath.Join(source, entry.Name())
+		destinationPath := filepath.Join(destination, entry.Name())
+		if entry.IsDir() {
+			if err := copyAgentDirNormalized(sourcePath, destinationPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := copyAgentFileNormalized(sourcePath, destinationPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyAgentFileNormalized 以 0644 模式复制单个普通文件。
+func copyAgentFileNormalized(source, destination string) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("open source file %q: %w", source, err)
+	}
+	defer input.Close()
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("create destination file %q: %w", destination, err)
+	}
+	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		return fmt.Errorf("copy %q to %q: %w", source, destination, err)
+	}
+	if err := output.Close(); err != nil {
+		return fmt.Errorf("close destination file %q: %w", destination, err)
+	}
+	return nil
 }
 
 var _ AgentAdapter = (*bibitAgentAdapter)(nil)

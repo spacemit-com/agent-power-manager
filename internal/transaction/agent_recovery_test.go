@@ -80,7 +80,7 @@ func newAgentRecoveryFixture(t *testing.T, operation Operation, phase Phase) *ag
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(t.TempDir(), "agents", "demo", "agent.yaml")
+	target := filepath.Join(t.TempDir(), "agents", "demo")
 	id := "00112233445566778899aabbccddeeff"
 	artifacts, err := artifactPaths(target, id)
 	if err != nil {
@@ -93,14 +93,14 @@ func newAgentRecoveryFixture(t *testing.T, operation Operation, phase Phase) *ag
 		Operation:     operation,
 		Phase:         phase,
 		Agent:         domain.AgentBibit,
-		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "2.0.0"},
+		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"},
 		Filesystem: &FilesystemJournalPayload{
 			TargetPath:     target,
 			TransactionDir: artifacts.dir,
 		},
 	}
 	if operation == OperationInstall {
-		journal.Previous = powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "1.0.0"})
+		journal.Previous = powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"})
 		journal.Filesystem.StagingRoot = staging
 		journal.Filesystem.BackupPath = artifacts.backup
 	} else {
@@ -125,14 +125,43 @@ func (f *agentRecoveryFixture) freshService() *Service {
 	return newService(f.manifests, newFilesystemJournalStore(f.journalPath), f.resolver)
 }
 
-func (f *agentRecoveryFixture) writeFile(path, contents string) {
+// writeDir 在 path 下写入与 ref 身份一致的完整 Agent 目录（agent.yaml + assets/avatar.png）。
+func (f *agentRecoveryFixture) writeDir(path string, ref domain.PowerRef) {
 	f.t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	writeAgentDirectory(f.t, path, []byte(agentFixtureYAML(ref)))
+}
+
+// writeCorruptDir 在 path 下写入 avatar 无效的 Agent 目录，必须被目录校验拒绝。
+func (f *agentRecoveryFixture) writeCorruptDir(path string, ref domain.PowerRef) {
+	f.t.Helper()
+	if err := os.MkdirAll(filepath.Join(path, "assets"), 0o755); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(path, "agent.yaml"), []byte(agentFixtureYAML(ref)), 0o644); err != nil {
 		f.t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(path, "assets", "avatar.png"), []byte("not a png"), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// writeIncompleteDir 在 path 下创建缺少 agent.yaml 的不完整目录，必须被目录校验拒绝。
+func (f *agentRecoveryFixture) writeIncompleteDir(path string) {
+	f.t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// useRealBibitAdapter 用真实 Bibit Adapter 替换 recording mock，验证目录级校验。
+func (f *agentRecoveryFixture) useRealBibitAdapter() {
+	f.t.Helper()
+	registry := adapter.NewRegistry()
+	real, err := registry.ResolveAgent(domain.AgentBibit)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.resolver.adapter = real
 }
 
 func (f *agentRecoveryFixture) assertJournalAbsent() {
@@ -169,8 +198,8 @@ func (f *agentRecoveryFixture) assertJournalPresent() {
 
 func TestRecoverAgentPublishingInstallWithTargetCompletesCommit(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writeFile(fixture.target, "new")
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.target, fixture.journal.Power)
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
 	fixture.persist()
 
 	result, err := fixture.freshService().Recover(context.Background())
@@ -180,9 +209,9 @@ func TestRecoverAgentPublishingInstallWithTargetCompletesCommit(t *testing.T) {
 	if fixture.manifests.setRef != fixture.journal.Power {
 		t.Fatalf("manifest Set = %+v", fixture.manifests.setRef)
 	}
-	contents, readErr := os.ReadFile(fixture.target)
-	if readErr != nil || string(contents) != "new" {
-		t.Fatalf("target = %q, %v", contents, readErr)
+	contents, readErr := os.ReadFile(filepath.Join(fixture.target, "agent.yaml"))
+	if readErr != nil || string(contents) != agentFixtureYAML(fixture.journal.Power) {
+		t.Fatalf("target agent.yaml = %q, %v", contents, readErr)
 	}
 	if _, err := os.Lstat(fixture.journal.Filesystem.BackupPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("backup remains: %v", err)
@@ -192,16 +221,16 @@ func TestRecoverAgentPublishingInstallWithTargetCompletesCommit(t *testing.T) {
 
 func TestRecoverAgentPublishingInstallWithoutTargetRollsBackBackup(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
 	fixture.persist()
 
 	result, err := fixture.freshService().Recover(context.Background())
 	if err != nil || result.Direction != RecoveryRollback {
 		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
-	contents, readErr := os.ReadFile(fixture.target)
-	if readErr != nil || string(contents) != "old" {
-		t.Fatalf("restored target = %q, %v", contents, readErr)
+	contents, readErr := os.ReadFile(filepath.Join(fixture.target, "agent.yaml"))
+	if readErr != nil || string(contents) != agentFixtureYAML(*fixture.journal.Previous) {
+		t.Fatalf("restored target agent.yaml = %q, %v", contents, readErr)
 	}
 	if fixture.manifests.setRef.Name != "" {
 		t.Fatalf("manifest unexpectedly set: %+v", fixture.manifests.setRef)
@@ -228,10 +257,10 @@ func TestRecoverAgentUninstallDirectionsConverge(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newAgentRecoveryFixture(t, OperationUninstall, test.phase)
 			if test.target {
-				fixture.writeFile(fixture.target, "installed")
+				fixture.writeDir(fixture.target, fixture.journal.Power)
 			}
 			if test.quarantine {
-				fixture.writeFile(fixture.journal.Filesystem.QuarantinePath, "installed")
+				fixture.writeDir(fixture.journal.Filesystem.QuarantinePath, fixture.journal.Power)
 			}
 			fixture.persist()
 
@@ -243,8 +272,8 @@ func TestRecoverAgentUninstallDirectionsConverge(t *testing.T) {
 				t.Fatalf("manifest removed = %v, want %v", got, test.wantManifestRemove)
 			}
 			if test.phase == PhaseRollingBack {
-				contents, readErr := os.ReadFile(fixture.target)
-				if readErr != nil || string(contents) != "installed" {
+				contents, readErr := os.ReadFile(filepath.Join(fixture.target, "agent.yaml"))
+				if readErr != nil || string(contents) != agentFixtureYAML(fixture.journal.Power) {
 					t.Fatalf("target not restored: %q, %v", contents, readErr)
 				}
 			}
@@ -255,8 +284,8 @@ func TestRecoverAgentUninstallDirectionsConverge(t *testing.T) {
 
 func TestAgentRecoveryInstallCommitValidatesTarget(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writeFile(fixture.target, "new")
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.target, fixture.journal.Power)
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
 	fixture.persist()
 
 	result, err := fixture.freshService().Recover(context.Background())
@@ -272,8 +301,8 @@ func TestAgentRecoveryInstallCommitValidatesTarget(t *testing.T) {
 
 func TestAgentRecoveryInstallCommitRejectsMismatch(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writeFile(fixture.target, "new")
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.target, fixture.journal.Power)
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
 	fixture.adapter.err = errors.New("artifact identity mismatch")
 	fixture.persist()
 
@@ -289,19 +318,19 @@ func TestAgentRecoveryInstallCommitRejectsMismatch(t *testing.T) {
 	}
 	fixture.assertJournalPresent()
 	fixture.assertValidated(fixture.journal.Power, fixture.target)
-	contents, readErr := os.ReadFile(fixture.target)
-	if readErr != nil || string(contents) != "new" {
-		t.Fatalf("target = %q, %v", contents, readErr)
+	contents, readErr := os.ReadFile(filepath.Join(fixture.target, "agent.yaml"))
+	if readErr != nil || string(contents) != agentFixtureYAML(fixture.journal.Power) {
+		t.Fatalf("target agent.yaml = %q, %v", contents, readErr)
 	}
-	backup, readErr := os.ReadFile(fixture.journal.Filesystem.BackupPath)
-	if readErr != nil || string(backup) != "old" {
-		t.Fatalf("backup = %q, %v", backup, readErr)
+	backup, readErr := os.ReadFile(filepath.Join(fixture.journal.Filesystem.BackupPath, "agent.yaml"))
+	if readErr != nil || string(backup) != agentFixtureYAML(*fixture.journal.Previous) {
+		t.Fatalf("backup agent.yaml = %q, %v", backup, readErr)
 	}
 }
 
 func TestAgentRecoveryInstallRollbackValidatesBackup(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
 	fixture.persist()
 
 	result, err := fixture.freshService().Recover(context.Background())
@@ -309,9 +338,9 @@ func TestAgentRecoveryInstallRollbackValidatesBackup(t *testing.T) {
 		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
 	fixture.assertValidated(*fixture.journal.Previous, fixture.journal.Filesystem.BackupPath)
-	contents, readErr := os.ReadFile(fixture.target)
-	if readErr != nil || string(contents) != "old" {
-		t.Fatalf("restored target = %q, %v", contents, readErr)
+	contents, readErr := os.ReadFile(filepath.Join(fixture.target, "agent.yaml"))
+	if readErr != nil || string(contents) != agentFixtureYAML(*fixture.journal.Previous) {
+		t.Fatalf("restored target agent.yaml = %q, %v", contents, readErr)
 	}
 	if fixture.manifests.setRef.Name != "" {
 		t.Fatalf("manifest unexpectedly set: %+v", fixture.manifests.setRef)
@@ -321,7 +350,7 @@ func TestAgentRecoveryInstallRollbackValidatesBackup(t *testing.T) {
 
 func TestAgentRecoveryInstallRollbackRejectsMismatch(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
 	fixture.adapter.err = errors.New("artifact identity mismatch")
 	fixture.persist()
 
@@ -340,16 +369,16 @@ func TestAgentRecoveryInstallRollbackRejectsMismatch(t *testing.T) {
 	if _, statErr := os.Lstat(fixture.target); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("target unexpectedly restored: %v", statErr)
 	}
-	backup, readErr := os.ReadFile(fixture.journal.Filesystem.BackupPath)
-	if readErr != nil || string(backup) != "old" {
-		t.Fatalf("backup = %q, %v", backup, readErr)
+	backup, readErr := os.ReadFile(filepath.Join(fixture.journal.Filesystem.BackupPath, "agent.yaml"))
+	if readErr != nil || string(backup) != agentFixtureYAML(*fixture.journal.Previous) {
+		t.Fatalf("backup agent.yaml = %q, %v", backup, readErr)
 	}
 }
 
 func TestAgentRecoveryInstallRollbackRejectsMissingPrevious(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
 	fixture.journal.Previous = nil
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, fixture.journal.Power)
 	fixture.persist()
 
 	result, err := fixture.freshService().Recover(context.Background())
@@ -367,15 +396,15 @@ func TestAgentRecoveryInstallRollbackRejectsMissingPrevious(t *testing.T) {
 	if _, statErr := os.Lstat(fixture.target); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("target unexpectedly restored: %v", statErr)
 	}
-	backup, readErr := os.ReadFile(fixture.journal.Filesystem.BackupPath)
-	if readErr != nil || string(backup) != "old" {
-		t.Fatalf("backup = %q, %v", backup, readErr)
+	backup, readErr := os.ReadFile(filepath.Join(fixture.journal.Filesystem.BackupPath, "agent.yaml"))
+	if readErr != nil || string(backup) != agentFixtureYAML(fixture.journal.Power) {
+		t.Fatalf("backup agent.yaml = %q, %v", backup, readErr)
 	}
 }
 
 func TestAgentRecoveryUninstallRollbackValidatesQuarantine(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationUninstall, PhaseRollingBack)
-	fixture.writeFile(fixture.journal.Filesystem.QuarantinePath, "installed")
+	fixture.writeDir(fixture.journal.Filesystem.QuarantinePath, fixture.journal.Power)
 	fixture.persist()
 
 	result, err := fixture.freshService().Recover(context.Background())
@@ -383,16 +412,16 @@ func TestAgentRecoveryUninstallRollbackValidatesQuarantine(t *testing.T) {
 		t.Fatalf("Recover() = %+v, %v", result, err)
 	}
 	fixture.assertValidated(fixture.journal.Power, fixture.journal.Filesystem.QuarantinePath)
-	contents, readErr := os.ReadFile(fixture.target)
-	if readErr != nil || string(contents) != "installed" {
-		t.Fatalf("restored target = %q, %v", contents, readErr)
+	contents, readErr := os.ReadFile(filepath.Join(fixture.target, "agent.yaml"))
+	if readErr != nil || string(contents) != agentFixtureYAML(fixture.journal.Power) {
+		t.Fatalf("restored target agent.yaml = %q, %v", contents, readErr)
 	}
 	fixture.assertJournalAbsent()
 }
 
 func TestAgentRecoveryUninstallRollbackRejectsMismatch(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationUninstall, PhaseRollingBack)
-	fixture.writeFile(fixture.journal.Filesystem.QuarantinePath, "installed")
+	fixture.writeDir(fixture.journal.Filesystem.QuarantinePath, fixture.journal.Power)
 	fixture.adapter.err = errors.New("artifact identity mismatch")
 	fixture.persist()
 
@@ -411,15 +440,15 @@ func TestAgentRecoveryUninstallRollbackRejectsMismatch(t *testing.T) {
 	if _, statErr := os.Lstat(fixture.target); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("target unexpectedly restored: %v", statErr)
 	}
-	quarantine, readErr := os.ReadFile(fixture.journal.Filesystem.QuarantinePath)
-	if readErr != nil || string(quarantine) != "installed" {
-		t.Fatalf("quarantine = %q, %v", quarantine, readErr)
+	quarantine, readErr := os.ReadFile(filepath.Join(fixture.journal.Filesystem.QuarantinePath, "agent.yaml"))
+	if readErr != nil || string(quarantine) != agentFixtureYAML(fixture.journal.Power) {
+		t.Fatalf("quarantine agent.yaml = %q, %v", quarantine, readErr)
 	}
 }
 
 func TestAgentRecoveryUninstallCommitSkipsValidation(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationUninstall, PhaseCommitting)
-	fixture.writeFile(fixture.journal.Filesystem.QuarantinePath, "installed")
+	fixture.writeDir(fixture.journal.Filesystem.QuarantinePath, fixture.journal.Power)
 	fixture.adapter.err = errors.New("must not validate on uninstall commit")
 	fixture.persist()
 
@@ -436,8 +465,8 @@ func TestAgentRecoveryUninstallCommitSkipsValidation(t *testing.T) {
 
 func TestAgentRecoveryResolverErrorFailsClosed(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writeFile(fixture.target, "new")
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.target, fixture.journal.Power)
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
 	resolveErr := errors.New("resolve failed")
 	fixture.resolver.err = resolveErr
 	fixture.resolver.adapter = nil
@@ -455,16 +484,16 @@ func TestAgentRecoveryResolverErrorFailsClosed(t *testing.T) {
 	}
 	fixture.assertJournalPresent()
 	fixture.assertNotValidated()
-	contents, readErr := os.ReadFile(fixture.target)
-	if readErr != nil || string(contents) != "new" {
-		t.Fatalf("target = %q, %v", contents, readErr)
+	contents, readErr := os.ReadFile(filepath.Join(fixture.target, "agent.yaml"))
+	if readErr != nil || string(contents) != agentFixtureYAML(fixture.journal.Power) {
+		t.Fatalf("target agent.yaml = %q, %v", contents, readErr)
 	}
 }
 
 func TestAgentRecoveryTypedNilAdapterFailsClosed(t *testing.T) {
 	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
-	fixture.writeFile(fixture.target, "new")
-	fixture.writeFile(fixture.journal.Filesystem.BackupPath, "old")
+	fixture.writeDir(fixture.target, fixture.journal.Power)
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
 	fixture.resolver.adapter = (*recoveryAgentAdapter)(nil)
 	fixture.persist()
 
@@ -485,12 +514,128 @@ func TestAgentRecoveryTypedNilAdapterFailsClosed(t *testing.T) {
 		t.Fatalf("manifest unexpectedly set: %+v", fixture.manifests.setRef)
 	}
 	fixture.assertJournalPresent()
-	contents, readErr := os.ReadFile(fixture.target)
-	if readErr != nil || string(contents) != "new" {
-		t.Fatalf("target = %q, %v", contents, readErr)
+	contents, readErr := os.ReadFile(filepath.Join(fixture.target, "agent.yaml"))
+	if readErr != nil || string(contents) != agentFixtureYAML(fixture.journal.Power) {
+		t.Fatalf("target agent.yaml = %q, %v", contents, readErr)
 	}
-	backup, readErr := os.ReadFile(fixture.journal.Filesystem.BackupPath)
-	if readErr != nil || string(backup) != "old" {
-		t.Fatalf("backup = %q, %v", backup, readErr)
+	backup, readErr := os.ReadFile(filepath.Join(fixture.journal.Filesystem.BackupPath, "agent.yaml"))
+	if readErr != nil || string(backup) != agentFixtureYAML(*fixture.journal.Previous) {
+		t.Fatalf("backup agent.yaml = %q, %v", backup, readErr)
+	}
+}
+
+func TestAgentRecoveryInstallCommitCompletesWithValidDirectories(t *testing.T) {
+	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
+	fixture.writeDir(fixture.target, fixture.journal.Power)
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
+	fixture.useRealBibitAdapter()
+	fixture.persist()
+
+	result, err := fixture.freshService().Recover(context.Background())
+	if err != nil || !result.Recovered || result.Direction != RecoveryCommit {
+		t.Fatalf("Recover() = %+v, %v", result, err)
+	}
+	if fixture.manifests.setRef != fixture.journal.Power {
+		t.Fatalf("manifest Set = %+v", fixture.manifests.setRef)
+	}
+	fixture.assertJournalAbsent()
+}
+
+func TestAgentRecoveryInstallCommitRejectsCorruptTarget(t *testing.T) {
+	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
+	fixture.writeCorruptDir(fixture.target, fixture.journal.Power)
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
+	fixture.useRealBibitAdapter()
+	fixture.persist()
+
+	result, err := fixture.freshService().Recover(context.Background())
+	if !errors.Is(err, ErrIndeterminateState) {
+		t.Fatalf("Recover() error = %v, want ErrIndeterminateState", err)
+	}
+	if result.Recovered {
+		t.Fatalf("Recover() recovered = %+v", result)
+	}
+	if fixture.manifests.setRef.Name != "" {
+		t.Fatalf("manifest unexpectedly set: %+v", fixture.manifests.setRef)
+	}
+	fixture.assertJournalPresent()
+	if _, statErr := os.Lstat(fixture.target); statErr != nil {
+		t.Fatalf("corrupt target removed: %v", statErr)
+	}
+	if _, statErr := os.Lstat(fixture.journal.Filesystem.BackupPath); statErr != nil {
+		t.Fatalf("backup removed: %v", statErr)
+	}
+}
+
+func TestAgentRecoveryInstallRollbackRejectsCorruptBackup(t *testing.T) {
+	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
+	fixture.writeCorruptDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
+	fixture.useRealBibitAdapter()
+	fixture.persist()
+
+	result, err := fixture.freshService().Recover(context.Background())
+	if !errors.Is(err, ErrIndeterminateState) {
+		t.Fatalf("Recover() error = %v, want ErrIndeterminateState", err)
+	}
+	if result.Recovered {
+		t.Fatalf("Recover() recovered = %+v", result)
+	}
+	if fixture.manifests.setRef.Name != "" {
+		t.Fatalf("manifest unexpectedly set: %+v", fixture.manifests.setRef)
+	}
+	fixture.assertJournalPresent()
+	if _, statErr := os.Lstat(fixture.target); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("target unexpectedly restored: %v", statErr)
+	}
+	if _, statErr := os.Lstat(fixture.journal.Filesystem.BackupPath); statErr != nil {
+		t.Fatalf("corrupt backup removed: %v", statErr)
+	}
+}
+
+func TestAgentRecoveryUninstallRollbackRejectsCorruptQuarantine(t *testing.T) {
+	fixture := newAgentRecoveryFixture(t, OperationUninstall, PhaseRollingBack)
+	fixture.writeCorruptDir(fixture.journal.Filesystem.QuarantinePath, fixture.journal.Power)
+	fixture.useRealBibitAdapter()
+	fixture.persist()
+
+	result, err := fixture.freshService().Recover(context.Background())
+	if !errors.Is(err, ErrIndeterminateState) {
+		t.Fatalf("Recover() error = %v, want ErrIndeterminateState", err)
+	}
+	if result.Recovered {
+		t.Fatalf("Recover() recovered = %+v", result)
+	}
+	if fixture.manifests.removed.Name != "" {
+		t.Fatalf("manifest unexpectedly removed: %+v", fixture.manifests.removed)
+	}
+	fixture.assertJournalPresent()
+	if _, statErr := os.Lstat(fixture.target); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("target unexpectedly restored: %v", statErr)
+	}
+	if _, statErr := os.Lstat(fixture.journal.Filesystem.QuarantinePath); statErr != nil {
+		t.Fatalf("corrupt quarantine removed: %v", statErr)
+	}
+}
+
+func TestAgentRecoveryInstallCommitRejectsIncompleteTarget(t *testing.T) {
+	fixture := newAgentRecoveryFixture(t, OperationInstall, PhasePublishing)
+	fixture.writeIncompleteDir(fixture.target)
+	fixture.writeDir(fixture.journal.Filesystem.BackupPath, *fixture.journal.Previous)
+	fixture.useRealBibitAdapter()
+	fixture.persist()
+
+	result, err := fixture.freshService().Recover(context.Background())
+	if !errors.Is(err, ErrIndeterminateState) {
+		t.Fatalf("Recover() error = %v, want ErrIndeterminateState", err)
+	}
+	if result.Recovered {
+		t.Fatalf("Recover() recovered = %+v", result)
+	}
+	if fixture.manifests.setRef.Name != "" {
+		t.Fatalf("manifest unexpectedly set: %+v", fixture.manifests.setRef)
+	}
+	fixture.assertJournalPresent()
+	if _, statErr := os.Lstat(fixture.target); statErr != nil {
+		t.Fatalf("incomplete target removed: %v", statErr)
 	}
 }
