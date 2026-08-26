@@ -12,7 +12,7 @@ var ErrInvalid = errors.New("invalid submission content")
 // Request 描述一次 validate/submit 的输入。
 type Request struct {
 	Type    domain.PowerType // skill | plugin | mcp | agent
-	Path    string           // skill/plugin 源目录、mcp JSON 文件，或 agent 的单个 agent.yaml 文件
+	Path    string           // skill/plugin 源目录、mcp JSON 文件，或 agent 源目录（agent.yaml + 可选 assets/）
 	Message string           // submit 必填；仅描述本次提交，不参与资源身份校验
 }
 

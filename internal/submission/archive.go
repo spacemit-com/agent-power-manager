@@ -66,6 +66,21 @@ type archiveEntry struct {
 	body     []byte
 }
 
+// agentTarGz 将已冻结的 Agent 快照确定性打包：普通文件 mode 归一为 0644、目录为 0755。
+// 执行位归一必须在 agentartifact.Validate 拒绝之后进行，避免把可执行文件静默降权为普通文件。
+func agentTarGz(snapshot sourceTreeSnapshot) ([]byte, error) {
+	entries := make([]archiveEntry, 0, len(snapshot.entries))
+	for _, entry := range snapshot.entries {
+		if entry.typeflag == tar.TypeReg {
+			entry.mode = 0o644
+		} else {
+			entry.mode = 0o755
+		}
+		entries = append(entries, entry)
+	}
+	return buildTarGz(entries)
+}
+
 // collectEntries 递归收集目录与普通文件；目录 mode 固定 0755，文件保留执行位
 // 并清除 setuid/setgid/sticky，无执行位则归一为 0644。
 func collectEntries(root string) ([]archiveEntry, error) {

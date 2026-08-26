@@ -82,8 +82,34 @@ func validateSourceTree(root string) (sourceStats, error) {
 	return snapshot.stats, nil
 }
 
-// captureSourceTree 在同一次物理校验读取中固定路径、mode 与正文；后续打包不得重读源目录。
+// sourceContentPolicy 校验单个已固定文件的正文；返回非 nil 即拒绝该文件并终止打包。
+type sourceContentPolicy func(path string, body []byte) error
+
+// defaultSourceTextPolicy 是 Skill/Plugin 共用的默认策略：所有文件必须为安全文本。
+func defaultSourceTextPolicy(path string, body []byte) error {
+	if contentpolicy.IsUnsafeText(body) {
+		return fmt.Errorf("file %q contains binary or archive content: %w", path, ErrInvalid)
+	}
+	return nil
+}
+
+// agentSourceContentPolicy 是 Agent 内容策略：agent.yaml 必须是安全文本，
+// assets/ 下允许二进制；嵌套归档、可执行文件与闭集由 agentartifact.Validate 统一拒绝。
+func agentSourceContentPolicy(path string, body []byte) error {
+	if path == "agent.yaml" && contentpolicy.IsUnsafeText(body) {
+		return fmt.Errorf("file %q contains binary or archive content: %w", path, ErrInvalid)
+	}
+	return nil
+}
+
+// captureSourceTree 以默认文本策略固定资源目录，供 Skill/Plugin 使用。
 func captureSourceTree(ctx context.Context, root string) (sourceTreeSnapshot, error) {
+	return captureSourceTreeWithPolicy(ctx, root, defaultSourceTextPolicy)
+}
+
+// captureSourceTreeWithPolicy 在同一次物理校验读取中固定路径、mode 与正文，并逐文件执行
+// 内容策略；后续打包必须消费返回的快照，不得重读源目录。
+func captureSourceTreeWithPolicy(ctx context.Context, root string, policy sourceContentPolicy) (sourceTreeSnapshot, error) {
 	if err := pluginartifact.ValidatePhysicalTree(root); err != nil {
 		return sourceTreeSnapshot{}, fmt.Errorf("validate source tree: %w", errors.Join(ErrInvalid, err))
 	}
@@ -126,8 +152,8 @@ func captureSourceTree(ctx context.Context, root string) (sourceTreeSnapshot, er
 		if snapshot.stats.totalSize > maxSourceTotalSize {
 			return fmt.Errorf("source total size exceeds %d bytes: %w", maxSourceTotalSize, ErrInvalid)
 		}
-		if contentpolicy.IsUnsafeText(contents) {
-			return fmt.Errorf("file %q contains binary or archive content: %w", slashed, ErrInvalid)
+		if err := policy(slashed, contents); err != nil {
+			return err
 		}
 		body := append([]byte(nil), contents...)
 		snapshot.files[slashed] = body

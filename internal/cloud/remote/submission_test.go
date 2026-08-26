@@ -34,8 +34,9 @@ func newTestSubmissionClientWithKey(t *testing.T, server *httptest.Server, apiKe
 	return client
 }
 
-// readSubmissionParts 读取 multipart 请求，返回 metadata JSON map、content part 的 Content-Type 与原始字节。
-func readSubmissionParts(t *testing.T, r *http.Request) (map[string]any, string, []byte) {
+// readSubmissionParts 读取 multipart 请求，返回 metadata JSON map、content part 的
+// Content-Type、Content-Disposition filename 与原始字节。
+func readSubmissionParts(t *testing.T, r *http.Request) (map[string]any, string, string, []byte) {
 	t.Helper()
 	mediaType, parameters, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "multipart/form-data" {
@@ -44,6 +45,7 @@ func readSubmissionParts(t *testing.T, r *http.Request) (map[string]any, string,
 	reader := multipart.NewReader(r.Body, parameters["boundary"])
 	var metadata map[string]any
 	var contentType string
+	var filename string
 	var content []byte
 	for {
 		part, err := reader.NextPart()
@@ -61,16 +63,17 @@ func readSubmissionParts(t *testing.T, r *http.Request) (map[string]any, string,
 			}
 		case "content":
 			contentType = part.Header.Get("Content-Type")
+			filename = part.FileName()
 			content = body
 		}
 	}
-	return metadata, contentType, content
+	return metadata, contentType, filename, content
 }
 
-func TestSubmitAgentUsesRawYAMLPart(t *testing.T) {
-	raw := []byte("schema_version: 1\nagent: {id: demo, version: v1.0.0, description: demo}\n")
+func TestSubmitAgentUsesGzipPart(t *testing.T) {
+	raw := []byte("schema_version: 1\nagent: {id: demo, name: demo, version: v1.0.0, description: demo, soul: help}\n")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		metadata, contentType, content := readSubmissionParts(t, r)
+		metadata, contentType, filename, content := readSubmissionParts(t, r)
 		if metadata["type"] != "agent" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
 			metadata["description"] != "demo" || metadata["message"] != "first" || metadata["content_md5"] != md5Hex(raw) {
 			t.Fatalf("metadata = %#v", metadata)
@@ -78,8 +81,8 @@ func TestSubmitAgentUsesRawYAMLPart(t *testing.T) {
 		if _, legacy := metadata["change_summary"]; legacy {
 			t.Fatalf("metadata contains legacy change_summary: %#v", metadata)
 		}
-		if contentType != "application/yaml" || !bytes.Equal(content, raw) {
-			t.Fatalf("content type/bytes = %q/%q", contentType, content)
+		if contentType != "application/gzip" || filename != "demo-v1.0.0.tar.gz" || !bytes.Equal(content, raw) {
+			t.Fatalf("content type/filename/bytes = %q/%q/%q", contentType, filename, content)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
@@ -89,7 +92,7 @@ func TestSubmitAgentUsesRawYAMLPart(t *testing.T) {
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
 		Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0", Description: "demo",
-		Message: "first", ContentType: "application/yaml", Content: raw,
+		Message: "first", ContentType: "application/gzip", Content: raw,
 		ContentMD5: md5Hex(raw), IdempotencyKey: "7d7e6d70-13ec-4cd5-9ad6-37e49e861ac2",
 	})
 	if err != nil || got.Outcome != domain.SubmissionAccepted {
@@ -105,7 +108,7 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotIdem = r.Header.Get("Idempotency-Key")
-		metadata, contentType, content := readSubmissionParts(t, r)
+		metadata, contentType, _, content := readSubmissionParts(t, r)
 		if metadata["type"] != "skill" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
 			metadata["description"] != "does things" || metadata["message"] != "first" || metadata["content_md5"] != "md5" {
 			t.Fatalf("metadata = %#v", metadata)
@@ -312,7 +315,7 @@ func TestSubmitRejectsContentTypeMismatchBeforeRequest(t *testing.T) {
 		{name: "skill with yaml", request: domain.SubmissionRequest{Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
 		{name: "plugin with json", request: domain.SubmissionRequest{Type: domain.PowerTypePlugin, Message: "fixture", ContentType: "application/json", Content: []byte("x")}},
 		{name: "mcp with gzip", request: domain.SubmissionRequest{Type: domain.PowerTypeMCP, Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
-		{name: "agent with gzip", request: domain.SubmissionRequest{Type: domain.PowerTypeAgent, Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
+		{name: "agent with yaml", request: domain.SubmissionRequest{Type: domain.PowerTypeAgent, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -335,13 +338,13 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 		{"skill", domain.PowerTypeSkill, "application/gzip"},
 		{"plugin", domain.PowerTypePlugin, "application/gzip"},
 		{"mcp", domain.PowerTypeMCP, "application/json"},
-		{"agent", domain.PowerTypeAgent, "application/yaml"},
+		{"agent", domain.PowerTypeAgent, "application/gzip"},
 	}
 	for _, tt := range valid {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotContentType string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, contentType, _ := readSubmissionParts(t, r)
+				_, contentType, _, _ := readSubmissionParts(t, r)
 				gotContentType = contentType
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusAccepted)
@@ -360,6 +363,89 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 				t.Fatalf("content part type = %q, want %q", gotContentType, tt.contentType)
 			}
 		})
+	}
+}
+
+func TestSubmissionFilename(t *testing.T) {
+	tests := []struct {
+		name    string
+		request domain.SubmissionRequest
+		want    string
+	}{
+		{name: "skill", request: domain.SubmissionRequest{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.tar.gz"},
+		{name: "plugin", request: domain.SubmissionRequest{Type: domain.PowerTypePlugin, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.tar.gz"},
+		{name: "agent", request: domain.SubmissionRequest{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.2.3"}, want: "demo-agent-v1.2.3.tar.gz"},
+		{name: "mcp", request: domain.SubmissionRequest{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.json"},
+		{name: "unknown type", request: domain.SubmissionRequest{Type: domain.PowerType("workflow"), Name: "demo", Version: "v1.0.0"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := submissionFilename(tt.request); got != tt.want {
+				t.Fatalf("submissionFilename(%+v) = %q, want %q", tt.request, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubmitWritesMultipartContentFilenames(t *testing.T) {
+	tests := []struct {
+		name        string
+		requestType domain.PowerType
+		contentType string
+		wantFile    string
+	}{
+		{"skill", domain.PowerTypeSkill, "application/gzip", "demo-v1.0.0.tar.gz"},
+		{"plugin", domain.PowerTypePlugin, "application/gzip", "demo-v1.0.0.tar.gz"},
+		{"agent", domain.PowerTypeAgent, "application/gzip", "demo-v1.0.0.tar.gz"},
+		{"mcp", domain.PowerTypeMCP, "application/json", "demo-v1.0.0.json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotFilename string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _, filename, _ := readSubmissionParts(t, r)
+				gotFilename = filename
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/s"}`))
+			}))
+			defer server.Close()
+			client := newTestSubmissionClient(t, server)
+			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+				Type: tt.requestType, Name: "demo", Version: "v1.0.0", Message: "fixture",
+				ContentType: tt.contentType, Content: []byte("x"), ContentMD5: "x", IdempotencyKey: "k",
+			})
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			if gotFilename != tt.wantFile {
+				t.Fatalf("content filename = %q, want %q", gotFilename, tt.wantFile)
+			}
+		})
+	}
+}
+
+func TestSubmitMultipartFilenameEscaping(t *testing.T) {
+	weirdName := `demo"quote\back`
+	var gotFilename string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _, filename, _ := readSubmissionParts(t, r)
+		gotFilename = filename
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/s"}`))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+		Type: domain.PowerTypeSkill, Name: weirdName, Version: "v1.0.0", Message: "fixture",
+		ContentType: "application/gzip", Content: []byte("x"), ContentMD5: "x", IdempotencyKey: "k",
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if want := weirdName + "-v1.0.0.tar.gz"; gotFilename != want {
+		t.Fatalf("content filename = %q, want %q", gotFilename, want)
 	}
 }
 

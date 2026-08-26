@@ -100,19 +100,20 @@ func TestValidateSourceTreeAcceptsTextTree(t *testing.T) {
 	}
 }
 
-const validAgentYAML = "schema_version: 1\nagent:\n  id: demo\n  version: v1.0.0\n  description: demo\n"
+const validAgentYAML = "schema_version: 1\nagent:\n  id: demo\n  name: demo-agent\n  version: v1.0.0\n  description: demo\n  soul: help safely\n"
 
-func TestValidateAgentRejectsEmptyFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	writeTestFile(t, path, "")
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path})
+func TestValidateAgentRejectsEmptyAgentYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "agent.yaml"), "")
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
 }
 
-func TestValidateAgentRejectsDirectory(t *testing.T) {
+func TestValidateAgentRequiresAgentYAML(t *testing.T) {
 	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "assets", "data.bin"), "payload")
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -120,11 +121,10 @@ func TestValidateAgentRejectsDirectory(t *testing.T) {
 }
 
 func TestValidateAgentRejectsSymlink(t *testing.T) {
-	dir := t.TempDir()
-	realPath := filepath.Join(dir, "real.yaml")
-	writeTestFile(t, realPath, validAgentYAML)
-	linkPath := filepath.Join(dir, "link.yaml")
-	if err := os.Symlink(realPath, linkPath); err != nil {
+	realRoot := t.TempDir()
+	writeValidAgentDir(t, realRoot)
+	linkPath := filepath.Join(t.TempDir(), "agent-link")
+	if err := os.Symlink(realRoot, linkPath); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: linkPath})
@@ -133,17 +133,18 @@ func TestValidateAgentRejectsSymlink(t *testing.T) {
 	}
 }
 
-func TestValidateAgentRejectsBinaryArchive(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	writeTestFile(t, path, string([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00}))
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path})
+func TestValidateAgentRejectsBinaryAgentYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "agent.yaml"), string([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00}))
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
 }
 
 func TestValidateAgentRejectsOversizedFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
@@ -154,18 +155,18 @@ func TestValidateAgentRejectsOversizedFile(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path})
+	_, err = Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
 }
 
 func TestValidateAgentHonorsCancelledContext(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	writeTestFile(t, path, validAgentYAML)
+	dir := t.TempDir()
+	writeValidAgentDir(t, dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := Validate(ctx, Request{Type: domain.PowerTypeAgent, Path: path})
+	_, err := Validate(ctx, Request{Type: domain.PowerTypeAgent, Path: dir})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Validate() error = %v, want context.Canceled", err)
 	}
@@ -178,8 +179,8 @@ func TestValidateAllTypesDoNotRequireMessage(t *testing.T) {
 	writeValidPlugin(t, pluginDir)
 	mcpPath := filepath.Join(t.TempDir(), "mcp.json")
 	writeTestFile(t, mcpPath, validMCPResource)
-	agentPath := filepath.Join(t.TempDir(), "agent.yaml")
-	writeTestFile(t, agentPath, validAgentYAML)
+	agentDir := t.TempDir()
+	writeValidAgentDir(t, agentDir)
 
 	for _, test := range []struct {
 		name      string
@@ -189,7 +190,7 @@ func TestValidateAllTypesDoNotRequireMessage(t *testing.T) {
 		{name: "skill", powerType: domain.PowerTypeSkill, path: skillDir},
 		{name: "plugin", powerType: domain.PowerTypePlugin, path: pluginDir},
 		{name: "mcp", powerType: domain.PowerTypeMCP, path: mcpPath},
-		{name: "agent", powerType: domain.PowerTypeAgent, path: agentPath},
+		{name: "agent", powerType: domain.PowerTypeAgent, path: agentDir},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := Validate(context.Background(), Request{Type: test.powerType, Path: test.path}); err != nil {

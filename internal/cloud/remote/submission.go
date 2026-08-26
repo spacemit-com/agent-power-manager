@@ -110,10 +110,10 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writeMultipartPart(writer, "metadata", "application/json", metadata); err != nil {
+	if err := writeMultipartPart(writer, "metadata", "application/json", "", metadata); err != nil {
 		return domain.SubmissionResult{}, fmt.Errorf("write remote submission metadata part: %w", err)
 	}
-	if err := writeMultipartPart(writer, "content", request.ContentType, request.Content); err != nil {
+	if err := writeMultipartPart(writer, "content", request.ContentType, submissionFilename(request), request.Content); err != nil {
 		return domain.SubmissionResult{}, fmt.Errorf("write remote submission content part: %w", err)
 	}
 	if err := writer.Close(); err != nil {
@@ -166,12 +166,23 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 // submissionContentType 返回 PowerType 对应的合法请求内容媒体类型；未知类型返回空串。
 func submissionContentType(powerType domain.PowerType) string {
 	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeAgent:
 		return "application/gzip"
 	case domain.PowerTypeMCP:
 		return "application/json"
-	case domain.PowerTypeAgent:
-		return "application/yaml"
+	default:
+		return ""
+	}
+}
+
+// submissionFilename 返回 content part 的 Content-Disposition filename（<name>-<version>.<ext>）；
+// 未知类型返回空串，表示不写 filename 属性。
+func submissionFilename(request domain.SubmissionRequest) string {
+	switch request.Type {
+	case domain.PowerTypeMCP:
+		return request.Name + "-" + request.Version + ".json"
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeAgent:
+		return request.Name + "-" + request.Version + ".tar.gz"
 	default:
 		return ""
 	}
@@ -466,10 +477,15 @@ func validateSubmissionTimeline(dto []submissionEventDTO) ([]domain.SubmissionEv
 	return timeline, nil
 }
 
-// writeMultipartPart 写一个具名 part 并显式声明 Content-Type。
-func writeMultipartPart(writer *multipart.Writer, name, contentType string, body []byte) error {
+// writeMultipartPart 写一个具名 part 并显式声明 Content-Type；filename 为空时省略该属性
+// （metadata 保持无文件名），否则用 mime.FormatMediaType 安全转义引号、反斜杠与非 ASCII。
+func writeMultipartPart(writer *multipart.Writer, name, contentType, filename string, body []byte) error {
+	parameters := map[string]string{"name": name}
+	if filename != "" {
+		parameters["filename"] = filename
+	}
 	header := make(textproto.MIMEHeader)
-	header.Set("Content-Disposition", fmt.Sprintf("form-data; name=%q", name))
+	header.Set("Content-Disposition", mime.FormatMediaType("form-data", parameters))
 	header.Set("Content-Type", contentType)
 	part, err := writer.CreatePart(header)
 	if err != nil {

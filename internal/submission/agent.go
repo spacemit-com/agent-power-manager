@@ -1,44 +1,52 @@
 package submission
 
 import (
+	"archive/tar"
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"strings"
 
-	"apm/internal/cloud/contentpolicy"
+	"apm/internal/agentartifact"
 	"apm/internal/domain"
 )
 
 type agentSourceLoader struct{}
 
-// Load 校验单个 agent.yaml 物理文件；构建结果保持原始字节且每次返回独立副本。
+// Load 只接受 Agent 资源根目录：按 Agent 内容策略冻结整棵树，再转换为逻辑快照交给
+// agentartifact.Validate 统一校验（根闭集、可执行文件、嵌套归档、avatar 与 agent.yaml
+// 解码）。单个 YAML 文件、预构建 gzip 与远程 URL 均被拒绝；symlink 与特殊文件由
+// ValidatePhysicalTree 拦截。构建只消费冻结快照，不重读源目录。
 func (agentSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	if err := ctx.Err(); err != nil {
 		return source{}, err
 	}
-	raw, _, err := readPhysicalRegularFile(ctx, path, maxSingleFileSize)
+	snapshot, err := captureSourceTreeWithPolicy(ctx, path, agentSourceContentPolicy)
 	if err != nil {
-		return source{}, fmt.Errorf("read Agent source: %w", err)
+		return source{}, err
 	}
-	if len(raw) == 0 {
-		return source{}, fmt.Errorf("Agent source size 0 is invalid: %w", ErrInvalid)
+	entries := make([]agentartifact.Entry, 0, len(snapshot.entries))
+	for _, entry := range snapshot.entries {
+		entries = append(entries, agentartifact.Entry{
+			Path:      strings.TrimSuffix(entry.name, "/"),
+			Directory: entry.typeflag == tar.TypeDir,
+			Mode:      fs.FileMode(entry.mode),
+			Data:      entry.body,
+		})
 	}
-	if contentpolicy.IsUnsafeText(raw) {
-		return source{}, fmt.Errorf("Agent source contains binary or archive content: %w", ErrInvalid)
-	}
-	config, err := domain.DecodeAgentConfigYAML(raw)
+	validated, err := agentartifact.Validate(entries, nil)
 	if err != nil {
-		return source{}, errors.Join(ErrInvalid, err)
+		return source{}, fmt.Errorf("validate agent artifact: %w", errors.Join(ErrInvalid, err))
 	}
-	validatedRaw := append([]byte(nil), raw...)
 	return source{
 		validation: Validation{
-			Type: domain.PowerTypeAgent, Name: config.Agent.ID, Version: config.Agent.Version,
-			Description: config.Agent.Description, FileCount: 1, ContentSize: int64(len(validatedRaw)), Warnings: []string{},
+			Type: domain.PowerTypeAgent, Name: validated.Config.Agent.Name, Version: validated.Config.Agent.Version,
+			Description: validated.Config.Agent.Description, FileCount: validated.FileCount, ContentSize: validated.ContentSize, Warnings: []string{},
 		},
-		contentType: "application/yaml",
+		contentType: "application/gzip",
 		build: func() ([]byte, error) {
-			return append([]byte(nil), validatedRaw...), nil
+			return agentTarGz(snapshot)
 		},
 	}, nil
 }

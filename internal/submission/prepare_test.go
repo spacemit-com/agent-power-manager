@@ -118,9 +118,9 @@ func TestPrepareRejectsInvalid(t *testing.T) {
 }
 
 func TestPrepareAgentRequiresMessage(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	writeTestFile(t, path, validAgentYAML)
-	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path})
+	dir := t.TempDir()
+	writeValidAgentDir(t, dir)
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Prepare() error = %v, want ErrInvalid", err)
 	}
@@ -128,15 +128,17 @@ func TestPrepareAgentRequiresMessage(t *testing.T) {
 
 func TestPrepareAgentWhitespaceChangesMD5(t *testing.T) {
 	dir := t.TempDir()
-	raw1 := []byte("schema_version: 1\nagent:\n  id: demo\n  version: v1.0.0\n  description: demo\n")
-	raw2 := []byte("schema_version: 1\nagent:\n  id: demo\n  version: v1.0.0\n  description: demo\n\n")
-	writeTestFile(t, filepath.Join(dir, "a.yaml"), string(raw1))
-	writeTestFile(t, filepath.Join(dir, "b.yaml"), string(raw2))
-	first, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: filepath.Join(dir, "a.yaml"), Message: "first"})
+	raw1 := "schema_version: 1\nagent:\n  id: demo\n  name: demo-agent\n  version: v1.0.0\n  description: demo\n  soul: help safely\n"
+	raw2 := raw1 + "\n"
+	firstRoot := filepath.Join(dir, "a")
+	secondRoot := filepath.Join(dir, "b")
+	writeAgentYAMLOnlyDir(t, firstRoot, raw1)
+	writeAgentYAMLOnlyDir(t, secondRoot, raw2)
+	first, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: firstRoot, Message: "first"})
 	if err != nil {
 		t.Fatalf("Prepare(a) error = %v", err)
 	}
-	second, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: filepath.Join(dir, "b.yaml"), Message: "first"})
+	second, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: secondRoot, Message: "first"})
 	if err != nil {
 		t.Fatalf("Prepare(b) error = %v", err)
 	}
@@ -154,8 +156,8 @@ func TestPrepareAllTypesUseRequestMessageOnly(t *testing.T) {
 	writeValidPlugin(t, pluginDir)
 	mcpPath := filepath.Join(t.TempDir(), "mcp.json")
 	writeTestFile(t, mcpPath, validMCPResource)
-	agentPath := filepath.Join(t.TempDir(), "agent.yaml")
-	writeTestFile(t, agentPath, validAgentYAML)
+	agentDir := t.TempDir()
+	writeValidAgentDir(t, agentDir)
 
 	tests := []struct {
 		name      string
@@ -165,7 +167,7 @@ func TestPrepareAllTypesUseRequestMessageOnly(t *testing.T) {
 		{name: "skill", powerType: domain.PowerTypeSkill, path: skillDir},
 		{name: "plugin", powerType: domain.PowerTypePlugin, path: pluginDir},
 		{name: "mcp", powerType: domain.PowerTypeMCP, path: mcpPath},
-		{name: "agent", powerType: domain.PowerTypeAgent, path: agentPath},
+		{name: "agent", powerType: domain.PowerTypeAgent, path: agentDir},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
