@@ -6,6 +6,12 @@
 > [ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md) 取代。Submission 请求本身仍不
 > 使用 catalog stale fallback。
 
+> 局部取代说明：本文保留 Feature 023 落定时的历史设计；其中 Agent 身份来源 `agent.id` 与
+> content 为“已验证的原始 YAML”的约定，已由 [Feature 026](../026-agent-package-assets/spec.md) 与
+> [ADR-023](../../adr/ADR-023-package-agent-with-assets.md) 取代（Agent 改为按 `agent.name` 身份提交的
+> 完整目录资源，权威 content 为确定性 `.tar.gz` 归档，根含 `agent.yaml` 与可选 `assets/`），当前实现
+> 与接口以 Feature 026/ADR-023 为准；本文的 Submission 查询、认证与元数据契约中未被修改的部分继续有效。
+
 - Status：Accepted
 - Date：2026-08-24
 - Related ADRs：[ADR-020](../../adr/ADR-020-source-owned-submission-metadata.md)、APC [ADR-003](../../../../apc/ivory-tower/adr/ADR-003-bound-active-submission-query.md)

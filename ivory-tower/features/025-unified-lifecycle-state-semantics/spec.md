@@ -104,7 +104,7 @@ Action        = unchanged | install-new | replace |
 映射为动作、outcome、warning 事实和公共业务错误。类型专属代码继续负责：
 
 - Skill：目录检查、staging 发布和文件系统 transaction。
-- Agent：Bibit `agents/<id>/agent.yaml` 检查、发布和文件系统 transaction。
+- Agent：Bibit `agents/<agent.name>` 完整目录检查、发布和文件系统 transaction。
 - MCP：Agent CLI Inspect/Add/Remove 和 agent-cli transaction。
 - Plugin：Plugin/marketplace 联合检查、artifact/staging 准备和 plugin transaction。
 
@@ -139,7 +139,7 @@ probe。未显式给出完整引用时，必须先通过 catalog 确定版本，
 | 不同版本清单、Plugin 部分 | 不适用 | 不适用 | 不适用 | `ErrIndeterminateState`，保留清单并 `failed` |
 
 Skill 与 Agent 的同版本快速路径在 lifecycle 层返回，因此不论目标是否存在都不可观察。Agent
-Power 仅支持 Bibit，目标是 `<bibit-root>/agents/<agent.id>/agent.yaml`；除卸载后清理空父目录
+Power 仅支持 Bibit，目标是 `<bibit-root>/agents/<agent.name>` 完整目录；除卸载后清理空父目录
 外，其基线宏观状态与 Skill 相同。
 
 #### Uninstall baseline

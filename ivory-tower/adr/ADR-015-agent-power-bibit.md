@@ -4,6 +4,8 @@
 - Date：2026-08-20
 - Decision Makers：APM maintainers
 
+> 局部取代说明：本文保留 ADR-015 落定时的历史决策；其中 Agent 以单个 `agent.yaml` 安装到 `<bibit根>/agents/<agent.id>/agent.yaml`、并把 `agent.id` 作为外部 PowerRef name 的安装机制，已由 [Feature 026](../features/026-agent-package-assets/spec.md) 和 [ADR-023](ADR-023-package-agent-with-assets.md) 取代（Agent 改为按 `agent.name` 发布的完整目录 `<bibit根>/agents/<agent.name>/`，根含 `agent.yaml` 与可选 `assets/`，云端内容为确定性 `.tar.gz`），当前实现与接口以 Feature 026/ADR-023 为准；本决策的 Bibit 专属边界、默认根修正与 filesystem transaction 复用中未被修改的部分继续有效。
+
 ## Context
 
 APM 已为 Codex、Claude Code、Hermes 与 Bibit 提供 Skill、MCP、Plugin 的统一 lifecycle，均以 `PowerType`（skill/plugin/mcp）组织、以版本化目录提供 Cloud 资源、以可恢复 transaction + manifest 管理安装状态。

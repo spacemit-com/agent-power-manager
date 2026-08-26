@@ -1,5 +1,11 @@
 # Feature 024：版本化资源目录缓存
 
+> 局部取代说明：本文保留 Feature 024 落定时的历史设计；其中“Agent 使用原始 YAML”的 content 约定
+> 已由 [Feature 026](../026-agent-package-assets/spec.md) 与
+> [ADR-023](../../adr/ADR-023-package-agent-with-assets.md) 取代（Agent 改为完整目录资源，Local Provider
+> 生成确定性 `.tar.gz`，远程 content 为 `application/gzip`），当前实现与接口以 Feature 026/ADR-023
+> 为准；本文的目录缓存、version 检查与 Snapshot 契约中未被修改的部分继续有效。
+
 - Status：Accepted
 - Date：2026-08-25
 - Related ADRs：[ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md)、APC [ADR-004](../../../../apc/ivory-tower/adr/ADR-004-publish-content-addressed-catalog.md)

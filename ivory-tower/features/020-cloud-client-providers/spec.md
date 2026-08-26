@@ -7,6 +7,13 @@
 
 > 状态：设计与实现已完成，待最终审查并合入 main。重大决策见 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
+> 局部取代说明：本文保留 Cloud Provider 与 APC Agent 只读契约落定时的历史设计；其中 Agent content
+> 为原始 `agent.yaml`（`application/yaml`）、Agent 原样写入单文件 destination、Adapter 继续解析
+> `agent.id` 作为外部身份的约定，已由 [Feature 026](../026-agent-package-assets/spec.md) 与
+> [ADR-023](../../adr/ADR-023-package-agent-with-assets.md) 取代（Agent 改为确定性 `.tar.gz` 目录资源、
+> `application/gzip` content、外部身份使用 `agent.name`），当前实现与接口以 Feature 026/ADR-023 为准；
+> 本文的 Provider、内容安全与 Canonical Plugin 历史设计中未被修改的部分继续有效。
+
 ## 背景
 
 APM 当前通过 `internal/cloud.LocalClient` 读取仓库内 `internal/cloud/resources`。该实现同时承担资源发现、fixture 读取以及 Skill/Agent 全局缓存写入；Plugin 下载却由调用方提供目录，MCP 又直接返回领域对象，接口职责不一致。`cmd/apm` 还在每个 lifecycle 工厂中硬编码创建 Local Client，无法在开发期 fixture 与生产 APC 之间安全切换。
