@@ -91,7 +91,7 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 	if err != nil {
 		return cli.InstallResult{}, releaseInstall(unlock, err)
 	}
-	if result, matched := s.explicitPluginManifestHit(flags, agents); matched {
+	if result, matched := s.explicitManifestHit(flags, agents); matched {
 		if releaseErr := unlock.Release(); releaseErr != nil {
 			return cli.InstallResult{}, fmt.Errorf("release install lock: %w", releaseErr)
 		}
@@ -141,25 +141,50 @@ func (s *InstallService) Install(ctx context.Context, flags cli.Flags) (cli.Inst
 	return result, nil
 }
 
-// explicitPluginManifestHit 仅处理类型、名称和规范版本都显式给出的 Plugin 批次。
+// explicitManifestHit 仅处理类型、名称和规范版本都显式给出的批次。
 // 任一 manifest 缺失、不匹配或不可读时回退既有 Cloud 解析路径，不在预检阶段改变错误优先级。
-func (s *InstallService) explicitPluginManifestHit(flags cli.Flags, agents []domain.AgentID) (cli.InstallResult, bool) {
-	if flags.Type != string(domain.PowerTypePlugin) || flags.Name == "" || flags.Version == "" {
+func (s *InstallService) explicitManifestHit(flags cli.Flags, agents []domain.AgentID) (cli.InstallResult, bool) {
+	powerType := domain.PowerType(flags.Type)
+	if !isManifestPowerType(powerType) || flags.Name == "" || flags.Version == "" {
 		return cli.InstallResult{}, false
 	}
-	ref := domain.PowerRef{Name: flags.Name, Type: domain.PowerTypePlugin, Version: flags.Version}
-	if _, err := domain.PluginRuntimeName(ref); err != nil {
+	ref := domain.PowerRef{Name: flags.Name, Type: powerType, Version: flags.Version}
+	if !validManifestRef(ref) {
 		return cli.InstallResult{}, false
 	}
 	items := make([]cli.InstallItem, 0, len(agents))
 	for _, agent := range agents {
-		previous, installed, err := s.config.Find(agent, domain.PowerTypePlugin, ref.Name)
+		previous, installed, err := s.config.Find(agent, powerType, ref.Name)
 		if err != nil || !installed || previous != ref {
 			return cli.InstallResult{}, false
 		}
-		items = append(items, pluginInstallItem(agent, ref, cli.InstallOutcomeUnchanged))
+		items = append(items, cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeUnchanged})
 	}
 	return cli.InstallResult{Items: items}, true
+}
+
+// isManifestPowerType 报告显式 fast path 是否支持该 Power 类型。
+func isManifestPowerType(powerType domain.PowerType) bool {
+	switch powerType {
+	case domain.PowerTypeSkill, domain.PowerTypeAgent, domain.PowerTypeMCP, domain.PowerTypePlugin:
+		return true
+	default:
+		return false
+	}
+}
+
+// validManifestRef 校验 ref 为规范显式身份：Plugin 复用 PluginRuntimeName 的类别/名称/版本约束，
+// 其余类型回退到通用规范名称与规范版本校验；非法身份不得进入 fast path。
+func validManifestRef(ref domain.PowerRef) bool {
+	if ref.Type == domain.PowerTypePlugin {
+		_, err := domain.PluginRuntimeName(ref)
+		return err == nil
+	}
+	if !domain.IsCanonicalPowerName(ref.Name) {
+		return false
+	}
+	_, err := domain.CanonicalPowerVersion(ref.Version)
+	return err == nil
 }
 
 func installAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.AgentID, error) {

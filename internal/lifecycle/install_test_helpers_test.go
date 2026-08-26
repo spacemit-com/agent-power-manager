@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"apm/internal/adapter"
@@ -686,4 +687,20 @@ func countEvent(events []string, want string) int {
 		}
 	}
 	return count
+}
+
+// agentInstallActivity 报告事件序列中是否出现指定 Agent 的探测、准备、安装或卸载活动；
+// 用于断言精确命中 fast path 之外，逐 Agent 执行仍在 target 检查前短路。
+func agentInstallActivity(events []string, agent domain.AgentID) bool {
+	needle := string(agent)
+	for _, event := range events {
+		if !strings.Contains(event, needle) {
+			continue
+		}
+		if strings.Contains(event, "inspect") || strings.Contains(event, "install") ||
+			strings.Contains(event, "prepare") || strings.Contains(event, "uninstall") {
+			return true
+		}
+	}
+	return false
 }

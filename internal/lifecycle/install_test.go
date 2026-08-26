@@ -233,45 +233,112 @@ func TestInstallStaleCatalogArtifactAvailabilityMatrix(t *testing.T) {
 	}
 }
 
-func TestInstallExplicitPluginManifestHitSkipsCloudAndMutablePluginDependencies(t *testing.T) {
+func TestInstallExplicitManifestHitSkipsCatalogAndMutableDependencies(t *testing.T) {
 	// 捕获错误变更：公共 Install 在 manifest 精确命中前仍先访问 Cloud 或进入资源、Adapter、Transaction。
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
+	// wantCalls 使用 DeepEqual 断言零 catalog、Cloud、cache、resource、Adapter、probe 与 transaction 调用。
+	allAgents := []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
+	tests := []struct {
+		name      string
+		powerType domain.PowerType
+		agent     string
+		agents    []domain.AgentID
+	}{
+		{name: "skill", powerType: domain.PowerTypeSkill, agent: "all", agents: allAgents},
+		{name: "agent", powerType: domain.PowerTypeAgent, agent: string(domain.AgentBibit), agents: []domain.AgentID{domain.AgentBibit}},
+		{name: "mcp", powerType: domain.PowerTypeMCP, agent: "all", agents: allAgents},
+		{name: "plugin", powerType: domain.PowerTypePlugin, agent: "all", agents: allAgents},
+	}
 	cloudCause := errors.New("Cloud must remain offline on manifest hit")
-	agents := []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}
-	installed := make(map[domain.AgentID]domain.PowerRef, len(agents))
-	for _, agent := range agents {
-		installed[agent] = ref
-	}
-	var calls []string
-	service := newInstallService(t, &calls, installFixture{
-		snapshot:     domain.AgentSnapshot{Agents: agents},
-		installed:    installed,
-		cloudListErr: cloudCause,
-	})
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ref := domain.PowerRef{Name: "demo", Type: test.powerType, Version: "v2.0.0"}
+			installed := make(map[domain.AgentID]domain.PowerRef, len(test.agents))
+			for _, agent := range test.agents {
+				installed[agent] = ref
+			}
+			var calls []string
+			service := newInstallService(t, &calls, installFixture{
+				snapshot:     domain.AgentSnapshot{Agents: test.agents},
+				installed:    installed,
+				cloudListErr: cloudCause,
+			})
 
-	result, err := service.Install(context.Background(), cli.Flags{
-		Agent: "all", Type: "plugin", Name: "demo", Version: "v2.0.0",
-	})
-	if err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	assertInstallItems(t, result, []cli.InstallItem{
-		{Agent: domain.AgentBibit, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
-		{Agent: domain.AgentClaudeCode, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
-		{Agent: domain.AgentCodex, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
-		{Agent: domain.AgentHermes, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
-	})
-	wantCalls := []string{
-		"acquire", "recover", "refresh",
-		"config:find:bibit", "config:find:claude-code", "config:find:codex", "config:find:hermes-agent",
-		"release",
-	}
-	if !reflect.DeepEqual(calls, wantCalls) {
-		t.Fatalf("calls = %v, want manifest-only %v", calls, wantCalls)
+			result, err := service.Install(context.Background(), cli.Flags{
+				Agent: test.agent, Type: string(test.powerType), Name: ref.Name, Version: ref.Version,
+			})
+			if err != nil {
+				t.Fatalf("Install() error = %v", err)
+			}
+			wantItems := make([]cli.InstallItem, 0, len(test.agents))
+			wantCalls := []string{"acquire", "recover", "refresh"}
+			for _, agent := range test.agents {
+				wantItems = append(wantItems, cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeUnchanged})
+				wantCalls = append(wantCalls, "config:find:"+string(agent))
+			}
+			wantCalls = append(wantCalls, "release")
+			assertInstallItems(t, result, wantItems)
+			if !reflect.DeepEqual(calls, wantCalls) {
+				t.Fatalf("calls = %v, want manifest-only %v", calls, wantCalls)
+			}
+		})
 	}
 }
 
-func TestInstallExplicitPluginManifestFastPathFallsBackWhenAnyAgentDiffers(t *testing.T) {
+func TestInstallExplicitManifestHitMixedAgentsFallbackKeepsExactAgentShortCircuit(t *testing.T) {
+	// 捕获错误变更：批量 fast path 只检查部分 Agent 时，把混合批次整体返回 unchanged；
+	// 或回退后逐 Agent 执行仍对精确命中 Agent 重复探测/安装。Agent 类型仅支持单 Agent，无法构成混合批次。
+	tests := []struct {
+		name      string
+		powerType domain.PowerType
+		configure func(*installFixture)
+	}{
+		{name: "skill", powerType: domain.PowerTypeSkill},
+		{name: "mcp", powerType: domain.PowerTypeMCP, configure: func(f *installFixture) {
+			f.mcpPresence = map[domain.AgentID]adapter.MCPPresence{domain.AgentClaudeCode: adapter.MCPAbsent}
+		}},
+		{name: "plugin", powerType: domain.PowerTypePlugin, configure: func(f *installFixture) {
+			f.pluginMode = domain.PluginDeploymentMarketplace
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ref := domain.PowerRef{Name: "demo", Type: test.powerType, Version: "v2.0.0"}
+			fixture := installFixture{
+				snapshot:  domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode}},
+				cloudRefs: targetRefs(ref),
+				selected:  ref.Version,
+				installed: map[domain.AgentID]domain.PowerRef{domain.AgentCodex: ref},
+			}
+			if test.configure != nil {
+				test.configure(&fixture)
+			}
+			var calls []string
+			service := newInstallService(t, &calls, fixture)
+
+			result, err := service.Install(context.Background(), cli.Flags{
+				Agent: "all", Type: string(test.powerType), Name: ref.Name, Version: ref.Version,
+			})
+			if err != nil {
+				t.Fatalf("Install() error = %v", err)
+			}
+			assertInstallItems(t, result, []cli.InstallItem{
+				{Agent: domain.AgentCodex, Power: ref, Outcome: cli.InstallOutcomeUnchanged},
+				{Agent: domain.AgentClaudeCode, Power: ref, Outcome: cli.InstallOutcomeInstalled},
+			})
+			if countEvent(calls, "catalog:snapshot-locked") != 1 {
+				t.Fatalf("calls = %v, want exactly one catalog snapshot", calls)
+			}
+			if agentInstallActivity(calls, domain.AgentCodex) {
+				t.Fatalf("calls = %v, exact Agent must skip probe and installation", calls)
+			}
+			if !agentInstallActivity(calls, domain.AgentClaudeCode) {
+				t.Fatalf("calls = %v, differing Agent must be executed", calls)
+			}
+		})
+	}
+}
+
+func TestInstallExplicitManifestHitFallsBackWhenAnyAgentDiffers(t *testing.T) {
 	// 捕获错误变更：批量 fast path 只检查部分 Agent，错误地把混合版本批次全部返回 unchanged。
 	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
 	cloudCause := errors.New("Cloud fallback reached")
@@ -300,30 +367,73 @@ func TestInstallExplicitPluginManifestFastPathFallsBackWhenAnyAgentDiffers(t *te
 	}
 }
 
-func TestInstallPluginFastPathRequiresExplicitCanonicalVersion(t *testing.T) {
-	// 捕获错误变更：省略版本时绕过 Cloud 版本选择并误用 manifest 中的任意版本。
-	cloudCause := errors.New("Cloud version selection required")
+func TestInstallExplicitManifestHitFallsBackWhenManifestUnreadable(t *testing.T) {
+	// 捕获错误变更：任一 Agent 的 manifest 读取失败时，fast path 仍须回退 Cloud 解析路径，
+	// 且不改变正常目录错误优先级。
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
+	findCause := errors.New("find installed Plugin manifest")
+	cloudCause := errors.New("Cloud fallback reached")
 	var calls []string
 	service := newInstallService(t, &calls, installFixture{
-		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		installed: map[domain.AgentID]domain.PowerRef{
-			domain.AgentCodex: {Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
-		},
-		cloudListErr: cloudCause,
+		snapshot:         domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		installed:        map[domain.AgentID]domain.PowerRef{domain.AgentCodex: ref},
+		configFindErrors: map[domain.AgentID]error{domain.AgentCodex: findCause},
+		cloudListErr:     cloudCause,
 	})
 
-	result, err := service.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})
+	result, err := service.Install(context.Background(), cli.Flags{
+		Agent: "codex", Type: "plugin", Name: "demo", Version: "v2.0.0",
+	})
 	if !errors.Is(err, cloudCause) {
-		t.Fatalf("Install() error = %v, want Cloud cause %v", err, cloudCause)
+		t.Fatalf("Install() error = %v, want Cloud fallback cause %v", err, cloudCause)
 	}
 	assertZeroInstallResult(t, result)
-	wantCalls := []string{"acquire", "recover", "refresh", "catalog:snapshot-locked", "release"}
+	wantCalls := []string{"acquire", "recover", "refresh", "config:find:codex", "catalog:snapshot-locked", "release"}
 	if !reflect.DeepEqual(calls, wantCalls) {
-		t.Fatalf("calls = %v, want normal resolution %v", calls, wantCalls)
+		t.Fatalf("calls = %v, want fallback %v", calls, wantCalls)
 	}
 }
 
-func TestInstallPluginManifestFastPathReleaseFailureSuppressesResult(t *testing.T) {
+func TestInstallExplicitManifestHitRequiresExplicitVersion(t *testing.T) {
+	// 捕获错误变更：省略版本时绕过 Cloud 版本选择并误用 manifest 中的任意版本。
+	tests := []struct {
+		name      string
+		powerType domain.PowerType
+		agent     string
+	}{
+		{name: "skill", powerType: domain.PowerTypeSkill, agent: "codex"},
+		{name: "agent", powerType: domain.PowerTypeAgent, agent: "bibit"},
+		{name: "mcp", powerType: domain.PowerTypeMCP, agent: "codex"},
+		{name: "plugin", powerType: domain.PowerTypePlugin, agent: "codex"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cloudCause := errors.New("Cloud version selection required")
+			ref := domain.PowerRef{Name: "demo", Type: test.powerType, Version: "v2.0.0"}
+			agent := domain.AgentID(test.agent)
+			var calls []string
+			service := newInstallService(t, &calls, installFixture{
+				snapshot:     domain.AgentSnapshot{Agents: []domain.AgentID{agent}},
+				installed:    map[domain.AgentID]domain.PowerRef{agent: ref},
+				cloudListErr: cloudCause,
+			})
+
+			result, err := service.Install(context.Background(), cli.Flags{
+				Agent: test.agent, Type: string(test.powerType), Name: "demo",
+			})
+			if !errors.Is(err, cloudCause) {
+				t.Fatalf("Install() error = %v, want Cloud cause %v", err, cloudCause)
+			}
+			assertZeroInstallResult(t, result)
+			wantCalls := []string{"acquire", "recover", "refresh", "catalog:snapshot-locked", "release"}
+			if !reflect.DeepEqual(calls, wantCalls) {
+				t.Fatalf("calls = %v, want normal resolution %v", calls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestInstallExplicitManifestHitReleaseFailureSuppressesResult(t *testing.T) {
 	// 捕获错误变更：新增 fast path 绕过统一解锁错误抑制，泄露 completed 结果。
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"}
 	releaseCause := errors.New("release fast-path lock")
