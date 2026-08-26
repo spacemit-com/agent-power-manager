@@ -2,6 +2,26 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-26
+
+分类：功能变更
+
+用户需求：统一 Skill、Agent、MCP 与 Plugin 在 `install`/`uninstall` 中面对相同入口状态时的宏观行为——同版本不探测即 `unchanged`；不同版本加缺失/不完整目标记录一次 warning 后同次修复并全新安装；无清单目标冲突只暴露公共 `adapter.ErrTargetConflict`；Plugin 卸载同时清除 Plugin 与专属 marketplace 并保留 artifact cache；显式精确 manifest 全命中快速路径扩展到四类 Power；CLI 运行时失败只记录一次 Error 不再打印 usage。契约见 [Feature 025](ivory-tower/features/025-unified-lifecycle-state-semantics/spec.md) 与 [ADR-022](ivory-tower/adr/ADR-022-unify-lifecycle-entry-state-semantics.md)。
+
+相关提交：
+
+- `965f795 refactor(lifecycle): add shared entry-state policy`
+- `1e4523f feat(lifecycle): align file power install states`
+- `775c216 feat(mcp): align install entry states`
+- `eb42d27 feat(plugin): remove marketplace during uninstall`
+- `a261e87 feat(lifecycle): align plugin entry states`
+- `2f5757c feat(install): generalize exact manifest fast path`
+- `e8f6470 test(lifecycle): enforce cross-power state contract`
+
+解决方案或完成结果：`internal/lifecycle` 新增共享纯状态策略，把 manifest（`absent`/`same-version`/`different-version`）与目标（`absent`/`complete`/`incomplete`/`conflict`）映射为动作与 outcome，四类 Power 保留各自类型专属 probe 与 transaction。同版本在目标探测前直接返回 `unchanged`，不检查目标是否存在或完整；不同版本且目标缺失或不完整时记录一次 `installed power target is missing` warning，先经 repair transaction 清理仍存在的受管残留并删除旧清单，再以首次安装语义安装新版本，成功只输出 `installed`；无清单但存在运行目标时拒绝接管，唯一公共业务原因是 `adapter.ErrTargetConflict`，MCP/Plugin 专属 conflict sentinel 不再作为额外 `errors.Is` 类型暴露。Plugin 卸载删除 Plugin、注销专属 `apm-<name>` marketplace 并删除 manifest，但保留共享不可变 artifact cache；Plugin 部分状态按新矩阵收敛（能证明归 APM 管理的缺失/不完整按缺失清理，身份或来源冲突仍 fail closed）。显式规范 Type/Name/Version 在所有目标 Agent 清单精确命中时四类 Power 都直接返回 `unchanged`，不访问 catalog、Cloud、cache、Plugin Resource、Adapter 或 Transaction。CLI 以 `runtimeFailure` 标记区分运行时失败与参数/writer 错误，前者只记录一次 Error 且不再打印 usage。
+
+验证结果或限制：`go test ./internal/lifecycle ./internal/transaction ./internal/cli ./cmd/apm -count=1`、`go test ./...`、`go test -race ./...`、`go vet ./...`、`go build -o ./apm ./cmd/apm`、`gofmt -l internal/lifecycle internal/transaction internal/pluginresource cmd/apm`（无输出）与 `git diff --check` 均以退出码 0 通过。同版本 `unchanged` 明确不审计目标健康，目标被外部删除或损坏时重复安装不会修复；依赖旧 `ErrStaleManifest`、MCP/Plugin 专属 conflict sentinel 或卸载后 retained marketplace 行为的调用方需要迁移。
+
 ## 2026-08-25
 
 分类：功能变更

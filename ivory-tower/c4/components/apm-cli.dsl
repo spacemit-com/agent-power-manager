@@ -5,7 +5,7 @@ cliEntry = component "CLI Entry" "cobra 命令路由；Search、List、Install�
         "classDiagram" "apm-cli-diagrams/cli-entry.mmd"
     }
 }
-lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install、Uninstall、Fix 生命周期端口。只读命令无锁检查 journal；Fix/Install/Uninstall 才串行恢复。" "Go" {
+lifecycle = component "Core Lifecycle" "提供独立的 Search、List、Install、Uninstall、Fix 生命周期端口。只读命令无锁检查 journal；Fix/Install/Uninstall 才串行恢复。Install/Uninstall 入口状态由共享纯状态策略统一：同版本不探测即 unchanged，不同版本加缺失目标 repair 后全新安装，无清单目标冲突只暴露 adapter.ErrTargetConflict（ADR-022）。" "Go" {
     properties {
         "classDiagram" "apm-cli-diagrams/core-lifecycle.mmd"
         "journalRecovery" "apm-cli-lifecycle-diagrams/common-journal-recovery.mmd"
@@ -70,7 +70,7 @@ codexMarketplaceBuilder = component "Codex Marketplace Builder" "从 Codex 原�
 }
 claudeMarketplaceBuilder = component "Claude Marketplace Builder" "从 Claude 原生 Plugin manifest 构建并复验单条目本地 marketplace。" "Go" {
 }
-transactionManager = component "Transaction Manager" "Plugin transaction 持久化 phase，联合切换 marketplace、Plugin 与 manifest；恢复时只读复验方向所需 artifact，不依赖 Cloud 或 Plugin Resource。" "Go" {
+transactionManager = component "Transaction Manager" "Plugin transaction 持久化 phase，联合切换 marketplace、Plugin 与 manifest；卸载清除 Plugin、注销 marketplace 并删除 manifest（保留 artifact cache），安装缺失目标先 repair 再全新安装；恢复时只读复验方向所需 artifact，不依赖 Cloud 或 Plugin Resource。" "Go" {
 }
 journalStore = component "Journal Store" "唯一 transactions/active.json，schema v1 shared envelope。" "filesystem" {
 }
@@ -95,7 +95,7 @@ lifecycle -> catalogManager "默认 List/Search 调用 Snapshot；Install 已持
 lifecycle -> cacheManager "Skill/Agent Install：PrepareSkill/PrepareAgent 返回公共 staging"
 lifecycle -> cloudClient "Install 以 CatalogEntry 获取精确 MCP/Skill/Agent/Plugin content；Submit/get/list 使用 Submission 端口；Uninstall/Fix 无依赖"
 lifecycle -> pluginResource "Plugin Ensure / Lookup / StageFilesystem；返回的 Artifact 再由调用方 MarketplaceFor(agent)"
-lifecycle -> transactionManager "Install/Uninstall/Fix 的可恢复事务"
+lifecycle -> transactionManager "Install/Uninstall/Fix 的可恢复事务；Install 缺失修复→首次安装两阶段，Plugin 卸载清除 Plugin+marketplace+manifest"
 lifecycle -> submission "Validate/Submit 对四类 Power 调用 Validate/Prepare；Submit 结果再经 cloud.Submit 上传"
 submission -> domain "Agent 原始 YAML 严格解析与身份校验（DecodeAgentConfigYAML/Validate/ValidatePowerRef）"
 catalogManager -> lockManager "Snapshot 非阻塞 Acquire/Release；SnapshotLocked 不再次获取"

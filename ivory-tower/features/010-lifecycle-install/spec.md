@@ -1,6 +1,8 @@
 # Lifecycle Install 规格
 
 > **当前状态说明（2026-08-12）：** 本 spec 的外层锁、批处理与 Skill Cache 流程继续有效；Feature 013 在同一 lifecycle 中新增不使用 Cache/Staging 的 MCP CLI 分支，参见 [Feature 013](../013-agent-mcp-adapters/spec.md) 与 [ADR-010](../../adr/ADR-010-use-type-specific-drivers-for-recoverable-power-transactions.md)。
+>
+> **取代说明（2026-08-26）：** 本 spec 的“陈旧清单项修复”规则——不同版本安装遇到缺失目标时 Remove 对应清单项并返回 `transaction.ErrStaleManifest`、要求用户再次执行——已被 [ADR-022](../../adr/ADR-022-unify-lifecycle-entry-state-semantics.md) 与 [Feature 025](../025-unified-lifecycle-state-semantics/spec.md) 定向取代：现在不同版本且目标缺失/不完整时记录一次 `installed power target is missing` warning，先 repair 清理残留并删除旧清单，再以首次安装语义安装新版本，成功只输出 `installed`，不再返回 `ErrStaleManifest`。
 
 ## 目标
 

@@ -5,6 +5,8 @@
 - Decision Makers：APM maintainers
 
 > 已由 [ADR-014](ADR-014-share-multi-agent-plugin-artifacts.md) 取代：Cloud 与持久缓存改为每个 Plugin 版本一份共享多 Agent 制品，Plugin 运行时名称和 selector 改为逻辑名称；以下正文保留为历史决策上下文。
+>
+> 另由 [ADR-022](ADR-022-unify-lifecycle-entry-state-semantics.md) 定向取代本文以下旧规则：Plugin 部分状态一律保留 manifest 并 fail closed（现按统一入口状态矩阵收敛，能证明归 APM 管理的缺失/不完整按缺失清理）；正常卸载保留 marketplace 与 artifact（现卸载同时删除 Plugin、注销专属 marketplace 并删除 manifest，仅保留 artifact cache）；只有 Plugin 支持显式精确版本 manifest 全命中的无 catalog 快速路径（现已扩展到四类 Power）。
 
 ## Context
 

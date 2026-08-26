@@ -3,6 +3,8 @@
 > 状态与取代说明：本文主体保留为 Feature 018 的历史设计记录；其中 Cloud provider 契约已由 [Feature 020](../020-cloud-client-providers/spec.md) 与 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 取代，Plugin canonical/派生契约已由 Feature 020 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 取代。
 >
 > 状态：已于 2026-08-20 按 [ADR-014](../../adr/ADR-014-share-multi-agent-plugin-artifacts.md) 实现。
+>
+> 取代说明（2026-08-26）：[ADR-022](../../adr/ADR-022-unify-lifecycle-entry-state-semantics.md) 与 [Feature 025](../025-unified-lifecycle-state-semantics/spec.md) 定向取代本文的以下旧规则：Plugin 部分状态一律保留 manifest 并 fail closed（现按统一入口状态矩阵收敛，能证明归 APM 管理的缺失/不完整按缺失清理，身份或来源冲突仍 fail closed）；Plugin 正常卸载保留 marketplace（现卸载同时删除 Plugin、注销专属 `apm-<name>` marketplace 并删除 manifest，仅保留共享 artifact cache）；只有 Plugin 支持显式精确版本 manifest 全命中的无 catalog 快速路径（现已扩展到 Skill、Agent、MCP、Plugin 四类 Power）。
 
 ## 背景
 

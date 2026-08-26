@@ -4,6 +4,8 @@
 - Date：2026-08-20
 - Decision Makers：APM maintainers
 
+> 取代说明（2026-08-26）：[ADR-022](ADR-022-unify-lifecycle-entry-state-semantics.md) 定向取代本文（连同 ADR-013 与 Feature 018）中的以下旧规则：Plugin 部分状态一律保留 manifest 并 fail closed（现按统一入口状态矩阵收敛）；Plugin 正常卸载保留 marketplace（现卸载同时删除 Plugin、注销专属 marketplace 并删除 manifest，仅保留 artifact cache）；只有 Plugin 支持显式精确版本 manifest 全命中的无 catalog 快速路径（现已扩展到四类 Power）。
+
 ## Context
 
 [ADR-013](ADR-013-generate-per-plugin-local-marketplaces.md) 按 `agent + plugin + version` 下载、构建并缓存 Plugin。实际 Cloud Plugin 是可以同时携带 `.codex-plugin`、`.claude-plugin` 与 `.hermes-plugin` 的完整多 Agent 包；按 Agent 维护多份内容会重复发布、下载和缓存相同资源。新增内部 Agent Bibit 后，这种重复会继续扩大。
