@@ -68,6 +68,32 @@ func (lookup *artifactLookup) Lookup(ref domain.PowerRef) (Artifact, error) {
 	return lookup.service.Lookup(ref)
 }
 
+type artifactLocator struct {
+	service *Service
+}
+
+var _ ArtifactLocator = (*artifactLocator)(nil)
+
+// NewLocator 使用默认缓存路径创建只读 Plugin 制品定位服务；返回契约只暴露 Locate 与 Exists，
+// 仅按 Ref 构造身份与预期根路径，不触发下载、构建、staging 或制品内容复验。
+func NewLocator() (ArtifactLocator, error) {
+	cacheRoot, err := paths.CachePath()
+	if err != nil {
+		return nil, err
+	}
+	return &artifactLocator{service: newService(cacheRoot, "", "", "", nil, builtInBuilder())}, nil
+}
+
+// Locate 具名委托共享 Service 的身份定位逻辑，不做任何缓存读取或制品内容复验。
+func (locator *artifactLocator) Locate(ref domain.PowerRef) (Artifact, error) {
+	return locator.service.Locate(ref)
+}
+
+// Exists 具名委托共享 Service 的预期根存在性检查，仅报告是否为物理目录。
+func (locator *artifactLocator) Exists(ref domain.PowerRef) (bool, error) {
+	return locator.service.Exists(ref)
+}
+
 func builtInBuilder() artifactBuilder {
 	return sharedMarketplaceBuilder{}
 }

@@ -296,9 +296,9 @@ func newUninstallLifecycle() (cli.UninstallLifecycle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create transaction manager: %w", err)
 	}
-	pluginResources, err := pluginresource.NewLookup()
+	pluginResources, err := pluginresource.NewLocator()
 	if err != nil {
-		return nil, fmt.Errorf("create uninstall Plugin Resource lookup: %w", err)
+		return nil, fmt.Errorf("create uninstall Plugin Resource locator: %w", err)
 	}
 	return lifecycle.NewUninstall(locker, transactions, pluginResources, registry, repository)
 }

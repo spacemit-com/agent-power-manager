@@ -19,19 +19,14 @@ import (
 type UninstallService struct {
 	locker       lock.Locker
 	transactions transaction.Manager
-	plugins      pluginArtifactLookup
+	plugins      pluginresource.ArtifactLocator
 	registry     AdapterRegistry
 	config       config.Repository
 }
 
-// pluginArtifactLookup 仅复验 manifest 指向的本地精确 Plugin 制品；卸载不得下载、构建或 staging。
-type pluginArtifactLookup interface {
-	Lookup(domain.PowerRef) (pluginresource.Artifact, error)
-}
-
 // NewUninstall 创建持有完整共享状态区间的 Uninstall 生命周期。
-// plugins 在卸载中只允许 Lookup manifest 指向的精确版本，禁止 Ensure 或回源 Cloud。
-func NewUninstall(locker lock.Locker, transactions transaction.Manager, plugins pluginArtifactLookup, registry AdapterRegistry, config config.Repository) (*UninstallService, error) {
+// plugins 在卸载中只允许 Locate/Exists 定位 manifest 指向的精确版本，禁止 Ensure、Lookup 或回源 Cloud。
+func NewUninstall(locker lock.Locker, transactions transaction.Manager, plugins pluginresource.ArtifactLocator, registry AdapterRegistry, config config.Repository) (*UninstallService, error) {
 	switch {
 	case isNilInterface(locker):
 		return nil, errors.New("create Uninstall lifecycle with nil locker")

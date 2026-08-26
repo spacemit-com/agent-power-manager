@@ -16,11 +16,13 @@ type Downloader interface {
 }
 
 // Manager 管理本地共享 Plugin artifact；Ensure 以权威 CatalogEntry 获取目标内容，
-// Lookup 与 StageFilesystem 只操作已经发布的精确 Ref 制品。
+// Lookup 与 StageFilesystem 只操作已经发布的精确 Ref 制品，Locate/Exists 仅做身份与预期根定位。
 type Manager interface {
 	Ensure(context.Context, domain.CatalogEntry) (Artifact, error)
 	Lookup(domain.PowerRef) (Artifact, error)
 	StageFilesystem(domain.PowerRef) (string, error)
+	Locate(domain.PowerRef) (Artifact, error)
+	Exists(domain.PowerRef) (bool, error)
 }
 
 // ArtifactLookup 只读查询并复验已发布的精确 Plugin 制品；不提供下载或 staging 能力。

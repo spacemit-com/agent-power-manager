@@ -134,6 +134,64 @@ func TestNewLookupExposesOnlyLookup(t *testing.T) {
 	}
 }
 
+type locatorOnlyContract interface {
+	Locate(domain.PowerRef) (Artifact, error)
+	Exists(domain.PowerRef) (bool, error)
+}
+
+func TestNewLocatorExposesOnlyLocateAndExists(t *testing.T) {
+	t.Setenv("APM_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	locator, err := NewLocator()
+	if err != nil {
+		t.Fatalf("NewLocator() error = %v", err)
+	}
+	var _ locatorOnlyContract = locator
+
+	locatorType := reflect.TypeOf(locator)
+	if locatorType.NumMethod() != 2 {
+		methods := make([]string, 0, locatorType.NumMethod())
+		for index := 0; index < locatorType.NumMethod(); index++ {
+			methods = append(methods, locatorType.Method(index).Name)
+		}
+		t.Fatalf("NewLocator() concrete method set = %v, want [Exists Locate]", methods)
+	}
+	if _, exposesLookup := any(locator).(interface {
+		Lookup(domain.PowerRef) (Artifact, error)
+	}); exposesLookup {
+		t.Fatal("NewLocator() exposes Lookup")
+	}
+	if _, exposesEnsure := any(locator).(interface {
+		Ensure(context.Context, domain.CatalogEntry) (Artifact, error)
+	}); exposesEnsure {
+		t.Fatal("NewLocator() exposes Ensure")
+	}
+}
+
+func TestNewLocatorLocatesWithoutRequiringArtifactContents(t *testing.T) {
+	t.Setenv("APM_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	locator, err := NewLocator()
+	if err != nil {
+		t.Fatalf("NewLocator() error = %v", err)
+	}
+	ref := testPluginRef()
+	artifact, err := locator.Locate(ref)
+	if err != nil {
+		t.Fatalf("Locate() error = %v", err)
+	}
+	if artifact.Power != ref || artifact.Root == "" || artifact.PluginPath == "" {
+		t.Fatalf("Locate() = %+v, want exact identity with expected root", artifact)
+	}
+	exists, err := locator.Exists(ref)
+	if err != nil {
+		t.Fatalf("Exists() error = %v", err)
+	}
+	if exists {
+		t.Fatalf("Exists() = true for unpublished ref %+v, want false", ref)
+	}
+}
+
 func TestNewLookupCannotWriteRelativeServiceDirectories(t *testing.T) {
 	t.Setenv("APM_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

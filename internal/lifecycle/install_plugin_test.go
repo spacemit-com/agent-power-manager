@@ -53,9 +53,11 @@ func TestInstallPluginMarketplaceFirstInstallUsesLocalArtifact(t *testing.T) {
 	wantCalls := []string{
 		"config:find:codex",
 		"resolve-plugin:codex",
-		"resource:ensure:v2.0.0",
+		"resource:locate:v2.0.0",
 		"marketplace:inspect:codex:apm-demo",
 		"plugin:inspect:codex:demo",
+		"resource:exists:v2.0.0",
+		"resource:ensure:v2.0.0",
 		"transaction:install-plugin:codex",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
@@ -79,19 +81,16 @@ func TestInstallPluginMarketplaceRejectsUnmanagedFacts(t *testing.T) {
 		name            string
 		marketplaceFact adapter.MarketplaceFact
 		pluginFact      adapter.PluginFact
-		wantErr         error
 	}{
 		{
 			name:            "marketplace exists",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/external"},
 			pluginFact:      adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"},
-			wantErr:         adapter.ErrMarketplaceConflict,
 		},
 		{
 			name:            "plugin exists",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
 			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@external"},
-			wantErr:         adapter.ErrPluginConflict,
 		},
 	}
 	for _, test := range tests {
@@ -103,8 +102,8 @@ func TestInstallPluginMarketplaceRejectsUnmanagedFacts(t *testing.T) {
 				pluginFacts:      map[string]adapter.PluginFact{"demo": test.pluginFact},
 			})
 			_, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, ref)
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("installForAgent() error = %v, want %v", err, test.wantErr)
+			if !errors.Is(err, adapter.ErrTargetConflict) {
+				t.Fatalf("installForAgent() error = %v, want ErrTargetConflict", err)
 			}
 			if containsEvent(calls, "transaction:install-plugin:codex") {
 				t.Fatalf("calls = %v, unmanaged facts must not enter transaction", calls)
@@ -127,8 +126,8 @@ func TestInstallPluginMarketplaceClaudeForeignSelectorFailsClosed(t *testing.T) 
 	})
 
 	_, err := installForAgentTest(t, service, context.Background(), domain.AgentClaudeCode, ref)
-	if !errors.Is(err, adapter.ErrPluginConflict) {
-		t.Fatalf("installForAgent() error = %v, want ErrPluginConflict", err)
+	if !errors.Is(err, adapter.ErrTargetConflict) {
+		t.Fatalf("installForAgent() error = %v, want ErrTargetConflict", err)
 	}
 	if containsEvent(calls, "transaction:install-plugin:"+string(domain.AgentClaudeCode)) {
 		t.Fatalf("calls = %v, foreign selector must not enter transaction", calls)
@@ -162,9 +161,11 @@ func TestInstallPluginMarketplaceSwitchUsesPreviousLookupOnly(t *testing.T) {
 	wantCalls := []string{
 		"config:find:codex",
 		"resolve-plugin:codex",
-		"resource:ensure:v2.0.0",
+		"resource:locate:v1.0.0",
 		"marketplace:inspect:codex:apm-demo",
 		"plugin:inspect:codex:demo",
+		"resource:exists:v1.0.0",
+		"resource:ensure:v2.0.0",
 		"resource:lookup:v1.0.0",
 		"transaction:install-plugin:codex",
 	}
@@ -179,28 +180,58 @@ func TestInstallPluginMarketplaceSwitchUsesPreviousLookupOnly(t *testing.T) {
 	}
 }
 
-func TestInstallPluginMarketplaceStaleManifestClearsSingleEntryThenFirstInstalls(t *testing.T) {
-	var calls []string
+func TestInstallPluginMarketplaceRepairsThenFirstInstalls(t *testing.T) {
 	previous := pluginRef("v1.0.0")
 	target := pluginRef("v2.0.0")
-	service := newInstallService(t, &calls, installFixture{
-		installed:  map[domain.AgentID]domain.PowerRef{domain.AgentCodex: previous},
-		pluginMode: domain.PluginDeploymentMarketplace,
-	})
+	tests := []struct {
+		name            string
+		marketplaceFact adapter.MarketplaceFact
+		pluginFact      adapter.PluginFact
+	}{
+		{
+			name:            "both absent",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"},
+		},
+		{
+			name:            "marketplace only",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"},
+		},
+		{
+			name:            "plugin only",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var calls []string
+			var uninstalls []transaction.PluginUninstallRequest
+			service := newInstallService(t, &calls, installFixture{
+				installed:           map[domain.AgentID]domain.PowerRef{domain.AgentCodex: previous},
+				pluginMode:          domain.PluginDeploymentMarketplace,
+				marketplaceFacts:    map[string]adapter.MarketplaceFact{"apm-demo": test.marketplaceFact},
+				pluginFacts:         map[string]adapter.PluginFact{"demo": test.pluginFact},
+				pluginUninstallSink: &uninstalls,
+			})
 
-	item, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
-	if err != nil || item.Outcome != cli.InstallOutcomeInstalled {
-		t.Fatalf("installForAgent() = %+v, %v, want fresh install", item, err)
-	}
-	wantCalls := []string{
-		"config:find:codex", "resolve-plugin:codex", "resource:ensure:v2.0.0",
-		"marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo",
-		"config:remove:codex:plugin:demo",
-		"marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo",
-		"transaction:install-plugin:codex",
-	}
-	if !reflect.DeepEqual(calls, wantCalls) {
-		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+			item, err := installForAgentTest(t, service, context.Background(), domain.AgentCodex, target)
+			if err != nil || item.Outcome != cli.InstallOutcomeInstalled {
+				t.Fatalf("installForAgent() = %+v, %v, want fresh install after repair", item, err)
+			}
+			wantCalls := []string{
+				"config:find:codex", "resolve-plugin:codex", "resource:locate:v1.0.0",
+				"marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo", "resource:exists:v1.0.0",
+				"transaction:uninstall-plugin:codex", "resource:ensure:v2.0.0", "transaction:install-plugin:codex",
+			}
+			if !reflect.DeepEqual(calls, wantCalls) {
+				t.Fatalf("calls = %v, want %v", calls, wantCalls)
+			}
+			if len(uninstalls) != 1 || uninstalls[0].Power != previous || uninstalls[0].Marketplace == nil || uninstalls[0].Marketplace.Source != "/cache/plugins/demo/v1.0.0" {
+				t.Fatalf("uninstall requests = %+v, want previous marketplace repair", uninstalls)
+			}
+		})
 	}
 }
 
@@ -248,6 +279,7 @@ func assertPluginManifestPreservedWithoutMutation(t *testing.T, calls []string) 
 		"config:remove:codex:plugin:demo",
 		"resource:stage-filesystem:v2.0.0",
 		"transaction:install-plugin:codex",
+		"transaction:uninstall-plugin:codex",
 		"cloud:get-plugin",
 		"cloud:download-plugin",
 	} {
@@ -268,10 +300,25 @@ func TestInstallPluginMarketplaceFailsClosedOnManagedAnomalies(t *testing.T) {
 		lookupErr       error
 		wantErr         error
 	}{
-		{name: "marketplace only", marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"}, pluginFact: adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"}, wantErr: transaction.ErrIndeterminateState},
-		{name: "plugin only", marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"}, pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, wantErr: transaction.ErrIndeterminateState},
-		{name: "wrong source", marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/other"}, pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, wantErr: transaction.ErrIndeterminateState},
-		{name: "damaged old cache", marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"}, pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, lookupErr: cacheDamage, wantErr: cacheDamage},
+		{
+			name:            "wrong source",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/other"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			wantErr:         transaction.ErrIndeterminateState,
+		},
+		{
+			name:            "wrong selector",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@foreign"},
+			wantErr:         transaction.ErrIndeterminateState,
+		},
+		{
+			name:            "damaged old cache",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			lookupErr:       cacheDamage,
+			wantErr:         cacheDamage,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -304,16 +351,18 @@ func TestInstallFilesystemPluginStagesOnlyAtPublishBoundaryForBibitAndHermes(t *
 		wantTxn   bool
 	}{
 		{name: "absent publishes", fact: adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"}, wantStage: 1, wantTxn: true},
-		{name: "unmanaged present conflicts", fact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, wantErr: adapter.ErrPluginConflict},
+		{name: "unmanaged present conflicts", fact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, wantErr: adapter.ErrTargetConflict},
 	}
 	for _, agent := range []domain.AgentID{domain.AgentBibit, domain.AgentHermes} {
 		for _, test := range tests {
 			t.Run(string(agent)+"/"+test.name, func(t *testing.T) {
 				var calls []string
 				resources := &fakePluginResources{}
+				target := filepath.Join(t.TempDir(), "demo")
 				service := newInstallService(t, &calls, installFixture{
 					pluginMode:      domain.PluginDeploymentFilesystem,
 					pluginFacts:     map[string]adapter.PluginFact{"demo": test.fact},
+					pluginTargets:   map[string]string{"demo": target},
 					pluginResources: resources,
 				})
 				_, err := installForAgentTest(t, service, context.Background(), agent, ref)
@@ -391,30 +440,35 @@ func TestInstallFilesystemPluginAbsentFactValidatesPhysicalManagedTargetBeforeMu
 	}
 }
 
-func TestInstallFilesystemPluginAbsentFactAndPhysicalTargetMissingCleansManifestThenInstalls(t *testing.T) {
+func TestInstallFilesystemPluginAbsentFactAndPhysicalTargetMissingRepairsThenInstalls(t *testing.T) {
 	previous := pluginRef("v1.0.0")
 	targetRef := pluginRef("v2.0.0")
 	target := filepath.Join(t.TempDir(), "demo")
 	var calls []string
+	var uninstalls []transaction.PluginUninstallRequest
 	service := newInstallService(t, &calls, installFixture{
-		installed:     map[domain.AgentID]domain.PowerRef{domain.AgentHermes: previous},
-		pluginMode:    domain.PluginDeploymentFilesystem,
-		pluginFacts:   map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginAbsent, ActualName: "demo"}},
-		pluginTargets: map[string]string{"demo": target},
+		installed:           map[domain.AgentID]domain.PowerRef{domain.AgentHermes: previous},
+		pluginMode:          domain.PluginDeploymentFilesystem,
+		pluginFacts:         map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginAbsent, ActualName: "demo"}},
+		pluginTargets:       map[string]string{"demo": target},
+		pluginUninstallSink: &uninstalls,
 	})
 
 	item, err := installForAgentTest(t, service, context.Background(), domain.AgentHermes, targetRef)
 	if err != nil || item.Outcome != cli.InstallOutcomeInstalled {
-		t.Fatalf("installForAgent() = %+v, %v; want fresh install after stale manifest cleanup", item, err)
+		t.Fatalf("installForAgent() = %+v, %v; want fresh install after repair", item, err)
 	}
 	want := []string{
 		"config:find:hermes-agent", "resolve-plugin:hermes-agent", "plugin:inspect:hermes-agent:demo",
-		"plugin:target-path:hermes-agent:demo", "config:remove:hermes-agent:plugin:demo",
-		"plugin:inspect:hermes-agent:demo", "resource:ensure:v2.0.0", "resource:stage-filesystem:v2.0.0",
+		"plugin:target-path:hermes-agent:demo", "transaction:uninstall-plugin:hermes-agent",
+		"resource:ensure:v2.0.0", "resource:stage-filesystem:v2.0.0",
 		"transaction:install-plugin:hermes-agent",
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+	if len(uninstalls) != 1 || uninstalls[0].Power != previous || uninstalls[0].Marketplace != nil {
+		t.Fatalf("uninstall requests = %+v, want filesystem previous repair", uninstalls)
 	}
 }
 
@@ -468,8 +522,8 @@ func TestInstallPluginUnknownCollectionFactRetainsManifestWithoutMutation(t *tes
 	if containsEvent(calls, "config:remove:codex:plugin:demo") || containsEvent(calls, "transaction:install-plugin:codex") {
 		t.Fatalf("calls = %v, unknown fact must retain manifest and Agent state", calls)
 	}
-	if resources.ensureCalls != 1 || resources.lookupCalls != 0 || resources.stageCalls != 0 {
-		t.Fatalf("resource calls ensure/lookup/stage = %d/%d/%d, want 1/0/0", resources.ensureCalls, resources.lookupCalls, resources.stageCalls)
+	if resources.ensureCalls != 0 || resources.lookupCalls != 0 || resources.stageCalls != 0 {
+		t.Fatalf("resource calls ensure/lookup/stage = %d/%d/%d, want 0/0/0", resources.ensureCalls, resources.lookupCalls, resources.stageCalls)
 	}
 }
 
@@ -478,3 +532,4 @@ func pluginRef(version string) domain.PowerRef {
 }
 
 var _ pluginresource.Manager = (*fakePluginResources)(nil)
+var _ pluginresource.ArtifactLocator = (*fakePluginResources)(nil)

@@ -889,12 +889,18 @@ func TestPluginAcceptanceFirstRepeatUninstallAndIsolation(t *testing.T) {
 				t.Fatalf("Uninstall() = %+v, %v", uninstalled, err)
 			}
 			h.assertManifest("demo-plugin", "", false)
-			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), false)
 			h.assertPlugins()
 			if agent == domain.AgentCodex {
-				h.assertMutationCallsSince(uninstallStart, h.expectedCall("plugin", "remove", "demo-plugin", "--json"))
+				h.assertMutationCallsSince(uninstallStart,
+					h.expectedCall("plugin", "remove", "demo-plugin", "--json"),
+					h.expectedCall("plugin", "marketplace", "remove", h.marketplaceName(artifact), "--json"),
+				)
 			} else {
-				h.assertMutationCallsSince(uninstallStart, h.expectedCall("plugin", "uninstall", "demo-plugin", "--scope", "user"))
+				h.assertMutationCallsSince(uninstallStart,
+					h.expectedCall("plugin", "uninstall", "demo-plugin", "--scope", "user"),
+					h.expectedCall("plugin", "marketplace", "remove", h.marketplaceName(artifact), "--scope", "user"),
+				)
 			}
 			if info, statErr := os.Stat(artifact.Root); statErr != nil || !info.IsDir() {
 				t.Fatalf("retained cache = %v, %v", info, statErr)
@@ -988,6 +994,26 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 		h.assertOnlyFakeExecutables()
 	})
 
+	t.Run("source conflict fails closed", func(t *testing.T) {
+		h := newPluginAcceptanceHarness(t, domain.AgentCodex)
+		if _, err := h.installRef("demo-plugin", "v0.0.1"); err != nil {
+			t.Fatal(err)
+		}
+		h.setMarketplace("demo-plugin", filepath.Join(h.root, "foreign"))
+		marketBefore, marketErr := os.ReadFile(h.marketplacePath("demo-plugin"))
+		pluginBefore, pluginErr := os.ReadFile(h.pluginPath("demo-plugin", "v0.0.1"))
+		start := len(h.callLines())
+		if _, err := h.installRef("demo-plugin", "v0.1.0"); !errors.Is(err, transaction.ErrIndeterminateState) {
+			t.Fatalf("Install() error = %v, want ErrIndeterminateState", err)
+		}
+		h.assertManifest("demo-plugin", "v0.0.1", true)
+		assertOptionalFileUnchanged(t, h.marketplacePath("demo-plugin"), marketBefore, marketErr)
+		assertOptionalFileUnchanged(t, h.pluginPath("demo-plugin", "v0.0.1"), pluginBefore, pluginErr)
+		h.assertNoMutationCallsSince(start)
+		h.assertJournal(false)
+		h.assertOnlyFakeExecutables()
+	})
+
 	for _, test := range []struct {
 		name   string
 		mutate func(*pluginAcceptanceHarness, pluginresource.Artifact)
@@ -998,32 +1024,27 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 		{name: "Plugin only", mutate: func(h *pluginAcceptanceHarness, _ pluginresource.Artifact) {
 			h.removeState(h.marketplacePath("demo-plugin"))
 		}},
-		{name: "source conflict", mutate: func(h *pluginAcceptanceHarness, _ pluginresource.Artifact) {
-			h.setMarketplace("demo-plugin", filepath.Join(h.root, "foreign"))
-		}},
 		{name: "missing old cache", mutate: func(h *pluginAcceptanceHarness, artifact pluginresource.Artifact) {
 			if err := os.RemoveAll(artifact.Root); err != nil {
 				h.t.Fatal(err)
 			}
 		}},
 	} {
-		t.Run(test.name+" fails closed", func(t *testing.T) {
+		t.Run(test.name+" repairs and first installs", func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
 			if _, err := h.installRef("demo-plugin", "v0.0.1"); err != nil {
 				t.Fatal(err)
 			}
 			old := h.artifact("demo-plugin", "v0.0.1")
 			test.mutate(h, old)
-			marketBefore, marketErr := os.ReadFile(h.marketplacePath("demo-plugin"))
-			pluginBefore, pluginErr := os.ReadFile(h.pluginPath("demo-plugin", "v0.0.1"))
-			start := len(h.callLines())
-			if _, err := h.installRef("demo-plugin", "v0.1.0"); err == nil {
-				t.Fatal("Install() error = nil, want fail closed")
+			result, err := h.installRef("demo-plugin", "v0.1.0")
+			if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+				t.Fatalf("repairing Install() = %+v, %v", result, err)
 			}
-			h.assertManifest("demo-plugin", "v0.0.1", true)
-			assertOptionalFileUnchanged(t, h.marketplacePath("demo-plugin"), marketBefore, marketErr)
-			assertOptionalFileUnchanged(t, h.pluginPath("demo-plugin", "v0.0.1"), pluginBefore, pluginErr)
-			h.assertNoMutationCallsSince(start)
+			target := h.artifact("demo-plugin", "v0.1.0")
+			h.assertManifest("demo-plugin", "v0.1.0", true)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
+			h.assertPlugins("demo-plugin")
 			h.assertJournal(false)
 			h.assertOnlyFakeExecutables()
 		})
@@ -1050,8 +1071,8 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 				h.setPlugin("demo-plugin", "v0.0.1")
 			}
 			start := len(h.callLines())
-			if _, err := h.installRef("demo-plugin", "v0.0.1"); err == nil {
-				t.Fatal("Install() error = nil, want unmanaged conflict")
+			if _, err := h.installRef("demo-plugin", "v0.0.1"); !errors.Is(err, adapter.ErrTargetConflict) {
+				t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
 			}
 			h.assertManifest("demo-plugin", "", false)
 			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), test.marketplace)
@@ -1120,7 +1141,7 @@ func (h *pluginAcceptanceHarness) writeInstallJournal(logical, targetRelease, pr
 	return writeIntegrationJournal(h.t, journal)
 }
 
-func (h *pluginAcceptanceHarness) writeUninstallJournal(logical, release string, phase transaction.Phase) string {
+func (h *pluginAcceptanceHarness) writeUninstallJournal(logical, release string, phase transaction.Phase, pluginPresent, marketplacePresent bool) string {
 	h.t.Helper()
 	artifact := h.artifact(logical, release)
 	return writeIntegrationJournal(h.t, transaction.Journal{
@@ -1133,14 +1154,15 @@ func (h *pluginAcceptanceHarness) writeUninstallJournal(logical, release string,
 		Power:         h.ref(logical, release),
 		Plugin: &transaction.PluginJournalPayload{
 			Deployment:    domain.PluginDeploymentMarketplace,
-			TargetPresent: true,
+			TargetPresent: pluginPresent,
 			Target: adapter.PluginTarget{
 				ActualName: h.runtimeName(artifact),
 				Selector:   h.runtimeName(artifact),
 			},
 			Marketplace: &transaction.PluginMarketplaceJournalPayload{
-				Name:         h.marketplaceName(artifact),
-				TargetSource: h.marketplaceSource(artifact),
+				Name:          h.marketplaceName(artifact),
+				TargetSource:  h.marketplaceSource(artifact),
+				TargetPresent: marketplacePresent,
 			},
 		},
 	})
@@ -1676,17 +1698,16 @@ func TestFixPluginAcceptanceUnknownFactsRetainJournalUntilReadable(t *testing.T)
 
 func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 	for _, test := range []struct {
-		name            string
-		phase           transaction.Phase
-		pluginPresent   bool
-		manifestPresent bool
-		wantManifest    bool
+		name               string
+		phase              transaction.Phase
+		pluginPresent      bool
+		marketplacePresent bool
+		manifestPresent    bool
 	}{
-		{name: "before remove rolls back", phase: transaction.PhaseRemovingPlugin, pluginPresent: true, manifestPresent: true, wantManifest: true},
-		{name: "rollback direction persisted", phase: transaction.PhaseRollingBack, pluginPresent: true, manifestPresent: true, wantManifest: true},
-		{name: "after remove commits", phase: transaction.PhaseRemovingPlugin, manifestPresent: true},
-		{name: "before manifest commit", phase: transaction.PhaseCommitting, manifestPresent: true},
-		{name: "after manifest commit", phase: transaction.PhaseCommitting},
+		{name: "before remove finishes plugin marketplace and manifest", phase: transaction.PhaseRemovingPlugin, pluginPresent: true, marketplacePresent: true, manifestPresent: true},
+		{name: "after remove finishes marketplace and manifest", phase: transaction.PhaseUnregisteringMarketplace, pluginPresent: false, marketplacePresent: true, manifestPresent: true},
+		{name: "before manifest commit finishes manifest", phase: transaction.PhaseCommitting, pluginPresent: false, marketplacePresent: false, manifestPresent: true},
+		{name: "after manifest commit completes", phase: transaction.PhaseCommitting, pluginPresent: false, marketplacePresent: false, manifestPresent: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newPluginAcceptanceHarness(t, domain.AgentCodex)
@@ -1694,7 +1715,9 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			h.setMarketplace("demo-plugin", h.marketplaceSource(artifact))
+			if test.marketplacePresent {
+				h.setMarketplace("demo-plugin", h.marketplaceSource(artifact))
+			}
 			if test.pluginPresent {
 				h.setPlugin("demo-plugin", "v0.0.1")
 			}
@@ -1703,23 +1726,20 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			h.writeUninstallJournal("demo-plugin", "v0.0.1", test.phase)
+			// 完整卸载的 journal 记录初始双事实均存在；恢复只收敛为移除，绝不复现或回滚。
+			h.writeUninstallJournal("demo-plugin", "v0.0.1", test.phase, true, true)
 			if err := h.fix.Fix(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			h.assertJournal(false)
-			h.assertManifest("demo-plugin", "v0.0.1", test.wantManifest)
-			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
-			if test.pluginPresent {
-				h.assertPlugins("demo-plugin")
-			} else {
-				h.assertPlugins()
-			}
+			h.assertManifest("demo-plugin", "", false)
+			h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), false)
+			h.assertPlugins()
 			h.assertOnlyFakeExecutables()
 		})
 	}
 
-	t.Run("CLI removal unknown commits without removing marketplace", func(t *testing.T) {
+	t.Run("CLI removal unknown converges to full removal", func(t *testing.T) {
 		h := newPluginAcceptanceHarness(t, domain.AgentCodex)
 		if result, err := h.installRef("demo-plugin", "v0.0.1"); err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
 			t.Fatalf("baseline Install() = %+v, %v", result, err)
@@ -1741,7 +1761,7 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 		}
 		h.assertJournal(false)
 		h.assertManifest("demo-plugin", "", false)
-		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), false)
 		h.assertPlugins()
 		h.assertOnlyFakeExecutables()
 	})
@@ -1786,23 +1806,14 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 		if err := os.Rename(artifact.Root, heldArtifact); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.fix.Fix(context.Background()); !errors.Is(err, transaction.ErrRecoveryFailed) || !errors.Is(err, transaction.ErrIndeterminateState) {
-			t.Fatalf("Fix() with unavailable cache = %v, want recovery/indeterminate", err)
-		}
-		h.assertPhase(transaction.PhaseRollingBack)
-		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
-		h.assertPlugins("demo-plugin")
-		if err := os.Rename(heldArtifact, artifact.Root); err != nil {
-			t.Fatal(err)
-		}
+		// 卸载恢复只依赖已安装事实，artifact 缓存缺失不阻断收敛为移除。
 		if err := h.fix.Fix(context.Background()); err != nil {
-			t.Fatal(err)
+			t.Fatalf("Fix() with unavailable cache = %v, want full removal", err)
 		}
 		h.assertJournal(false)
-		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
-		h.assertPlugins("demo-plugin")
+		h.assertManifest("demo-plugin", "", false)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), false)
+		h.assertPlugins()
 		h.assertOnlyFakeExecutables()
 	})
 
@@ -1820,7 +1831,7 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 		}
 		h.assertPhase(transaction.PhaseCommitting)
 		h.assertManifest("demo-plugin", "v0.0.1", true)
-		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), false)
 		h.assertPlugins()
 		h.manifests.removeErr = nil
 		if err := h.fix.Fix(context.Background()); err != nil {
@@ -1828,7 +1839,7 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 		}
 		h.assertJournal(false)
 		h.assertManifest("demo-plugin", "", false)
-		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
+		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), false)
 		h.assertPlugins()
 		h.assertOnlyFakeExecutables()
 	})

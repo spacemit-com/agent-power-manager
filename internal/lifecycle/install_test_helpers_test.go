@@ -51,6 +51,10 @@ type installFixture struct {
 	pluginMode               domain.PluginDeploymentMode
 	pluginRequests           []transaction.PluginInstallRequest
 	pluginRequestSink        *[]transaction.PluginInstallRequest
+	pluginUninstallRequests  []transaction.PluginUninstallRequest
+	pluginUninstallSink      *[]transaction.PluginUninstallRequest
+	uninstallResults         map[domain.AgentID]transaction.UninstallResult
+	uninstallErrors          map[domain.AgentID]error
 	pluginResources          *fakePluginResources
 	configRemoveErr          error
 	versionErr               error
@@ -70,11 +74,16 @@ type fakePluginResources struct {
 	artifacts     map[string]pluginresource.Artifact
 	ensureErr     map[string]error
 	lookupErr     map[string]error
+	locateErr     map[string]error
+	exists        map[string]bool
+	existsErr     map[string]error
 	stageRoot     string
 	stageErr      error
 	stageCalls    int
 	ensureCalls   int
 	lookupCalls   int
+	locateCalls   int
+	existsCalls   int
 	ensureEntries []domain.CatalogEntry
 }
 
@@ -124,6 +133,36 @@ func (resources *fakePluginResources) Lookup(ref domain.PowerRef) (pluginresourc
 		return artifact, nil
 	}
 	return fakePluginArtifact(ref), nil
+}
+
+func (resources *fakePluginResources) Locate(ref domain.PowerRef) (pluginresource.Artifact, error) {
+	resources.locateCalls++
+	if resources.calls != nil {
+		*resources.calls = append(*resources.calls, "resource:locate:"+ref.Version)
+	}
+	key := pluginArtifactKey(ref)
+	if err := resources.locateErr[key]; err != nil {
+		return pluginresource.Artifact{}, err
+	}
+	if artifact, ok := resources.artifacts[key]; ok {
+		return artifact, nil
+	}
+	return fakePluginArtifact(ref), nil
+}
+
+func (resources *fakePluginResources) Exists(ref domain.PowerRef) (bool, error) {
+	resources.existsCalls++
+	if resources.calls != nil {
+		*resources.calls = append(*resources.calls, "resource:exists:"+ref.Version)
+	}
+	key := pluginArtifactKey(ref)
+	if err := resources.existsErr[key]; err != nil {
+		return false, err
+	}
+	if exists, ok := resources.exists[key]; ok {
+		return exists, nil
+	}
+	return true, nil
 }
 
 func (resources *fakePluginResources) StageFilesystem(ref domain.PowerRef) (string, error) {
@@ -239,8 +278,13 @@ func (m *installFakeTransactions) InstallPlugin(_ context.Context, request trans
 	}
 	return m.fixture.transactionInstallErr[request.Agent]
 }
-func (*installFakeTransactions) UninstallPlugin(context.Context, transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
-	return transaction.UninstallResult{}, errors.New("unexpected UninstallPlugin call")
+func (m *installFakeTransactions) UninstallPlugin(_ context.Context, request transaction.PluginUninstallRequest) (transaction.UninstallResult, error) {
+	*m.calls = append(*m.calls, "transaction:uninstall-plugin:"+string(request.Agent))
+	m.fixture.pluginUninstallRequests = append(m.fixture.pluginUninstallRequests, request)
+	if m.fixture.pluginUninstallSink != nil {
+		*m.fixture.pluginUninstallSink = append(*m.fixture.pluginUninstallSink, request)
+	}
+	return m.fixture.uninstallResults[request.Agent], m.fixture.uninstallErrors[request.Agent]
 }
 
 type installFakeCloud struct {

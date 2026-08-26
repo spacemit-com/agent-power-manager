@@ -34,25 +34,81 @@ func TestUninstallPluginWithoutManifestSkipsAllPluginDependencies(t *testing.T) 
 	}
 }
 
-func TestUninstallPluginMarketplaceDoubleAbsentCleansOnlyManifest(t *testing.T) {
-	var calls []string
+func TestUninstallPluginMarketplaceDelegatesCleanupForNonConflictStates(t *testing.T) {
 	ref := pluginRef("v1.0.0")
-	service := newUninstallService(t, &calls, uninstallFixture{pluginMode: domain.PluginDeploymentMarketplace})
-
-	result, err := service.uninstallPlugin(context.Background(), domain.AgentCodex, ref)
-	if err != nil || !result.TargetMissing {
-		t.Fatalf("uninstallPlugin() = %+v, %v, want target missing", result, err)
+	tests := []struct {
+		name            string
+		marketplaceFact adapter.MarketplaceFact
+		pluginFact      adapter.PluginFact
+		setExists       bool
+		exists          bool
+		wantMissing     bool
+	}{
+		{
+			name:            "both absent",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"},
+			wantMissing:     true,
+		},
+		{
+			name:            "marketplace only",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"},
+			wantMissing:     true,
+		},
+		{
+			name:            "plugin only",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			wantMissing:     true,
+		},
+		{
+			name:            "both complete",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			wantMissing:     false,
+		},
+		{
+			name:            "missing cache does not block",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			setExists:       true,
+			exists:          false,
+			wantMissing:     false,
+		},
 	}
-	want := []string{
-		"resolve-plugin:codex", "marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo",
-		"config:remove:codex:plugin:demo",
-	}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("calls = %v, want %v", calls, want)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var calls []string
+			resources := &fakePluginResources{}
+			if test.setExists {
+				resources.exists = map[string]bool{pluginArtifactKey(ref): test.exists}
+			}
+			service := newUninstallService(t, &calls, uninstallFixture{
+				pluginMode:         domain.PluginDeploymentMarketplace,
+				marketplaceFacts:   map[string]adapter.MarketplaceFact{"apm-demo": test.marketplaceFact},
+				pluginFacts:        map[string]adapter.PluginFact{"demo": test.pluginFact},
+				pluginResources:    resources,
+				transactionResults: map[domain.AgentID]transaction.UninstallResult{domain.AgentCodex: {TargetMissing: test.wantMissing}},
+			})
+			result, err := service.uninstallPlugin(context.Background(), domain.AgentCodex, ref)
+			if err != nil || result.TargetMissing != test.wantMissing {
+				t.Fatalf("uninstallPlugin() = %+v, %v; want TargetMissing=%t", result, err, test.wantMissing)
+			}
+			if !containsEvent(calls, "transaction:uninstall-plugin:codex") {
+				t.Fatalf("calls = %v, want delegated transaction", calls)
+			}
+			if containsEvent(calls, "config:remove:codex:plugin:demo") {
+				t.Fatalf("calls = %v, manifest removal must be delegated to transaction", calls)
+			}
+			if resources.lookupCalls != 0 || resources.ensureCalls != 0 {
+				t.Fatalf("resource calls lookup/ensure = %d/%d, want 0/0", resources.lookupCalls, resources.ensureCalls)
+			}
+		})
 	}
 }
 
-func TestUninstallPluginMarketplaceExactManagedStateUsesOfflineLookup(t *testing.T) {
+func TestUninstallPluginMarketplaceExactManagedStateUsesLocator(t *testing.T) {
 	var calls []string
 	var requests []transaction.PluginUninstallRequest
 	ref := pluginRef("v1.0.0")
@@ -72,48 +128,54 @@ func TestUninstallPluginMarketplaceExactManagedStateUsesOfflineLookup(t *testing
 		t.Fatalf("uninstallPlugin() = %+v, %v, want transaction", result, err)
 	}
 	want := []string{
-		"resolve-plugin:codex", "marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo",
-		"resource:lookup:v1.0.0", "transaction:uninstall-plugin:codex",
+		"resolve-plugin:codex", "resource:locate:v1.0.0", "marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo",
+		"resource:exists:v1.0.0", "transaction:uninstall-plugin:codex",
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 	if len(requests) != 1 || requests[0].Target != (adapter.PluginTarget{ActualName: "demo", Selector: "demo"}) || requests[0].Marketplace == nil || requests[0].Marketplace.Source != "/cache/plugins/demo/v1.0.0" {
-		t.Fatalf("requests = %+v, want exact offline artifact", requests)
+		t.Fatalf("requests = %+v, want exact located marketplace", requests)
 	}
 }
 
-func TestUninstallPluginMarketplaceFailsClosedOnAnomalies(t *testing.T) {
+func TestUninstallPluginMarketplaceRejectsConflict(t *testing.T) {
 	ref := pluginRef("v1.0.0")
-	cacheDamage := errors.New("cached artifact damaged")
 	tests := []struct {
 		name            string
 		marketplaceFact adapter.MarketplaceFact
 		pluginFact      adapter.PluginFact
-		lookupErr       error
-		wantErr         error
 	}{
-		{name: "marketplace only", marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"}, pluginFact: adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"}, wantErr: transaction.ErrIndeterminateState},
-		{name: "plugin only", marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"}, pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, wantErr: transaction.ErrIndeterminateState},
-		{name: "wrong source", marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/other"}, pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, wantErr: transaction.ErrIndeterminateState},
-		{name: "damaged cache", marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"}, pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, lookupErr: cacheDamage, wantErr: cacheDamage},
+		{
+			name:            "wrong source",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/other"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+		},
+		{
+			name:            "wrong selector",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@foreign"},
+		},
+		{
+			name:            "wrong absent marketplace name",
+			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-other"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var calls []string
-			resources := &fakePluginResources{lookupErr: map[string]error{pluginArtifactKey(ref): test.lookupErr}}
 			service := newUninstallService(t, &calls, uninstallFixture{
 				pluginMode:       domain.PluginDeploymentMarketplace,
 				marketplaceFacts: map[string]adapter.MarketplaceFact{"apm-demo": test.marketplaceFact},
 				pluginFacts:      map[string]adapter.PluginFact{"demo": test.pluginFact},
-				pluginResources:  resources,
 			})
 			_, err := service.uninstallPlugin(context.Background(), domain.AgentCodex, ref)
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("uninstallPlugin() error = %v, want %v", err, test.wantErr)
+			if !errors.Is(err, transaction.ErrIndeterminateState) {
+				t.Fatalf("uninstallPlugin() error = %v, want ErrIndeterminateState", err)
 			}
 			if containsEvent(calls, "config:remove:codex:plugin:demo") || containsEvent(calls, "transaction:uninstall-plugin:codex") {
-				t.Fatalf("calls = %v, anomaly must preserve manifest", calls)
+				t.Fatalf("calls = %v, conflict must preserve manifest", calls)
 			}
 		})
 	}
@@ -149,11 +211,11 @@ func TestUninstallFilesystemPluginUsesFactsOfflineForBibitAndHermes(t *testing.T
 	tests := []struct {
 		name        string
 		fact        adapter.PluginFact
+		createDir   bool
 		wantMissing bool
-		wantTxn     bool
 	}{
-		{name: "absent cleans manifest", fact: adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"}, wantMissing: true},
-		{name: "present uninstalls", fact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, wantTxn: true},
+		{name: "absent delegates cleanup", fact: adapter.PluginFact{Presence: adapter.PluginAbsent, ActualName: "demo"}, wantMissing: true},
+		{name: "present uninstalls", fact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}, createDir: true, wantMissing: false},
 	}
 	for _, agent := range []domain.AgentID{domain.AgentBibit, domain.AgentHermes} {
 		for _, test := range tests {
@@ -161,17 +223,23 @@ func TestUninstallFilesystemPluginUsesFactsOfflineForBibitAndHermes(t *testing.T
 				var calls []string
 				resources := &fakePluginResources{}
 				target := filepath.Join(t.TempDir(), "demo")
+				if test.createDir {
+					if err := os.MkdirAll(target, 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
 				service := newUninstallService(t, &calls, uninstallFixture{
-					pluginMode:      domain.PluginDeploymentFilesystem,
-					pluginFacts:     map[string]adapter.PluginFact{"demo": test.fact},
-					pluginTargets:   map[string]string{"demo": target},
-					pluginResources: resources,
+					pluginMode:         domain.PluginDeploymentFilesystem,
+					pluginFacts:        map[string]adapter.PluginFact{"demo": test.fact},
+					pluginTargets:      map[string]string{"demo": target},
+					pluginResources:    resources,
+					transactionResults: map[domain.AgentID]transaction.UninstallResult{agent: {TargetMissing: test.wantMissing}},
 				})
 				result, err := service.uninstallPlugin(context.Background(), agent, ref)
 				if err != nil || result.TargetMissing != test.wantMissing {
-					t.Fatalf("uninstallPlugin() = %+v, %v", result, err)
+					t.Fatalf("uninstallPlugin() = %+v, %v; want TargetMissing=%t", result, err, test.wantMissing)
 				}
-				if containsEvent(calls, "transaction:uninstall-plugin:"+string(agent)) != test.wantTxn || resources.lookupCalls != 0 || resources.ensureCalls != 0 {
+				if !containsEvent(calls, "transaction:uninstall-plugin:"+string(agent)) || resources.lookupCalls != 0 || resources.ensureCalls != 0 {
 					t.Fatalf("calls = %v, lookup/ensure=%d/%d", calls, resources.lookupCalls, resources.ensureCalls)
 				}
 			})

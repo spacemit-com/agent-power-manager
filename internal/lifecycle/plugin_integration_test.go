@@ -622,8 +622,8 @@ func TestPluginIntegrationFourAgentBibitLifecycleMatrix(t *testing.T) {
 			h.assertManagedPlugin(agent, "", false)
 
 			h.createUnmanagedPluginState(agent)
-			if _, err := h.installPlugin(agent, "v0.0.1"); !errors.Is(err, adapter.ErrPluginConflict) || !errors.Is(err, adapter.ErrTargetConflict) {
-				t.Fatalf("unmanaged Install() error = %v, want Plugin and target conflict", err)
+			if _, err := h.installPlugin(agent, "v0.0.1"); !errors.Is(err, adapter.ErrTargetConflict) {
+				t.Fatalf("unmanaged Install() error = %v, want target conflict", err)
 			}
 			if _, found, err := h.repository.Find(agent, domain.PowerTypePlugin, "demo-plugin"); err != nil || found {
 				t.Fatalf("unmanaged conflict manifest found=%v err=%v", found, err)
@@ -764,8 +764,8 @@ func TestPluginIntegrationRejectsUnmanagedTargetAndMarketplaceConflict(t *testin
 			t.Fatal(err)
 		}
 		_, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"})
-		if !errors.Is(err, adapter.ErrPluginConflict) || !errors.Is(err, adapter.ErrTargetConflict) {
-			t.Fatalf("Install() error = %v, want Plugin and target conflict", err)
+		if !errors.Is(err, adapter.ErrTargetConflict) {
+			t.Fatalf("Install() error = %v, want target conflict", err)
 		}
 		if _, found, findErr := harness.repository.Find(domain.AgentCodex, domain.PowerTypePlugin, "demo-plugin"); findErr != nil || found {
 			t.Fatalf("manifest found/error = %v/%v, want absent", found, findErr)
@@ -780,13 +780,13 @@ func TestPluginIntegrationRejectsUnmanagedTargetAndMarketplaceConflict(t *testin
 		}
 		t.Setenv("FAKE_PLUGIN_MARKETPLACE", filepath.Join(harness.root, "foreign-marketplace"))
 		_, err := harness.install.Install(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"})
-		if !errors.Is(err, adapter.ErrMarketplaceConflict) {
-			t.Fatalf("Install() error = %v, want ErrMarketplaceConflict", err)
+		if !errors.Is(err, adapter.ErrTargetConflict) {
+			t.Fatalf("Install() error = %v, want ErrTargetConflict", err)
 		}
 		if _, statErr := os.Lstat(filepath.Join(harness.state, "plugin-codex")); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("conflicting marketplace mutated Plugin state: %v", statErr)
 		}
-		harness.assertMarketplaceCachePresentAndStagingAbsent(domain.AgentCodex, "v0.0.1")
+		harness.assertMarketplaceCacheAbsentAndStagingAbsent(domain.AgentCodex, "v0.0.1")
 		harness.assertOnlyFakeExecutables()
 	})
 }
@@ -1041,8 +1041,8 @@ func TestPluginIntegrationMultiAgentInstallFailsFast(t *testing.T) {
 	}
 	t.Setenv("FAKE_PLUGIN_MARKETPLACE", filepath.Join(harness.root, "foreign-marketplace"))
 	result, err := harness.install.Install(context.Background(), cli.Flags{Agent: string(domain.AllAgents), Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"})
-	if !errors.Is(err, adapter.ErrMarketplaceConflict) {
-		t.Fatalf("Install(all) error = %v, want ErrMarketplaceConflict", err)
+	if !errors.Is(err, adapter.ErrTargetConflict) {
+		t.Fatalf("Install(all) error = %v, want ErrTargetConflict", err)
 	}
 	if len(result.Items) != 3 || result.Items[0].Agent != domain.AgentClaudeCode || result.Items[0].Outcome != cli.InstallOutcomeFailed ||
 		result.Items[1].Outcome != cli.InstallOutcomeUnexecuted || result.Items[2].Outcome != cli.InstallOutcomeUnexecuted {
@@ -1055,15 +1055,15 @@ func TestPluginIntegrationMultiAgentInstallFailsFast(t *testing.T) {
 	if strings.Contains(string(contents), filepath.Join(harness.fakeBin, "codex")+"|") || strings.Contains(string(contents), filepath.Join(harness.fakeBin, "hermes")+"|") {
 		t.Fatalf("fail-fast invoked later Agent CLI:\n%s", contents)
 	}
-	harness.assertMarketplaceCachePresentAndStagingAbsent(domain.AgentClaudeCode, "v0.0.1")
+	harness.assertMarketplaceCacheAbsentAndStagingAbsent(domain.AgentClaudeCode, "v0.0.1")
 	harness.assertOnlyFakeExecutables()
 }
 
-func (h *isolatedPluginHarness) assertMarketplaceCachePresentAndStagingAbsent(agent domain.AgentID, version string) {
+func (h *isolatedPluginHarness) assertMarketplaceCacheAbsentAndStagingAbsent(agent domain.AgentID, version string) {
 	h.t.Helper()
 	cachePath := filepath.Join(h.cacheHome, "apm", "plugins", "demo-plugin", version)
-	if info, err := os.Stat(cachePath); err != nil || !info.IsDir() {
-		h.t.Fatalf("Plugin cache %q is not persisted: %v", cachePath, err)
+	if _, err := os.Lstat(cachePath); !errors.Is(err, os.ErrNotExist) {
+		h.t.Fatalf("Plugin cache %q exists after fail-closed rejection: %v", cachePath, err)
 	}
 	for _, path := range []string{
 		filepath.Join(h.root, "apm-home", ".apm", "staging"),
