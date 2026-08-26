@@ -129,13 +129,44 @@ func TestUninstallPluginMarketplaceExactManagedStateUsesLocator(t *testing.T) {
 	}
 	want := []string{
 		"resolve-plugin:codex", "resource:locate:v1.0.0", "marketplace:inspect:codex:apm-demo", "plugin:inspect:codex:demo",
-		"resource:exists:v1.0.0", "transaction:uninstall-plugin:codex",
+		"transaction:uninstall-plugin:codex",
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 	if len(requests) != 1 || requests[0].Target != (adapter.PluginTarget{ActualName: "demo", Selector: "demo"}) || requests[0].Marketplace == nil || requests[0].Marketplace.Source != "/cache/plugins/demo/v1.0.0" {
 		t.Fatalf("requests = %+v, want exact located marketplace", requests)
+	}
+}
+
+func TestUninstallPluginMarketplaceToleratesDamagedCacheRoot(t *testing.T) {
+	// 损坏缓存根（symlink/非目录/lstat 错误）不得阻塞卸载：卸载分类独立于缓存，且绝不调用 Exists。
+	ref := pluginRef("v1.0.0")
+	var calls []string
+	resources := &fakePluginResources{
+		existsErr: map[string]error{pluginArtifactKey(ref): errors.New("damaged cache root: lstat failed")},
+	}
+	service := newUninstallService(t, &calls, uninstallFixture{
+		pluginMode: domain.PluginDeploymentMarketplace,
+		marketplaceFacts: map[string]adapter.MarketplaceFact{
+			"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
+		},
+		pluginFacts: map[string]adapter.PluginFact{
+			"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+		},
+		pluginResources:    resources,
+		transactionResults: map[domain.AgentID]transaction.UninstallResult{domain.AgentCodex: {}},
+	})
+
+	result, err := service.uninstallPlugin(context.Background(), domain.AgentCodex, ref)
+	if err != nil || result.TargetMissing {
+		t.Fatalf("uninstallPlugin() = %+v, %v; want delegated cleanup despite damaged cache", result, err)
+	}
+	if !containsEvent(calls, "transaction:uninstall-plugin:codex") {
+		t.Fatalf("calls = %v, want delegated transaction", calls)
+	}
+	if resources.existsCalls != 0 {
+		t.Fatalf("uninstall consulted cache Exists %d times, want 0", resources.existsCalls)
 	}
 }
 

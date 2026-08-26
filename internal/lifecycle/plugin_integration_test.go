@@ -814,6 +814,36 @@ func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
 	harness.assertOnlyFakeExecutables()
 }
 
+func TestPluginIntegrationUninstallToleratesDamagedCacheRoot(t *testing.T) {
+	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
+	if _, err := harness.installPlugin(domain.AgentCodex, "v0.0.1"); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	harness.assertManagedPlugin(domain.AgentCodex, "v0.0.1", true)
+
+	// 损坏不可变缓存根：用 symlink 替换已发布缓存目录，卸载不得因此失败。
+	cacheRoot := filepath.Join(harness.cacheHome, "apm", "plugins", "demo-plugin", "v0.0.1")
+	if err := os.RemoveAll(cacheRoot); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(harness.root, "outside"), cacheRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := harness.uninstallPlugin(domain.AgentCodex)
+	if err != nil || len(removed.Items) != 1 || removed.Items[0].Outcome != cli.UninstallOutcomeCompleted {
+		t.Fatalf("Uninstall() = %+v, %v; want completed despite damaged cache root", removed, err)
+	}
+	harness.assertManagedPlugin(domain.AgentCodex, "", false)
+	if _, err := os.Lstat(harness.marketplaceState(domain.AgentCodex)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("marketplace state remains after uninstall: %v", err)
+	}
+	if info, err := os.Lstat(cacheRoot); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("damaged cache root was mutated during uninstall: mode=%v err=%v", info.Mode(), err)
+	}
+	harness.assertOnlyFakeExecutables()
+}
+
 func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJournal(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}

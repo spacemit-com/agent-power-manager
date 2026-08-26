@@ -59,11 +59,10 @@ func (s *UninstallService) uninstallMarketplacePlugin(
 	if err != nil {
 		return transaction.UninstallResult{}, fmt.Errorf("inspect installed Plugin %q: %w", actualName, err)
 	}
-	cacheExists, err := s.plugins.Exists(ref)
-	if err != nil {
-		return transaction.UninstallResult{}, fmt.Errorf("inspect installed Plugin artifact cache %+v: %w", ref, err)
-	}
-	facts := classifyMarketplacePluginTarget(actualName, marketplace, marketplaceFact, pluginFact, cacheExists)
+	// 卸载决策与缓存根无关：缓存根仅用于把“双事实齐备”拆分为 complete/incomplete，而两者都映射为
+	// 非拒绝动作。因此这里不调用 Exists，避免 symlink/非目录/lstat 错误的损坏缓存根阻塞卸载
+	//（spec §6.3/§7.2：损坏/缺失缓存不得阻塞卸载）。安装分类仍需 Exists 区分 complete/incomplete。
+	facts := classifyMarketplacePluginTarget(actualName, marketplace, marketplaceFact, pluginFact, true)
 	if decideUninstallState(true, facts.state).action == actionRejectState {
 		return transaction.UninstallResult{}, fmt.Errorf("installed marketplace/Plugin state conflicts with manifest: %w", transaction.ErrIndeterminateState)
 	}
