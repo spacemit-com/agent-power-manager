@@ -2,6 +2,22 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-08-27
+
+分类：功能变更
+
+用户需求：把安装时捕获的 `description` 与 `tags` 作为已安装 Power 的一等元数据，持久化到清单与 journal，使离线 recovery 与 `apm list --installed` 不再丢失；同时让 `apm list` / `apm search` 通过 `-a/--all` 追加 description/tags、通过 `--json` 输出 JSON，默认文本输出与身份语义保持不变。契约见 [Feature 027](ivory-tower/features/027-installed-power-metadata/spec.md) 与 [ADR-024](ivory-tower/adr/ADR-024-persist-installed-power-description-and-tags.md)。
+
+相关提交：
+
+- `f34b013 docs(adr): persist installed power description and tags`
+- `31d1663 docs(metadata): specify installed power metadata and list/search output`
+- `0e39bf7 feat(metadata): persist and expose installed power description and tags`
+
+解决方案或完成结果：`internal/domain` 新增 `InstalledPower{Ref, Description, Tags}`（含深拷贝 `Clone`）与 `InstalledPowerGroups`，`PowerRef` 保持纯身份，不参与 `==`、map key、排序与缓存键。`internal/config` 的 manifest `powerEntry` 追加 `description,omitempty` 与 `tags,omitempty`，并补齐读写转换、`normalizeTags` nil→`[]` 归一化与深拷贝；空元数据省略写出，旧清单无损读取为 `""`/`[]`。`internal/transaction` 的 `Journal` 追加 `description`/`tags`（`omitempty`），四类 install 事务从 `entry` 透传，filesystem/MCP/plugin 三类 recovery 经 `journal.installedPower()` 重建并写回清单；`Power` 仍为 `PowerRef`，只有新版本的元数据被 journal。`internal/lifecycle` 把 `CatalogEntry`（list 云 / search）与 `InstalledPower`（list `--installed`）的 description/tags 透传进结果，`filterSearchPowers` 在 keep-latest 去重时保留最新版本的 description/tags。`internal/cli` 为 `list`/`search` 增加 `-a/--all` 与 `--json`：文本 `-a` 在身份行下追加两空格缩进的 `description` 与 `tags`（非空才输出），`--json` 输出顶层数组，`--json` 不带 `-a` 只含身份字段、带 `-a` 才追加 description/tags；list 与 search 共用 `renderPowers` 渲染路径。身份、幂等、恢复与冲突语义不变，journal/manifest schema version 不升级。
+
+验证结果或限制：`go build ./...`、`go vet ./...`、`go test ./...` 与 `gofmt -l .` 均以退出码 0 通过。新增用例覆盖 manifest description/tags round-trip、旧清单无字段读取、install 把元数据持久化进 manifest 与 journal、list/search 结果透传元数据、search keep-latest 保留最新版本元数据，以及 CLI 的 `-a` 文本、`--json` 身份、`--json --all` 全量渲染。description/tags 仅作为本地元数据展示，不参与身份或幂等判断，也不按元数据筛选、排序或搜索。
+
 ## 2026-08-26
 
 分类：功能变更
