@@ -29,10 +29,11 @@ const (
 // ValidateDirectory 校验物理 Agent 目录：先执行 pluginartifact.ValidatePhysicalTree
 // 的物理树检查（拒绝非目录根、symlink、硬链接与特殊文件），再按公共阈值
 // 读取并转换为逻辑快照，最后调用 Validate。ctx 取消时中止遍历并返回取消原因。
+// 物理树与语义失败统一包裹 domain.ErrInvalidAgent，保持校验器错误契约一致。
 // 20 MiB 压缩上限与 100x 膨胀率属于归档下载边界，不在本函数内检查。
 func ValidateDirectory(ctx context.Context, root string, ref *domain.PowerRef) (Snapshot, error) {
 	if err := pluginartifact.ValidatePhysicalTree(root); err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, errors.Join(domain.ErrInvalidAgent, err)
 	}
 	entries, totalBytes, nodeCount := make([]Entry, 0), int64(0), 0
 	err := filepath.WalkDir(root, func(current string, dirEntry fs.DirEntry, walkErr error) error {
@@ -97,7 +98,7 @@ func ValidateDirectory(ctx context.Context, root string, ref *domain.PowerRef) (
 // 路径可被并发重定向而句柄边界不可，因此 Remote 解包私有输出的校验必须使用本入口。
 func ValidateDirectoryFd(ctx context.Context, directory *os.File, ref *domain.PowerRef) (Snapshot, error) {
 	if err := pluginartifact.ValidatePhysicalTreeFd(directory); err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, errors.Join(domain.ErrInvalidAgent, err)
 	}
 	// ReadDir 从句柄当前偏移读取；物理检查已消费根目录流，数据遍历必须使用
 	// 指向同一目录的新句柄（fd 相对，不重新解析路径）。
