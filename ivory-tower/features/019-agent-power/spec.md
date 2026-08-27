@@ -1,6 +1,6 @@
 # Agent Power（Bibit 专属）设计规格
 
-> 状态与取代说明：本文主体保留为 Feature 019 的历史设计记录；其中 Cloud provider 契约已由 [Feature 020](../020-cloud-client-providers/spec.md) 与 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 取代，Plugin canonical/派生契约已由 Feature 020 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 取代。
+> 状态与取代说明：本文主体保留为 Feature 019 的历史设计记录；其中 Cloud provider 契约已由 [Feature 020](../020-cloud-client-providers/spec.md) 与 [ADR-016](../../adr/ADR-016-select-cloud-clients-with-explicit-providers.md) 取代，Plugin canonical/派生契约已由 Feature 020 与 [ADR-017](../../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 取代；单文件 `agent.yaml` 下载/安装与 `agent.id` 作为外部身份的契约已由 [Feature 026](../026-agent-package-assets/spec.md) 与 [ADR-023](../../adr/ADR-023-package-agent-with-assets.md) 取代（改为目录归档资源 + `agent.name`）。
 >
 > 状态：设计已确认，待编写实现计划；重大决策将记录于 [ADR-015](../../adr/ADR-015-agent-power-bibit.md)。
 
