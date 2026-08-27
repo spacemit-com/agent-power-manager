@@ -142,7 +142,7 @@ func (s *Service) finishMCPAdd(ctx context.Context, journal Journal, mcpAdapter 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.manifests.Set(journal.Agent, journal.Power); err != nil {
+	if err := s.manifests.Set(journal.Agent, journal.installedPower()); err != nil {
 		return fmt.Errorf("set MCP manifest: %w", err)
 	}
 	if err := s.journals.Delete(journal.TransactionID); err != nil {
@@ -181,6 +181,8 @@ func (s *Service) newMCPInstallJournal(request MCPInstallRequest, phase Phase) (
 		Phase:         phase,
 		Agent:         request.Agent,
 		Power:         request.Power,
+		Description:   request.Description,
+		Tags:          request.Tags,
 		Previous:      clonePowerRef(request.Previous),
 		AgentCLI: &AgentCLIJournalPayload{
 			Server:         &server,

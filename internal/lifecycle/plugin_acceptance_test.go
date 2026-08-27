@@ -240,15 +240,15 @@ type acceptanceBarrierAnswer struct {
 	err   error
 }
 
-func (r *acceptanceManifestRepository) List(agent domain.AgentID) (domain.PowerGroups, error) {
+func (r *acceptanceManifestRepository) List(agent domain.AgentID) (domain.InstalledPowerGroups, error) {
 	return r.base.List(agent)
 }
 
-func (r *acceptanceManifestRepository) Find(agent domain.AgentID, powerType domain.PowerType, name string) (domain.PowerRef, bool, error) {
+func (r *acceptanceManifestRepository) Find(agent domain.AgentID, powerType domain.PowerType, name string) (domain.InstalledPower, bool, error) {
 	return r.base.Find(agent, powerType, name)
 }
 
-func (r *acceptanceManifestRepository) Set(agent domain.AgentID, power domain.PowerRef) error {
+func (r *acceptanceManifestRepository) Set(agent domain.AgentID, power domain.InstalledPower) error {
 	if r.setErr != nil {
 		return r.setErr
 	}
@@ -651,7 +651,7 @@ func (h *pluginAcceptanceHarness) assertManifest(logical, release string, presen
 	if found != present {
 		h.t.Fatalf("manifest %s found = %t, want %t; got=%+v", logical, found, present, got)
 	}
-	if present && got != h.ref(logical, release) {
+	if present && got.Ref != h.ref(logical, release) {
 		h.t.Fatalf("manifest %s = %+v, want %+v", logical, got, h.ref(logical, release))
 	}
 }
@@ -1008,7 +1008,7 @@ func TestPluginAcceptanceManifestAndAgentAnomalyTable(t *testing.T) {
 
 	t.Run("stale old double absent cleans and installs", func(t *testing.T) {
 		h := newPluginAcceptanceHarness(t, domain.AgentCodex)
-		if err := h.repository.Set(h.agent, h.ref("demo-plugin", "v0.0.1")); err != nil {
+		if err := h.repository.Set(h.agent, domain.InstalledPower{Ref: h.ref("demo-plugin", "v0.0.1")}); err != nil {
 			t.Fatal(err)
 		}
 		result, err := h.installRef("demo-plugin", "v0.1.0")
@@ -1224,7 +1224,7 @@ func TestFixPluginAcceptanceFirstInstallJournalPhases(t *testing.T) {
 				h.setPlugin("demo-plugin", "v0.0.1")
 			}
 			if test.manifestAlready {
-				if err := h.repository.Set(h.agent, h.ref("demo-plugin", "v0.0.1")); err != nil {
+				if err := h.repository.Set(h.agent, domain.InstalledPower{Ref: h.ref("demo-plugin", "v0.0.1")}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1328,7 +1328,7 @@ func TestFixPluginAcceptanceVersionSwitchJournalPhases(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := h.repository.Set(h.agent, h.ref("demo-plugin", "v0.0.1")); err != nil {
+			if err := h.repository.Set(h.agent, domain.InstalledPower{Ref: h.ref("demo-plugin", "v0.0.1")}); err != nil {
 				t.Fatal(err)
 			}
 			switch test.marketplace {
@@ -1750,7 +1750,7 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 				h.setPlugin("demo-plugin", "v0.0.1")
 			}
 			if test.manifestPresent {
-				if err := h.repository.Set(h.agent, h.ref("demo-plugin", "v0.0.1")); err != nil {
+				if err := h.repository.Set(h.agent, domain.InstalledPower{Ref: h.ref("demo-plugin", "v0.0.1")}); err != nil {
 					t.Fatal(err)
 				}
 			}

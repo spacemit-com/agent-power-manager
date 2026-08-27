@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"apm/internal/adapter"
+	"apm/internal/domain"
 )
 
 // InstallAgent 执行单个 Agent 的可恢复文件型 Agent 安装事务。
@@ -72,6 +73,8 @@ func (s *Service) InstallAgent(ctx context.Context, request AgentInstallRequest)
 		Phase:         PhasePreparing,
 		Agent:         request.Agent,
 		Power:         request.Power,
+		Description:   request.Description,
+		Tags:          request.Tags,
 		Previous:      clonePowerRef(request.Previous),
 		Filesystem: &FilesystemJournalPayload{
 			StagingRoot:    request.StagingRoot,
@@ -127,7 +130,7 @@ func (s *Service) InstallAgent(ctx context.Context, request AgentInstallRequest)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.manifests.Set(request.Agent, request.Power); err != nil {
+	if err := s.manifests.Set(request.Agent, domain.InstalledPower{Ref: request.Power, Description: request.Description, Tags: request.Tags}); err != nil {
 		return fmt.Errorf("set installed power manifest: %w", err)
 	}
 	if err := s.files.removeAll(artifacts.backup); err != nil {

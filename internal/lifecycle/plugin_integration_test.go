@@ -517,7 +517,7 @@ func (h *isolatedPluginHarness) assertManagedPlugin(agent domain.AgentID, releas
 	if err != nil || found != present {
 		h.t.Fatalf("manifest for %q found=%v ref=%+v err=%v, want present=%v", agent, found, ref, err, present)
 	}
-	if present && ref != (domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: release}) {
+	if present && ref.Ref != (domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: release}) {
 		h.t.Fatalf("manifest for %q = %+v, want release %s", agent, ref, release)
 	}
 	target := h.pluginTarget(agent)
@@ -795,10 +795,10 @@ func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
 	harness := newIsolatedPluginHarness(t, domain.AgentCodex)
 	ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}
 	keep := domain.PowerRef{Name: "keep-plugin", Type: domain.PowerTypePlugin, Version: "v9.9.9"}
-	if err := harness.repository.Set(domain.AgentCodex, ref); err != nil {
+	if err := harness.repository.Set(domain.AgentCodex, domain.InstalledPower{Ref: ref}); err != nil {
 		t.Fatal(err)
 	}
-	if err := harness.repository.Set(domain.AgentCodex, keep); err != nil {
+	if err := harness.repository.Set(domain.AgentCodex, domain.InstalledPower{Ref: keep}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := harness.uninstall.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo-plugin"})
@@ -808,7 +808,7 @@ func TestPluginIntegrationUninstallRepairsMissingTargetManifest(t *testing.T) {
 	if _, found, findErr := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); findErr != nil || found {
 		t.Fatalf("missing target manifest found/error = %v/%v", found, findErr)
 	}
-	if got, found, findErr := harness.repository.Find(domain.AgentCodex, keep.Type, keep.Name); findErr != nil || !found || got != keep {
+	if got, found, findErr := harness.repository.Find(domain.AgentCodex, keep.Type, keep.Name); findErr != nil || !found || got.Ref != keep {
 		t.Fatalf("unrelated manifest = %+v, %v, %v", got, found, findErr)
 	}
 	harness.assertOnlyFakeExecutables()
@@ -939,7 +939,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJou
 		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
 	}
 	assertJournalAbsent(t, journalPath)
-	if got, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || !found || got != ref {
+	if got, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || !found || got.Ref != ref {
 		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
 	if contents, statErr := os.ReadFile(filepath.Join(harness.state, "plugin-codex")); statErr != nil || string(contents) != selector {
@@ -1045,7 +1045,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedHermesFilesyst
 		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
 	}
 	assertJournalAbsent(t, journalPath)
-	if got, found, err := harness.repository.Find(domain.AgentHermes, ref.Type, ref.Name); err != nil || !found || got != ref {
+	if got, found, err := harness.repository.Find(domain.AgentHermes, ref.Type, ref.Name); err != nil || !found || got.Ref != ref {
 		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
 	assertFileContents(t, filepath.Join(target, "PLUGIN.md"), "interrupted target\n")
@@ -1136,6 +1136,8 @@ type lifecycleRemoteResource struct {
 	ref         domain.PowerRef
 	contentType string
 	content     []byte
+	description string
+	tags        []string
 }
 
 type lifecycleRemoteServer struct {
@@ -1167,14 +1169,39 @@ func newLifecycleRemoteServer(t *testing.T) *lifecycleRemoteServer {
 		resource: make(map[domain.PowerRef]lifecycleRemoteResource), requests: make(map[string]int),
 		transport: &lifecycleAttemptTransport{base: http.DefaultTransport},
 	}
+	// Remote 测试服务器必须与 local provider 返回同一份发布元数据（description/tags），
+	// 否则安装写入清单后两个 provider 的状态无法一致。
+	localClient, err := local.New(resourcesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogPath := filepath.Join(t.TempDir(), "catalog.json")
+	if err := localClient.DownloadCatalog(context.Background(), catalogPath); err != nil {
+		t.Fatal(err)
+	}
+	rawCatalog, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Decode(rawCatalog)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, ref := range []domain.PowerRef{
 		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
 		{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"},
 		{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"},
 	} {
+		entry, err := snapshot.Resolve(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
 		contentType, content := lifecycleFixtureContent(t, resourcesRoot, ref)
-		server.resource[ref] = lifecycleRemoteResource{ref: ref, contentType: contentType, content: content}
+		server.resource[ref] = lifecycleRemoteResource{
+			ref: ref, contentType: contentType, content: content,
+			description: entry.Description, tags: entry.Tags,
+		}
 	}
 	server.server = httptest.NewServer(http.HandlerFunc(server.serveHTTP))
 	t.Cleanup(func() {
@@ -1296,9 +1323,9 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 		for ref, resource := range server.resource {
 			digest := md5.Sum(resource.content)
 			entries = append(entries, domain.CatalogEntry{
-				Ref: ref, Description: "lifecycle fixture", Message: "fixture",
+				Ref: ref, Description: resource.description, Message: "fixture",
 				ContentType: resource.contentType, ContentSize: int64(len(resource.content)),
-				ContentMD5: fmt.Sprintf("%x", digest), PublishedAt: "2026-08-01T00:00:00Z", Tags: []string{},
+				ContentMD5: fmt.Sprintf("%x", digest), PublishedAt: "2026-08-01T00:00:00Z", Tags: resource.tags,
 			})
 		}
 		raw, err := catalog.Encode(entries)
@@ -1338,7 +1365,7 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 		digest := md5.Sum(resource.content)
 		writeLifecycleJSON(writer, map[string]any{
 			"type": ref.Type, "name": ref.Name, "version": ref.Version,
-			"description": "lifecycle fixture", "message": "fixture",
+			"description": resource.description, "message": "fixture",
 			"content_type": resource.contentType, "content_size": len(resource.content),
 			"content_md5": fmt.Sprintf("%x", digest), "published_at": "2026-08-01T00:00:00Z",
 			"status": "published", "yanked_at": "", "yank_reason": "",
@@ -1558,7 +1585,7 @@ func assertProviderHarnessExecutables(t *testing.T, fakeBin, isolatedHome string
 }
 
 type lifecycleProviderState struct {
-	Manifest domain.PowerGroups
+	Manifest domain.InstalledPowerGroups
 	Nodes    []lifecycleStateNode
 }
 
@@ -1734,7 +1761,7 @@ func TestRemotePluginUninstallRemainsOfflineAfterServerClose(t *testing.T) {
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
 		t.Fatalf("installed Plugin target %q = %v, %v; want directory", target, info, err)
 	}
-	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got != ref {
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got.Ref != ref {
 		t.Fatalf("installed Plugin manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
 	journalPath, err := paths.JournalPath()
@@ -1757,7 +1784,7 @@ func TestRemotePluginUninstallRemainsOfflineAfterServerClose(t *testing.T) {
 	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Plugin target %q remains after uninstall: %v", target, err)
 	}
-	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || found || got != (domain.PowerRef{}) {
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || found || got.Ref != (domain.PowerRef{}) {
 		t.Fatalf("Plugin manifest after uninstall = %+v, found=%v err=%v; want exact entry absent", got, found, err)
 	}
 	assertJournalAbsent(t, journalPath)

@@ -15,7 +15,7 @@ type failFastInspectionManifestWriter struct {
 	t *testing.T
 }
 
-func (w failFastInspectionManifestWriter) Set(domain.AgentID, domain.PowerRef) error {
+func (w failFastInspectionManifestWriter) Set(domain.AgentID, domain.InstalledPower) error {
 	w.t.Fatal("Inspect() accessed manifest Set")
 	return nil
 }

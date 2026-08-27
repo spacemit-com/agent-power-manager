@@ -28,20 +28,20 @@ func TestAgentSnapshotContainsAndOrderedCopy(t *testing.T) {
 
 func TestSharedTypesCompile(t *testing.T) {
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
-	groups := domain.PowerGroups{domain.PowerTypeSkill: {ref}}
-	if groups[domain.PowerTypeSkill][0] != ref {
+	groups := domain.InstalledPowerGroups{domain.PowerTypeSkill: {domain.InstalledPower{Ref: ref}}}
+	if groups[domain.PowerTypeSkill][0].Ref != ref {
 		t.Fatal("共享类型未保存输入")
 	}
 }
 
 func TestPowerGroupsKeepTypedVersionedReferences(t *testing.T) {
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}
-	groups := domain.PowerGroups{
-		domain.PowerTypeSkill:  {ref},
+	groups := domain.InstalledPowerGroups{
+		domain.PowerTypeSkill:  {domain.InstalledPower{Ref: ref}},
 		domain.PowerTypePlugin: {},
 		domain.PowerTypeMCP:    {},
 	}
-	if got := groups[domain.PowerTypeSkill][0]; got != ref {
+	if got := groups[domain.PowerTypeSkill][0].Ref; got != ref {
 		t.Fatalf("skill group = %#v, want %#v", got, ref)
 	}
 }

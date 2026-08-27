@@ -21,5 +21,21 @@ type PowerRef struct {
 	Version string
 }
 
-// PowerGroups 表示按能力类别组织的能力引用集合。
-type PowerGroups map[PowerType][]PowerRef
+// InstalledPower 表示清单中一条已安装 Power：安装时捕获的精确身份与发布元数据（description、tags）。
+// Ref 仍是唯一身份；Description 与 Tags 不参与身份比较、缓存键或排序。
+type InstalledPower struct {
+	Ref         PowerRef
+	Description string
+	Tags        []string
+}
+
+// Clone 返回不共享 Tags 底层数组的清单条目副本，供清单快照向调用方暴露数据。
+func (power InstalledPower) Clone() InstalledPower {
+	if power.Tags != nil {
+		power.Tags = append([]string{}, power.Tags...)
+	}
+	return power
+}
+
+// InstalledPowerGroups 表示按能力类别组织的已安装 Power 清单。
+type InstalledPowerGroups map[PowerType][]InstalledPower

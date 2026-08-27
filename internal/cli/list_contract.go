@@ -9,9 +9,12 @@ import (
 )
 
 // ListedPower 表示 List 可渲染的一条 Power；Cloud 记录的 Agent 为空，已安装记录的 Agent 必填。
+// Description 与 Tags 仅在 --all 时参与文本或 JSON 输出。
 type ListedPower struct {
-	Agent domain.AgentID
-	Power domain.PowerRef
+	Agent       domain.AgentID
+	Power       domain.PowerRef
+	Description string
+	Tags        []string
 }
 
 // ListResult 表示 CLI 可直接渲染的 List 业务结果。

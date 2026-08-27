@@ -30,13 +30,13 @@ func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 			}
 			result, err := service.List(command.Context(), flags)
 			if err == nil {
-				return renderList(command.OutOrStdout(), result)
+				return renderList(command.OutOrStdout(), result, flags)
 			}
 			var partial *PartialListError
 			if !errors.As(err, &partial) {
 				return err
 			}
-			if renderErr := renderList(command.OutOrStdout(), result); renderErr != nil {
+			if renderErr := renderList(command.OutOrStdout(), result, flags); renderErr != nil {
 				return errors.Join(err, renderErr)
 			}
 			return err
@@ -45,6 +45,8 @@ func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 	command.Flags().StringVar(&flags.Agent, "agent", "", "target agent ID or all; requires --installed")
 	command.Flags().BoolVar(&flags.Installed, "installed", false, "list powers installed for the target agent")
 	bindTypeFlag(command, &flags)
+	command.Flags().BoolVarP(&flags.All, "all", "a", false, "show description and tags")
+	command.Flags().BoolVar(&flags.JSON, "json", false, "machine-readable JSON output")
 	return command
 }
 

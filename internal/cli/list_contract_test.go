@@ -15,7 +15,7 @@ func TestRenderListWritesExactCloudAndInstalledLines(t *testing.T) {
 		{Agent: domain.AgentCodex, Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "local", Version: "v1.0.0"}},
 	}}
 	var output strings.Builder
-	if err := renderList(&output, result); err != nil {
+	if err := renderList(&output, result, Flags{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := output.String(), "mcp/cloud@v2.0.0\ncodex/skill/local@v1.0.0\n"; got != want {
@@ -25,11 +25,73 @@ func TestRenderListWritesExactCloudAndInstalledLines(t *testing.T) {
 
 func TestRenderListWritesNothingForEmptyResult(t *testing.T) {
 	var output strings.Builder
-	if err := renderList(&output, ListResult{}); err != nil {
+	if err := renderList(&output, ListResult{}, Flags{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := output.String(); got != "" {
 		t.Fatalf("renderList() = %q, want empty output", got)
+	}
+}
+
+func TestRenderListAllWritesDescriptionAndTagsIndented(t *testing.T) {
+	result := ListResult{Powers: []ListedPower{{
+		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.2.3"},
+		Description: "a demo skill",
+		Tags:        []string{"alpha", "beta"},
+	}}}
+	var output strings.Builder
+	if err := renderList(&output, result, Flags{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	const want = "skill/demo@v1.2.3\n  description: a demo skill\n  tags: alpha, beta\n"
+	if got := output.String(); got != want {
+		t.Fatalf("renderList(all) = %q, want %q", got, want)
+	}
+}
+
+func TestRenderListAllOmitsEmptyDescriptionAndTags(t *testing.T) {
+	result := ListResult{Powers: []ListedPower{{
+		Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "bare", Version: "v1.0.0"},
+	}}}
+	var output strings.Builder
+	if err := renderList(&output, result, Flags{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "skill/bare@v1.0.0\n"; got != want {
+		t.Fatalf("renderList(all, empty metadata) = %q, want %q", got, want)
+	}
+}
+
+func TestRenderListJSONIdentityOnly(t *testing.T) {
+	result := ListResult{Powers: []ListedPower{{
+		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
+		Description: "should be omitted",
+		Tags:        []string{"should", "be", "omitted"},
+	}}}
+	var output strings.Builder
+	if err := renderList(&output, result, Flags{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"
+	if got := output.String(); got != want {
+		t.Fatalf("renderList(json) = %q, want %q", got, want)
+	}
+}
+
+func TestRenderListJSONWithAllIncludesDescriptionAndTags(t *testing.T) {
+	result := ListResult{Powers: []ListedPower{{
+		Agent:       domain.AgentCodex,
+		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
+		Description: "a demo skill",
+		Tags:        []string{"alpha", "beta"},
+	}}}
+	var output strings.Builder
+	if err := renderList(&output, result, Flags{All: true, JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	const want = "[\n  {\n    \"agent\": \"codex\",\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\",\n      \"beta\"\n    ]\n  }\n]\n"
+	if got := output.String(); got != want {
+		t.Fatalf("renderList(json+all) = %q, want %q", got, want)
 	}
 }
 
@@ -41,9 +103,9 @@ func TestRenderListWrapsSecondWriteFailureAndPreservesFirstLine(t *testing.T) {
 		{Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "second", Version: "v1.0.0"}},
 	}}
 
-	err := renderList(writer, result)
-	if err == nil || !strings.Contains(err.Error(), "write list result") {
-		t.Fatalf("renderList() error = %v, want wrapped write list result error", err)
+	err := renderList(writer, result, Flags{})
+	if err == nil || !strings.Contains(err.Error(), "write power result") {
+		t.Fatalf("renderList() error = %v, want wrapped write power result error", err)
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("renderList() error = %v, want cause %v", err, cause)

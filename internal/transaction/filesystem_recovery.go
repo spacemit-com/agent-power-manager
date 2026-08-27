@@ -92,7 +92,7 @@ func (s *Service) recoverInstallCommit(ctx context.Context, journal Journal, sta
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.manifests.Set(journal.Agent, journal.Power); err != nil {
+	if err := s.manifests.Set(journal.Agent, journal.installedPower()); err != nil {
 		return fmt.Errorf("set recovered install manifest: %w", err)
 	}
 	result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionSetManifest})

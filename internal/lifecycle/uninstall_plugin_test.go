@@ -18,7 +18,7 @@ func TestUninstallPluginWithoutManifestSkipsAllPluginDependencies(t *testing.T) 
 	var calls []string
 	service := newUninstallService(t, &calls, uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		groups:   map[domain.AgentID]domain.PowerGroups{domain.AgentCodex: {}},
+		groups:   map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentCodex: {}},
 	})
 
 	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})

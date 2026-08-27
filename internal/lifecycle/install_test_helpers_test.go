@@ -539,15 +539,15 @@ type installFakeConfig struct {
 	fixture *installFixture
 }
 
-func (c *installFakeConfig) Find(agent domain.AgentID, _ domain.PowerType, _ string) (domain.PowerRef, bool, error) {
+func (c *installFakeConfig) Find(agent domain.AgentID, _ domain.PowerType, _ string) (domain.InstalledPower, bool, error) {
 	*c.calls = append(*c.calls, "config:find:"+string(agent))
 	ref, ok := c.fixture.installed[agent]
-	return ref, ok, c.fixture.configFindErrors[agent]
+	return domain.InstalledPower{Ref: ref}, ok, c.fixture.configFindErrors[agent]
 }
 
-func (*installFakeConfig) List(domain.AgentID) (domain.PowerGroups, error) { return nil, nil }
+func (*installFakeConfig) List(domain.AgentID) (domain.InstalledPowerGroups, error) { return nil, nil }
 
-func (*installFakeConfig) Set(domain.AgentID, domain.PowerRef) error { return nil }
+func (*installFakeConfig) Set(domain.AgentID, domain.InstalledPower) error { return nil }
 
 func (c *installFakeConfig) Remove(agent domain.AgentID, powerType domain.PowerType, name string) error {
 	*c.calls = append(*c.calls, "config:remove:"+string(agent)+":"+string(powerType)+":"+name)

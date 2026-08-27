@@ -2,13 +2,11 @@ package cli
 
 import (
 	"context"
-
-	"apm/internal/domain"
 )
 
 // SearchResult 表示 CLI 可直接渲染的搜索业务结果。
 type SearchResult struct {
-	Powers []domain.PowerRef
+	Powers []ListedPower
 }
 
 // SearchLifecycle 定义 search 命令唯一需要的生命周期入口。

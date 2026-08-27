@@ -37,5 +37,5 @@ func (s *SearchService) Search(ctx context.Context, flags cli.Flags) (cli.Search
 		return cli.SearchResult{}, fmt.Errorf("snapshot catalog for search: %w", err)
 	}
 	warnStaleCatalog("search", status)
-	return cli.SearchResult{Powers: filterSearchPowers(flags, catalogRefs(snapshot.List(domain.PowerType(flags.Type))))}, nil
+	return cli.SearchResult{Powers: filterSearchPowers(flags, catalogPowers(snapshot.List(domain.PowerType(flags.Type))))}, nil
 }

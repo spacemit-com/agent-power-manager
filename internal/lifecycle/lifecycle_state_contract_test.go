@@ -255,8 +255,8 @@ func contractUninstallFixture(power contractPower, manifest, target string) unin
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{power.agent}},
 	}
 	if manifest == "present" {
-		fixture.groups = map[domain.AgentID]domain.PowerGroups{
-			power.agent: {power.powerType: {ref}},
+		fixture.groups = map[domain.AgentID]domain.InstalledPowerGroups{
+			power.agent: {power.powerType: {domain.InstalledPower{Ref: ref}}},
 		}
 		// 目录型缺陷（缺 agent.yaml / 缺 avatar / 多余资源）与位置缺失一样
 		// 建模为 TargetMissing，卸载方向只产生一次告警并收敛为 completed。

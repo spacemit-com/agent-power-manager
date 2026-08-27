@@ -155,7 +155,7 @@ func (s *InstallService) explicitManifestHit(flags cli.Flags, agents []domain.Ag
 	items := make([]cli.InstallItem, 0, len(agents))
 	for _, agent := range agents {
 		previous, installed, err := s.config.Find(agent, powerType, ref.Name)
-		if err != nil || !installed || previous != ref {
+		if err != nil || !installed || previous.Ref != ref {
 			return cli.InstallResult{}, false
 		}
 		items = append(items, cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeUnchanged})

@@ -103,7 +103,7 @@ func TestFixIntegrationFilesystemSkillPreservesJournalUntilFixThenCommits(t *tes
 		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
 	}
 	assertJournalAbsent(t, journalPath)
-	if got, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || !found || got != ref {
+	if got, found, err := harness.repository.Find(domain.AgentCodex, ref.Type, ref.Name); err != nil || !found || got.Ref != ref {
 		t.Fatalf("recovered manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
 	assertFileContents(t, filepath.Join(target, "SKILL.md"), "interrupted target\n")
@@ -240,7 +240,7 @@ func TestRemoteFixRecoversFilesystemJournalAfterServerClose(t *testing.T) {
 		t.Fatalf("offline Fix made %d HTTP transport attempts, want 0", got)
 	}
 	assertJournalAbsent(t, journalPath)
-	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got != ref {
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got.Ref != ref {
 		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
 	markerAfterFix, err := os.ReadFile(markerPath)
@@ -321,7 +321,7 @@ func TestFixIntegrationAgentIdentityMismatchFailsClosedThenConverges(t *testing.
 		t.Fatalf("second Fix() error = %v", err)
 	}
 	assertJournalAbsent(t, journalPath)
-	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got != ref {
+	if got, found, err := harness.repository.Find(domain.AgentBibit, ref.Type, ref.Name); err != nil || !found || got.Ref != ref {
 		t.Fatalf("recovered manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
 	assertFileContents(t, filepath.Join(target, "agent.yaml"), legalYAML)

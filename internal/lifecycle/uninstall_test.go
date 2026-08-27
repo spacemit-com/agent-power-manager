@@ -77,11 +77,11 @@ func TestUninstallAllUsesSnapshotOrderAndDistinctPowerPointers(t *testing.T) {
 	var calls []string
 	service := newUninstallService(t, &calls, uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}},
-		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentBibit:      {domain.PowerTypeSkill: {bibitRef}},
-			domain.AgentClaudeCode: {domain.PowerTypeSkill: {claudeRef}},
-			domain.AgentCodex:      {domain.PowerTypeSkill: {codexRef}},
-			domain.AgentHermes:     {domain.PowerTypeSkill: {hermesRef}},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentBibit:      {domain.PowerTypeSkill: {domain.InstalledPower{Ref: bibitRef}}},
+			domain.AgentClaudeCode: {domain.PowerTypeSkill: {domain.InstalledPower{Ref: claudeRef}}},
+			domain.AgentCodex:      {domain.PowerTypeSkill: {domain.InstalledPower{Ref: codexRef}}},
+			domain.AgentHermes:     {domain.PowerTypeSkill: {domain.InstalledPower{Ref: hermesRef}}},
 		},
 	})
 
@@ -235,13 +235,13 @@ func TestUninstallAllConfigFailurePreventsLaterAgentLifecycleAccess(t *testing.T
 }
 
 func TestUninstallAllSameAgentTypeAmbiguityPreventsLaterAgentLifecycleAccess(t *testing.T) {
-	groups := domain.PowerGroups{
-		domain.PowerTypeSkill:  {{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}},
-		domain.PowerTypePlugin: {{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}},
+	groups := domain.InstalledPowerGroups{
+		domain.PowerTypeSkill:  {{Ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}}},
+		domain.PowerTypePlugin: {{Ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}}},
 	}
 	fixture := uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
-		groups:   map[domain.AgentID]domain.PowerGroups{domain.AgentClaudeCode: groups},
+		groups:   map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentClaudeCode: groups},
 	}
 	fixture.onEvent = rejectLaterUninstallEvents(t, []domain.AgentID{domain.AgentCodex})
 	var calls []string
@@ -269,8 +269,8 @@ func TestUninstallAllMissingThenSuccessfulRecordsPreserveSnapshotOrder(t *testin
 	ref := uninstallTarget()
 	fixture := uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
-		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentCodex: {domain.PowerTypeSkill: {ref}},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentCodex: {domain.PowerTypeSkill: {domain.InstalledPower{Ref: ref}}},
 		},
 	}
 	var calls []string
@@ -311,9 +311,9 @@ func TestUninstallDoesNotMutateAgentSnapshotAcrossSuccessAndFailure(t *testing.T
 	}{
 		{
 			name: "success",
-			fixture: uninstallFixture{groups: map[domain.AgentID]domain.PowerGroups{
-				domain.AgentClaudeCode: {domain.PowerTypeSkill: {uninstallTarget()}},
-				domain.AgentCodex:      {domain.PowerTypeSkill: {uninstallTarget()}},
+			fixture: uninstallFixture{groups: map[domain.AgentID]domain.InstalledPowerGroups{
+				domain.AgentClaudeCode: {domain.PowerTypeSkill: {domain.InstalledPower{Ref: uninstallTarget()}}},
+				domain.AgentCodex:      {domain.PowerTypeSkill: {domain.InstalledPower{Ref: uninstallTarget()}}},
 			}},
 			flags: cli.Flags{Agent: "all", Type: "skill", Name: "demo"},
 		},

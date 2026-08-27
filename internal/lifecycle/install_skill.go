@@ -26,7 +26,7 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 	}
 
 	manifest := manifestAbsent
-	if installed && previous.Version == ref.Version {
+	if installed && previous.Ref.Version == ref.Version {
 		manifest = manifestSameVersion
 	} else if installed {
 		manifest = manifestDifferentVersion
@@ -54,6 +54,8 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 		request := transaction.SkillInstallRequest{
 			Agent:       agent,
 			Power:       ref,
+			Description: entry.Description,
+			Tags:        entry.Tags,
 			StagingRoot: staging,
 			Adapter:     resolvedAdapter,
 		}
@@ -66,10 +68,12 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("prepare install power %+v: %w", ref, err)
 		}
-		previousCopy := previous
+		previousCopy := previous.Ref
 		request := transaction.SkillInstallRequest{
 			Agent:       agent,
 			Power:       ref,
+			Description: entry.Description,
+			Tags:        entry.Tags,
 			Previous:    &previousCopy,
 			StagingRoot: staging,
 			Adapter:     resolvedAdapter,
@@ -78,7 +82,7 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 			return cli.InstallItem{}, fmt.Errorf("install power %+v for agent %q: %w", ref, agent, err)
 		}
 		outcome := cli.InstallOutcomeInstalled
-		if semver.MustParse(ref.Version).GreaterThan(semver.MustParse(previous.Version)) {
+		if semver.MustParse(ref.Version).GreaterThan(semver.MustParse(previous.Ref.Version)) {
 			outcome = cli.InstallOutcomeUpgraded
 		} else {
 			outcome = cli.InstallOutcomeDowngraded
@@ -86,14 +90,14 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 		return cli.InstallItem{Agent: agent, Power: ref, Outcome: outcome}, nil
 	case actionCleanAndInstall:
 		if decision.warnMissing {
-			logInstallMissingTarget(agent, previous)
+			logInstallMissingTarget(agent, previous.Ref)
 		}
 		if _, err := s.transactions.UninstallSkill(ctx, transaction.SkillUninstallRequest{
 			Agent:   agent,
-			Power:   previous,
+			Power:   previous.Ref,
 			Adapter: resolvedAdapter,
 		}); err != nil {
-			return cli.InstallItem{}, fmt.Errorf("repair installed power %+v for agent %q: %w", previous, agent, err)
+			return cli.InstallItem{}, fmt.Errorf("repair installed power %+v for agent %q: %w", previous.Ref, agent, err)
 		}
 		staging, err := s.cache.PrepareSkill(ctx, entry)
 		if err != nil {
@@ -102,6 +106,8 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 		request := transaction.SkillInstallRequest{
 			Agent:       agent,
 			Power:       ref,
+			Description: entry.Description,
+			Tags:        entry.Tags,
 			StagingRoot: staging,
 			Adapter:     resolvedAdapter,
 		}

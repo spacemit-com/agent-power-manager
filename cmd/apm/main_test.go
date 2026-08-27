@@ -414,12 +414,12 @@ func TestNewSearchLifecycleSearchesBundledResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search(summary) error = %v", err)
 	}
-	want := cli.SearchResult{Powers: []domain.PowerRef{{
-		Type:    domain.PowerTypeSkill,
-		Name:    "foo-before-summary",
-		Version: "v0.1.0",
+	want := cli.SearchResult{Powers: []cli.ListedPower{{
+		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.1.0"},
+		Description: "Use when preparing a user-facing summary or completion note.",
+		Tags:        []string{},
 	}}}
-	if len(got.Powers) != len(want.Powers) || len(got.Powers) != 1 || got.Powers[0] != want.Powers[0] {
+	if len(got.Powers) != len(want.Powers) || len(got.Powers) != 1 || !reflect.DeepEqual(got.Powers[0], want.Powers[0]) {
 		t.Fatalf("Search(summary) = %#v, want %#v", got, want)
 	}
 }
@@ -581,7 +581,7 @@ func TestNewListLifecycleListsInstalledManifest(t *testing.T) {
 		t.Fatalf("create Codex root: %v", err)
 	}
 	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.2.3"}
-	if err := config.NewJSONRepository().Set(domain.AgentCodex, ref); err != nil {
+	if err := config.NewJSONRepository().Set(domain.AgentCodex, domain.InstalledPower{Ref: ref}); err != nil {
 		t.Fatalf("seed manifest: %v", err)
 	}
 	service, err := newListLifecycle()
@@ -592,8 +592,8 @@ func TestNewListLifecycleListsInstalledManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(installed codex) error = %v", err)
 	}
-	want := cli.ListedPower{Agent: domain.AgentCodex, Power: ref}
-	if len(result.Powers) != 1 || result.Powers[0] != want {
+	want := cli.ListedPower{Agent: domain.AgentCodex, Power: ref, Tags: []string{}}
+	if len(result.Powers) != 1 || !reflect.DeepEqual(result.Powers[0], want) {
 		t.Fatalf("List(installed codex) = %#v, want %#v", result, want)
 	}
 }
@@ -644,7 +644,7 @@ func TestNewInstallLifecycleInstallsBundledSkillAndThenReturnsUnchanged(t *testi
 	if err != nil {
 		t.Fatalf("find installed manifest = %v", err)
 	}
-	if !found || manifested != ref {
+	if !found || manifested.Ref != ref {
 		t.Fatalf("installed manifest = (%#v, %t), want (%#v, true)", manifested, found, ref)
 	}
 	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
@@ -778,7 +778,7 @@ func TestNewUninstallLifecycleRemovesManifestWhenInstalledTargetIsMissing(t *tes
 		t.Fatalf("create Codex root: %v", err)
 	}
 	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "missing-target", Version: "v1.2.3"}
-	if err := config.NewJSONRepository().Set(domain.AgentCodex, ref); err != nil {
+	if err := config.NewJSONRepository().Set(domain.AgentCodex, domain.InstalledPower{Ref: ref}); err != nil {
 		t.Fatalf("seed manifest: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -864,7 +864,7 @@ func TestNewUninstallLifecycleUsesFirstDuplicateManifestEntryAndRemovesAllMatche
 	if err != nil {
 		t.Fatalf("List() after Uninstall: %v", err)
 	}
-	wantSkills := []domain.PowerRef{{Type: domain.PowerTypeSkill, Name: "keep", Version: "v3.0.0"}}
+	wantSkills := []domain.InstalledPower{{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "keep", Version: "v3.0.0"}, Tags: []string{}}}
 	if !reflect.DeepEqual(groups[domain.PowerTypeSkill], wantSkills) {
 		t.Fatalf("skills after Uninstall = %#v, want %#v", groups[domain.PowerTypeSkill], wantSkills)
 	}

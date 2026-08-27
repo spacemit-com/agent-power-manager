@@ -58,9 +58,9 @@ type recordingMarketplaceManifestWriter struct {
 	removed domain.PowerRef
 }
 
-func (w *recordingMarketplaceManifestWriter) Set(_ domain.AgentID, ref domain.PowerRef) error {
+func (w *recordingMarketplaceManifestWriter) Set(_ domain.AgentID, power domain.InstalledPower) error {
 	*w.events = append(*w.events, "set-manifest")
-	w.setRef = ref
+	w.setRef = power.Ref
 	return nil
 }
 

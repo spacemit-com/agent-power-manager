@@ -142,7 +142,7 @@ type statefulRecoveryManifestWriter struct {
 	removeCalls int
 }
 
-func (w *statefulRecoveryManifestWriter) Set(domain.AgentID, domain.PowerRef) error {
+func (w *statefulRecoveryManifestWriter) Set(domain.AgentID, domain.InstalledPower) error {
 	w.installed = true
 	*w.events = append(*w.events, "manifest:set")
 	return nil

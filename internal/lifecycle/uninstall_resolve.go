@@ -9,7 +9,7 @@ import (
 )
 
 // resolveUninstallPower 从单个 Agent 的可信清单中解析待卸载能力；同类别重复取清单首项，仅跨类别匹配报歧义，并保持输入清单不变。
-func resolveUninstallPower(flags cli.Flags, groups domain.PowerGroups) (domain.PowerRef, bool, error) {
+func resolveUninstallPower(flags cli.Flags, groups domain.InstalledPowerGroups) (domain.PowerRef, bool, error) {
 	types := []domain.PowerType{
 		domain.PowerTypeSkill,
 		domain.PowerTypePlugin,
@@ -17,9 +17,9 @@ func resolveUninstallPower(flags cli.Flags, groups domain.PowerGroups) (domain.P
 	}
 	if flags.Type != "" {
 		powerType := domain.PowerType(flags.Type)
-		for _, ref := range groups[powerType] {
-			if ref.Name == flags.Name {
-				return ref, true, nil
+		for _, installed := range groups[powerType] {
+			if installed.Ref.Name == flags.Name {
+				return installed.Ref, true, nil
 			}
 		}
 		return domain.PowerRef{}, false, nil
@@ -28,9 +28,9 @@ func resolveUninstallPower(flags cli.Flags, groups domain.PowerGroups) (domain.P
 	matches := make([]domain.PowerRef, 0, 1)
 	matchedTypes := make([]string, 0, 1)
 	for _, powerType := range types {
-		for _, ref := range groups[powerType] {
-			if ref.Name == flags.Name {
-				matches = append(matches, ref)
+		for _, installed := range groups[powerType] {
+			if installed.Ref.Name == flags.Name {
+				matches = append(matches, installed.Ref)
 				matchedTypes = append(matchedTypes, string(powerType))
 				break
 			}

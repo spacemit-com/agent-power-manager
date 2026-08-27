@@ -24,9 +24,9 @@ func TestListInstalledActiveJournalWarnsThenRefreshesAndReads(t *testing.T) {
 	fixture := listFixture{
 		inspection: transaction.InspectionResult{Active: true, Operation: transaction.OperationInstall, Agent: domain.AgentCodex, Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"}, OriginalPhase: transaction.PhasePublishing},
 		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
-		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentClaudeCode: {domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "alpha", Version: "v1.0.0"}}},
-			domain.AgentCodex:      {domain.PowerTypePlugin: {{Type: domain.PowerTypePlugin, Name: "beta", Version: "v2.0.0"}}},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentClaudeCode: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "alpha", Version: "v1.0.0"}}}},
+			domain.AgentCodex:      {domain.PowerTypePlugin: {{Ref: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "beta", Version: "v2.0.0"}}}},
 		},
 	}
 	fixture.beforeRefresh = func() {
@@ -112,7 +112,7 @@ func TestListInstalledAllReturnsPartialAndContinuesAfterAgentFailure(t *testing.
 	claudeErr := errors.New("claude config failed")
 	service := newListService(t, &calls, listFixture{
 		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
-		groups:     map[domain.AgentID]domain.PowerGroups{domain.AgentCodex: {domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}}}},
+		groups:     map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentCodex: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}}}}},
 		configErrs: map[domain.AgentID]error{domain.AgentClaudeCode: claudeErr},
 	})
 	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
@@ -135,7 +135,7 @@ func TestListInstalledAllKeepsFailureOrderAndReadsLaterAgents(t *testing.T) {
 	codexErr := errors.New("codex config failed")
 	service := newListService(t, &calls, listFixture{
 		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}},
-		groups:     map[domain.AgentID]domain.PowerGroups{domain.AgentHermes: {domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "later", Version: "v1.0.0"}}}},
+		groups:     map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentHermes: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "later", Version: "v1.0.0"}}}}},
 		configErrs: map[domain.AgentID]error{domain.AgentBibit: bibitErr, domain.AgentClaudeCode: claudeErr, domain.AgentCodex: codexErr},
 	})
 	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
@@ -163,7 +163,7 @@ func TestListInstalledDamagedJournalWarnsAndContinues(t *testing.T) {
 	service := newListService(t, &calls, listFixture{
 		inspectErr: errors.New("damaged journal"),
 		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		groups:     map[domain.AgentID]domain.PowerGroups{domain.AgentCodex: {domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "visible", Version: "v1.0.0"}}}},
+		groups:     map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentCodex: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "visible", Version: "v1.0.0"}}}}},
 	})
 	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
 	if err != nil || len(result.Powers) != 1 || result.Powers[0].Agent != domain.AgentCodex {

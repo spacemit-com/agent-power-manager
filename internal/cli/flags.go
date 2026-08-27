@@ -17,6 +17,7 @@ type Flags struct {
 	Version   string
 	Keyword   string
 	Installed bool
+	All       bool   // All 在 list/search 中追加输出 description 与 tags。
 	Message   string // Message 仅用于 submit，进入 lifecycle 前会去除首尾空白。
 	Output    string // Output 预留给查询命令绑定输出格式。
 	JSON      bool

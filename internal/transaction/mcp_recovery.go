@@ -151,7 +151,7 @@ func (s *Service) recoverMCPUninstall(ctx context.Context, journal Journal, pres
 func (s *Service) commitRecoveredMCP(journal Journal, result *RecoveryResult) error {
 	var err error
 	if journal.Operation == OperationInstall {
-		err = s.manifests.Set(journal.Agent, journal.Power)
+		err = s.manifests.Set(journal.Agent, journal.installedPower())
 		if err == nil {
 			result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionSetManifest})
 		}

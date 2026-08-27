@@ -93,7 +93,7 @@ func (s *Service) commitLocalMarketplacePluginInstall(ctx context.Context, journ
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.manifests.Set(journal.Agent, journal.Power); err != nil {
+	if err := s.manifests.Set(journal.Agent, journal.installedPower()); err != nil {
 		return fmt.Errorf("set marketplace Plugin manifest: %w", err)
 	}
 	if err := s.journals.Delete(journal.TransactionID); err != nil {
@@ -271,6 +271,8 @@ func (s *Service) newLocalMarketplacePluginInstallJournal(request PluginInstallR
 		Phase:         phase,
 		Agent:         request.Agent,
 		Power:         request.Power,
+		Description:   request.Description,
+		Tags:          request.Tags,
 		Previous:      clonePowerRef(request.Previous),
 		Plugin:        payload,
 	}, nil

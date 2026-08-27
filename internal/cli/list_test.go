@@ -224,7 +224,7 @@ func TestListRenderFailurePreservesCompletedPrefix(t *testing.T) {
 	})
 
 	err := entry.Execute([]string{"list"})
-	if !errors.Is(err, writeErr) || !strings.Contains(err.Error(), "write list result") {
+	if !errors.Is(err, writeErr) || !strings.Contains(err.Error(), "write power result") {
 		t.Fatalf("Execute() error = %v, want wrapped writer error", err)
 	}
 	if got, want := stdout.String(), "mcp/alpha@v2.0.0\n"; got != want {
@@ -407,6 +407,41 @@ func TestListRepeatedExecutionDoesNotLeakFlagsLoggerOrService(t *testing.T) {
 	slog.Debug("after non-verbose list")
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("second output = stdout %q, stderr %q; want no leaked verbose state", stdout.String(), stderr.String())
+	}
+}
+
+func TestListAllAndJSONFlagsRenderMetadata(t *testing.T) {
+	result := cli.ListResult{Powers: []cli.ListedPower{{
+		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+		Description: "a demo skill",
+		Tags:        []string{"alpha"},
+	}}}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "all text", args: []string{"list", "--all"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n  tags: alpha\n"},
+		{name: "short all", args: []string{"list", "-a"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n  tags: alpha\n"},
+		{name: "json identity", args: []string{"list", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"},
+		{name: "json all", args: []string{"list", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ]\n  }\n]\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			lifecycle := &recordingListLifecycle{result: result}
+			entry := newListEntry(t, &stdout, &stderr, func() (cli.ListLifecycle, error) { return lifecycle, nil })
+
+			if err := entry.Execute(tt.args); err != nil {
+				t.Fatalf("Execute(%q) error = %v", tt.args, err)
+			}
+			if got := stdout.String(); got != tt.want {
+				t.Fatalf("stdout = %q, want %q", got, tt.want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
 	}
 }
 

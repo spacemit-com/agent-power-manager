@@ -227,7 +227,7 @@ func (s *Service) commitRecoveredFilesystemPlugin(journal Journal, result *Recov
 
 func (s *Service) commitRecoveredPluginManifest(journal Journal, result *RecoveryResult) error {
 	if journal.Operation == OperationInstall {
-		if err := s.manifests.Set(journal.Agent, journal.Power); err != nil {
+		if err := s.manifests.Set(journal.Agent, journal.installedPower()); err != nil {
 			return fmt.Errorf("commit recovered Plugin manifest: %w", err)
 		}
 		result.Actions = append(result.Actions, RecoveryAction{Kind: RecoveryActionSetManifest})

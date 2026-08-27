@@ -260,10 +260,10 @@ func TestMCPIntegrationHTTPConflictAndStaleRepair(t *testing.T) {
 		harness := newIsolatedMCPHarness(t, domain.AgentCodex)
 		stale := domain.PowerRef{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}
 		keep := domain.PowerRef{Name: "keep", Type: domain.PowerTypeMCP, Version: "v9.9.9"}
-		if err := harness.repository.Set(domain.AgentCodex, stale); err != nil {
+		if err := harness.repository.Set(domain.AgentCodex, domain.InstalledPower{Ref: stale}); err != nil {
 			t.Fatal(err)
 		}
-		if err := harness.repository.Set(domain.AgentCodex, keep); err != nil {
+		if err := harness.repository.Set(domain.AgentCodex, domain.InstalledPower{Ref: keep}); err != nil {
 			t.Fatal(err)
 		}
 		var stdout, stderr bytes.Buffer
@@ -278,10 +278,10 @@ func TestMCPIntegrationHTTPConflictAndStaleRepair(t *testing.T) {
 		if strings.Count(stderr.String(), "level=WARN") != 1 || !strings.Contains(stderr.String(), `msg="installed power target is missing"`) {
 			t.Fatalf("stderr = %q, want exactly one missing-target warning", stderr.String())
 		}
-		if got, found, err := harness.repository.Find(domain.AgentCodex, stale.Type, stale.Name); err != nil || !found || got.Version != "v0.1.0" {
+		if got, found, err := harness.repository.Find(domain.AgentCodex, stale.Type, stale.Name); err != nil || !found || got.Ref.Version != "v0.1.0" {
 			t.Fatalf("repaired entry = %+v, %v, %v; want v0.1.0", got, found, err)
 		}
-		if got, found, err := harness.repository.Find(domain.AgentCodex, keep.Type, keep.Name); err != nil || !found || got != keep {
+		if got, found, err := harness.repository.Find(domain.AgentCodex, keep.Type, keep.Name); err != nil || !found || got.Ref != keep {
 			t.Fatalf("keep entry = %+v, %v, %v", got, found, err)
 		}
 		harness.assertManagedMCP(domain.AgentCodex, "filesystem", "v0.1.0", true)
@@ -381,7 +381,7 @@ func testMCPIntegrationSearchPreservesAndFixRecoversInterruptedAgentCLIJournal(t
 		t.Fatalf("Recover calls = %d, want 1", recoverer.calls)
 	}
 	assertJournalAbsent(t, journalPath)
-	if got, found, err := harness.repository.Find(agent, ref.Type, ref.Name); err != nil || !found || got != ref {
+	if got, found, err := harness.repository.Find(agent, ref.Type, ref.Name); err != nil || !found || got.Ref != ref {
 		t.Fatalf("Fix manifest = %+v, found=%v err=%v, want %+v", got, found, err, ref)
 	}
 	if _, err := os.Stat(statePath); err != nil {
@@ -418,7 +418,7 @@ func (h *isolatedMCPHarness) assertManagedMCP(agent domain.AgentID, name, versio
 		}
 		return
 	}
-	if !found || ref.Version != version || ref.Name != name || ref.Type != domain.PowerTypeMCP {
+	if !found || ref.Ref.Version != version || ref.Ref.Name != name || ref.Ref.Type != domain.PowerTypeMCP {
 		h.t.Fatalf("manifest entry = %+v, found %v, want version %q", ref, found, version)
 	}
 }

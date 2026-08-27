@@ -25,7 +25,7 @@ type listFixture struct {
 
 	inspection transaction.InspectionResult
 	snapshot   domain.AgentSnapshot
-	groups     map[domain.AgentID]domain.PowerGroups
+	groups     map[domain.AgentID]domain.InstalledPowerGroups
 	configErrs map[domain.AgentID]error
 	cloudRefs  []domain.PowerRef
 	catalog    catalog.Snapshot
@@ -86,14 +86,14 @@ type listFakeConfig struct {
 	fixture *listFixture
 }
 
-func (c *listFakeConfig) List(agent domain.AgentID) (domain.PowerGroups, error) {
+func (c *listFakeConfig) List(agent domain.AgentID) (domain.InstalledPowerGroups, error) {
 	*c.calls = append(*c.calls, "config:"+string(agent))
 	return c.fixture.groups[agent], c.fixture.configErrs[agent]
 }
-func (*listFakeConfig) Find(domain.AgentID, domain.PowerType, string) (domain.PowerRef, bool, error) {
-	return domain.PowerRef{}, false, nil
+func (*listFakeConfig) Find(domain.AgentID, domain.PowerType, string) (domain.InstalledPower, bool, error) {
+	return domain.InstalledPower{}, false, nil
 }
-func (*listFakeConfig) Set(domain.AgentID, domain.PowerRef) error             { return nil }
+func (*listFakeConfig) Set(domain.AgentID, domain.InstalledPower) error       { return nil }
 func (*listFakeConfig) Remove(domain.AgentID, domain.PowerType, string) error { return nil }
 
 func TestNewListRejectsNilDependencies(t *testing.T) {
@@ -142,7 +142,7 @@ func TestListCatalogInspectsBeforeTakingOneSnapshot(t *testing.T) {
 	if want := []string{"inspect", "catalog-snapshot"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
-	if want := (cli.ListResult{Powers: []cli.ListedPower{{Power: ref}}}); !reflect.DeepEqual(result, want) {
+	if want := (cli.ListResult{Powers: []cli.ListedPower{{Power: ref, Description: "test power", Tags: []string{}}}}); !reflect.DeepEqual(result, want) {
 		t.Fatalf("List() = %#v, want %#v", result, want)
 	}
 }
@@ -188,7 +188,7 @@ func TestListCatalogJournalWarningsDoNotBlockListing(t *testing.T) {
 
 			result, err := service.List(context.Background(), cli.Flags{})
 			if tt.name == "active" {
-				if err != nil || !reflect.DeepEqual(result, cli.ListResult{Powers: []cli.ListedPower{{Power: ref}}}) {
+				if err != nil || !reflect.DeepEqual(result, cli.ListResult{Powers: []cli.ListedPower{{Power: ref, Description: "test power", Tags: []string{}}}}) {
 					t.Fatalf("List() = (%#v, %v), want Cloud result without error", result, err)
 				}
 			} else if !errors.Is(err, tt.wantCloudErr) || !strings.Contains(err.Error(), "snapshot catalog powers") {

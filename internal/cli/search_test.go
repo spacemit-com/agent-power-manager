@@ -84,9 +84,9 @@ func TestSearchInvokesLifecycleWithTrimmedKeywordAndType(t *testing.T) {
 
 func TestSearchRendersExactResultLines(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	lifecycle := &recordingSearchLifecycle{result: cli.SearchResult{Powers: []domain.PowerRef{
-		{Type: domain.PowerTypeMCP, Name: "alpha", Version: "v2.0.0"},
-		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
+	lifecycle := &recordingSearchLifecycle{result: cli.SearchResult{Powers: []cli.ListedPower{
+		{Power: domain.PowerRef{Type: domain.PowerTypeMCP, Name: "alpha", Version: "v2.0.0"}},
+		{Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"}},
 	}}}
 	entry := newSearchEntry(t, &stdout, &stderr, func() (cli.SearchLifecycle, error) { return lifecycle, nil })
 
@@ -105,8 +105,8 @@ func TestSearchRendersExactResultLines(t *testing.T) {
 func TestSearchRoutesRecoveryWarnToStderrAndBusinessResultsToStdout(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	entry := newSearchEntry(t, &stdout, &stderr, func() (cli.SearchLifecycle, error) {
-		return &warningSearchLifecycle{result: cli.SearchResult{Powers: []domain.PowerRef{
-			{Type: domain.PowerTypeSkill, Name: "summary", Version: "v1.2.3"},
+		return &warningSearchLifecycle{result: cli.SearchResult{Powers: []cli.ListedPower{
+			{Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "summary", Version: "v1.2.3"}},
 		}}}, nil
 	})
 
@@ -226,11 +226,11 @@ func TestSearchFactoryRunsAfterVerboseLoggerSetup(t *testing.T) {
 func TestSearchRenderFailureIsLoggedOnce(t *testing.T) {
 	var stderr bytes.Buffer
 	entry := newSearchEntry(t, errWriter{}, &stderr, func() (cli.SearchLifecycle, error) {
-		return &recordingSearchLifecycle{result: cli.SearchResult{Powers: []domain.PowerRef{{Type: domain.PowerTypeSkill, Name: "alpha", Version: "v1.0.0"}}}}, nil
+		return &recordingSearchLifecycle{result: cli.SearchResult{Powers: []cli.ListedPower{{Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "alpha", Version: "v1.0.0"}}}}}, nil
 	})
 
 	err := entry.Execute([]string{"search", "alpha"})
-	if err == nil || !strings.Contains(err.Error(), "write search result") {
+	if err == nil || !strings.Contains(err.Error(), "write power result") {
 		t.Fatalf("Execute(search) error = %v, want render error", err)
 	}
 	if got := stderr.String(); !strings.Contains(got, "Usage:") || strings.Count(got, "level=ERROR") != 1 {
@@ -242,9 +242,9 @@ func TestSearchRenderFailurePreservesCompletedPrefix(t *testing.T) {
 	stdout := &prefixWriter{writesBeforeError: 1}
 	var stderr bytes.Buffer
 	entry := newSearchEntry(t, stdout, &stderr, func() (cli.SearchLifecycle, error) {
-		return &recordingSearchLifecycle{result: cli.SearchResult{Powers: []domain.PowerRef{
-			{Type: domain.PowerTypeMCP, Name: "alpha", Version: "v2.0.0"},
-			{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
+		return &recordingSearchLifecycle{result: cli.SearchResult{Powers: []cli.ListedPower{
+			{Power: domain.PowerRef{Type: domain.PowerTypeMCP, Name: "alpha", Version: "v2.0.0"}},
+			{Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"}},
 		}}}, nil
 	})
 
@@ -253,6 +253,41 @@ func TestSearchRenderFailurePreservesCompletedPrefix(t *testing.T) {
 	}
 	if got, want := stdout.String(), "mcp/alpha@v2.0.0\n"; got != want {
 		t.Fatalf("search stdout = %q, want completed prefix %q", got, want)
+	}
+}
+
+func TestSearchAllAndJSONFlagsRenderMetadata(t *testing.T) {
+	result := cli.SearchResult{Powers: []cli.ListedPower{{
+		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+		Description: "a demo skill",
+		Tags:        []string{"alpha"},
+	}}}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "all text", args: []string{"search", "demo", "--all"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n  tags: alpha\n"},
+		{name: "short all", args: []string{"search", "demo", "-a"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n  tags: alpha\n"},
+		{name: "json identity", args: []string{"search", "demo", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"},
+		{name: "json all", args: []string{"search", "demo", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ]\n  }\n]\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			lifecycle := &recordingSearchLifecycle{result: result}
+			entry := newSearchEntry(t, &stdout, &stderr, func() (cli.SearchLifecycle, error) { return lifecycle, nil })
+
+			if err := entry.Execute(tt.args); err != nil {
+				t.Fatalf("Execute(%q) error = %v", tt.args, err)
+			}
+			if got := stdout.String(); got != tt.want {
+				t.Fatalf("stdout = %q, want %q", got, tt.want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
 	}
 }
 

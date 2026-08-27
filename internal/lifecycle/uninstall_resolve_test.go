@@ -13,7 +13,7 @@ func TestResolveUninstallPower(t *testing.T) {
 	tests := []struct {
 		name    string
 		flags   cli.Flags
-		groups  domain.PowerGroups
+		groups  domain.InstalledPowerGroups
 		want    domain.PowerRef
 		found   bool
 		wantErr string
@@ -21,9 +21,9 @@ func TestResolveUninstallPower(t *testing.T) {
 		{
 			name:  "exact name and inferred type",
 			flags: cli.Flags{Name: "Demo"},
-			groups: domain.PowerGroups{domain.PowerTypeSkill: {
-				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
-				{Type: domain.PowerTypeSkill, Name: "Demo", Version: "v2.0.0"},
+			groups: domain.InstalledPowerGroups{domain.PowerTypeSkill: {
+				{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}},
+				{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "Demo", Version: "v2.0.0"}},
 			}},
 			want:  domain.PowerRef{Type: domain.PowerTypeSkill, Name: "Demo", Version: "v2.0.0"},
 			found: true,
@@ -31,17 +31,17 @@ func TestResolveUninstallPower(t *testing.T) {
 		{
 			name:  "explicit type does not fall back",
 			flags: cli.Flags{Name: "demo", Type: "plugin"},
-			groups: domain.PowerGroups{domain.PowerTypeSkill: {
-				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+			groups: domain.InstalledPowerGroups{domain.PowerTypeSkill: {
+				{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}},
 			}},
 			found: false,
 		},
 		{
 			name:  "explicit type uses first duplicate in manifest order",
 			flags: cli.Flags{Name: "demo", Type: "skill"},
-			groups: domain.PowerGroups{domain.PowerTypeSkill: {
-				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
-				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+			groups: domain.InstalledPowerGroups{domain.PowerTypeSkill: {
+				{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"}},
+				{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}},
 			}},
 			want:  domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
 			found: true,
@@ -49,9 +49,9 @@ func TestResolveUninstallPower(t *testing.T) {
 		{
 			name:  "inferred type uses first duplicate in manifest order",
 			flags: cli.Flags{Name: "demo"},
-			groups: domain.PowerGroups{domain.PowerTypeSkill: {
-				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
-				{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+			groups: domain.InstalledPowerGroups{domain.PowerTypeSkill: {
+				{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"}},
+				{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}},
 			}},
 			want:  domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
 			found: true,
@@ -59,29 +59,29 @@ func TestResolveUninstallPower(t *testing.T) {
 		{
 			name:  "same agent cross type ambiguity",
 			flags: cli.Flags{Name: "demo"},
-			groups: domain.PowerGroups{
-				domain.PowerTypeSkill:  {{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}},
-				domain.PowerTypePlugin: {{Type: domain.PowerTypePlugin, Name: "demo", Version: "v2.0.0"}},
+			groups: domain.InstalledPowerGroups{
+				domain.PowerTypeSkill:  {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}}},
+				domain.PowerTypePlugin: {{Ref: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "demo", Version: "v2.0.0"}}},
 			},
 			wantErr: "multiple power types [plugin skill]; specify --type",
 		},
 		{
 			name:  "cross type ambiguity lists each type once",
 			flags: cli.Flags{Name: "demo"},
-			groups: domain.PowerGroups{
+			groups: domain.InstalledPowerGroups{
 				domain.PowerTypeSkill: {
-					{Type: domain.PowerTypeSkill, Name: "demo", Version: "v3.0.0"},
-					{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
+					{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v3.0.0"}},
+					{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"}},
 				},
-				domain.PowerTypePlugin: {{Type: domain.PowerTypePlugin, Name: "demo", Version: "v1.0.0"}},
+				domain.PowerTypePlugin: {{Ref: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "demo", Version: "v1.0.0"}}},
 			},
 			wantErr: "multiple power types [plugin skill]; specify --type",
 		},
 		{
 			name:  "no exact name",
 			flags: cli.Flags{Name: "Demo"},
-			groups: domain.PowerGroups{
-				domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}},
+			groups: domain.InstalledPowerGroups{
+				domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}}},
 			},
 			found: false,
 		},
@@ -115,11 +115,11 @@ func TestResolveUninstallPower(t *testing.T) {
 }
 
 func TestResolveUninstallPowerResolvesAgentsIndependently(t *testing.T) {
-	agentAGroups := domain.PowerGroups{
-		domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}},
+	agentAGroups := domain.InstalledPowerGroups{
+		domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}}},
 	}
-	agentBGroups := domain.PowerGroups{
-		domain.PowerTypePlugin: {{Type: domain.PowerTypePlugin, Name: "demo", Version: "v2.0.0"}},
+	agentBGroups := domain.InstalledPowerGroups{
+		domain.PowerTypePlugin: {{Ref: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "demo", Version: "v2.0.0"}}},
 	}
 	wantAgentA := clonePowerGroups(agentAGroups)
 	wantAgentB := clonePowerGroups(agentBGroups)
@@ -141,10 +141,10 @@ func TestResolveUninstallPowerResolvesAgentsIndependently(t *testing.T) {
 	}
 }
 
-func clonePowerGroups(groups domain.PowerGroups) domain.PowerGroups {
-	clone := make(domain.PowerGroups, len(groups))
+func clonePowerGroups(groups domain.InstalledPowerGroups) domain.InstalledPowerGroups {
+	clone := make(domain.InstalledPowerGroups, len(groups))
 	for powerType, refs := range groups {
-		clone[powerType] = append([]domain.PowerRef(nil), refs...)
+		clone[powerType] = append([]domain.InstalledPower(nil), refs...)
 	}
 	return clone
 }

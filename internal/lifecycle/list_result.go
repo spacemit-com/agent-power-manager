@@ -15,7 +15,7 @@ func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.L
 		if flags.Type != "" && entry.Ref.Type != domain.PowerType(flags.Type) {
 			continue
 		}
-		powers = append(powers, cli.ListedPower{Power: entry.Ref})
+		powers = append(powers, cli.ListedPower{Power: entry.Ref, Description: entry.Description, Tags: entry.Tags})
 	}
 
 	sortListedPowers(powers)
@@ -26,12 +26,12 @@ func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.L
 func makeInstalledListResult(flags cli.Flags, inputs []agentPowerGroups) cli.ListResult {
 	powers := make([]cli.ListedPower, 0)
 	for _, input := range inputs {
-		for _, refs := range input.groups {
-			for _, ref := range refs {
-				if flags.Type != "" && ref.Type != domain.PowerType(flags.Type) {
+		for _, installed := range input.groups {
+			for _, power := range installed {
+				if flags.Type != "" && power.Ref.Type != domain.PowerType(flags.Type) {
 					continue
 				}
-				powers = append(powers, cli.ListedPower{Agent: input.agent, Power: ref})
+				powers = append(powers, cli.ListedPower{Agent: input.agent, Power: power.Ref, Description: power.Description, Tags: power.Tags})
 			}
 		}
 	}

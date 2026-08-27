@@ -20,7 +20,7 @@ import (
 type uninstallFixture struct {
 	recovery              transaction.RecoveryResult
 	snapshot              domain.AgentSnapshot
-	groups                map[domain.AgentID]domain.PowerGroups
+	groups                map[domain.AgentID]domain.InstalledPowerGroups
 	transactionResults    map[domain.AgentID]transaction.UninstallResult
 	transactionMCPResults map[domain.AgentID]transaction.UninstallResult
 	mcpPresence           map[domain.AgentID]adapter.MCPPresence
@@ -261,16 +261,16 @@ type uninstallFakeConfig struct {
 	fixture *uninstallFixture
 }
 
-func (c *uninstallFakeConfig) List(agent domain.AgentID) (domain.PowerGroups, error) {
+func (c *uninstallFakeConfig) List(agent domain.AgentID) (domain.InstalledPowerGroups, error) {
 	recordUninstallEvent(c.calls, c.fixture, "config:"+string(agent))
 	return c.fixture.groups[agent], c.fixture.configErrors[agent]
 }
 
-func (*uninstallFakeConfig) Find(domain.AgentID, domain.PowerType, string) (domain.PowerRef, bool, error) {
-	return domain.PowerRef{}, false, nil
+func (*uninstallFakeConfig) Find(domain.AgentID, domain.PowerType, string) (domain.InstalledPower, bool, error) {
+	return domain.InstalledPower{}, false, nil
 }
 
-func (*uninstallFakeConfig) Set(domain.AgentID, domain.PowerRef) error { return nil }
+func (*uninstallFakeConfig) Set(domain.AgentID, domain.InstalledPower) error { return nil }
 
 func (c *uninstallFakeConfig) Remove(agent domain.AgentID, powerType domain.PowerType, name string) error {
 	recordUninstallEvent(c.calls, c.fixture, "config:remove:"+string(agent)+":"+string(powerType)+":"+name)
@@ -305,8 +305,8 @@ func uninstallTargetFixture() uninstallFixture {
 	target := uninstallTarget()
 	return uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentCodex: {domain.PowerTypeSkill: {target}},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentCodex: {domain.PowerTypeSkill: {domain.InstalledPower{Ref: target}}},
 		},
 	}
 }

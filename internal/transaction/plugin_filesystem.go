@@ -138,7 +138,8 @@ func (s *Service) installFilesystemPlugin(ctx context.Context, request PluginIns
 	}
 	journal := Journal{
 		SchemaVersion: 1, TransactionID: id, Driver: DriverPlugin, Operation: OperationInstall,
-		Phase: phase, Agent: request.Agent, Power: request.Power, Previous: clonePowerRef(request.Previous),
+		Phase: phase, Agent: request.Agent, Power: request.Power, Description: request.Description, Tags: request.Tags,
+		Previous: clonePowerRef(request.Previous),
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentFilesystem,
 			Target:     request.Target,
@@ -209,7 +210,7 @@ func (s *Service) installFilesystemPlugin(ctx context.Context, request PluginIns
 	if err := s.journals.Update(journal); err != nil {
 		return fmt.Errorf("persist filesystem Plugin committing: %w", err)
 	}
-	if err := s.manifests.Set(request.Agent, request.Power); err != nil {
+	if err := s.manifests.Set(request.Agent, domain.InstalledPower{Ref: request.Power, Description: request.Description, Tags: request.Tags}); err != nil {
 		return fmt.Errorf("set filesystem Plugin manifest: %w", err)
 	}
 	if err := s.files.removeAll(artifacts.previous); err != nil {

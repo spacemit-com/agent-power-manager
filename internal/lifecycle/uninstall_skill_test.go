@@ -100,9 +100,9 @@ func TestUninstallTransactionFailureSuppressesLaterAgentAndKeepsResolvedPower(t 
 	later := domain.AgentClaudeCode
 	fixture := uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex, later}},
-		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentCodex: {domain.PowerTypeSkill: {ref}},
-			later:             {domain.PowerTypeSkill: {ref}},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentCodex: {domain.PowerTypeSkill: {domain.InstalledPower{Ref: ref}}},
+			later:             {domain.PowerTypeSkill: {domain.InstalledPower{Ref: ref}}},
 		},
 		transactionErrors: map[domain.AgentID]error{domain.AgentCodex: cause},
 	}

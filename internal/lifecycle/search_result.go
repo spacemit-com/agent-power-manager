@@ -17,42 +17,42 @@ type searchPowerKey struct {
 	name      string
 }
 
-// catalogRefs 将不可变目录条目映射为保留既有输出结构的 Power 引用。
-func catalogRefs(entries []domain.CatalogEntry) []domain.PowerRef {
-	refs := make([]domain.PowerRef, len(entries))
+// catalogPowers 将不可变目录条目复制为保留 description 与 tags 的 CLI 列表记录。
+func catalogPowers(entries []domain.CatalogEntry) []cli.ListedPower {
+	powers := make([]cli.ListedPower, len(entries))
 	for index, entry := range entries {
-		refs[index] = entry.Ref
+		powers[index] = cli.ListedPower{Power: entry.Ref, Description: entry.Description, Tags: entry.Tags}
 	}
-	return refs
+	return powers
 }
 
-func filterSearchPowers(flags cli.Flags, refs []domain.PowerRef) []domain.PowerRef {
+func filterSearchPowers(flags cli.Flags, powers []cli.ListedPower) []cli.ListedPower {
 	keyword := searchFold.String(strings.TrimSpace(flags.Keyword))
-	latest := make(map[searchPowerKey]domain.PowerRef)
+	latest := make(map[searchPowerKey]cli.ListedPower)
 
-	for _, ref := range refs {
-		if flags.Type != "" && ref.Type != domain.PowerType(flags.Type) {
+	for _, power := range powers {
+		if flags.Type != "" && power.Power.Type != domain.PowerType(flags.Type) {
 			continue
 		}
-		if !strings.Contains(searchFold.String(ref.Name), keyword) {
+		if !strings.Contains(searchFold.String(power.Power.Name), keyword) {
 			continue
 		}
-		key := searchPowerKey{powerType: ref.Type, name: ref.Name}
+		key := searchPowerKey{powerType: power.Power.Type, name: power.Power.Name}
 		current, found := latest[key]
-		if !found || semver.MustParse(ref.Version).GreaterThan(semver.MustParse(current.Version)) {
-			latest[key] = ref
+		if !found || semver.MustParse(power.Power.Version).GreaterThan(semver.MustParse(current.Power.Version)) {
+			latest[key] = power
 		}
 	}
 
-	powers := make([]domain.PowerRef, 0, len(latest))
-	for _, ref := range latest {
-		powers = append(powers, ref)
+	result := make([]cli.ListedPower, 0, len(latest))
+	for _, power := range latest {
+		result = append(result, power)
 	}
-	sort.SliceStable(powers, func(i, j int) bool {
-		if powers[i].Type != powers[j].Type {
-			return powers[i].Type < powers[j].Type
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Power.Type != result[j].Power.Type {
+			return result[i].Power.Type < result[j].Power.Type
 		}
-		return powers[i].Name < powers[j].Name
+		return result[i].Power.Name < result[j].Power.Name
 	})
-	return powers
+	return result
 }

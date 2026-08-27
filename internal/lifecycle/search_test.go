@@ -140,7 +140,7 @@ func TestSearchInspectsBeforeTakingOneCatalogSnapshot(t *testing.T) {
 	if want := []string{"inspect", "catalog-snapshot"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
-	if want := []domain.PowerRef{{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}}; !reflect.DeepEqual(result.Powers, want) {
+	if want := []cli.ListedPower{{Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v2.0.0"}, Description: "test power", Tags: []string{}}}; !reflect.DeepEqual(result.Powers, want) {
 		t.Fatalf("result.Powers = %#v, want %#v", result.Powers, want)
 	}
 }

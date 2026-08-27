@@ -109,8 +109,8 @@ func uninstallMCPFixture(presence adapter.MCPPresence) uninstallFixture {
 	ref := uninstallMCPRef()
 	return uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentCodex: {domain.PowerTypeMCP: {ref}},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentCodex: {domain.PowerTypeMCP: {domain.InstalledPower{Ref: ref}}},
 		},
 		mcpPresence: map[domain.AgentID]adapter.MCPPresence{domain.AgentCodex: presence},
 	}

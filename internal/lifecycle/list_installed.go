@@ -11,7 +11,7 @@ import (
 // agentPowerGroups 保存单个 Agent 的已安装能力分组。
 type agentPowerGroups struct {
 	agent  domain.AgentID
-	groups domain.PowerGroups
+	groups domain.InstalledPowerGroups
 }
 
 func installedListAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.AgentID, error) {

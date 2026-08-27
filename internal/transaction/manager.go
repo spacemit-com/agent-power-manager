@@ -66,6 +66,8 @@ type AdapterResolver interface {
 type SkillInstallRequest struct {
 	Agent       domain.AgentID
 	Power       domain.PowerRef
+	Description string
+	Tags        []string
 	Previous    *domain.PowerRef
 	StagingRoot string
 	Adapter     adapter.SkillAdapter
@@ -82,6 +84,8 @@ type SkillUninstallRequest struct {
 type AgentInstallRequest struct {
 	Agent       domain.AgentID
 	Power       domain.PowerRef
+	Description string
+	Tags        []string
 	Previous    *domain.PowerRef
 	StagingRoot string
 	Adapter     adapter.AgentAdapter
@@ -98,6 +102,8 @@ type AgentUninstallRequest struct {
 type MCPInstallRequest struct {
 	Agent          domain.AgentID
 	Power          domain.PowerRef
+	Description    string
+	Tags           []string
 	Previous       *domain.PowerRef
 	Server         *domain.MCPServer
 	PreviousServer *domain.MCPServer
@@ -122,6 +128,8 @@ type PluginMarketplaceInstallRequest struct {
 type PluginInstallRequest struct {
 	Agent          domain.AgentID
 	Power          domain.PowerRef
+	Description    string
+	Tags           []string
 	Previous       *domain.PowerRef
 	StagingRoot    string
 	Adapter        adapter.PluginAdapter
@@ -147,7 +155,7 @@ type UninstallResult struct {
 
 // ManifestWriter 定义提交后的清单写入，以及安装预检发现陈旧清单时不创建 journal 的单条移除操作。
 type ManifestWriter interface {
-	Set(domain.AgentID, domain.PowerRef) error
+	Set(domain.AgentID, domain.InstalledPower) error
 	Remove(domain.AgentID, domain.PowerType, string) error
 }
 

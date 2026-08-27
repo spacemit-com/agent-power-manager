@@ -38,19 +38,15 @@ func newSearchCommand(newLifecycle SearchLifecycleFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return renderSearch(command.OutOrStdout(), result)
+			return renderSearch(command.OutOrStdout(), result, flags)
 		},
 	}
 	bindTypeFlag(command, &flags)
+	command.Flags().BoolVarP(&flags.All, "all", "a", false, "show description and tags")
+	command.Flags().BoolVar(&flags.JSON, "json", false, "machine-readable JSON output")
 	return command
 }
 
-func renderSearch(writer io.Writer, result SearchResult) error {
-	for _, ref := range result.Powers {
-		line := string(ref.Type) + "/" + ref.Name + "@" + ref.Version + "\n"
-		if _, err := io.WriteString(writer, line); err != nil {
-			return fmt.Errorf("write search result: %w", err)
-		}
-	}
-	return nil
+func renderSearch(writer io.Writer, result SearchResult, flags Flags) error {
+	return renderPowers(writer, result.Powers, flags.All, flags.JSON)
 }

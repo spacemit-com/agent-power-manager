@@ -82,16 +82,20 @@ type recordingManifestWriter struct {
 	setErr       error
 	removeErr    error
 	setRef       domain.PowerRef
+	setDesc      string
+	setTags      []string
 	removedAgent domain.AgentID
 	removed      domain.PowerRef
 }
 
-func (w *recordingManifestWriter) Set(_ domain.AgentID, ref domain.PowerRef) error {
+func (w *recordingManifestWriter) Set(_ domain.AgentID, power domain.InstalledPower) error {
 	*w.events = append(*w.events, "manifest:set")
 	if w.setErr != nil {
 		return w.setErr
 	}
-	w.setRef = ref
+	w.setRef = power.Ref
+	w.setDesc = power.Description
+	w.setTags = power.Tags
 	return nil
 }
 func (w *recordingManifestWriter) Remove(agent domain.AgentID, powerType domain.PowerType, name string) error {
@@ -189,6 +193,31 @@ func TestInstallFirstInstallPublishesSetsManifestAndCleansJournal(t *testing.T) 
 		t.Fatalf("Set ref = %+v", fixture.manifests.setRef)
 	}
 	assertEventSubsequence(t, fixture.events, []string{"create:preparing", "update:publishing", "adapter:install", "update:committing", "manifest:set", "delete:journal"})
+}
+
+func TestInstallSkillPersistsDescriptionAndTagsIntoManifestAndJournal(t *testing.T) {
+	fixture := newInstallFixture(t)
+	if err := os.MkdirAll(fixture.staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture.request.Description = "demo skill summary"
+	fixture.request.Tags = []string{"alpha", "beta"}
+	if err := fixture.service.InstallSkill(context.Background(), fixture.request); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.manifests.setDesc != "demo skill summary" {
+		t.Fatalf("Set description = %q, want %q", fixture.manifests.setDesc, "demo skill summary")
+	}
+	if !reflect.DeepEqual(fixture.manifests.setTags, []string{"alpha", "beta"}) {
+		t.Fatalf("Set tags = %#v, want [alpha beta]", fixture.manifests.setTags)
+	}
+	// journal 需持久化元数据，离线恢复才能重放同一份 description/tags 到清单。
+	if got := fixture.journals.journal.Description; got != "demo skill summary" {
+		t.Fatalf("journal description = %q, want %q", got, "demo skill summary")
+	}
+	if !reflect.DeepEqual(fixture.journals.journal.Tags, []string{"alpha", "beta"}) {
+		t.Fatalf("journal tags = %#v, want [alpha beta]", fixture.journals.journal.Tags)
+	}
 }
 
 func TestInstallUpgradeBacksUpOldTargetBeforePublishing(t *testing.T) {

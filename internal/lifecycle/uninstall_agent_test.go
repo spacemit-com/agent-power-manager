@@ -18,8 +18,8 @@ func TestUninstallPluginDispatchesThroughPluginAdapterOnly(t *testing.T) {
 	var calls []string
 	service := newUninstallService(t, &calls, uninstallFixture{
 		snapshot: domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		groups: map[domain.AgentID]domain.PowerGroups{
-			domain.AgentCodex: {domain.PowerTypePlugin: {ref}},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentCodex: {domain.PowerTypePlugin: {domain.InstalledPower{Ref: ref}}},
 		},
 		marketplaceFacts: map[string]adapter.MarketplaceFact{
 			"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},

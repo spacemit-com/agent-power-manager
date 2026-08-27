@@ -21,7 +21,7 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 		return cli.InstallItem{}, fmt.Errorf("find installed Plugin %+v for agent %q: %w", ref, agent, err)
 	}
 	manifest := manifestAbsent
-	if installed && previous.Version == ref.Version {
+	if installed && previous.Ref.Version == ref.Version {
 		manifest = manifestSameVersion
 	} else if installed {
 		manifest = manifestDifferentVersion
@@ -46,9 +46,9 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 		if !ok {
 			return cli.InstallItem{}, fmt.Errorf("resolve marketplace Plugin adapter for agent %q: %w", agent, adapter.ErrUnsupportedAdapter)
 		}
-		return s.installMarketplacePlugin(ctx, agent, entry, ref, previous, manifest, target, pluginAdapter, marketplaceAdapter)
+		return s.installMarketplacePlugin(ctx, agent, entry, ref, previous.Ref, manifest, target, pluginAdapter, marketplaceAdapter)
 	case domain.PluginDeploymentFilesystem:
-		return s.installFilesystemPlugin(ctx, agent, entry, ref, previous, manifest, target, pluginAdapter)
+		return s.installFilesystemPlugin(ctx, agent, entry, ref, previous.Ref, manifest, target, pluginAdapter)
 	default:
 		return cli.InstallItem{}, fmt.Errorf("unsupported Plugin deployment %q: %w", pluginAdapter.DeploymentMode(), adapter.ErrUnsupportedAdapter)
 	}
@@ -141,7 +141,7 @@ func (s *InstallService) installMarketplacePluginFresh(
 		return cli.InstallItem{}, fmt.Errorf("resolve target Plugin marketplace for agent %q: %w", agent, err)
 	}
 	request := transaction.PluginInstallRequest{
-		Agent: agent, Power: ref, Adapter: pluginAdapter,
+		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, Adapter: pluginAdapter,
 		Target: target,
 		Marketplace: &transaction.PluginMarketplaceInstallRequest{
 			Target: marketplaceTarget(targetMarketplace), Adapter: marketplaceAdapter,
@@ -194,7 +194,7 @@ func (s *InstallService) installMarketplacePluginReplace(
 	previousTarget := adapter.PluginTarget{ActualName: previousName, Selector: previousName}
 	previousMarketplace := marketplaceTarget(previousMarketplaceResource)
 	request := transaction.PluginInstallRequest{
-		Agent: agent, Power: ref, Previous: powerRefPointer(previous), Adapter: pluginAdapter,
+		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, Previous: powerRefPointer(previous), Adapter: pluginAdapter,
 		Target:         target,
 		PreviousTarget: &previousTarget,
 		Marketplace: &transaction.PluginMarketplaceInstallRequest{
@@ -284,7 +284,7 @@ func (s *InstallService) installFilesystemPluginPublish(
 		return cli.InstallItem{}, fmt.Errorf("stage filesystem Plugin artifact %+v: %w", ref, err)
 	}
 	request := transaction.PluginInstallRequest{
-		Agent: agent, Power: ref, StagingRoot: staging, Adapter: pluginAdapter,
+		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, StagingRoot: staging, Adapter: pluginAdapter,
 		Target: target,
 	}
 	if previous != nil {

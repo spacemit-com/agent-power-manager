@@ -31,8 +31,8 @@ func TestJSONRepositoryWriteRejectsInvalidVersionWithoutChangingTarget(t *testin
 		t.Fatal(err)
 	}
 
-	err = (&JSONRepository{}).write(domain.AgentCodex, domain.PowerGroups{
-		domain.PowerTypeSkill: {{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.2"}},
+	err = (&JSONRepository{}).write(domain.AgentCodex, domain.InstalledPowerGroups{
+		domain.PowerTypeSkill: {domain.InstalledPower{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.2"}}},
 	})
 	if !errors.Is(err, ErrInvalidPower) {
 		t.Fatalf("write() error = %v, want ErrInvalidPower", err)
@@ -60,8 +60,8 @@ func TestJSONRepositoryWriteRenameFailurePreservesTargetAndCleansTemporaryFile(t
 		t.Fatal(err)
 	}
 
-	err = (&JSONRepository{}).write("codex", domain.PowerGroups{
-		domain.PowerTypeSkill:  {{Name: "power", Type: domain.PowerTypeSkill, Version: "v1.0.0"}},
+	err = (&JSONRepository{}).write("codex", domain.InstalledPowerGroups{
+		domain.PowerTypeSkill:  {domain.InstalledPower{Ref: domain.PowerRef{Name: "power", Type: domain.PowerTypeSkill, Version: "v1.0.0"}}},
 		domain.PowerTypePlugin: {},
 		domain.PowerTypeMCP:    {},
 	})

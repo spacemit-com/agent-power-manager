@@ -117,10 +117,22 @@ type Journal struct {
 	Phase         Phase                     `json:"phase"`
 	Agent         domain.AgentID            `json:"agent"`
 	Power         domain.PowerRef           `json:"power"`
+	Description   string                    `json:"description,omitempty"`
+	Tags          []string                  `json:"tags,omitempty"`
 	Previous      *domain.PowerRef          `json:"previous,omitempty"`
 	Filesystem    *FilesystemJournalPayload `json:"filesystem,omitempty"`
 	AgentCLI      *AgentCLIJournalPayload   `json:"agent_cli,omitempty"`
 	Plugin        *PluginJournalPayload     `json:"plugin,omitempty"`
+}
+
+// installedPower 将 journal 的身份与安装时捕获的发布元数据组合为清单条目，
+// 供安装提交与恢复重放写入清单时复用同一份数据。
+func (journal Journal) installedPower() domain.InstalledPower {
+	return domain.InstalledPower{
+		Ref:         journal.Power,
+		Description: journal.Description,
+		Tags:        journal.Tags,
+	}
 }
 
 // RecoveryDirection 表示恢复器固定的收敛方向。

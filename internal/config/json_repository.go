@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 
 	"github.com/Masterminds/semver/v3"
 
@@ -24,57 +25,57 @@ func NewJSONRepository() *JSONRepository {
 	return &JSONRepository{}
 }
 
-// List 返回指定智能体按类别组织的能力引用。
-func (r *JSONRepository) List(agent domain.AgentID) (domain.PowerGroups, error) {
+// List 返回指定智能体按类别组织的已安装 Power 清单。
+func (r *JSONRepository) List(agent domain.AgentID) (domain.InstalledPowerGroups, error) {
 	groups, err := r.read("List", agent)
 	if err != nil {
 		return nil, fmt.Errorf("List agent %q: %w", agent, err)
 	}
-	return clonePowerGroups(groups), nil
+	return cloneInstalledPowerGroups(groups), nil
 }
 
-// Find 返回指定智能体中第一个匹配的能力引用。
-func (r *JSONRepository) Find(agent domain.AgentID, powerType domain.PowerType, name string) (domain.PowerRef, bool, error) {
+// Find 返回指定智能体中第一个匹配的已安装 Power。
+func (r *JSONRepository) Find(agent domain.AgentID, powerType domain.PowerType, name string) (domain.InstalledPower, bool, error) {
 	if !validPowerType(powerType) {
-		return domain.PowerRef{}, false, fmt.Errorf("Find agent %q: invalid power type %q: %w", agent, powerType, ErrInvalidPower)
+		return domain.InstalledPower{}, false, fmt.Errorf("Find agent %q: invalid power type %q: %w", agent, powerType, ErrInvalidPower)
 	}
 	if name == "" {
-		return domain.PowerRef{}, false, fmt.Errorf("Find agent %q: empty power name: %w", agent, ErrInvalidPower)
+		return domain.InstalledPower{}, false, fmt.Errorf("Find agent %q: empty power name: %w", agent, ErrInvalidPower)
 	}
 
 	groups, err := r.read("Find", agent)
 	if err != nil {
-		return domain.PowerRef{}, false, fmt.Errorf("Find agent %q: %w", agent, err)
+		return domain.InstalledPower{}, false, fmt.Errorf("Find agent %q: %w", agent, err)
 	}
 	for _, power := range groups[powerType] {
-		if power.Name == name {
-			return power, true, nil
+		if power.Ref.Name == name {
+			return power.Clone(), true, nil
 		}
 	}
-	return domain.PowerRef{}, false, nil
+	return domain.InstalledPower{}, false, nil
 }
 
-// Set 新增或替换指定智能体的能力引用。
-func (r *JSONRepository) Set(agent domain.AgentID, power domain.PowerRef) error {
-	if !validPowerType(power.Type) {
-		return fmt.Errorf("Set agent %q: invalid power type %q: %w", agent, power.Type, ErrInvalidPower)
+// Set 新增或替换指定智能体的已安装 Power；Description 与 Tags 随身份一并持久化。
+func (r *JSONRepository) Set(agent domain.AgentID, power domain.InstalledPower) error {
+	if !validPowerType(power.Ref.Type) {
+		return fmt.Errorf("Set agent %q: invalid power type %q: %w", agent, power.Ref.Type, ErrInvalidPower)
 	}
-	if power.Name == "" {
+	if power.Ref.Name == "" {
 		return fmt.Errorf("Set agent %q: empty power name: %w", agent, ErrInvalidPower)
 	}
-	if err := validateCanonicalVersion(power.Version); err != nil {
-		return fmt.Errorf("Set agent %q power %q version %q: %w", agent, power.Name, power.Version, err)
+	if err := validateCanonicalVersion(power.Ref.Version); err != nil {
+		return fmt.Errorf("Set agent %q power %q version %q: %w", agent, power.Ref.Name, power.Ref.Version, err)
 	}
 
 	groups, err := r.read("Set", agent)
 	if err != nil {
 		return fmt.Errorf("Set agent %q: %w", agent, err)
 	}
-	powers := groups[power.Type]
+	powers := groups[power.Ref.Type]
 	firstMatch := -1
 	matchCount := 0
 	for index, candidate := range powers {
-		if candidate.Name != power.Name {
+		if candidate.Ref.Name != power.Ref.Name {
 			continue
 		}
 		if firstMatch == -1 {
@@ -82,34 +83,39 @@ func (r *JSONRepository) Set(agent domain.AgentID, power domain.PowerRef) error 
 		}
 		matchCount++
 	}
-	if matchCount == 1 && powers[firstMatch] == power {
+	if matchCount == 1 && installedPowerEqual(powers[firstMatch], power) {
 		slog.Debug(
 			"power already set",
 			logging.Agent(agent),
-			logging.Power(power.Name),
-			logging.Version(power.Version),
+			logging.Power(power.Ref.Name),
+			logging.Version(power.Ref.Version),
 		)
 		return nil
 	}
 
 	if firstMatch == -1 {
-		groups[power.Type] = append(powers, power)
+		groups[power.Ref.Type] = append(powers, power.Clone())
 	} else {
-		updated := make([]domain.PowerRef, 0, len(powers)-matchCount+1)
+		updated := make([]domain.InstalledPower, 0, len(powers)-matchCount+1)
 		for index, candidate := range powers {
 			switch {
 			case index == firstMatch:
-				updated = append(updated, power)
-			case candidate.Name != power.Name:
+				updated = append(updated, power.Clone())
+			case candidate.Ref.Name != power.Ref.Name:
 				updated = append(updated, candidate)
 			}
 		}
-		groups[power.Type] = updated
+		groups[power.Ref.Type] = updated
 	}
 	if err := r.write(agent, groups); err != nil {
 		return fmt.Errorf("Set agent %q: %w", agent, err)
 	}
 	return nil
+}
+
+// installedPowerEqual 比较两条清单条目的身份与发布元数据是否一致；Tags 使用切片内容比较。
+func installedPowerEqual(left, right domain.InstalledPower) bool {
+	return left.Ref == right.Ref && left.Description == right.Description && slices.Equal(left.Tags, right.Tags)
 }
 
 // Remove 删除指定智能体目标类别中的全部同名能力引用。
@@ -126,10 +132,10 @@ func (r *JSONRepository) Remove(agent domain.AgentID, powerType domain.PowerType
 		return fmt.Errorf("Remove agent %q: %w", agent, err)
 	}
 	powers := groups[powerType]
-	filtered := make([]domain.PowerRef, 0, len(powers))
+	filtered := make([]domain.InstalledPower, 0, len(powers))
 	found := false
 	for _, power := range powers {
-		if power.Name == name {
+		if power.Ref.Name == name {
 			found = true
 			continue
 		}
@@ -165,19 +171,19 @@ func validateCanonicalVersion(version string) error {
 	return nil
 }
 
-func validatePowerGroups(operation string, agent domain.AgentID, groups domain.PowerGroups) error {
+func validateInstalledPowerGroups(operation string, agent domain.AgentID, groups domain.InstalledPowerGroups) error {
 	for _, powerType := range []domain.PowerType{domain.PowerTypeSkill, domain.PowerTypeAgent, domain.PowerTypePlugin, domain.PowerTypeMCP} {
 		for index, power := range groups[powerType] {
-			if err := validateCanonicalVersion(power.Version); err != nil {
+			if err := validateCanonicalVersion(power.Ref.Version); err != nil {
 				return fmt.Errorf("%s agent %q type %q entry %d power %q version %q: %w",
-					operation, agent, powerType, index, power.Name, power.Version, err)
+					operation, agent, powerType, index, power.Ref.Name, power.Ref.Version, err)
 			}
 		}
 	}
 	return nil
 }
 
-func (r *JSONRepository) read(operation string, agent domain.AgentID) (domain.PowerGroups, error) {
+func (r *JSONRepository) read(operation string, agent domain.AgentID) (domain.InstalledPowerGroups, error) {
 	path, err := paths.ManifestPath(agent)
 	if err != nil {
 		return nil, fmt.Errorf("resolve manifest path for agent %q: %w", agent, err)
@@ -186,7 +192,7 @@ func (r *JSONRepository) read(operation string, agent domain.AgentID) (domain.Po
 
 	contents, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return emptyPowerGroups(), nil
+		return emptyInstalledPowerGroups(), nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read manifest %q for agent %q: %w", path, agent, err)
@@ -202,18 +208,18 @@ func (r *JSONRepository) read(operation string, agent domain.AgentID) (domain.Po
 	if document.Agent != agent {
 		return nil, fmt.Errorf("decode manifest %q for agent %q: document agent %q does not match", path, agent, document.Agent)
 	}
-	groups := manifestToPowerGroups(document)
-	if err := validatePowerGroups(operation, agent, groups); err != nil {
+	groups := manifestToInstalledPowerGroups(document)
+	if err := validateInstalledPowerGroups(operation, agent, groups); err != nil {
 		return nil, err
 	}
 	return groups, nil
 }
 
-func (r *JSONRepository) write(agent domain.AgentID, groups domain.PowerGroups) (resultErr error) {
-	if err := validatePowerGroups("write", agent, groups); err != nil {
+func (r *JSONRepository) write(agent domain.AgentID, groups domain.InstalledPowerGroups) (resultErr error) {
+	if err := validateInstalledPowerGroups("write", agent, groups); err != nil {
 		return err
 	}
-	document := powerGroupsToManifest(agent, groups)
+	document := installedPowerGroupsToManifest(agent, groups)
 	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode manifest for agent %q: %w", agent, err)
