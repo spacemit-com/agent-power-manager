@@ -402,7 +402,7 @@ GET /api/v1/resources/{type}/{name}/versions/{version}/content
 ### 11.4 Provider contract
 
 - Local/Remote 产生并消费相同 Catalog JSON/domain 契约；
-- Remote version/catalog 无 Bearer，Submission Bearer 隔离保持；
+- Remote version/catalog 无凭据，Submission `X-API-Key` 隔离保持；
 - content type/size/MD5 与 entry 一致；下架竞争返回 410；
 - 严格 fake 证明旧分页/latest/exact-metadata endpoint 零调用；
 - 生产扫描不存在已删除接口、cursor 或 DTO。

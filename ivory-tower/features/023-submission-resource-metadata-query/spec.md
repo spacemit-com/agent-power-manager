@@ -12,6 +12,8 @@
 > 完整目录资源，权威 content 为确定性 `.tar.gz` 归档，根含 `agent.yaml` 与可选 `assets/`），当前实现
 > 与接口以 Feature 026/ADR-023 为准；本文的 Submission 查询、认证与元数据契约中未被修改的部分继续有效。
 
+> 局部取代说明：本文的 Submission 认证 wire 描述（`Authorization: Bearer`）为落定时的历史设计，已由 [Feature 028](../028-apc-api-adaptation/spec.md) 与 [ADR-025](../../adr/ADR-025-apc-api-client-contract.md) 取代（Submission 仅发送 `X-API-Key`，匿名资源接口不携带任何凭据），当前实现与接口以二者为准。
+
 - Status：Accepted
 - Date：2026-08-24
 - Related ADRs：[ADR-020](../../adr/ADR-020-source-owned-submission-metadata.md)、APC [ADR-003](../../../../apc/ivory-tower/adr/ADR-003-bound-active-submission-query.md)

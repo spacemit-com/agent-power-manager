@@ -27,11 +27,11 @@ go build -o ./apm ./cmd/apm
 
 ## Cloud Provider 配置
 
-APM 把 Local 与 Remote provider 静态链接到同一个二进制，并由 `cmd/apm` 的 `newCloudClient` 在每次 lifecycle 构造时创建独立 `ProviderRegistry`、注册 factory 后只打开被选中的 provider（[ADR-016](ivory-tower/adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）。默认 provider 是 `remote`，当前开发默认 APC 地址为 `http://127.0.0.1:8080`：
+APM 把 Local 与 Remote provider 静态链接到同一个二进制，并由 `cmd/apm` 的 `newCloudClient` 在每次 lifecycle 构造时创建独立 `ProviderRegistry`、注册 factory 后只打开被选中的 provider（[ADR-016](ivory-tower/adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）。默认 provider 是 `remote`，默认 APC 测试环境根地址为 `https://developer.bianbu.xyz`（[ADR-025](ivory-tower/adr/ADR-025-apc-api-client-contract.md)）：
 
 ```bash
-# 默认 Remote（当前开发默认 APC 地址）
-APC_BASE_URL=http://127.0.0.1:8080 ./apm list
+# 默认 Remote（默认 APC 测试环境根地址，可用 APC_BASE_URL 覆盖）
+APC_BASE_URL=https://developer.bianbu.xyz ./apm list
 
 # 显式 Local canonical fixture
 APM_CLOUD_PROVIDER=local \
@@ -42,7 +42,7 @@ APM_CLOUD_LOCAL_ROOT="$(pwd)/internal/cloud/resources" \
 | 环境变量 | 默认值与约束 |
 | --- | --- |
 | `APM_CLOUD_PROVIDER` | 默认 `remote`；只接受 `remote` 或 `local`。 |
-| `APC_BASE_URL` | 默认 `http://127.0.0.1:8080`；必须是无凭据、query、fragment 和非根路径的绝对 URL。非 loopback 地址只允许 HTTPS，HTTP 仅允许 loopback。 |
+| `APC_BASE_URL` | 默认 `https://developer.bianbu.xyz`；必须是无凭据、query、fragment 和非根路径的绝对 URL。非 loopback 地址只允许 HTTPS，HTTP 仅允许 loopback。 |
 | `APM_CLOUD_LOCAL_ROOT` | 选择 `local` 时必填，必须是 clean absolute path，且从文件系统根到 fixture 根不能经过 symlink/reparse point。 |
 
 provider 配置、Remote 网络/协议或内容错误都不会自动回退另一 provider。composition root 为 Remote 构造具有两分钟整体 timeout 和同源 redirect 策略的 `http.Client`；调用方更短的 context deadline 优先。Search 与默认 Cloud List 只在首次目录快照请求时惰性构造所选 provider；installed List 不触发该构造。Install 为内容获取构造 provider，但四类 Power 显式精确 manifest 全命中时不调用 catalog（[Feature 025](ivory-tower/features/025-unified-lifecycle-state-semantics/spec.md)、[ADR-022](ivory-tower/adr/ADR-022-unify-lifecycle-entry-state-semantics.md)）；Uninstall 与 Fix 都不创建 Cloud Client。
@@ -173,7 +173,7 @@ track: apm submission get sub_...
 
 `accepted` 与 `replayed` 都不代表发布成功，只表示本次提交已被同步受理或已存在。Local provider 的 `Submit`/`GetSubmission`/`ListSubmissions` 对所有类型返回 `cloud.ErrSubmissionUnsupported`（fail loud），因此 validate/submit/submission 需指向 Remote APC（默认 provider）。
 
-`submission list` 和 `submission get` 使用 `Authorization: Bearer <official-api-key>` 的独立认证请求，不向匿名资源接口泄露 Key。list 只返回当前 Key 所属账号按创建时间倒序的 active Submission（`received`、`validating`、`review_pending`、`approved`、`publishing`），最多 20 条，只接受 status/type/name 筛选，不提供分页或时间范围参数。get 展示 description、message、时间戳和原样 timeline；终态记录只能通过已知 ID 获取。
+`submission list` 和 `submission get` 使用 `X-API-Key: <official-api-key>` 的独立认证请求，不向匿名资源接口泄露 Key。list 只返回当前 Key 所属账号按创建时间倒序的 active Submission（`received`、`validating`、`review_pending`、`approved`、`publishing`），最多 20 条，只接受 status/type/name 筛选，不提供分页或时间范围参数。get 展示 description、message、时间戳和原样 timeline；终态记录只能通过已知 ID 获取。
 
 Search 已实现：它从同步后的一份不可变 Catalog Snapshot 按名称搜索 Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
 
