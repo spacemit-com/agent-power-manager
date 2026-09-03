@@ -35,6 +35,9 @@ func TestCatalogVersionRequestsExactAnonymousEndpoint(t *testing.T) {
 		if values := r.Header.Values("Authorization"); len(values) != 0 {
 			t.Errorf("Authorization = %q, want absent", values)
 		}
+		if values := r.Header.Values("X-API-Key"); len(values) != 0 {
+			t.Errorf("X-API-Key = %q, want absent", values)
+		}
 		if accept := r.Header.Get("Accept"); accept != "application/json" {
 			t.Errorf("Accept = %q, want application/json", accept)
 		}
@@ -171,6 +174,9 @@ func TestCatalogVersionPreservesSameOriginAndRejectsCrossOriginRedirects(t *test
 			if values := r.Header.Values("Authorization"); len(values) != 0 {
 				t.Errorf("Authorization = %q, want absent", values)
 			}
+			if values := r.Header.Values("X-API-Key"); len(values) != 0 {
+				t.Errorf("X-API-Key = %q, want absent", values)
+			}
 			if r.URL.Path == "/api/v1/resources/version" {
 				if r.URL.RawQuery != "" {
 					t.Errorf("initial query = %q, want empty", r.URL.RawQuery)
@@ -224,6 +230,9 @@ func TestDownloadCatalogRequestsExactAnonymousEndpointAndWritesOpaqueBytes(t *te
 		}
 		if values := r.Header.Values("Authorization"); len(values) != 0 {
 			t.Errorf("Authorization = %q, want absent", values)
+		}
+		if values := r.Header.Values("X-API-Key"); len(values) != 0 {
+			t.Errorf("X-API-Key = %q, want absent", values)
 		}
 		if accept := r.Header.Get("Accept"); accept != "application/json" {
 			t.Errorf("Accept = %q, want application/json", accept)
@@ -443,7 +452,7 @@ func TestDownloadCatalogRejectsDestinationNameSubstitution(t *testing.T) {
 }
 
 func TestCatalogRedirectRejectsCallerCredentialInjection(t *testing.T) {
-	credentialHeaders := []string{"Authorization", "Proxy-Authorization", "Cookie"}
+	credentialHeaders := []string{"Authorization", "Proxy-Authorization", "Cookie", "X-API-Key"}
 	operations := []struct {
 		name string
 		run  func(context.Context, *Client, string) error
@@ -741,4 +750,19 @@ func (reader repeatedByteReader) Read(buffer []byte) (int, error) {
 		buffer[index] = byte(reader)
 	}
 	return len(buffer), nil
+}
+
+func TestEndpointEscapesNameAndVersionSegments(t *testing.T) {
+	client, err := New("https://apc.example.com", &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := client.endpoint("api", "v1", "resources", "skill", "my skill/name", "versions", "v1.0.0", "content")
+	const wantRawPath = "/api/v1/resources/skill/my%20skill%2Fname/versions/v1.0.0/content"
+	if endpoint.RawPath != wantRawPath {
+		t.Fatalf("endpoint RawPath = %q, want %q", endpoint.RawPath, wantRawPath)
+	}
+	if strings.Contains(endpoint.RawPath, " ") || strings.Contains(endpoint.RawPath, "my skill/name") {
+		t.Fatalf("endpoint RawPath = %q contains unescaped name characters", endpoint.RawPath)
+	}
 }

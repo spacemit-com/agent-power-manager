@@ -589,3 +589,80 @@ func trustedTestDir(t *testing.T) string {
 	t.Setenv("TMPDIR", directory)
 	return directory
 }
+
+func TestCatalogEntryContentTypeMapping(t *testing.T) {
+	cases := []struct {
+		name string
+		ref  domain.PowerRef
+		want string
+	}{
+		{name: "skill", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo-skill", Version: "v1.0.0"}, want: "application/gzip"},
+		{name: "plugin", ref: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "demo-plugin", Version: "v1.0.0"}, want: "application/gzip"},
+		{name: "mcp", ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo-mcp", Version: "v1.0.0"}, want: "application/json"},
+		{name: "agent", ref: domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.0.0"}, want: "application/gzip"},
+	}
+	contents := []byte("opaque content")
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := validRemoteCatalogEntry(tt.ref, contents)
+			if entry.ContentType != tt.want {
+				t.Fatalf("ContentType = %q, want %q", entry.ContentType, tt.want)
+			}
+			if err := entry.Validate(); err != nil {
+				t.Fatalf("Validate() with correct content type = %v", err)
+			}
+			wrong := entry
+			if tt.want == "application/json" {
+				wrong.ContentType = "application/gzip"
+			} else {
+				wrong.ContentType = "application/json"
+			}
+			if err := wrong.Validate(); err == nil {
+				t.Fatalf("Validate() with content type %q = nil, want mismatch error", wrong.ContentType)
+			}
+		})
+	}
+}
+
+func TestDownloadVerifiedContentNeverSendsSubmissionCredentials(t *testing.T) {
+	contents := []byte("schema_version: 1\nopaque: value\n")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if values := r.Header.Values("X-API-Key"); len(values) != 0 {
+			t.Errorf("X-API-Key = %q, want absent", values)
+		}
+		if values := r.Header.Values("Authorization"); len(values) != 0 {
+			t.Errorf("Authorization = %q, want absent", values)
+		}
+		w.Header().Set("Content-Type", entry.ContentType)
+		_, _ = w.Write(contents)
+	}))
+	defer server.Close()
+
+	client, err := NewWithAPIKey(server.URL, &http.Client{Timeout: 5 * time.Second}, "submission-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := openTestPinnedDirectory(t, trustedTestDir(t))
+	temporary, err := client.downloadVerifiedContent(context.Background(), entry, entry.ContentType, directory, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = temporary.remove() })
+}
+
+func TestDownloadVerifiedContentMapsGoneToYanked(t *testing.T) {
+	contents := []byte("gone resource")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGone)
+	}))
+	defer server.Close()
+
+	client := newRemoteTestClient(t, server.URL)
+	directory := openTestPinnedDirectory(t, trustedTestDir(t))
+	_, err := client.downloadVerifiedContent(context.Background(), entry, entry.ContentType, directory, 0o600)
+	if !errors.Is(err, cloud.ErrYanked) || errors.Is(err, cloud.ErrNotFound) || errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("downloadVerifiedContent() error = %v, want only ErrYanked", err)
+	}
+}

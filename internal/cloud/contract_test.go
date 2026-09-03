@@ -1039,3 +1039,23 @@ func TestBundledMCPResourcesUseCanonicalV1Schema(t *testing.T) {
 		t.Fatal("bundled MCP fixture walk found no MCP.json files")
 	}
 }
+
+func TestCatalogDecodeRejectsMCPWithGzipContentType(t *testing.T) {
+	raw := []byte(`{"schema_version":1,"skills":{"schema_version":1,"items":[]},"plugins":{"schema_version":1,"items":[]},"mcps":{"schema_version":1,"items":[{"name":"demo-mcp","version":"v1.0.0","description":"mcp description","message":"mcp message","content_type":"application/gzip","content_size":1,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":[]}]},"agents":{"schema_version":1,"items":[]}}`)
+	if _, err := catalog.Decode(raw); !errors.Is(err, catalog.ErrInvalidCatalog) {
+		t.Fatalf("catalog.Decode() error = %v, want catalog.ErrInvalidCatalog", err)
+	}
+	entry := domain.CatalogEntry{
+		Ref:         domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo-mcp", Version: "v1.0.0"},
+		Description: "mcp description",
+		Message:     "mcp message",
+		ContentType: "application/gzip",
+		ContentSize: 1,
+		ContentMD5:  "0123456789abcdef0123456789abcdef",
+		PublishedAt: "2026-08-25T12:34:56Z",
+		Tags:        []string{},
+	}
+	if err := entry.Validate(); err == nil {
+		t.Fatalf("domain.CatalogEntry.Validate() = nil, want content type mismatch error")
+	}
+}
