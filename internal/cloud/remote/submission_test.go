@@ -74,7 +74,7 @@ func TestSubmitAgentUsesGzipPart(t *testing.T) {
 	raw := []byte("schema_version: 1\nagent: {id: demo, name: demo, version: v1.0.0, description: demo, soul: help}\n")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metadata, contentType, filename, content := readSubmissionParts(t, r)
-		if metadata["type"] != "agent" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
+		if metadata["schema_version"] != float64(1) || metadata["type"] != "agent" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
 			metadata["description"] != "demo" || metadata["message"] != "first" || metadata["content_md5"] != md5Hex(raw) {
 			t.Fatalf("metadata = %#v", metadata)
 		}
@@ -104,12 +104,15 @@ func TestSubmitAgentUsesGzipPart(t *testing.T) {
 }
 
 func TestSubmitReturnsAcceptedResult(t *testing.T) {
-	var gotAuth, gotIdem string
+	var gotAPIKey string
+	var gotAuthValues []string
+	var gotIdem string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("X-API-Key")
+		gotAuthValues = r.Header.Values("Authorization")
 		gotIdem = r.Header.Get("Idempotency-Key")
 		metadata, contentType, _, content := readSubmissionParts(t, r)
-		if metadata["type"] != "skill" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
+		if metadata["schema_version"] != float64(1) || metadata["type"] != "skill" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
 			metadata["description"] != "does things" || metadata["message"] != "first" || metadata["content_md5"] != "md5" {
 			t.Fatalf("metadata = %#v", metadata)
 		}
@@ -125,7 +128,7 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newTestSubmissionClient(t, server)
+	client := newTestSubmissionClientWithKey(t, server, "official-key")
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
 		Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0",
 		Description: "does things", Message: "  first  ",
@@ -138,8 +141,11 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 		got.Status != domain.SubmissionReceived || got.StatusURL == "" {
 		t.Fatalf("Submit() = %+v", got)
 	}
-	if gotAuth != "Bearer key" {
-		t.Fatalf("Authorization = %q", gotAuth)
+	if gotAPIKey != "official-key" {
+		t.Fatalf("X-API-Key = %q, want official-key", gotAPIKey)
+	}
+	if len(gotAuthValues) != 0 {
+		t.Fatalf("Authorization = %q, want absent", gotAuthValues)
 	}
 	if gotIdem != "k" {
 		t.Fatalf("Idempotency-Key = %q", gotIdem)
@@ -344,8 +350,11 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotContentType string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, contentType, _, _ := readSubmissionParts(t, r)
+				metadata, contentType, _, _ := readSubmissionParts(t, r)
 				gotContentType = contentType
+				if metadata["schema_version"] != float64(1) {
+					t.Fatalf("metadata schema_version = %#v, want 1", metadata["schema_version"])
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusAccepted)
 				_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/s"}`))
@@ -601,8 +610,11 @@ func TestGetSubmissionUsesBearerAndReturnsFullDetail(t *testing.T) {
 		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api/v1/submissions/sub_1" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.EscapedPath())
 		}
-		if authorization := r.Header.Get("Authorization"); authorization != "Bearer official-key" {
-			t.Fatalf("Authorization = %q, want Bearer official-key", authorization)
+		if apiKey := r.Header.Get("X-API-Key"); apiKey != "official-key" {
+			t.Fatalf("X-API-Key = %q, want official-key", apiKey)
+		}
+		if authorization := r.Header.Values("Authorization"); len(authorization) != 0 {
+			t.Fatalf("Authorization = %q, want absent", authorization)
 		}
 		if accept := r.Header.Get("Accept"); accept != "application/json" {
 			t.Fatalf("Accept = %q, want application/json", accept)
@@ -638,8 +650,11 @@ func TestListSubmissionsUsesBearerAndBoundedFilters(t *testing.T) {
 		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api/v1/submissions" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.EscapedPath())
 		}
-		if authorization := r.Header.Get("Authorization"); authorization != "Bearer official-key" {
-			t.Fatalf("Authorization = %q, want Bearer official-key", authorization)
+		if apiKey := r.Header.Get("X-API-Key"); apiKey != "official-key" {
+			t.Fatalf("X-API-Key = %q, want official-key", apiKey)
+		}
+		if authorization := r.Header.Values("Authorization"); len(authorization) != 0 {
+			t.Fatalf("Authorization = %q, want absent", authorization)
 		}
 		if accept := r.Header.Get("Accept"); accept != "application/json" {
 			t.Fatalf("Accept = %q, want application/json", accept)

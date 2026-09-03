@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,6 +18,12 @@ import (
 	"apm/internal/cloud/local"
 	"apm/internal/cloud/remote"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
 
 func clearCloudEnvironment(t *testing.T) {
 	t.Helper()
@@ -68,6 +75,32 @@ func TestNewCloudClientConfigurationContract(t *testing.T) {
 	}
 	if cloudProviderEnv != "APM_CLOUD_PROVIDER" || apcBaseURLEnv != "APC_BASE_URL" || localRootEnv != "APM_CLOUD_LOCAL_ROOT" {
 		t.Fatalf("environment names = (%q, %q, %q), want documented Cloud variables", cloudProviderEnv, apcBaseURLEnv, localRootEnv)
+	}
+}
+
+func TestRemoteDefaultBaseURLRequestsTestEnvironment(t *testing.T) {
+	clearCloudEnvironment(t)
+
+	var recordedURL string
+	recorder := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		recordedURL = request.URL.String()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"schema_version":1,"catalog_sha256":"0000000000000000000000000000000000000000000000000000000000000000","catalog_size":0}`)),
+			Request:    request,
+		}, nil
+	})
+
+	client, err := remote.NewWithAPIKey(defaultAPCBaseURL, &http.Client{Timeout: time.Second, Transport: recorder}, "")
+	if err != nil {
+		t.Fatalf("remote.NewWithAPIKey(%q) error = %v", defaultAPCBaseURL, err)
+	}
+	if _, err := client.CatalogVersion(context.Background()); err != nil {
+		t.Fatalf("CatalogVersion() error = %v", err)
+	}
+	if !strings.HasPrefix(recordedURL, "https://developer.bianbu.xyz/") {
+		t.Fatalf("CatalogVersion() URL = %q, want prefix https://developer.bianbu.xyz/", recordedURL)
 	}
 }
 
