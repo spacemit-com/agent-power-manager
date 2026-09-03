@@ -2,6 +2,25 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-03
+
+分类：功能变更
+
+用户需求：依据 APC-API.md 把 APC v1 客户端适配为 Submission 三个接口仅使用 `X-API-Key` 认证（不再发送 `Authorization`）、在 Submission multipart metadata 中补齐 `schema_version: 1`，并把 Remote 默认基址改为测试环境 `https://developer.bianbu.xyz`；同时用契约测试固定匿名目录/内容请求的无凭据约束、四类资源内容类型映射与错误映射。契约见 [Feature 028](ivory-tower/features/028-apc-api-adaptation/spec.md) 与 [ADR-025](ivory-tower/adr/ADR-025-apc-api-client-contract.md)。
+
+相关提交：
+
+- `ba5b83e test(apc): define X-API-Key wire contract`
+- `224faa7 feat(apc): use X-API-Key and schema version metadata`
+- `d1d4c9f test(apc): verify anonymous catalog and content contracts`
+- `505c46b feat(apc): default Remote provider to test environment`
+- `00723de test(apc): cover 404 content mapping (review fix)`
+- `6e69771 docs(apc): record API v1 client contract decision`
+
+解决方案或完成结果：`internal/cloud/remote` 的 `Submit` 与 `getSubmissionJSON` 把认证头从 `Authorization: Bearer` 改为 `X-API-Key`，不再设置 `Authorization`，且 `apiKey` 为空时经既有 preflight 返回 `cloud.ErrAuth`；Submission multipart metadata 增加 `schema_version: 1`。`cmd/apm` 的 `defaultAPCBaseURL` 改为 `https://developer.bianbu.xyz`，保留 `APC_BASE_URL` 覆盖与既有 base URL 校验。契约测试新增/更新：Submission 请求只有 `X-API-Key` 且无 `Authorization`、metadata 含 `schema_version=1`；匿名目录/内容请求在配置 key 的客户端上仍不携带任何凭据；重定向凭据注入拒绝列表补入 `X-API-Key`；四类资源内容类型映射（Skill/Plugin/Agent=`application/gzip`、MCP=`application/json`）严格校验；`endpoint()` 对 name/version 段做百分号转义；内容 404→`ErrNotFound`、410→`ErrYanked` 映射。ADR-025 记录“APC-API.md 为客户端权威契约、Submission 仅 X-API-Key、拒绝隐式 Bearer 回退”决策，并同步 BUILD、Project Overview 与 Feature 021/023/024 的历史标注。
+
+验证结果或限制：`go test ./...`、`go test -race ./...`、`go vet ./...`、隔离目录 `go build` 与 `git diff --check` 均以退出码 0 通过。2026-09-03 对 `https://developer.bianbu.xyz` 只读探测（`curl -k`，产品 TLS 校验保持开启）得到可复现结论，详见 [live-probe](ivory-tower/features/028-apc-api-adaptation/live-probe.md)：(1) 真实 APC 基址为 `https://developer.bianbu.xyz/api-server/apc/api/v1`，APM 默认基址加 `/api/v1/...` 被网关以 `401 Full authentication is required` 拦截，且该非根路径无法经 `APC_BASE_URL` 指向；(2) 测试环境 Submission 仍要求 `Authorization`、忽略 `X-API-Key`（`401 Authorization header is required`），真实 Submission GET/POST 判定为服务端阻塞，未尝试真实 POST；(3) 目录把 MCP `content_type` 声明为 `application/gzip` 但 CDN 实际返回 `application/json`；(4) 目录与内容 `302` 重定向到跨源 CDN `cdn-resource.spacemit.com`，与 APM 同源重定向策略不符；(5) 服务端目录无顶层/分组 `schema_version` 且含 `download_url` 字段，会被严格 catalog 解码拒绝；(6) 容器缺少目标站点 CA 链，产品 TLS 校验正确拒绝。以上限制均按 spec 以 fail-closed 记录，客户端未做隐式降级或扩大接受范围。
+
 ## 2026-08-27
 
 分类：功能变更
