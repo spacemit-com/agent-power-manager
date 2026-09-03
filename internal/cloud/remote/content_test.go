@@ -666,3 +666,19 @@ func TestDownloadVerifiedContentMapsGoneToYanked(t *testing.T) {
 		t.Fatalf("downloadVerifiedContent() error = %v, want only ErrYanked", err)
 	}
 }
+
+func TestDownloadVerifiedContentMapsNotFoundToErrNotFound(t *testing.T) {
+	contents := []byte("missing resource")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := newRemoteTestClient(t, server.URL)
+	directory := openTestPinnedDirectory(t, trustedTestDir(t))
+	_, err := client.downloadVerifiedContent(context.Background(), entry, entry.ContentType, directory, 0o600)
+	if !errors.Is(err, cloud.ErrNotFound) || errors.Is(err, cloud.ErrYanked) || errors.Is(err, cloud.ErrInvalidResponse) {
+		t.Fatalf("downloadVerifiedContent() error = %v, want only ErrNotFound", err)
+	}
+}
