@@ -26,12 +26,13 @@ const maxActiveSubmissions = 20
 
 // submissionMetadataDTO 是 multipart 中 metadata part 的传输类型。
 type submissionMetadataDTO struct {
-	Type        domain.PowerType `json:"type"`
-	Name        string           `json:"name"`
-	Version     string           `json:"version"`
-	Description string           `json:"description"`
-	Message     string           `json:"message"`
-	ContentMD5  string           `json:"content_md5"`
+	SchemaVersion int              `json:"schema_version"`
+	Type          domain.PowerType `json:"type"`
+	Name          string           `json:"name"`
+	Version       string           `json:"version"`
+	Description   string           `json:"description"`
+	Message       string           `json:"message"`
+	ContentMD5    string           `json:"content_md5"`
 }
 
 type submissionReceiptDTO struct {
@@ -97,12 +98,13 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 		return domain.SubmissionResult{}, errors.New("submit remote resource message is required")
 	}
 	metadata, err := json.Marshal(submissionMetadataDTO{
-		Type:        request.Type,
-		Name:        request.Name,
-		Version:     request.Version,
-		Description: request.Description,
-		Message:     message,
-		ContentMD5:  request.ContentMD5,
+		SchemaVersion: 1,
+		Type:          request.Type,
+		Name:          request.Name,
+		Version:       request.Version,
+		Description:   request.Description,
+		Message:       message,
+		ContentMD5:    request.ContentMD5,
 	})
 	if err != nil {
 		return domain.SubmissionResult{}, fmt.Errorf("encode remote submission metadata: %w", err)
@@ -126,7 +128,9 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 		return domain.SubmissionResult{}, fmt.Errorf("create remote submission request: %w", err)
 	}
 	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
-	httpRequest.Header.Set("Authorization", "Bearer "+c.apiKey)
+	// X-API-Key 是 APC v1 Submission 接口的提交凭据；CatalogSource 与资源 content 请求保持匿名。
+	// 凭据值不得写入日志。
+	httpRequest.Header.Set("X-API-Key", c.apiKey)
 	httpRequest.Header.Set("Idempotency-Key", request.IdempotencyKey)
 	httpRequest.Header.Set("Accept", "application/json")
 
@@ -239,7 +243,8 @@ func decodeSubmissionDetail(ctx context.Context, response *http.Response) (domai
 	return validateSubmissionDetail(dto)
 }
 
-// getSubmissionJSON 仅为 Submission 查询附加 Bearer；CatalogSource 与资源 content 请求保持匿名，避免凭据扩散。
+// getSubmissionJSON 仅为 Submission 查询附加 X-API-Key 凭据；CatalogSource 与资源 content
+// 请求保持匿名，避免凭据扩散。凭据值不得写入日志。
 func (c *Client) getSubmissionJSON(ctx context.Context, endpoint *url.URL, target any) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("query remote submission: %w", err)
@@ -252,7 +257,7 @@ func (c *Client) getSubmissionJSON(ctx context.Context, endpoint *url.URL, targe
 		return fmt.Errorf("create remote submission query: %w", err)
 	}
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Authorization", "Bearer "+c.apiKey)
+	request.Header.Set("X-API-Key", c.apiKey)
 
 	response, err := c.http.Do(request)
 	if err != nil {

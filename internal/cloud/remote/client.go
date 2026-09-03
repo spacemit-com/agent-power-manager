@@ -43,7 +43,7 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 	return NewWithAPIKey(baseURL, httpClient, "")
 }
 
-// NewWithAPIKey 创建远端目录 Client 并注入 Bearer 凭据；apiKey 为空表示匿名（仅资源读取与下载）。
+// NewWithAPIKey 创建远端目录 Client 并注入 X-API-Key 凭据；apiKey 为空表示匿名（仅资源读取与下载）。
 func NewWithAPIKey(baseURL string, httpClient *http.Client, apiKey string) (*Client, error) {
 	if httpClient == nil || httpClient.Timeout <= 0 {
 		return nil, fmt.Errorf("create remote Client with bounded HTTP client: %w", cloud.ErrProviderConfig)

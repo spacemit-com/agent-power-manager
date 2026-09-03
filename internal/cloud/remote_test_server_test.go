@@ -342,10 +342,14 @@ func (fixture *canonicalRemoteServer) find(ref domain.PowerRef) *canonicalRemote
 }
 
 // serveSubmissionAPI 模拟提交、本人活动列表与详情三个 APC v1 端点，并严格校验
-// Bearer、无分页查询及提交幂等键，避免跨层测试被宽松 fake 掩盖。
+// X-API-Key、无分页查询及提交幂等键，避免跨层测试被宽松 fake 掩盖。
 func (fixture *canonicalRemoteServer) serveSubmissionAPI(writer http.ResponseWriter, request *http.Request, segments []string) {
-	if authorization := request.Header.Values("Authorization"); len(authorization) != 1 || authorization[0] != "Bearer "+canonicalSubmissionAPIKey {
-		fixture.rejectProtocol(writer, request, "Authorization = %q, want exactly one contract Bearer", authorization)
+	if values := request.Header.Values("X-API-Key"); len(values) != 1 || values[0] != canonicalSubmissionAPIKey {
+		fixture.rejectProtocol(writer, request, "X-API-Key = %q, want exactly one contract key", values)
+		return
+	}
+	if authorization := request.Header.Values("Authorization"); len(authorization) != 0 {
+		fixture.rejectProtocol(writer, request, "Authorization = %q, want absent", authorization)
 		return
 	}
 	if values := request.Header.Values("Accept"); len(values) != 1 || values[0] != "application/json" {
@@ -500,6 +504,9 @@ func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, wan
 	got := fixture.submissions[len(fixture.submissions)-1]
 	if got.parseErr != nil {
 		t.Fatalf("submission parse error: %v", got.parseErr)
+	}
+	if got.metadata["schema_version"] != float64(1) {
+		t.Fatalf("metadata schema_version = %#v, want 1", got.metadata["schema_version"])
 	}
 	if got.metadata["type"] != string(want) || got.metadata["name"] != name ||
 		got.metadata["version"] != version || got.metadata["description"] != description ||
