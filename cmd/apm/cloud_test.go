@@ -70,8 +70,8 @@ func TestNewSubmitLifecycleWithAPIKey(t *testing.T) {
 }
 
 func TestNewCloudClientConfigurationContract(t *testing.T) {
-	if defaultCloudProvider != cloud.ProviderRemote || defaultAPCBaseURL != "http://127.0.0.1:8080" {
-		t.Fatalf("defaults = (%q, %q), want Remote and loopback APC", defaultCloudProvider, defaultAPCBaseURL)
+	if defaultCloudProvider != cloud.ProviderRemote || defaultAPCBaseURL != "https://developer.bianbu.xyz" {
+		t.Fatalf("defaults = (%q, %q), want Remote and test-environment APC", defaultCloudProvider, defaultAPCBaseURL)
 	}
 	if cloudProviderEnv != "APM_CLOUD_PROVIDER" || apcBaseURLEnv != "APC_BASE_URL" || localRootEnv != "APM_CLOUD_LOCAL_ROOT" {
 		t.Fatalf("environment names = (%q, %q, %q), want documented Cloud variables", cloudProviderEnv, apcBaseURLEnv, localRootEnv)

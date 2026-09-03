@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultCloudProvider = cloud.ProviderRemote
-	defaultAPCBaseURL    = "http://127.0.0.1:8080"
+	defaultAPCBaseURL    = "https://developer.bianbu.xyz"
 	cloudProviderEnv     = "APM_CLOUD_PROVIDER"
 	apcBaseURLEnv        = "APC_BASE_URL"
 	apcAPIKeyEnv         = "APC_API_KEY"
