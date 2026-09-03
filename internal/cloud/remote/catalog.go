@@ -107,9 +107,13 @@ func (c *Client) downloadCatalogWithHooks(ctx context.Context, destination strin
 	if err := requireCatalogJSONContentType(response); err != nil {
 		return fmt.Errorf("download remote catalog: %w", err)
 	}
-	contentLength, err := requireCatalogContentLength(response)
+	contentLength, hasLength, err := catalogReadLimit(response)
 	if err != nil {
 		return err
+	}
+	readLimit := int64(catalog.MaxCatalogSize) + 1
+	if hasLength {
+		readLimit = contentLength + 1
 	}
 
 	staged, output, err = parent.createNamedStaged(destinationName)
@@ -118,7 +122,7 @@ func (c *Client) downloadCatalogWithHooks(ctx context.Context, destination strin
 	}
 
 	written := &catalogDestinationWriter{writer: output}
-	actualSize, copyErr := io.Copy(written, io.LimitReader(&contextReader{ctx: ctx, reader: response.Body}, contentLength+1))
+	actualSize, copyErr := io.Copy(written, io.LimitReader(&contextReader{ctx: ctx, reader: response.Body}, readLimit))
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return fmt.Errorf("stream remote catalog: %w", ctxErr)
 	}
@@ -127,12 +131,15 @@ func (c *Client) downloadCatalogWithHooks(ctx context.Context, destination strin
 			return catalogDestinationFailure("write remote catalog destination", written.err)
 		}
 		if errors.Is(copyErr, io.ErrUnexpectedEOF) {
-			return fmt.Errorf("remote catalog ended before Content-Length %d: %w", contentLength, errors.Join(cloud.ErrIntegrity, copyErr))
+			return fmt.Errorf("remote catalog body ended prematurely: %w", errors.Join(cloud.ErrIntegrity, copyErr))
 		}
 		return fmt.Errorf("stream remote catalog: %w", classifyResponseReadError(ctx, copyErr))
 	}
-	if actualSize != contentLength {
+	if hasLength && actualSize != contentLength {
 		return fmt.Errorf("remote catalog size %d does not match Content-Length %d: %w", actualSize, contentLength, cloud.ErrIntegrity)
+	}
+	if actualSize > catalog.MaxCatalogSize {
+		return fmt.Errorf("remote catalog size %d exceeds %d bytes: %w", actualSize, catalog.MaxCatalogSize, cloud.ErrInvalidResponse)
 	}
 	if hooks.beforeFinalize != nil {
 		hooks.beforeFinalize(staged)
@@ -185,27 +192,32 @@ func requireCatalogJSONContentType(response *http.Response) error {
 	return nil
 }
 
-func requireCatalogContentLength(response *http.Response) (int64, error) {
+// catalogReadLimit 返回读取 catalog 响应体的字节上界：优先使用响应声明的 Content-Length；
+// HTTP/2 或分块响应可能不含该头，此时返回 hasLength=false，调用方回退到 MaxCatalogSize+1。
+func catalogReadLimit(response *http.Response) (limit int64, hasLength bool, err error) {
 	values := response.Header.Values("Content-Length")
+	if len(values) == 0 {
+		return 0, false, nil
+	}
 	if len(values) != 1 || values[0] == "" {
-		return 0, fmt.Errorf("remote catalog must contain one explicit Content-Length header: %w", cloud.ErrInvalidResponse)
+		return 0, false, fmt.Errorf("remote catalog must contain one explicit Content-Length header: %w", cloud.ErrInvalidResponse)
 	}
 	for _, character := range []byte(values[0]) {
 		if character < '0' || character > '9' {
-			return 0, fmt.Errorf("remote catalog Content-Length %q is not unsigned decimal: %w", values[0], cloud.ErrInvalidResponse)
+			return 0, false, fmt.Errorf("remote catalog Content-Length %q is not unsigned decimal: %w", values[0], cloud.ErrInvalidResponse)
 		}
 	}
 	contentLength, err := strconv.ParseInt(values[0], 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("parse remote catalog Content-Length %q: %w", values[0], errors.Join(cloud.ErrInvalidResponse, err))
+		return 0, false, fmt.Errorf("parse remote catalog Content-Length %q: %w", values[0], errors.Join(cloud.ErrInvalidResponse, err))
 	}
 	if contentLength != response.ContentLength {
-		return 0, fmt.Errorf("remote catalog Content-Length header %d does not match parsed response length %d: %w", contentLength, response.ContentLength, cloud.ErrInvalidResponse)
+		return 0, false, fmt.Errorf("remote catalog Content-Length header %d does not match parsed response length %d: %w", contentLength, response.ContentLength, cloud.ErrInvalidResponse)
 	}
 	if contentLength > catalog.MaxCatalogSize {
-		return 0, fmt.Errorf("remote catalog Content-Length %d exceeds %d bytes: %w", contentLength, catalog.MaxCatalogSize, cloud.ErrInvalidResponse)
+		return 0, false, fmt.Errorf("remote catalog Content-Length %d exceeds %d bytes: %w", contentLength, catalog.MaxCatalogSize, cloud.ErrInvalidResponse)
 	}
-	return contentLength, nil
+	return contentLength, true, nil
 }
 
 func closeCatalogResponse(ctx context.Context, response *http.Response) error {

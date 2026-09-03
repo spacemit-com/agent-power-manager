@@ -1040,15 +1040,20 @@ func TestBundledMCPResourcesUseCanonicalV1Schema(t *testing.T) {
 	}
 }
 
-func TestCatalogDecodeRejectsMCPWithGzipContentType(t *testing.T) {
-	raw := []byte(`{"schema_version":1,"skills":{"schema_version":1,"items":[]},"plugins":{"schema_version":1,"items":[]},"mcps":{"schema_version":1,"items":[{"name":"demo-mcp","version":"v1.0.0","description":"mcp description","message":"mcp message","content_type":"application/gzip","content_size":1,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":[]}]},"agents":{"schema_version":1,"items":[]}}`)
-	if _, err := catalog.Decode(raw); !errors.Is(err, catalog.ErrInvalidCatalog) {
-		t.Fatalf("catalog.Decode() error = %v, want catalog.ErrInvalidCatalog", err)
+func TestCatalogDecodeNormalizesMCPGzipToJSON(t *testing.T) {
+	raw := []byte(`{"schema_version":1,"skills":{"schema_version":1,"items":[]},"plugins":{"schema_version":1,"items":[]},"mcps":{"schema_version":1,"items":[{"name":"demo-mcp","version":"v1.0.0","description":"mcp description","content_type":"application/gzip","content_size":1,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":[]}]},"agents":{"schema_version":1,"items":[]}}`)
+	snapshot, err := catalog.Decode(raw)
+	if err != nil {
+		t.Fatalf("catalog.Decode() error = %v, want success with normalized MCP content type", err)
 	}
+	entries := snapshot.List(domain.PowerTypeMCP)
+	if len(entries) != 1 || entries[0].ContentType != "application/json" {
+		t.Fatalf("decoded MCP content type = %v, want normalized application/json", entries)
+	}
+	// domain 层防御性不变量仍拒绝直接声明 gzip 的 MCP 条目。
 	entry := domain.CatalogEntry{
 		Ref:         domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo-mcp", Version: "v1.0.0"},
 		Description: "mcp description",
-		Message:     "mcp message",
 		ContentType: "application/gzip",
 		ContentSize: 1,
 		ContentMD5:  "0123456789abcdef0123456789abcdef",

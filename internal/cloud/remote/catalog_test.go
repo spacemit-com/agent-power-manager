@@ -2,6 +2,8 @@ package remote
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,8 +31,8 @@ func TestCatalogVersionRequestsExactAnonymousEndpoint(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api/v1/resources/version" || r.URL.RawQuery != "" {
-			t.Errorf("request = %s %s, want exact GET /api/v1/resources/version", r.Method, r.URL.RequestURI())
+		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api-server/apc/api/v1/resources/version" || r.URL.RawQuery != "" {
+			t.Errorf("request = %s %s, want exact GET /api-server/apc/api/v1/resources/version", r.Method, r.URL.RequestURI())
 		}
 		if values := r.Header.Values("Authorization"); len(values) != 0 {
 			t.Errorf("Authorization = %q, want absent", values)
@@ -177,7 +179,7 @@ func TestCatalogVersionPreservesSameOriginAndRejectsCrossOriginRedirects(t *test
 			if values := r.Header.Values("X-API-Key"); len(values) != 0 {
 				t.Errorf("X-API-Key = %q, want absent", values)
 			}
-			if r.URL.Path == "/api/v1/resources/version" {
+			if r.URL.Path == "/api-server/apc/api/v1/resources/version" {
 				if r.URL.RawQuery != "" {
 					t.Errorf("initial query = %q, want empty", r.URL.RawQuery)
 				}
@@ -201,7 +203,7 @@ func TestCatalogVersionPreservesSameOriginAndRejectsCrossOriginRedirects(t *test
 		}
 	})
 
-	t.Run("cross origin", func(t *testing.T) {
+	t.Run("cross origin HTTP downgrade", func(t *testing.T) {
 		var targetRequests atomic.Int32
 		target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			targetRequests.Add(1)
@@ -214,10 +216,38 @@ func TestCatalogVersionPreservesSameOriginAndRejectsCrossOriginRedirects(t *test
 
 		_, err := newRemoteTestClient(t, source.URL).CatalogVersion(context.Background())
 		if !errors.Is(err, cloud.ErrInvalidResponse) {
-			t.Fatalf("CatalogVersion() error = %v, want cross-origin ErrInvalidResponse", err)
+			t.Fatalf("CatalogVersion() error = %v, want cross-origin HTTP downgrade ErrInvalidResponse", err)
 		}
 		if got := targetRequests.Load(); got != 0 {
 			t.Fatalf("cross-origin target requests = %d, want 0", got)
+		}
+	})
+
+	t.Run("cross origin HTTPS followed", func(t *testing.T) {
+		var targetRequests atomic.Int32
+		target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			targetRequests.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, validCatalogVersionJSON(1))
+		}))
+		defer target.Close()
+		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusFound)
+		}))
+		defer source.Close()
+
+		pool := x509.NewCertPool()
+		pool.AddCert(target.Certificate())
+		transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
+		client, err := New(source.URL, &http.Client{Transport: transport, Timeout: 5 * time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.CatalogVersion(context.Background()); err != nil {
+			t.Fatalf("CatalogVersion() error = %v, want cross-origin HTTPS redirect followed", err)
+		}
+		if got := targetRequests.Load(); got != 1 {
+			t.Fatalf("cross-origin HTTPS target requests = %d, want 1", got)
 		}
 	})
 }
@@ -225,8 +255,8 @@ func TestCatalogVersionPreservesSameOriginAndRejectsCrossOriginRedirects(t *test
 func TestDownloadCatalogRequestsExactAnonymousEndpointAndWritesOpaqueBytes(t *testing.T) {
 	contents := []byte(`{"opaque":"transport must not decode catalog schema"}`)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api/v1/resources" || r.URL.RawQuery != "" {
-			t.Errorf("request = %s %s, want exact GET /api/v1/resources", r.Method, r.URL.RequestURI())
+		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api-server/apc/api/v1/resources" || r.URL.RawQuery != "" {
+			t.Errorf("request = %s %s, want exact GET /api-server/apc/api/v1/resources", r.Method, r.URL.RequestURI())
 		}
 		if values := r.Header.Values("Authorization"); len(values) != 0 {
 			t.Errorf("Authorization = %q, want absent", values)
@@ -282,8 +312,6 @@ func TestDownloadCatalogRejectsProtocolAndSizeFailuresWithoutDestinationMarker(t
 		{name: "missing content type", status: http.StatusOK, contentLength: int64(len(contents)), body: strings.NewReader(contents), want: cloud.ErrInvalidResponse},
 		{name: "wrong content type", status: http.StatusOK, contentType: "text/plain", contentLength: int64(len(contents)), body: strings.NewReader(contents), want: cloud.ErrInvalidResponse},
 		{name: "malformed content type", status: http.StatusOK, contentType: "application/json; charset", contentLength: int64(len(contents)), body: strings.NewReader(contents), want: cloud.ErrInvalidResponse},
-		{name: "missing Content-Length", status: http.StatusOK, contentType: "application/json", contentLength: -1, body: strings.NewReader(contents), want: cloud.ErrInvalidResponse},
-		{name: "invalid negative Content-Length", status: http.StatusOK, contentType: "application/json", contentLength: -2, body: strings.NewReader(contents), want: cloud.ErrInvalidResponse},
 		{name: "Content-Length over maximum", status: http.StatusOK, contentType: "application/json", contentLength: catalog.MaxCatalogSize + 1, body: strings.NewReader(""), want: cloud.ErrInvalidResponse},
 		{name: "short body", status: http.StatusOK, contentType: "application/json", contentLength: int64(len(contents) + 1), body: strings.NewReader(contents), want: cloud.ErrIntegrity},
 		{name: "short body unexpected EOF", status: http.StatusOK, contentType: "application/json", contentLength: int64(len(contents)), body: io.MultiReader(strings.NewReader("partial"), readerError{err: io.ErrUnexpectedEOF}), want: cloud.ErrIntegrity},
@@ -330,9 +358,6 @@ func TestDownloadCatalogRequiresSingleExplicitContentLengthHeader(t *testing.T) 
 		wantErr       bool
 	}{
 		{name: "explicit zero", status: http.StatusOK, headerValues: []string{"0"}, contentLength: 0},
-		{name: "missing zero on 200", status: http.StatusOK, contentLength: 0, wantErr: true},
-		{name: "missing zero on 204", status: http.StatusNoContent, contentLength: 0, wantErr: true},
-		{name: "missing positive", status: http.StatusOK, contentLength: 1, body: "x", wantErr: true},
 		{name: "multiple", status: http.StatusOK, headerValues: []string{"1", "1"}, contentLength: 1, body: "x", wantErr: true},
 		{name: "signed decimal", status: http.StatusOK, headerValues: []string{"+1"}, contentLength: 1, body: "x", wantErr: true},
 		{name: "comma joined", status: http.StatusOK, headerValues: []string{"1, 1"}, contentLength: 1, body: "x", wantErr: true},
@@ -368,6 +393,27 @@ func TestDownloadCatalogRequiresSingleExplicitContentLengthHeader(t *testing.T) 
 				t.Fatalf("destination exists after invalid Content-Length: %v", statErr)
 			}
 		})
+	}
+}
+
+func TestDownloadCatalogToleratesMissingContentLength(t *testing.T) {
+	// 测试环境 CDN 经 HTTP/2 返回 catalog 时不带 Content-Length 头；
+	// 客户端应以 MaxCatalogSize 为上界读取并接受完整字节。
+	contents := "opaque catalog bytes without Content-Length"
+	client := newCatalogTransportClient(t, func(request *http.Request) *http.Response {
+		return catalogHTTPResponse(request, http.StatusOK, "application/json", -1, strings.NewReader(contents))
+	})
+	destination := filepath.Join(trustedTestDir(t), "catalog.json")
+
+	if err := client.DownloadCatalog(context.Background(), destination); err != nil {
+		t.Fatalf("DownloadCatalog() error = %v, want success without Content-Length", err)
+	}
+	got, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != contents {
+		t.Fatalf("catalog contents = %q, want exact %q", got, contents)
 	}
 }
 
@@ -668,8 +714,8 @@ func newCatalogTransportClient(t *testing.T, response func(*http.Request) *http.
 	client, err := New("https://apc.example.com", &http.Client{
 		Timeout: time.Second,
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-			if request.Method != http.MethodGet || request.URL.EscapedPath() != "/api/v1/resources" || request.URL.RawQuery != "" {
-				t.Errorf("request = %s %s, want exact GET /api/v1/resources", request.Method, request.URL.RequestURI())
+			if request.Method != http.MethodGet || request.URL.EscapedPath() != "/api-server/apc/api/v1/resources" || request.URL.RawQuery != "" {
+				t.Errorf("request = %s %s, want exact GET /api-server/apc/api/v1/resources", request.Method, request.URL.RequestURI())
 			}
 			if values := request.Header.Values("Authorization"); len(values) != 0 {
 				t.Errorf("Authorization = %q, want absent", values)
@@ -758,7 +804,7 @@ func TestEndpointEscapesNameAndVersionSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpoint := client.endpoint("api", "v1", "resources", "skill", "my skill/name", "versions", "v1.0.0", "content")
-	const wantRawPath = "/api/v1/resources/skill/my%20skill%2Fname/versions/v1.0.0/content"
+	const wantRawPath = "/api-server/apc/api/v1/resources/skill/my%20skill%2Fname/versions/v1.0.0/content"
 	if endpoint.RawPath != wantRawPath {
 		t.Fatalf("endpoint RawPath = %q, want %q", endpoint.RawPath, wantRawPath)
 	}

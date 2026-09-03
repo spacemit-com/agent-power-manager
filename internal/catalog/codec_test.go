@@ -116,6 +116,53 @@ func TestEncodeIsDeterministicAndEmitsAllGroups(t *testing.T) {
 	}
 }
 
+func TestDecodeServerActualCatalogSchema(t *testing.T) {
+	// 复现测试环境 https://developer.bianbu.xyz 实际返回的目录结构：
+	// 无顶层/分组 schema_version，条目含 schema_version 与 download_url，
+	// MCP 误声明 application/gzip 且缺 message，published_at 无时区。
+	raw := []byte(`{
+		"skills":{"items":[{
+			"schema_version":1,
+			"content_size":160,
+			"content_type":"application/gzip",
+			"name":"code-review-helper",
+			"download_url":"https://cdn-resource.spacemit.com/file/apc/resource/skill/code-review-helper-1-v1.0.0.tar.gz",
+			"description":"代码审查助手",
+			"message":"首次发布",
+			"content_md5":"0274020ce87b4b9c067786d8fdf342ef",
+			"published_at":"2026-09-01T17:48:14",
+			"version":"v1.0.0",
+			"tags":["hot","new","popular","recommended"]
+		}]},
+		"plugins":{"items":[]},
+		"mcps":{"items":[{
+			"schema_version":1,
+			"content_size":269,
+			"content_type":"application/gzip",
+			"name":"filesystem",
+			"download_url":"https://cdn-resource.spacemit.com/file/apc/resource/mcp/filesystem-1-v1.0.0.json",
+			"description":"提供受限的文件系统访问能力",
+			"content_md5":"ac771c6a1392087ccdb299d29820a2b5",
+			"published_at":"2026-09-03T10:12:04",
+			"version":"v1.0.0",
+			"tags":["hot","official"]
+		}]},
+		"agents":{"items":[]}
+	}`)
+	snapshot, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("Decode(server catalog) error = %v", err)
+	}
+	mcps := snapshot.List(domain.PowerTypeMCP)
+	if len(mcps) != 1 || mcps[0].Ref.Name != "filesystem" || mcps[0].ContentType != "application/json" {
+		t.Fatalf("MCP entries = %#v, want normalized filesystem/application/json", mcps)
+	}
+	skills := snapshot.List(domain.PowerTypeSkill)
+	if len(skills) != 1 || skills[0].Ref.Name != "code-review-helper" || skills[0].ContentType != "application/gzip" {
+		t.Fatalf("Skill entries = %#v, want code-review-helper/application/gzip", skills)
+	}
+}
+
 func replaceJSON(t *testing.T, data []byte, old, replacement string) []byte {
 	t.Helper()
 	got := strings.Replace(string(data), old, replacement, 1)

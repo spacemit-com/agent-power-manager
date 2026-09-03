@@ -1,6 +1,6 @@
 # Adopt APC-API.md as the Client Wire Contract
 
-- Status：Accepted
+- Status：Superseded（由 [ADR-026](ADR-026-adapt-apc-client-to-test-environment-behavior.md) 取代）
 - Date：2026-09-03
 - Decision Makers：APM maintainers
 - Related Feature：[Feature 028](../features/028-apc-api-adaptation/spec.md)

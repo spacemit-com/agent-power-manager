@@ -21,6 +21,16 @@
 
 验证结果或限制：`go test ./...`、`go test -race ./...`、`go vet ./...`、隔离目录 `go build` 与 `git diff --check` 均以退出码 0 通过。2026-09-03 对 `https://developer.bianbu.xyz` 只读探测（`curl -k`，产品 TLS 校验保持开启）得到可复现结论，详见 [live-probe](ivory-tower/features/028-apc-api-adaptation/live-probe.md)：(1) 真实 APC 基址为 `https://developer.bianbu.xyz/api-server/apc/api/v1`，APM 默认基址加 `/api/v1/...` 被网关以 `401 Full authentication is required` 拦截，且该非根路径无法经 `APC_BASE_URL` 指向；(2) 测试环境 Submission 仍要求 `Authorization`、忽略 `X-API-Key`（`401 Authorization header is required`），真实 Submission GET/POST 判定为服务端阻塞，未尝试真实 POST；(3) 目录把 MCP `content_type` 声明为 `application/gzip` 但 CDN 实际返回 `application/json`；(4) 目录与内容 `302` 重定向到跨源 CDN `cdn-resource.spacemit.com`，与 APM 同源重定向策略不符；(5) 服务端目录无顶层/分组 `schema_version` 且含 `download_url` 字段，会被严格 catalog 解码拒绝；(6) 容器缺少目标站点 CA 链，产品 TLS 校验正确拒绝。以上限制均按 spec 以 fail-closed 记录，客户端未做隐式降级或扩大接受范围。
 
+## 2026-09-03（后续修正：按服务端实际行为适配）
+
+分类：功能变更
+
+用户需求：以测试环境实际行为为准（服务端行为优先于 `APC-API.md`），把 APC 客户端适配为对真实服务可用，并修复 2026-09-03 只读探测记录的六项偏差——#1 路径前缀、#2 Submission 认证、#3 MCP 内容类型、#4 跨源重定向、#5 目录 schema（#6 容器 CA 属环境问题，仅记录）。契约见 [ADR-026](ivory-tower/adr/ADR-026-adapt-apc-client-to-test-environment-behavior.md)（取代 [ADR-025](ivory-tower/adr/ADR-025-apc-api-client-contract.md)），证据见 [live-probe](ivory-tower/features/028-apc-api-adaptation/live-probe.md)。
+
+解决方案或完成结果：`internal/cloud/remote` 的 `endpoint()` 在所有 `/api/v1/...` 相对路径前固定拼接网关前缀 `/api-server/apc`（base URL 校验仍要求根路径）；`Submit` 与 `getSubmissionJSON` 的认证头由 `X-API-Key` 改为 `Authorization: Bearer`，匿名目录/content 请求仍无凭据。`internal/catalog` 的目录解码适配服务端形状：顶层/分组 `schema_version` 改为可选（缺省视为 v1），item 容忍 `schema_version`/`download_url`（DTO 增加 `omitempty` 字段），MCP 误声明的 `application/gzip` 归一化为 `application/json`；`internal/domain` 的 MCP 条目 `message` 允许为空、`published_at` 接受 RFC3339 或无时区 ISO 8601。重定向策略允许匿名目录/content 请求跨源跳转到 HTTPS CDN（`cdn-resource.spacemit.com`），拒绝降级到 HTTP、携带 userinfo 或认证请求跨源；content 请求标记为匿名。目录下载容忍 HTTP/2 无 `Content-Length`（以 `MaxCatalogSize` 为上界，最终大小/哈希由目录版本响应兜底）。MCP 资源 JSON 容忍服务端额外返回的 `type`/`message`/`content_md5`（可能为 null）。
+
+验证结果或限制：`go test ./...`、`go vet ./...` 均以退出码 0 通过；新增用例覆盖服务端目录 schema 解码、MCP gzip→json 归一化、无 `Content-Length` 目录下载、跨源 HTTPS 重定向跟随/HTTP 降级拒绝、MCP 资源额外字段容忍与 Submission Bearer 头。以服务端证书作为信任锚（`SSL_CERT_FILE`，仅验证环境，产品 TLS 校验保持开启）做端到端验证：`apm list` 返回 `mcp/filesystem@v1.0.0`、`skill/code-review-helper@v1.0.0`、`skill/code-test-helper@v1.0.0`；`apm list -a` 与 `apm search` 正常；`remote.GetMCP(filesystem)` 成功下载并校验（269 字节、MD5 一致）；`apm submission list`（占位 key）返回 `401 INVALID_API_KEY`，证明 `Authorization: Bearer` 被服务端识别。容器缺少目标站点 CA 链仍属环境问题，未在客户端关闭 TLS 校验。
+
 ## 2026-08-27
 
 分类：功能变更

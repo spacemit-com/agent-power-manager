@@ -96,6 +96,7 @@ func (c *Client) downloadVerifiedContent(
 	if err != nil {
 		return nil, fmt.Errorf("create remote content request: %w", err)
 	}
+	request = request.WithContext(markAnonymousCatalogRedirect(request.Context()))
 	request.Header.Set("Accept", expectedType)
 	response, err := c.http.Do(request)
 	if err != nil {

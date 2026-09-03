@@ -70,3 +70,31 @@
 
 - `APM_HOME=<隔离目录> apm list`（默认基址）→ 失败：`tls: failed to verify certificate: x509: certificate signed by unknown authority`（产品正确拒绝未知 CA，未关闭 TLS 校验）。
 - `APC_BASE_URL=https://developer.bianbu.xyz/api-server/apc/api/v1 apm list` → 失败：base URL 校验拒绝非根路径。
+
+## 适配过程中补充的发现
+
+在按服务端实际行为适配（见 [ADR-026](../../adr/ADR-026-adapt-apc-client-to-test-environment-behavior.md)）并逐项验证时，又确认以下传输与内容形状差异：
+
+| # | 补充发现 | 适配 |
+| --- | --- | --- |
+| 7 | CDN 经 HTTP/2 返回目录时无 `Content-Length`（`resp.ContentLength=-1`），HTTP/1.1 直连则有 `Content-Length: 1686` | 目录下载容忍无 `Content-Length`，以 `MaxCatalogSize` 为上界，最终大小/哈希由目录版本响应兜底 |
+| 8 | 目录 MCP 条目缺少 `message` 字段 | MCP 条目 `message` 允许为空 |
+| 9 | 目录条目 `published_at` 无时区（如 `2026-09-03T10:12:04`） | 时间戳校验接受 RFC3339 或无时区 ISO 8601 |
+| 10 | MCP 资源 JSON 额外返回 `type`/`message`(null)/`content_md5`(null) | 容忍但不校验这三个字段 |
+
+MCP 资源文件实际内容（269 字节，与目录 `content_md5` 一致）：
+
+```json
+{"type":"mcp","name":"filesystem","version":"v1.0.0","description":"提供受限的文件系统访问能力","message":null,"definition":{"transport":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem"]},"schema_version":1,"content_md5":null}
+```
+
+## 适配后的验证结果
+
+以服务端证书（`*.bianbu.xyz`，签发者 `dc.com-CA`）作为信任锚设置 `SSL_CERT_FILE`（仅验证环境，产品代码仍开启 TLS 校验）后：
+
+- `apm list` → 成功返回 `mcp/filesystem@v1.0.0`、`skill/code-review-helper@v1.0.0`、`skill/code-test-helper@v1.0.0`。
+- `apm list -a` / `apm search filesystem` → 成功展示 description/tags。
+- `remote.GetMCP(filesystem)` → 成功下载并校验（`application/json`、269 字节、MD5 一致），解码为 stdio MCP。
+- `apm submission list`（占位 key）→ `401 code=INVALID_API_KEY`，证明 `Authorization: Bearer` 已被服务端识别并进入 key 校验。
+
+容器缺少目标站点 CA 链（#6）仍属环境问题，未在客户端关闭 TLS 校验。

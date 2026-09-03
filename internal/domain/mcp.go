@@ -47,6 +47,10 @@ type mcpResourceWire struct {
 	Version       string          `json:"version"`
 	Description   string          `json:"description"`
 	Definition    json.RawMessage `json:"definition"`
+	// 测试环境资源文件额外返回的字段，容忍但不校验。
+	Type       json.RawMessage `json:"type"`
+	Message    json.RawMessage `json:"message"`
+	ContentMD5 json.RawMessage `json:"content_md5"`
 }
 
 type presentJSONValue[T any] struct {

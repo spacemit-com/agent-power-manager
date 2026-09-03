@@ -107,6 +107,18 @@ func TestDecodeMCPResourceJSONValidatesCanonicalResource(t *testing.T) {
 	}
 }
 
+func TestDecodeMCPResourceJSONToleratesServerExtraFields(t *testing.T) {
+	// 测试环境资源文件额外返回 type/message/content_md5，其中 message 与 content_md5 为 null；容忍但不校验。
+	raw := []byte(`{"type":"mcp","name":"filesystem","version":"v1.0.0","description":"提供受限的文件系统访问能力","message":null,"definition":{"transport":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem"]},"schema_version":1,"content_md5":null}`)
+	got, err := domain.DecodeMCPResourceJSON(raw)
+	if err != nil {
+		t.Fatalf("DecodeMCPResourceJSON() error = %v", err)
+	}
+	if got.Name != "filesystem" || got.Version != "v1.0.0" || got.Definition.Command != "npx" {
+		t.Fatalf("DecodeMCPResourceJSON() = %+v", got)
+	}
+}
+
 func TestDecodeMCPResourceJSONRejectsOldAndOpenShapes(t *testing.T) {
 	cases := []string{
 		`{"transport":"stdio","command":"npx"}`,

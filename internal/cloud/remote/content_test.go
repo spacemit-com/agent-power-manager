@@ -188,7 +188,7 @@ func TestDownloadVerifiedContentStagesExactBytesWithPrivateMode(t *testing.T) {
 	if mode := info.Mode().Perm(); mode != 0o600 {
 		t.Fatalf("temporary mode = %o, want 600", mode)
 	}
-	wantRequests := []string{"/api/v1/resources/agent/demo-agent/versions/v1.2.3/content"}
+	wantRequests := []string{"/api-server/apc/api/v1/resources/agent/demo-agent/versions/v1.2.3/content"}
 	if fmt.Sprint(requests) != fmt.Sprint(wantRequests) {
 		t.Fatalf("requests = %v, want catalog-entry content only %v", requests, wantRequests)
 	}

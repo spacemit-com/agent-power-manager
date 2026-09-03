@@ -172,6 +172,10 @@ func deterministicArchive(t *testing.T, root string) []byte {
 
 func (fixture *canonicalRemoteServer) serveHTTP(writer http.ResponseWriter, request *http.Request) {
 	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	// 剥离网关挂载前缀，模拟网关在路由到 /api/v1 前去掉 /api-server/apc。
+	if len(segments) >= 2 && segments[0] == "api-server" && segments[1] == "apc" {
+		segments = segments[2:]
+	}
 	if len(segments) >= 3 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "submissions" {
 		fixture.serveSubmissionAPI(writer, request, segments)
 		return
@@ -249,8 +253,11 @@ func (fixture *canonicalRemoteServer) requireRequest(writer http.ResponseWriter,
 }
 
 func escapedAPIPath(segments ...string) string {
-	escaped := make([]string, len(segments))
-	for index, segment := range segments {
+	all := make([]string, 0, len(segments)+2)
+	all = append(all, "api-server", "apc")
+	all = append(all, segments...)
+	escaped := make([]string, len(all))
+	for index, segment := range all {
 		escaped[index] = url.PathEscape(segment)
 	}
 	return "/" + strings.Join(escaped, "/")
@@ -342,14 +349,14 @@ func (fixture *canonicalRemoteServer) find(ref domain.PowerRef) *canonicalRemote
 }
 
 // serveSubmissionAPI 模拟提交、本人活动列表与详情三个 APC v1 端点，并严格校验
-// X-API-Key、无分页查询及提交幂等键，避免跨层测试被宽松 fake 掩盖。
+// Authorization: Bearer、无分页查询及提交幂等键，避免跨层测试被宽松 fake 掩盖。
 func (fixture *canonicalRemoteServer) serveSubmissionAPI(writer http.ResponseWriter, request *http.Request, segments []string) {
-	if values := request.Header.Values("X-API-Key"); len(values) != 1 || values[0] != canonicalSubmissionAPIKey {
-		fixture.rejectProtocol(writer, request, "X-API-Key = %q, want exactly one contract key", values)
+	if values := request.Header.Values("Authorization"); len(values) != 1 || values[0] != "Bearer "+canonicalSubmissionAPIKey {
+		fixture.rejectProtocol(writer, request, "Authorization = %q, want exactly one Bearer contract key", values)
 		return
 	}
-	if authorization := request.Header.Values("Authorization"); len(authorization) != 0 {
-		fixture.rejectProtocol(writer, request, "Authorization = %q, want absent", authorization)
+	if apiKey := request.Header.Values("X-API-Key"); len(apiKey) != 0 {
+		fixture.rejectProtocol(writer, request, "X-API-Key = %q, want absent", apiKey)
 		return
 	}
 	if values := request.Header.Values("Accept"); len(values) != 1 || values[0] != "application/json" {

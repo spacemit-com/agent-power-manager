@@ -128,9 +128,9 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 		return domain.SubmissionResult{}, fmt.Errorf("create remote submission request: %w", err)
 	}
 	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
-	// X-API-Key 是 APC v1 Submission 接口的提交凭据；CatalogSource 与资源 content 请求保持匿名。
-	// 凭据值不得写入日志。
-	httpRequest.Header.Set("X-API-Key", c.apiKey)
+	// 测试环境 Submission 实际要求 Authorization: Bearer（忽略 X-API-Key）；以服务端实际行为为准。
+	// CatalogSource 与资源 content 请求保持匿名。凭据值不得写入日志。
+	httpRequest.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpRequest.Header.Set("Idempotency-Key", request.IdempotencyKey)
 	httpRequest.Header.Set("Accept", "application/json")
 
@@ -243,7 +243,7 @@ func decodeSubmissionDetail(ctx context.Context, response *http.Response) (domai
 	return validateSubmissionDetail(dto)
 }
 
-// getSubmissionJSON 仅为 Submission 查询附加 X-API-Key 凭据；CatalogSource 与资源 content
+// getSubmissionJSON 仅为 Submission 查询附加 Authorization: Bearer 凭据；CatalogSource 与资源 content
 // 请求保持匿名，避免凭据扩散。凭据值不得写入日志。
 func (c *Client) getSubmissionJSON(ctx context.Context, endpoint *url.URL, target any) error {
 	if err := ctx.Err(); err != nil {
@@ -257,7 +257,7 @@ func (c *Client) getSubmissionJSON(ctx context.Context, endpoint *url.URL, targe
 		return fmt.Errorf("create remote submission query: %w", err)
 	}
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("X-API-Key", c.apiKey)
+	request.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	response, err := c.http.Do(request)
 	if err != nil {

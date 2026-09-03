@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -55,13 +56,17 @@ func (entry CatalogEntry) Validate() error {
 		return fmt.Errorf("catalog entry version %q: %w", entry.Ref.Version, err)
 	}
 	for _, field := range []struct {
-		name  string
-		value string
+		name     string
+		value    string
+		optional bool
 	}{
 		{name: "description", value: entry.Description},
-		{name: "message", value: entry.Message},
+		{name: "message", value: entry.Message, optional: entry.Ref.Type == PowerTypeMCP},
 		{name: "content type", value: entry.ContentType},
 	} {
+		if field.optional && field.value == "" {
+			continue
+		}
 		if field.value == "" || strings.TrimSpace(field.value) != field.value {
 			return fmt.Errorf("catalog entry %s must be non-empty and trimmed", field.name)
 		}
@@ -75,8 +80,8 @@ func (entry CatalogEntry) Validate() error {
 	if !isLowerHex(entry.ContentMD5, 32) {
 		return fmt.Errorf("catalog entry MD5 %q must be 32 lowercase hexadecimal characters", entry.ContentMD5)
 	}
-	if _, err := time.Parse(time.RFC3339, entry.PublishedAt); err != nil {
-		return fmt.Errorf("catalog entry published at %q must be RFC3339: %w", entry.PublishedAt, err)
+	if !isCatalogPublishedAt(entry.PublishedAt) {
+		return fmt.Errorf("catalog entry published at %q must be RFC3339 or ISO 8601 without timezone", entry.PublishedAt)
 	}
 	if entry.Tags == nil {
 		return fmt.Errorf("catalog entry tags must be a non-null array")
@@ -126,4 +131,18 @@ func isLowerHex(value string, length int) bool {
 		return false
 	}
 	return true
+}
+
+// catalogTimestampWithoutZone 匹配测试环境返回的无时区 ISO 8601 时间戳（可带 1-9 位小数秒）。
+var catalogTimestampWithoutZone = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?$`)
+
+// isCatalogPublishedAt 接受 RFC3339（含纳秒）或测试环境实际返回的无时区 ISO 8601 时间戳。
+func isCatalogPublishedAt(value string) bool {
+	if _, err := time.Parse(time.RFC3339, value); err == nil {
+		return true
+	}
+	if _, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return true
+	}
+	return catalogTimestampWithoutZone.MatchString(value)
 }

@@ -80,18 +80,23 @@ func requireAPIKey() error {
 func newRemoteHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout:       2 * time.Minute,
-		CheckRedirect: sameOriginOnly,
+		CheckRedirect: redirectPolicy,
 	}
 }
 
-// sameOriginOnly 是 composition root 的跨源重定向纵深防线；Remote Client 仍负责最终的 base origin 校验和错误分类。
-func sameOriginOnly(request *http.Request, via []*http.Request) error {
+// redirectPolicy 是 composition root 的重定向纵深防线：允许同源重定向，或匿名资源请求跨源跳转到
+// HTTPS CDN（测试环境 catalog/content 302 到 cdn-resource.spacemit.com），拒绝降级到 HTTP 或携带
+// userinfo。认证请求的跨源重定向由 Remote Client 内部的凭据保护先行拒绝。
+func redirectPolicy(request *http.Request, via []*http.Request) error {
 	if request == nil || request.URL == nil || request.URL.User != nil ||
 		len(via) == 0 || via[0] == nil || via[0].URL == nil || via[0].URL.User != nil {
 		return errors.New("reject Remote redirect without an original origin")
 	}
-	if !sameHTTPOrigin(via[0].URL, request.URL) {
-		return fmt.Errorf("reject cross-origin Remote redirect from %q to %q", via[0].URL.Host, request.URL.Host)
+	if sameHTTPOrigin(via[0].URL, request.URL) {
+		return nil
+	}
+	if !strings.EqualFold(request.URL.Scheme, "https") {
+		return fmt.Errorf("reject cross-origin Remote redirect to non-HTTPS %q", request.URL.Scheme)
 	}
 	return nil
 }

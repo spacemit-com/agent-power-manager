@@ -152,7 +152,7 @@ func TestNewCloudClientUsesRemoteBaseURLOverride(t *testing.T) {
 	if version.Size != 0 {
 		t.Fatalf("CatalogVersion() = %#v, want empty overridden catalog", version)
 	}
-	if requestPath != "/api/v1/resources/version" {
+	if requestPath != "/api-server/apc/api/v1/resources/version" {
 		t.Fatalf("request URI = %q, want overridden APC catalog path", requestPath)
 	}
 }
@@ -380,7 +380,7 @@ func TestNewCloudClientAcceptsPhysicalLocalRoot(t *testing.T) {
 	}
 }
 
-func TestNewRemoteHTTPClientIsFreshBoundedAndSameOriginOnly(t *testing.T) {
+func TestNewRemoteHTTPClientIsFreshBoundedAndSafeRedirect(t *testing.T) {
 	first := newRemoteHTTPClient()
 	second := newRemoteHTTPClient()
 	if first == second {
@@ -398,7 +398,11 @@ func TestNewRemoteHTTPClientIsFreshBoundedAndSameOriginOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	crossOriginURL, err := url.Parse("https://other.example.com/next")
+	crossOriginHTTPSURL, err := url.Parse("https://cdn.example.com/file/next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	crossOriginHTTPURL, err := url.Parse("http://cdn.example.com/file/next")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,12 +410,15 @@ func TestNewRemoteHTTPClientIsFreshBoundedAndSameOriginOnly(t *testing.T) {
 	if err := first.CheckRedirect(&http.Request{URL: sameOriginURL}, via); err != nil {
 		t.Fatalf("same-origin redirect error = %v", err)
 	}
-	if err := first.CheckRedirect(&http.Request{URL: crossOriginURL}, via); err == nil {
-		t.Fatal("cross-origin redirect error = nil")
+	if err := first.CheckRedirect(&http.Request{URL: crossOriginHTTPSURL}, via); err != nil {
+		t.Fatalf("cross-origin HTTPS redirect error = %v, want followed", err)
+	}
+	if err := first.CheckRedirect(&http.Request{URL: crossOriginHTTPURL}, via); err == nil {
+		t.Fatal("cross-origin HTTP downgrade redirect error = nil")
 	}
 }
 
-func TestSameOriginOnlyRejectsNilAndCredentialedRedirects(t *testing.T) {
+func TestRedirectPolicyRejectsNilAndCredentialedRedirects(t *testing.T) {
 	safeURL := &url.URL{Scheme: "https", Host: "apc.example.com", Path: "/next"}
 	credentialedURL := &url.URL{
 		Scheme: "https",
@@ -434,14 +441,14 @@ func TestSameOriginOnlyRejectsNilAndCredentialedRedirects(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := sameOriginOnly(tt.request, tt.via); err == nil {
-				t.Fatal("sameOriginOnly() error = nil")
+			if err := redirectPolicy(tt.request, tt.via); err == nil {
+				t.Fatal("redirectPolicy() error = nil")
 			}
 		})
 	}
 }
 
-func TestSameOriginOnlyTreatsDefaultPortsAsEquivalent(t *testing.T) {
+func TestRedirectPolicyTreatsDefaultPortsAsEquivalent(t *testing.T) {
 	tests := []struct {
 		name     string
 		original string
@@ -460,8 +467,8 @@ func TestSameOriginOnlyTreatsDefaultPortsAsEquivalent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := sameOriginOnly(&http.Request{URL: target}, []*http.Request{{URL: original}}); err != nil {
-				t.Fatalf("sameOriginOnly() error = %v", err)
+			if err := redirectPolicy(&http.Request{URL: target}, []*http.Request{{URL: original}}); err != nil {
+				t.Fatalf("redirectPolicy() error = %v", err)
 			}
 		})
 	}

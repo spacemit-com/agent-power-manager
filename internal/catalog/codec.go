@@ -37,15 +37,17 @@ type groupDTO struct {
 }
 
 type itemDTO struct {
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	Description string   `json:"description"`
-	Message     string   `json:"message"`
-	ContentType string   `json:"content_type"`
-	ContentSize int64    `json:"content_size"`
-	ContentMD5  string   `json:"content_md5"`
-	PublishedAt string   `json:"published_at"`
-	Tags        []string `json:"tags"`
+	Name          string   `json:"name"`
+	SchemaVersion int      `json:"schema_version,omitempty"` // 测试环境目录条目额外字段；容忍但不校验。
+	Version       string   `json:"version"`
+	Description   string   `json:"description"`
+	Message       string   `json:"message"`
+	ContentType   string   `json:"content_type"`
+	ContentSize   int64    `json:"content_size"`
+	ContentMD5    string   `json:"content_md5"`
+	PublishedAt   string   `json:"published_at"`
+	DownloadURL   string   `json:"download_url,omitempty"` // 测试环境目录条目额外字段；容忍但不使用。
+	Tags          []string `json:"tags"`
 }
 
 // Decode 严格解码一个 catalog JSON v1，并将其构造成不执行 I/O 的不可变快照。
@@ -60,7 +62,7 @@ func Decode(data []byte) (Snapshot, error) {
 	if err := jsonstrict.Decode(data, &dto, true); err != nil {
 		return Snapshot{}, fmt.Errorf("decode catalog JSON: %w", fmt.Errorf("%w: %w", ErrInvalidCatalog, err))
 	}
-	if dto.SchemaVersion != catalogSchemaVersion {
+	if dto.SchemaVersion != 0 && dto.SchemaVersion != catalogSchemaVersion {
 		return Snapshot{}, fmt.Errorf("catalog schema version %d must be %d: %w", dto.SchemaVersion, catalogSchemaVersion, ErrInvalidCatalog)
 	}
 
@@ -125,7 +127,7 @@ func decodeGroup(powerType domain.PowerType, name string, group *groupDTO) ([]do
 	if group == nil {
 		return nil, fmt.Errorf("catalog group %q is required: %w", name, ErrInvalidCatalog)
 	}
-	if group.SchemaVersion != catalogSchemaVersion {
+	if group.SchemaVersion != 0 && group.SchemaVersion != catalogSchemaVersion {
 		return nil, fmt.Errorf("catalog group %q schema version %d must be %d: %w", name, group.SchemaVersion, catalogSchemaVersion, ErrInvalidCatalog)
 	}
 	if group.Items == nil {
@@ -146,6 +148,7 @@ func decodeGroup(powerType domain.PowerType, name string, group *groupDTO) ([]do
 			PublishedAt: item.PublishedAt,
 			Tags:        cloneTags(item.Tags),
 		}
+		normalizeServerCatalogEntry(&entry)
 		if err := entry.Validate(); err != nil {
 			return nil, fmt.Errorf("validate catalog group %q item %d: %w", name, index, fmt.Errorf("%w: %w", ErrInvalidCatalog, err))
 		}
@@ -155,6 +158,18 @@ func decodeGroup(powerType domain.PowerType, name string, group *groupDTO) ([]do
 		return nil, fmt.Errorf("catalog group %q: %w", name, err)
 	}
 	return entries, nil
+}
+
+// normalizeServerCatalogEntry 将测试环境实际返回的目录条目归一化为 APM 语义：
+// 服务端把 MCP 的 content_type 误声明为 application/gzip（实际内容为 JSON），
+// 这里按实际内容修正为 application/json，避免严格校验拒绝真实目录。
+func normalizeServerCatalogEntry(entry *domain.CatalogEntry) {
+	if entry == nil || entry.Ref.Type != domain.PowerTypeMCP {
+		return
+	}
+	if entry.ContentType == "application/gzip" {
+		entry.ContentType = "application/json"
+	}
 }
 
 func encodeGroup(entries []domain.CatalogEntry) *groupDTO {
@@ -344,7 +359,7 @@ func catalogObjectAllowsKey(kind catalogObjectKind, key string) bool {
 		return key == "schema_version" || key == "items"
 	case catalogItemObject:
 		switch key {
-		case "name", "version", "description", "message", "content_type", "content_size", "content_md5", "published_at", "tags":
+		case "name", "schema_version", "version", "description", "message", "content_type", "content_size", "content_md5", "published_at", "download_url", "tags":
 			return true
 		default:
 			return false

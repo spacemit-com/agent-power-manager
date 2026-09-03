@@ -1311,11 +1311,15 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 	server.requests[request.URL.Path]++
 	server.mu.Unlock()
 	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	// 剥离网关挂载前缀，模拟网关在路由到 /api/v1 前去掉 /api-server/apc。
+	if len(segments) >= 2 && segments[0] == "api-server" && segments[1] == "apc" {
+		segments = segments[2:]
+	}
 	if request.Method != http.MethodGet {
 		server.rejectProtocol(writer, request, "method = %q, want GET", request.Method)
 		return
 	}
-	if request.URL.Path == "/api/v1/resources" {
+	if len(segments) == 3 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "resources" {
 		if !server.requireRequest(writer, request, []string{"api", "v1", "resources"}, "application/json") {
 			return
 		}
@@ -1401,8 +1405,11 @@ func (server *lifecycleRemoteServer) requireRequest(writer http.ResponseWriter, 
 }
 
 func lifecycleEscapedPath(segments ...string) string {
-	escaped := make([]string, len(segments))
-	for index, segment := range segments {
+	all := make([]string, 0, len(segments)+2)
+	all = append(all, "api-server", "apc")
+	all = append(all, segments...)
+	escaped := make([]string, len(all))
+	for index, segment := range all {
 		escaped[index] = url.PathEscape(segment)
 	}
 	return "/" + strings.Join(escaped, "/")

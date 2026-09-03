@@ -43,7 +43,7 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 	return NewWithAPIKey(baseURL, httpClient, "")
 }
 
-// NewWithAPIKey 创建远端目录 Client 并注入 X-API-Key 凭据；apiKey 为空表示匿名（仅资源读取与下载）。
+// NewWithAPIKey 创建远端目录 Client 并注入 Authorization: Bearer 凭据；apiKey 为空表示匿名（仅资源读取与下载）。
 func NewWithAPIKey(baseURL string, httpClient *http.Client, apiKey string) (*Client, error) {
 	if httpClient == nil || httpClient.Timeout <= 0 {
 		return nil, fmt.Errorf("create remote Client with bounded HTTP client: %w", cloud.ErrProviderConfig)
@@ -64,21 +64,21 @@ func NewWithAPIKey(baseURL string, httpClient *http.Client, apiKey string) (*Cli
 	clientCopy := *httpClient
 	callerRedirect := httpClient.CheckRedirect
 	clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		anonymousCatalog := anonymousCatalogRedirect(req.Context())
-		if !validRedirectRequest(&normalized, req) {
+		anonymous := anonymousCatalogRedirect(req.Context())
+		if !validRedirectRequest(&normalized, req, anonymous) {
 			return fmt.Errorf("remote redirect crosses configured origin: %w", cloud.ErrInvalidResponse)
 		}
 		if callerRedirect != nil {
 			if err := callerRedirect(req, via); err != nil {
 				return err
 			}
-			if !validRedirectRequest(&normalized, req) {
+			if !validRedirectRequest(&normalized, req, anonymous) {
 				return fmt.Errorf("remote redirect policy changed configured origin: %w", cloud.ErrInvalidResponse)
 			}
 		} else if len(via) >= 10 {
 			return fmt.Errorf("remote request stopped after 10 redirects: %w", cloud.ErrInvalidResponse)
 		}
-		if anonymousCatalog {
+		if anonymous {
 			for name, values := range req.Header {
 				if len(values) > 0 && isCredentialRequestHeader(name) {
 					return fmt.Errorf("remote anonymous catalog redirect contains credential header %q: %w", name, cloud.ErrInvalidResponse)
@@ -93,6 +93,7 @@ func NewWithAPIKey(baseURL string, httpClient *http.Client, apiKey string) (*Cli
 
 type anonymousCatalogRedirectContextKey struct{}
 
+// markAnonymousCatalogRedirect 标记匿名目录/内容请求：它们不携带凭据，允许跟随跨源 CDN 重定向。
 func markAnonymousCatalogRedirect(ctx context.Context) context.Context {
 	return context.WithValue(ctx, anonymousCatalogRedirectContextKey{}, true)
 }
@@ -116,8 +117,19 @@ func isCredentialRequestHeader(name string) bool {
 		strings.HasSuffix(normalized, "-secret")
 }
 
-func validRedirectRequest(baseURL *url.URL, request *http.Request) bool {
-	return request != nil && request.URL != nil && request.URL.User == nil && sameOrigin(baseURL, request.URL)
+// validRedirectRequest 允许同源重定向；跨源重定向仅允许匿名目录/内容请求跳转到 HTTPS CDN，
+// 防止 Submission 凭据被转发到第三方。
+func validRedirectRequest(baseURL *url.URL, request *http.Request, anonymous bool) bool {
+	if request == nil || request.URL == nil || request.URL.User != nil {
+		return false
+	}
+	if sameOrigin(baseURL, request.URL) {
+		return true
+	}
+	if !anonymous || !strings.EqualFold(request.URL.Scheme, "https") {
+		return false
+	}
+	return true
 }
 
 func validateBaseURL(baseURL *url.URL) error {
@@ -167,13 +179,19 @@ func originPort(value *url.URL) string {
 	return ""
 }
 
+// gatewayPathPrefix 是 APC 服务在网关后挂载的固定路径前缀；测试与生产环境均为 /api-server/apc。
+// endpoint() 在其后拼接调用方传入的 /api/v1/... 相对路径。
+const gatewayPathPrefix = "api-server/apc"
+
 func (c *Client) endpoint(segments ...string) *url.URL {
 	endpoint := *c.baseURL
-	decoded := make([]string, len(segments))
-	escaped := make([]string, len(segments))
+	decoded := make([]string, len(segments)+1)
+	escaped := make([]string, len(segments)+1)
+	decoded[0] = gatewayPathPrefix
+	escaped[0] = gatewayPathPrefix
 	for index, segment := range segments {
-		decoded[index] = segment
-		escaped[index] = url.PathEscape(segment)
+		decoded[index+1] = segment
+		escaped[index+1] = url.PathEscape(segment)
 	}
 	endpoint.Path = "/" + strings.Join(decoded, "/")
 	endpoint.RawPath = "/" + strings.Join(escaped, "/")

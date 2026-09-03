@@ -86,7 +86,7 @@ func TestSubmitAgentUsesGzipPart(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/api/v1/submissions/sub_1"}`))
+		_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/api-server/apc/api/v1/submissions/sub_1"}`))
 	}))
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
@@ -98,18 +98,18 @@ func TestSubmitAgentUsesGzipPart(t *testing.T) {
 	if err != nil || got.Outcome != domain.SubmissionAccepted {
 		t.Fatalf("Submit() = %+v, %v", got, err)
 	}
-	if got.SubmissionID != "sub_1" || got.Status != domain.SubmissionReceived || got.StatusURL != "/api/v1/submissions/sub_1" {
+	if got.SubmissionID != "sub_1" || got.Status != domain.SubmissionReceived || got.StatusURL != "/api-server/apc/api/v1/submissions/sub_1" {
 		t.Fatalf("Submit() = %+v", got)
 	}
 }
 
 func TestSubmitReturnsAcceptedResult(t *testing.T) {
-	var gotAPIKey string
-	var gotAuthValues []string
+	var gotAuthorization string
+	var gotAPIKeyValues []string
 	var gotIdem string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAPIKey = r.Header.Get("X-API-Key")
-		gotAuthValues = r.Header.Values("Authorization")
+		gotAuthorization = r.Header.Get("Authorization")
+		gotAPIKeyValues = r.Header.Values("X-API-Key")
 		gotIdem = r.Header.Get("Idempotency-Key")
 		metadata, contentType, _, content := readSubmissionParts(t, r)
 		if metadata["schema_version"] != float64(1) || metadata["type"] != "skill" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
@@ -124,7 +124,7 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/api/v1/submissions/sub_1"}`))
+		_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/api-server/apc/api/v1/submissions/sub_1"}`))
 	}))
 	defer server.Close()
 
@@ -141,11 +141,11 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 		got.Status != domain.SubmissionReceived || got.StatusURL == "" {
 		t.Fatalf("Submit() = %+v", got)
 	}
-	if gotAPIKey != "official-key" {
-		t.Fatalf("X-API-Key = %q, want official-key", gotAPIKey)
+	if gotAuthorization != "Bearer official-key" {
+		t.Fatalf("Authorization = %q, want Bearer official-key", gotAuthorization)
 	}
-	if len(gotAuthValues) != 0 {
-		t.Fatalf("Authorization = %q, want absent", gotAuthValues)
+	if len(gotAPIKeyValues) != 0 {
+		t.Fatalf("X-API-Key = %q, want absent", gotAPIKeyValues)
 	}
 	if gotIdem != "k" {
 		t.Fatalf("Idempotency-Key = %q", gotIdem)
@@ -607,14 +607,14 @@ func TestSubmitRejectsInvalidReplayDetail(t *testing.T) {
 
 func TestGetSubmissionUsesBearerAndReturnsFullDetail(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api/v1/submissions/sub_1" {
+		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api-server/apc/api/v1/submissions/sub_1" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.EscapedPath())
 		}
-		if apiKey := r.Header.Get("X-API-Key"); apiKey != "official-key" {
-			t.Fatalf("X-API-Key = %q, want official-key", apiKey)
+		if authorization := r.Header.Get("Authorization"); authorization != "Bearer official-key" {
+			t.Fatalf("Authorization = %q, want Bearer official-key", authorization)
 		}
-		if authorization := r.Header.Values("Authorization"); len(authorization) != 0 {
-			t.Fatalf("Authorization = %q, want absent", authorization)
+		if apiKey := r.Header.Values("X-API-Key"); len(apiKey) != 0 {
+			t.Fatalf("X-API-Key = %q, want absent", apiKey)
 		}
 		if accept := r.Header.Get("Accept"); accept != "application/json" {
 			t.Fatalf("Accept = %q, want application/json", accept)
@@ -647,14 +647,14 @@ func TestGetSubmissionUsesBearerAndReturnsFullDetail(t *testing.T) {
 
 func TestListSubmissionsUsesBearerAndBoundedFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api/v1/submissions" {
+		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/api-server/apc/api/v1/submissions" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.EscapedPath())
 		}
-		if apiKey := r.Header.Get("X-API-Key"); apiKey != "official-key" {
-			t.Fatalf("X-API-Key = %q, want official-key", apiKey)
+		if authorization := r.Header.Get("Authorization"); authorization != "Bearer official-key" {
+			t.Fatalf("Authorization = %q, want Bearer official-key", authorization)
 		}
-		if authorization := r.Header.Values("Authorization"); len(authorization) != 0 {
-			t.Fatalf("Authorization = %q, want absent", authorization)
+		if apiKey := r.Header.Values("X-API-Key"); len(apiKey) != 0 {
+			t.Fatalf("X-API-Key = %q, want absent", apiKey)
 		}
 		if accept := r.Header.Get("Accept"); accept != "application/json" {
 			t.Fatalf("Accept = %q, want application/json", accept)
@@ -768,12 +768,12 @@ func TestAnonymousCatalogNeverReceivesSubmissionBearer(t *testing.T) {
 		if authorization := r.Header.Values("Authorization"); len(authorization) != 0 {
 			t.Fatalf("%s Authorization = %q, want absent", r.URL.EscapedPath(), authorization)
 		}
-		if r.URL.EscapedPath() == "/api/v1/resources/version" {
+		if r.URL.EscapedPath() == "/api-server/apc/api/v1/resources/version" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"schema_version":1,"catalog_sha256":"0000000000000000000000000000000000000000000000000000000000000000","catalog_size":0}`))
 			return
 		}
-		if r.URL.EscapedPath() == "/api/v1/resources/mcp/demo/versions/v1.0.0/content" {
+		if r.URL.EscapedPath() == "/api-server/apc/api/v1/resources/mcp/demo/versions/v1.0.0/content" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Content-Length", fmt.Sprint(len(content)))
 			_, _ = w.Write(content)
@@ -796,8 +796,8 @@ func TestAnonymousCatalogNeverReceivesSubmissionBearer(t *testing.T) {
 		t.Fatalf("GetMCP() = %#v, want %#v", got, want)
 	}
 	wantPaths := []string{
-		"/api/v1/resources/version",
-		"/api/v1/resources/mcp/demo/versions/v1.0.0/content",
+		"/api-server/apc/api/v1/resources/version",
+		"/api-server/apc/api/v1/resources/mcp/demo/versions/v1.0.0/content",
 	}
 	if !reflect.DeepEqual(paths, wantPaths) {
 		t.Fatalf("anonymous resource request paths = %v, want %v", paths, wantPaths)

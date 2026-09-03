@@ -27,7 +27,7 @@ go build -o ./apm ./cmd/apm
 
 ## Cloud Provider 配置
 
-APM 把 Local 与 Remote provider 静态链接到同一个二进制，并由 `cmd/apm` 的 `newCloudClient` 在每次 lifecycle 构造时创建独立 `ProviderRegistry`、注册 factory 后只打开被选中的 provider（[ADR-016](ivory-tower/adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）。默认 provider 是 `remote`，默认 APC 测试环境根地址为 `https://developer.bianbu.xyz`（[ADR-025](ivory-tower/adr/ADR-025-apc-api-client-contract.md)）：
+APM 把 Local 与 Remote provider 静态链接到同一个二进制，并由 `cmd/apm` 的 `newCloudClient` 在每次 lifecycle 构造时创建独立 `ProviderRegistry`、注册 factory 后只打开被选中的 provider（[ADR-016](ivory-tower/adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）。默认 provider 是 `remote`，默认 APC 测试环境根地址为 `https://developer.bianbu.xyz`（[ADR-026](ivory-tower/adr/ADR-026-adapt-apc-client-to-test-environment-behavior.md)）：
 
 ```bash
 # 默认 Remote（默认 APC 测试环境根地址，可用 APC_BASE_URL 覆盖）
