@@ -38,6 +38,10 @@ Feature 028 的只读探测（见 [live-probe](../features/028-apc-api-adaptatio
    `MaxCatalogSize` 为上界读取；最终大小与哈希仍由目录版本响应 + sha256/size 校验兜底。
 7. **MCP 资源额外字段**：MCP 资源 JSON 容忍服务端额外返回的 `type`/`message`/`content_md5`
    （可能为 null），不参与身份或完整性校验。
+8. **gzip 内容媒体类型别名**：目录声明 `application/gzip` 的 Skill/Plugin/Agent 归档，CDN
+   实际返回历史别名 `application/x-gzip`；content 校验把该别名归一化为 `application/gzip`
+   后再与目录声明比较。归一化只作用于响应侧、只认精确的 `application/x-gzip`，目录元数据
+   仍要求 IANA 声明 `application/gzip`（fail-closed 不扩大）。
 
 ## Consequences
 

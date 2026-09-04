@@ -2,6 +2,16 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-03（后续修正：接受 gzip 历史媒体类型别名）
+
+分类：功能变更
+
+用户需求：测试环境 CDN 对 Skill/Plugin/Agent 归档返回 `Content-Type: application/x-gzip`（历史别名），而目录声明 `application/gzip`，导致 `apm install` 报 `remote catalog entry content has media type "application/x-gzip": cloud invalid response`。将客户端适配为接受该别名，使 gzip 归档安装对真实服务可用。契约见 [ADR-026](ivory-tower/adr/ADR-026-adapt-apc-client-to-test-environment-behavior.md)，证据见 [live-probe](ivory-tower/features/028-apc-api-adaptation/live-probe.md)。
+
+解决方案或完成结果：`internal/cloud/remote` 的 `verifyCatalogEntryContent` 在比较响应媒体类型前调用新增的 `normalizeContentType`，把精确的 `application/x-gzip` 归一化为 `application/gzip` 后再与 `entry.ContentType` 比较；其它媒体类型原样返回仍严格相等校验。归一化只作用于响应侧、只认精确的 `application/x-gzip`，目录元数据仍要求 IANA 声明 `application/gzip`（fail-closed 不扩大）；`Accept` 头、解包与 MD5/大小校验不变。
+
+验证结果或限制：新增用例覆盖 `application/x-gzip` 响应被接受且字节精确（`TestVerifyCatalogEntryContentAcceptsLegacyXGzipAlias`）以及完整 `DownloadSkill` 路径在旧别名下发布成功（`TestDownloadSkillAcceptsLegacyXGzipContentType`）；既有「错误媒体类型」「带参数媒体类型」用例保持拒绝，证明 fail-closed 未扩大。
+
 ## 2026-09-03
 
 分类：功能变更

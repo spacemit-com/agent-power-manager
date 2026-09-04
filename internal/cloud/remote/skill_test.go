@@ -43,6 +43,27 @@ func TestDownloadSkillPublishesVerifiedArchiveWithRequiredMarkers(t *testing.T) 
 	}
 }
 
+func TestDownloadSkillAcceptsLegacyXGzipContentType(t *testing.T) {
+	contents := testTarGzBytes(t,
+		testTarEntry{name: "SKILL.md", body: []byte("# Demo\n")},
+		testTarEntry{name: "skill-card.md", body: []byte("summary\n")},
+	)
+	client := newContentClient(t, remoteSkillRef, contents, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/content") {
+			w.Header().Set("Content-Type", "application/x-gzip")
+			_, _ = w.Write(contents)
+			return
+		}
+		rejectRemovedMetadata(t, w)
+	})
+	destination := filepath.Join(trustedTestDir(t), "skill")
+	if err := client.DownloadSkill(context.Background(), validRemoteCatalogEntry(remoteSkillRef, contents), destination); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContentsAndMode(t, filepath.Join(destination, "SKILL.md"), "# Demo\n", 0o644)
+	assertFileContentsAndMode(t, filepath.Join(destination, "skill-card.md"), "summary\n", 0o644)
+}
+
 func TestDownloadSkillAcceptsExistingEmptyPhysicalDestination(t *testing.T) {
 	contents := testTarGzBytes(t,
 		testTarEntry{name: "SKILL.md", body: []byte("skill")},

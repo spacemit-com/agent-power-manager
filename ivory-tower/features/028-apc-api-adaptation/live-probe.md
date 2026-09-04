@@ -81,6 +81,7 @@
 | 8 | 目录 MCP 条目缺少 `message` 字段 | MCP 条目 `message` 允许为空 |
 | 9 | 目录条目 `published_at` 无时区（如 `2026-09-03T10:12:04`） | 时间戳校验接受 RFC3339 或无时区 ISO 8601 |
 | 10 | MCP 资源 JSON 额外返回 `type`/`message`(null)/`content_md5`(null) | 容忍但不校验这三个字段 |
+| 11 | Skill/Plugin/Agent 归档 CDN 返回 `Content-Type: application/x-gzip`，目录却声明 `application/gzip` | content 校验把 `application/x-gzip` 归一化为 `application/gzip` 后再比较，目录元数据仍要求 IANA 声明 |
 
 MCP 资源文件实际内容（269 字节，与目录 `content_md5` 一致）：
 

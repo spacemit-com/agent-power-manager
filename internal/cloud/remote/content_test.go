@@ -44,6 +44,20 @@ func TestVerifyCatalogEntryContentAcceptsExactBytesWithKnownOrUnknownLength(t *t
 	}
 }
 
+func TestVerifyCatalogEntryContentAcceptsLegacyXGzipAlias(t *testing.T) {
+	contents := []byte("schema_version: 1\nopaque:  value\n")
+	entry := validRemoteCatalogEntry(remoteAgentRef, contents)
+	response := contentVerificationResponse("application/x-gzip", int64(len(contents)), bytes.NewReader(contents))
+	var destination bytes.Buffer
+
+	if err := verifyCatalogEntryContent(context.Background(), response, entry, &destination); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(destination.Bytes(), contents) {
+		t.Fatalf("verified contents = %q, want exact %q", destination.Bytes(), contents)
+	}
+}
+
 func TestVerifyCatalogEntryContentRejectsProtocolAndIntegrityFailures(t *testing.T) {
 	contents := []byte("verified entry bytes")
 	entry := validRemoteCatalogEntry(remoteAgentRef, contents)

@@ -36,7 +36,7 @@ func verifyCatalogEntryContent(ctx context.Context, response *http.Response, ent
 		return fmt.Errorf("remote catalog entry content size %d exceeds %d bytes: %w", entry.ContentSize, maxRemoteContentSize, cloud.ErrUnsafeContent)
 	}
 	mediaType, parameters, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || mediaType != entry.ContentType || len(parameters) != 0 {
+	if err != nil || normalizeContentType(mediaType) != entry.ContentType || len(parameters) != 0 {
 		return fmt.Errorf("remote catalog entry content has media type %q: %w", response.Header.Get("Content-Type"), cloud.ErrInvalidResponse)
 	}
 	if response.ContentLength < -1 {
@@ -144,6 +144,16 @@ func (c *Client) downloadVerifiedContent(
 		return nil, fmt.Errorf("close staged remote content: %w", closeErr)
 	}
 	return staged, nil
+}
+
+// normalizeContentType 把 gzip 的历史别名 application/x-gzip 归一化为 IANA 注册的
+// application/gzip，使测试环境 CDN 返回的旧式媒体类型与目录声明一致；其它媒体类型
+// 原样返回，仍按严格相等校验，避免扩大接受范围。
+func normalizeContentType(mediaType string) string {
+	if mediaType == "application/x-gzip" {
+		return "application/gzip"
+	}
+	return mediaType
 }
 
 type contextReader struct {
