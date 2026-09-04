@@ -29,11 +29,18 @@ func renderShow(writer io.Writer, result ShowResult, asJSON bool) error {
 	}
 	p := result.Power
 	tags := strings.Join(p.Tags, ", ")
-	if len(p.Tags) == 0 {
-		tags = "[]"
-	}
-	if _, err := fmt.Fprintf(writer, "type: %s\nname: %s\nversion: %s\ndescription: %s\ntags: %s\n", p.Power.Type, p.Power.Name, p.Power.Version, p.Description, tags); err != nil {
+	if _, err := fmt.Fprintf(writer, "type: %s\nname: %s\nversion: %s\ndescription: %s\n", p.Power.Type, p.Power.Name, p.Power.Version, p.Description); err != nil {
 		return fmt.Errorf("write show result: %w", err)
+	}
+	if tags == "" {
+		_, err := io.WriteString(writer, "tags:\n")
+		if err != nil {
+			return fmt.Errorf("write show tags: %w", err)
+		}
+		return nil
+	}
+	if _, err := fmt.Fprintf(writer, "tags: %s\n", tags); err != nil {
+		return fmt.Errorf("write show tags: %w", err)
 	}
 	return nil
 }

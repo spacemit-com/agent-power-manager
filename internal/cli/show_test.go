@@ -77,7 +77,7 @@ func TestShowRendersLabeledFieldsAndEmptyTags(t *testing.T) {
 	if err := entry.Execute([]string{"show", "demo"}); err != nil {
 		t.Fatalf("Execute(show) error = %v", err)
 	}
-	want := "type: skill\nname: demo\nversion: v1.0.0\ndescription: desc\ntags: []\n"
+	want := "type: skill\nname: demo\nversion: v1.0.0\ndescription: desc\ntags:\n"
 	if stdout.String() != want {
 		t.Fatalf("output = %q, want %q", stdout.String(), want)
 	}
