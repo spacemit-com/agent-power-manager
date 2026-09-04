@@ -23,7 +23,9 @@ CLI 语法采用：
 ```text
 apm search <keyword> [--type=<skill|plugin|mcp>]
 apm list [name] [--type=<skill|plugin|mcp>]
+apm list [name] --all [--type=<skill|plugin|mcp>]
 apm list [name] --installed [--agent=<agent-id|all>] [--type=<skill|plugin|mcp>]
+apm show <name> [--type=<skill|plugin|mcp>] [--version=vMAJOR.MINOR.PATCH] [--json]
 apm install <power>[=<version>] --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
 apm fix
@@ -36,7 +38,8 @@ apm fix
 
 - `search` 的 keyword 必填，只查询云端资源；省略 `--type` 时不应用类别过滤。
 - 该命令不注册 `--agent`，传入该 flag 时 Cobra 报告 unknown flag。
-- `list` 默认列出 Cloud 资源，省略 `--type` 时不应用类别过滤，并保留每个版本；`list --installed` 读取本地安装清单并按本地记录解析类别。Cloud 行精确为 `<type>/<name>@<version>`；installed 具体 Agent 行精确为 `<type>/<name>@<version>`（不重复 Agent 前缀），installed 省略 `--agent` 或 `--agent=all` 时按 Agent ID 字典序分组缩进输出，未安装与空清单分别以 `not installed`/`no powers installed` 标记。
+- `list` 默认列出 Cloud 资源，省略 `--type` 时不应用类别过滤，并按 `(type,name)` 只保留最新版本；提供 `name --all`（或 `name -a`）时仅展开该名称的全部版本，缺少 name 使用 `--all` 会被拒绝。`--all` 不改变元数据渲染。`list --installed` 读取本地安装清单并按本地记录解析类别。Cloud 行精确为 `<type>/<name>@<version>`；installed 具体 Agent 行精确为 `<type>/<name>@<version>`（不重复 Agent 前缀），installed 省略 `--agent` 或 `--agent=all` 时按 Agent ID 字典序分组缩进输出，未安装与空清单分别以 `not installed`/`no powers installed` 标记。
+- `show <name>` 只查询 Cloud catalog，默认展示最新版本；`--version` 选择精确版本，跨类别同名时必须提供 `--type`。文本输出包含 type、name、version、description、tags，`--json` 输出单对象。
 - `list` 的可选位置参数 `name` 按区分大小写的原始字符串精确匹配 `PowerRef.Name`，对默认 Cloud 列表与 `list --installed` 均生效；省略时不应用名字过滤，`name` 不是 flag，且不接受版本。
 - `install` 的 Name 与 Cloud `PowerRef.Name` 按区分大小写的原始字符串精确匹配；省略 `--type` 时从 Cloud `List()` 返回的带版本 `PowerRef` 推断类别。若同名候选跨 Type，必须在任何版本选择（包括显式版本）前报歧义并要求 `--type`。未指定版本时从确定类别的候选引用选择最新版并填充 `PowerRef.Version`；显式 `<power>=<version>` 只接受规范 `vMAJOR.MINOR.PATCH`，可安装、升级或降级到指定版本；相同版本视为成功且不重复安装。
 - `uninstall` 不接受版本；位置参数中任何 `=` 都在创建 lifecycle 前被拒绝并返回 `uninstall does not accept a version`。它为每个目标 Agent 分别从本地安装清单解析 Type 和 Version：显式 `--type` 只精确匹配该类别并取清单第一条同名记录；省略时按当前 Agent 内匹配到的去重类别消歧，只有一个类别时同样取该类别第一条。不同 Agent 可解析为不同 Type/Version。当前 Agent 无匹配记录时同步 Warn，记为 Agent-only `unexecuted` 并继续，整体仍是幂等成功；同名跨类别歧义则要求显式 `--type`。
