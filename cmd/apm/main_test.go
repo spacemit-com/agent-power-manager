@@ -35,6 +35,8 @@ func useBundledLocalCloud(t *testing.T) {
 
 func newBundledCLIEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
 	t.Helper()
+	original := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(original) })
 	composition := newCatalogLifecycleComposition()
 	return cli.New(
 		stdout,
