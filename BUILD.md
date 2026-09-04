@@ -179,13 +179,14 @@ track: apm submission get sub_...
 
 `submission list` 和 `submission get` 使用 `X-API-Key: <official-api-key>` 的独立认证请求，不向匿名资源接口泄露 Key。list 只返回当前 Key 所属账号按创建时间倒序的 active Submission（`received`、`validating`、`review_pending`、`approved`、`publishing`），最多 20 条，只接受 status/type/name 筛选，不提供分页或时间范围参数。get 展示 description、message、时间戳和原样 timeline；终态记录只能通过已知 ID 获取。
 
-Search 已实现：它从同步后的一份不可变 Catalog Snapshot 按名称搜索 Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`。例如：
+Search 已实现：它从同步后的一份不可变 Catalog Snapshot 按名称搜索 Power，为每个类别和名称选择最新版本，并输出精确格式 `<type>/<name>@<version>`，有 description 时在身份行下追加两空格缩进的 `description`（默认展示、不展示 tags）。例如：
 
 ```text
 skill/foo-before-summary@v0.1.0
+  description: 云函数事件前置汇总
 ```
 
-Search 只接受可选的 `--type`，不接受 `--agent`。全局选项 `--verbose` 输出解析和 journal 检查诊断到标准错误；帮助信息可查看每个子命令支持的参数。
+Search 只接受可选的 `--type` 与 `--json`，不接受 `--agent`，也不再接受 `-a/--all`。全局选项 `--verbose` 输出解析和 journal 检查诊断到标准错误；帮助信息可查看每个子命令支持的参数。
 
 Search 与两种 List 在原查询前都会无锁检查唯一活动 journal。合法活动 journal 会在 stderr Warn 并提示 `run apm fix`；journal 损坏或不可读时只 Warn，不附加 Fix 提示，随后继续原只读业务。检查错误不改变原命令的业务结果或退出状态。
 

@@ -2,6 +2,16 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-04（后续：search 去掉 -a/--all，默认显示 description 不显示 tags）
+
+分类：功能变更
+
+用户需求：`apm search` 删除 `-a/--all` flag，默认输出即展示 description，且任何情况下都不展示 tags；`apm list` 的 `-a/--all`（追加 description + tags）保持不变。
+
+解决方案或完成结果：`internal/cli` 的 `search` 命令移除 `-a/--all` 注册，`renderSearch` 改为固定元数据策略（description 默认、tags 永不）；`power_render.go` 把 `renderPowers`/`renderPowerText`/`renderPowerLine`/`toPowerJSON` 的 `all bool` 重构为 `powerMetadata{description, tags}`，使 description 与 tags 可独立开关，list 继续经 `allMetadata(flags.All)` 保持原语义。`--json` 与文本一致：默认含 `description`、不含 `tags`。`search --all`/`-a` 现在由 Cobra 报 unknown flag。
+
+验证结果或限制：`go test ./...`、`go vet ./...`、`gofmt -l cmd internal` 与 `go build -o /dev/null ./cmd/apm` 均以退出码 0 通过；更新用例覆盖 search 文本/JSON 默认含 description 不含 tags，以及 `--all`/`-a` 被拒绝。
+
 ## 2026-09-04（后续：list --installed 的 --agent 可选并分组输出）
 
 分类：功能变更

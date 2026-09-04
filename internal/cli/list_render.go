@@ -12,7 +12,7 @@ func renderList(writer io.Writer, result ListResult, flags Flags) error {
 	if result.Agents != nil {
 		return renderInstalledAgents(writer, result, flags.All, flags.JSON)
 	}
-	return renderPowers(writer, result.Powers, flags.All, flags.JSON)
+	return renderPowers(writer, result.Powers, allMetadata(flags.All), flags.JSON)
 }
 
 // agentStateJSON 是 installed all 模式 JSON 输出中未安装/空清单 Agent 的状态记录。
@@ -30,6 +30,7 @@ func renderInstalledAgents(writer io.Writer, result ListResult, all, asJSON bool
 
 // renderInstalledAgentsText 按 Agent 顺序输出小节标题，未安装/空清单输出状态，已安装输出缩进能力行。
 func renderInstalledAgentsText(writer io.Writer, result ListResult, all bool) error {
+	metadata := allMetadata(all)
 	byAgent := groupPowersByAgent(result.Powers)
 	for _, summary := range result.Agents {
 		if _, err := io.WriteString(writer, string(summary.Agent)+"\n"); err != nil {
@@ -46,7 +47,7 @@ func renderInstalledAgentsText(writer io.Writer, result ListResult, all bool) er
 			}
 		case InstalledAgentListed:
 			for _, power := range byAgent[summary.Agent] {
-				if err := renderPowerLine(writer, power, all, "  "); err != nil {
+				if err := renderPowerLine(writer, power, metadata, "  "); err != nil {
 					return err
 				}
 			}
@@ -57,6 +58,7 @@ func renderInstalledAgentsText(writer io.Writer, result ListResult, all bool) er
 
 // renderInstalledAgentsJSON 输出顶层数组：未安装/空清单为状态记录，能力为原 power 对象，按 Agent 顺序交错。
 func renderInstalledAgentsJSON(writer io.Writer, result ListResult, all bool) error {
+	metadata := allMetadata(all)
 	byAgent := groupPowersByAgent(result.Powers)
 	records := make([]any, 0, len(result.Agents)+len(result.Powers))
 	for _, summary := range result.Agents {
@@ -65,7 +67,7 @@ func renderInstalledAgentsJSON(writer io.Writer, result ListResult, all bool) er
 			records = append(records, agentStateJSON{Agent: string(summary.Agent), State: string(summary.State)})
 		case InstalledAgentListed:
 			for _, power := range byAgent[summary.Agent] {
-				records = append(records, toPowerJSON(power, all))
+				records = append(records, toPowerJSON(power, metadata))
 			}
 		}
 	}

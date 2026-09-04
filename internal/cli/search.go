@@ -42,11 +42,11 @@ func newSearchCommand(newLifecycle SearchLifecycleFactory) *cobra.Command {
 		},
 	}
 	bindTypeFlag(command, &flags)
-	command.Flags().BoolVarP(&flags.All, "all", "a", false, "show description and tags")
 	command.Flags().BoolVar(&flags.JSON, "json", false, "machine-readable JSON output")
 	return command
 }
 
 func renderSearch(writer io.Writer, result SearchResult, flags Flags) error {
-	return renderPowers(writer, result.Powers, flags.All, flags.JSON)
+	// search 默认展示 description、不展示 tags。
+	return renderPowers(writer, result.Powers, powerMetadata{description: true}, flags.JSON)
 }

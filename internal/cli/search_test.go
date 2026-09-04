@@ -256,7 +256,7 @@ func TestSearchRenderFailurePreservesCompletedPrefix(t *testing.T) {
 	}
 }
 
-func TestSearchAllAndJSONFlagsRenderMetadata(t *testing.T) {
+func TestSearchRendersDescriptionByDefaultWithoutTags(t *testing.T) {
 	result := cli.SearchResult{Powers: []cli.ListedPower{{
 		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
 		Description: "a demo skill",
@@ -267,10 +267,8 @@ func TestSearchAllAndJSONFlagsRenderMetadata(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "all text", args: []string{"search", "demo", "--all"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n  tags: alpha\n"},
-		{name: "short all", args: []string{"search", "demo", "-a"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n  tags: alpha\n"},
-		{name: "json identity", args: []string{"search", "demo", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"},
-		{name: "json all", args: []string{"search", "demo", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ]\n  }\n]\n"},
+		{name: "text default", args: []string{"search", "demo"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n"},
+		{name: "json default", args: []string{"search", "demo", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\"\n  }\n]\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -286,6 +284,36 @@ func TestSearchAllAndJSONFlagsRenderMetadata(t *testing.T) {
 			}
 			if stderr.Len() != 0 {
 				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+func TestSearchRejectsAllFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "long", args: []string{"search", "demo", "--all"}, want: "unknown flag: --all"},
+		{name: "short", args: []string{"search", "demo", "-a"}, want: "unknown shorthand flag: 'a' in -a"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			entry := newSearchEntry(t, &stdout, &stderr, func() (cli.SearchLifecycle, error) {
+				return &recordingSearchLifecycle{}, nil
+			})
+
+			err := entry.Execute(tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Execute(%q) error = %v, want %q", tt.args, err, tt.want)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if got := stderr.String(); !strings.Contains(got, "Usage:") || strings.Count(got, "level=ERROR") != 1 {
+				t.Fatalf("stderr = %q, want one error and usage", got)
 			}
 		})
 	}
