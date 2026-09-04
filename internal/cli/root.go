@@ -29,6 +29,7 @@ type CLIEntry struct {
 	setupLogging           SetupLoggingFunc
 	newSearchLifecycle     SearchLifecycleFactory
 	newListLifecycle       ListLifecycleFactory
+	newShowLifecycle       ShowLifecycleFactory
 	newInstallLifecycle    InstallLifecycleFactory
 	newUninstallLifecycle  UninstallLifecycleFactory
 	newFixLifecycle        FixLifecycleFactory
@@ -38,13 +39,19 @@ type CLIEntry struct {
 }
 
 // New 使用指定输出、日志初始化函数和相互独立的 Search/List/Install/Uninstall/Fix/Validate/Submit/Submission 生命周期工厂创建 CLI 入口。
-func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newInstallLifecycle InstallLifecycleFactory, newUninstallLifecycle UninstallLifecycleFactory, newFixLifecycle FixLifecycleFactory, newValidateLifecycle ValidateLifecycleFactory, newSubmitLifecycle SubmitLifecycleFactory, newSubmissionLifecycle SubmissionQueryLifecycleFactory) *CLIEntry {
+
+func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newInstallLifecycle InstallLifecycleFactory, newUninstallLifecycle UninstallLifecycleFactory, newFixLifecycle FixLifecycleFactory, newValidateLifecycle ValidateLifecycleFactory, newSubmitLifecycle SubmitLifecycleFactory, newSubmissionLifecycle SubmissionQueryLifecycleFactory, showFactories ...ShowLifecycleFactory) *CLIEntry {
+	var newShowLifecycle ShowLifecycleFactory
+	if len(showFactories) > 0 {
+		newShowLifecycle = showFactories[0]
+	}
 	return &CLIEntry{
 		stdout:                 stdout,
 		stderr:                 stderr,
 		setupLogging:           setupLogging,
 		newSearchLifecycle:     newSearchLifecycle,
 		newListLifecycle:       newListLifecycle,
+		newShowLifecycle:       newShowLifecycle,
 		newInstallLifecycle:    newInstallLifecycle,
 		newUninstallLifecycle:  newUninstallLifecycle,
 		newFixLifecycle:        newFixLifecycle,
@@ -56,7 +63,7 @@ func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifec
 
 // Execute 解析参数并执行选定的 CLI 命令。
 func (entry *CLIEntry) Execute(args []string) error {
-	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle, entry.newListLifecycle, entry.newInstallLifecycle, entry.newUninstallLifecycle, entry.newFixLifecycle, entry.newValidateLifecycle, entry.newSubmitLifecycle, entry.newSubmissionLifecycle)
+	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle, entry.newListLifecycle, entry.newShowLifecycle, entry.newInstallLifecycle, entry.newUninstallLifecycle, entry.newFixLifecycle, entry.newValidateLifecycle, entry.newSubmitLifecycle, entry.newSubmissionLifecycle)
 	preparseLogging(root, args, entry.setupLogging)
 	root.SetArgs(args)
 	executed, err := root.ExecuteC()
@@ -91,7 +98,7 @@ func isNilInterface(value any) bool {
 	}
 }
 
-func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newInstallLifecycle InstallLifecycleFactory, newUninstallLifecycle UninstallLifecycleFactory, newFixLifecycle FixLifecycleFactory, newValidateLifecycle ValidateLifecycleFactory, newSubmitLifecycle SubmitLifecycleFactory, newSubmissionLifecycle SubmissionQueryLifecycleFactory) *cobra.Command {
+func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newShowLifecycle ShowLifecycleFactory, newInstallLifecycle InstallLifecycleFactory, newUninstallLifecycle UninstallLifecycleFactory, newFixLifecycle FixLifecycleFactory, newValidateLifecycle ValidateLifecycleFactory, newSubmitLifecycle SubmitLifecycleFactory, newSubmissionLifecycle SubmissionQueryLifecycleFactory) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "apm",
 		Short:         "Agent Power Manager",
@@ -104,6 +111,7 @@ func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycle
 	root.AddCommand(
 		newSearchCommand(newSearchLifecycle),
 		newListCommand(newListLifecycle),
+		newShowCommand(newShowLifecycle),
 		newInstallCommand(newInstallLifecycle),
 		newUninstallCommand(newUninstallLifecycle),
 		newFixCommand(newFixLifecycle),
