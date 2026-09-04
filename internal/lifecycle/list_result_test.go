@@ -151,6 +151,25 @@ func TestMakeCatalogListResultFiltersByNameKeepsLatest(t *testing.T) {
 	}
 }
 
+func TestMakeCatalogListResultWithAllAndNameKeepsAllVersions(t *testing.T) {
+	refs := []domain.PowerRef{
+		{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+		{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
+		{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.5.0"},
+		{Type: domain.PowerTypeSkill, Name: "other", Version: "v9.0.0"},
+	}
+
+	got := makeCatalogListResult(cli.Flags{Name: "demo", All: true}, catalogEntriesFromRefs(refs))
+	want := cli.ListResult{Powers: []cli.ListedPower{
+		{Power: refs[1], Description: "test power", Tags: []string{}},
+		{Power: refs[2], Description: "test power", Tags: []string{}},
+		{Power: refs[0], Description: "test power", Tags: []string{}},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("makeCatalogListResult() = %#v, want %#v", got, want)
+	}
+}
+
 func catalogEntriesFromRefs(refs []domain.PowerRef) []domain.CatalogEntry {
 	entries := make([]domain.CatalogEntry, 0, len(refs))
 	for _, ref := range refs {

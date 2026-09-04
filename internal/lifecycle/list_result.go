@@ -16,6 +16,22 @@ type catalogPowerKey struct {
 
 // makeCatalogListResult 将目录条目复制为 CLI 列表结果，按可选 type/name 精确过滤、按类型与名称去重仅保留最高 SemVer 版本并完成排序。
 func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.ListResult {
+	// --all 仅在指定名称时展开该能力的全部版本；否则沿用每个身份保留最新版本的默认行为。
+	if flags.All && flags.Name != "" {
+		powers := make([]cli.ListedPower, 0, len(entries))
+		for _, entry := range entries {
+			if flags.Type != "" && entry.Ref.Type != domain.PowerType(flags.Type) {
+				continue
+			}
+			if entry.Ref.Name != flags.Name {
+				continue
+			}
+			powers = append(powers, cli.ListedPower{Power: entry.Ref, Description: entry.Description, Tags: entry.Tags})
+		}
+		sortListedPowers(powers)
+		return cli.ListResult{Powers: powers}
+	}
+
 	latest := make(map[catalogPowerKey]cli.ListedPower)
 	for _, entry := range entries {
 		if flags.Type != "" && entry.Ref.Type != domain.PowerType(flags.Type) {
