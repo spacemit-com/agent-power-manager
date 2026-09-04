@@ -163,4 +163,3 @@ Snapshot.List(type)
    指定版本；`--json` 输出单对象。
 4. 同名跨类型、未知名称、未知版本和非法版本均返回可诊断错误，不访问 installed 状态或回退其它版本。
 5. 全量测试、race、vet、构建与 `git diff --check` 通过，文档与 ADR 引用新契约。
-

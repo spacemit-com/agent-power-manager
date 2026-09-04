@@ -134,4 +134,3 @@
 - After each task, inspect the diff and run the task's focused tests before proceeding.
 - Before final completion, re-read Feature 029 section-by-section against the implementation and run the full verification commands above.
 - Any implementation decision that materially changes the approved spec must be recorded as a ruling and reflected in ADR-028 before completion.
-
