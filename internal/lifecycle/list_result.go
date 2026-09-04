@@ -8,16 +8,31 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-// makeCatalogListResult 将目录条目复制为 CLI 列表结果并完成过滤排序。
+// catalogPowerKey 标识目录条目的逻辑身份；同身份仅保留最高 SemVer 版本。
+type catalogPowerKey struct {
+	powerType domain.PowerType
+	name      string
+}
+
+// makeCatalogListResult 将目录条目复制为 CLI 列表结果，按类型与名称去重仅保留最高 SemVer 版本并完成排序。
 func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.ListResult {
-	powers := make([]cli.ListedPower, 0, len(entries))
+	latest := make(map[catalogPowerKey]cli.ListedPower)
 	for _, entry := range entries {
 		if flags.Type != "" && entry.Ref.Type != domain.PowerType(flags.Type) {
 			continue
 		}
-		powers = append(powers, cli.ListedPower{Power: entry.Ref, Description: entry.Description, Tags: entry.Tags})
+		power := cli.ListedPower{Power: entry.Ref, Description: entry.Description, Tags: entry.Tags}
+		key := catalogPowerKey{powerType: entry.Ref.Type, name: entry.Ref.Name}
+		current, found := latest[key]
+		if !found || semver.MustParse(power.Power.Version).GreaterThan(semver.MustParse(current.Power.Version)) {
+			latest[key] = power
+		}
 	}
 
+	powers := make([]cli.ListedPower, 0, len(latest))
+	for _, power := range latest {
+		powers = append(powers, power)
+	}
 	sortListedPowers(powers)
 	return cli.ListResult{Powers: powers}
 }

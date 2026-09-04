@@ -8,7 +8,7 @@ import (
 	"apm/internal/domain"
 )
 
-func TestMakeCatalogListResultFiltersTypeKeepsAllVersionsAndSorts(t *testing.T) {
+func TestMakeCatalogListResultKeepsLatestPerNameAndSorts(t *testing.T) {
 	refs := []domain.PowerRef{
 		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.9.0"},
 		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.10.0"},
@@ -19,7 +19,6 @@ func TestMakeCatalogListResultFiltersTypeKeepsAllVersionsAndSorts(t *testing.T) 
 	want := cli.ListResult{Powers: []cli.ListedPower{
 		{Power: refs[2], Description: "test power", Tags: []string{}},
 		{Power: refs[1], Description: "test power", Tags: []string{}},
-		{Power: refs[0], Description: "test power", Tags: []string{}},
 	}}
 
 	if !reflect.DeepEqual(got, want) {
@@ -39,7 +38,7 @@ func TestMakeCatalogListResultAppliesExactTypeFilter(t *testing.T) {
 	}
 }
 
-func TestMakeCatalogListResultKeepsCompleteDuplicatesStable(t *testing.T) {
+func TestMakeCatalogListResultCollapsesDuplicateVersions(t *testing.T) {
 	refs := []domain.PowerRef{
 		{Type: domain.PowerTypeSkill, Name: "first", Version: "v1.0.0"},
 		{Type: domain.PowerTypeSkill, Name: "first", Version: "v1.0.0"},
@@ -49,7 +48,6 @@ func TestMakeCatalogListResultKeepsCompleteDuplicatesStable(t *testing.T) {
 	got := makeCatalogListResult(cli.Flags{}, catalogEntriesFromRefs(refs))
 	want := cli.ListResult{Powers: []cli.ListedPower{
 		{Power: refs[0], Description: "test power", Tags: []string{}},
-		{Power: refs[1], Description: "test power", Tags: []string{}},
 		{Power: refs[2], Description: "test power", Tags: []string{}},
 	}}
 	if !reflect.DeepEqual(got, want) {
@@ -79,6 +77,43 @@ func TestMakeCatalogListResultDoesNotModifyInput(t *testing.T) {
 
 	if !reflect.DeepEqual(entries, want) {
 		t.Fatalf("makeCatalogListResult() modified input: got %#v, want %#v", entries, want)
+	}
+}
+
+func TestMakeCatalogListResultKeepsLatestRegardlessOfInputOrder(t *testing.T) {
+	refs := []domain.PowerRef{
+		{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"},
+		{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+		{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.5.0"},
+	}
+
+	got := makeCatalogListResult(cli.Flags{}, catalogEntriesFromRefs(refs))
+	want := cli.ListResult{Powers: []cli.ListedPower{
+		{Power: refs[0], Description: "test power", Tags: []string{}},
+	}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("makeCatalogListResult() = %#v, want %#v", got, want)
+	}
+}
+
+func TestMakeCatalogListResultKeepsLatestDescriptionAndTags(t *testing.T) {
+	entries := []domain.CatalogEntry{
+		catalogEntryFromRef(domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.9.0"}),
+		catalogEntryFromRef(domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.10.0"}),
+	}
+	entries[0].Description = "old"
+	entries[0].Tags = []string{"old-tag"}
+	entries[1].Description = "new"
+	entries[1].Tags = []string{"new-tag"}
+
+	got := makeCatalogListResult(cli.Flags{}, entries)
+	want := cli.ListResult{Powers: []cli.ListedPower{
+		{Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.10.0"}, Description: "new", Tags: []string{"new-tag"}},
+	}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("makeCatalogListResult() = %#v, want %#v", got, want)
 	}
 }
 

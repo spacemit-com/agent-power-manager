@@ -552,11 +552,15 @@ func TestNewListLifecycleListsBundledCloud(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(skill) error = %v", err)
 	}
-	want := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.0.1"}
+	want := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.1.0"}
+	stale := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.0.1"}
 	found := false
 	for _, item := range result.Powers {
 		if item.Agent == "" && item.Power == want {
 			found = true
+		}
+		if item.Agent == "" && item.Power == stale {
+			t.Fatalf("List(skill) = %#v, want no stale %#v", result, stale)
 		}
 	}
 	if !found {

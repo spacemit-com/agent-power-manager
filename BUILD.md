@@ -185,7 +185,7 @@ Search 只接受可选的 `--type`，不接受 `--agent`。全局选项 `--verbo
 
 Search 与两种 List 在原查询前都会无锁检查唯一活动 journal。合法活动 journal 会在 stderr Warn 并提示 `run apm fix`；journal 损坏或不可读时只 Warn，不附加 Fix 提示，随后继续原只读业务。检查错误不改变原命令的业务结果或退出状态。
 
-List 已实现两种独立模式（命令边界见 [ADR-002](ivory-tower/adr/ADR-002-cli-agent-and-power-type-as-flags.md)、[ADR-003](ivory-tower/adr/ADR-003-serialize-lifecycle-and-recover-journal.md) 与 [ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md)）：默认 Cloud List 在 Inspect 和一次 Catalog Snapshot 同步后输出每个版本的精确行：
+List 已实现两种独立模式（命令边界见 [ADR-002](ivory-tower/adr/ADR-002-cli-agent-and-power-type-as-flags.md)、[ADR-003](ivory-tower/adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md) 与 [ADR-027](ivory-tower/adr/ADR-027-list-cloud-latest-only.md)）：默认 Cloud List 在 Inspect 和一次 Catalog Snapshot 同步后对每个 type/name 只输出最高 SemVer 版本的精确行：
 
 ```text
 <type>/<name>@<version>

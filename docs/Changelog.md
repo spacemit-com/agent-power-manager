@@ -2,6 +2,16 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-04
+
+分类：功能变更
+
+用户需求：默认 `apm list`（Cloud/catalog 模式）此前平铺输出每个 Power 的全部版本，同名多版本并列展示；改为对每个 type/name 只输出最高 SemVer 版本，`list --installed` 与 `search` 行为不变。契约见 [ADR-027](ivory-tower/adr/ADR-027-list-cloud-latest-only.md)。
+
+解决方案或完成结果：`internal/lifecycle` 的 `makeCatalogListResult` 改为按 `(type, name)` 用 map 聚合目录条目，以 `semver.GreaterThan` 保留最高版本，再走既有 `sortListedPowers` 稳定排序；保留记录携带最新版本的 description/tags。`list --installed`（`makeInstalledListResult`）与 `search`（`filterSearchPowers`）不改。`cmd/apm` 的 bundled-cloud 集成用例改为断言 `foo-before-summary@v0.1.0` 存在且 `v0.0.1` 不再出现。ADR-027 记录该决策并取代 ADR-002 第 39 行“保留每个版本”条款，Project Overview 与 BUILD 同步更新。
+
+验证结果或限制：`go test ./...`、`go vet ./...`、`gofmt -l cmd internal` 与 `go build -o /dev/null ./cmd/apm` 均以退出码 0 通过；`internal/lifecycle` 新增/更新用例覆盖同名多版本 keep-latest、无序输入选择最高版本、完全重复折叠为一条、以及最新版本 description/tags 保留。
+
 ## 2026-09-03（后续修正：容忍 tar 结束块后的 NUL 填充）
 
 分类：功能变更
