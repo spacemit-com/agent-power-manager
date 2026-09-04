@@ -53,7 +53,7 @@ func TestShowPassesNameTypeAndVersion(t *testing.T) {
 	if lifecycle.flags != (cli.Flags{Name: "demo", Type: "skill", Version: "v1.2.3"}) {
 		t.Fatalf("flags = %#v", lifecycle.flags)
 	}
-	if !strings.Contains(stdout.String(), "skill/demo@v1.2.3") || !strings.Contains(stdout.String(), "description: demo desc") || !strings.Contains(stdout.String(), "tags: tag") {
+	if !strings.Contains(stdout.String(), "type: skill") || !strings.Contains(stdout.String(), "version: v1.2.3") || !strings.Contains(stdout.String(), "description: demo desc") || !strings.Contains(stdout.String(), "tags: tag") {
 		t.Fatalf("output = %q", stdout.String())
 	}
 }
@@ -67,6 +67,36 @@ func TestShowDefaultsToLatestVersionAndSupportsJSON(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"version": "v2.0.0"`) || !strings.Contains(stdout.String(), `"description": "desc"`) {
 		t.Fatalf("json output = %q", stdout.String())
+	}
+}
+
+func TestShowRendersLabeledFieldsAndEmptyTags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingShowLifecycle{result: cli.ShowResult{Power: cli.ListedPower{Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, Description: "desc", Tags: []string{}}}}
+	entry := newShowEntry(t, &stdout, &stderr, func() (cli.ShowLifecycle, error) { return lifecycle, nil })
+	if err := entry.Execute([]string{"show", "demo"}); err != nil {
+		t.Fatalf("Execute(show) error = %v", err)
+	}
+	want := "type: skill\nname: demo\nversion: v1.0.0\ndescription: desc\ntags: []\n"
+	if stdout.String() != want {
+		t.Fatalf("output = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestShowValidatesCanonicalNameAndVersionBeforeFactory(t *testing.T) {
+	for _, args := range [][]string{{"show", "Bad Name"}, {"show", "demo", "--version=1.0.0"}} {
+		var stdout, stderr bytes.Buffer
+		factoryCalls := 0
+		entry := newShowEntry(t, &stdout, &stderr, func() (cli.ShowLifecycle, error) {
+			factoryCalls++
+			return &recordingShowLifecycle{}, nil
+		})
+		if err := entry.Execute(args); err == nil {
+			t.Fatalf("Execute(%q) unexpectedly succeeded", args)
+		}
+		if factoryCalls != 0 {
+			t.Fatalf("factory calls = %d, want 0 for %q", factoryCalls, args)
+		}
 	}
 }
 

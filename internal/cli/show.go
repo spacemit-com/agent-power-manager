@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"apm/internal/domain"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +19,14 @@ func newShowCommand(newLifecycle ShowLifecycleFactory) *cobra.Command {
 			flags.Name = strings.TrimSpace(args[0])
 			if flags.Name == "" {
 				return errors.New("name must not be empty")
+			}
+			if !domain.IsCanonicalPowerName(flags.Name) {
+				return fmt.Errorf("invalid power name %q", flags.Name)
+			}
+			if flags.Version != "" {
+				if _, err := domain.CanonicalPowerVersion(flags.Version); err != nil {
+					return fmt.Errorf("invalid power version %q: must be vMAJOR.MINOR.PATCH", flags.Version)
+				}
 			}
 			if err := validatePowerType(flags); err != nil {
 				return err
