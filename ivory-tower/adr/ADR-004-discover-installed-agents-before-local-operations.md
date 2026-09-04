@@ -25,7 +25,7 @@ Adapter Registry 提供公共刷新流程：先复制已注册的唯一 Agent ID
 
 installed List 的快照只是无锁、尽力而为的观测：逐个 `DetectAgent` 之间 Agent 根目录可能被外部创建或删除，随后逐 Agent 读取 manifest 时也可能看到不同时间点。该快照不承诺与 journal、manifest 或 target 构成全局一致时间点。Install/Uninstall 的刷新仍位于各自完整锁区间内，以串行化 APM 自身的恢复和变更；外部进程竞态仍不在保证范围内。
 
-指定具体 `--agent` 时，该 Agent 必须存在于快照，否则返回“未受支持或未安装”错误，由 CLI 统一记录并非零退出。`list --installed --agent=all` 遍历快照，空快照返回空结果并正常退出；`install/uninstall --agent=all` 在空快照时返回“没有已支持且已安装的 Agent”错误并非零退出，非空时按快照中的 Agent ID 升序串行执行。
+指定具体 `--agent` 时，该 Agent 必须存在于快照，否则返回“未受支持或未安装”错误，由 CLI 统一记录并非零退出。`list --installed` 省略 `--agent` 或 `--agent=all` 时遍历全部受支持 Agent（区分未安装与空清单）并正常退出；`install/uninstall --agent=all` 在空快照时返回“没有已支持且已安装的 Agent”错误并非零退出，非空时按快照中的 Agent ID 升序串行执行。
 
 Agent discovery 与 Power 类型无关：每条相关命令只刷新一次 Agent 快照，不按 Power 类型重复扫描。Uninstall 则在该快照内为每个 Agent 分别读取本地清单、独立解析 Type 和 Version；该 Power 解析不触发第二次 Agent discovery。APM 的感知边界仅限命令执行时检查已注册 Agent 根目录是否存在；APM 不负责 Agent 的安装、卸载、实时监控、运行时感知或 Power 更新通知，也不因 Agent 未安装而自动删除其历史 Power 清单。List 的条件式 Agent CLI 语法和 partial 输出边界见 [ADR-002](ADR-002-cli-agent-and-power-type-as-flags.md)，清单内容校验见 [ADR-007](ADR-007-use-stateless-config-repository.md)。
 

@@ -16,11 +16,11 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 
 - 包含：
     - 提供 `search`、`list`、`install`、`uninstall`、`fix`、`validate`、`submit`、`submission get|list` 等 CLI 能力。
-    - `search <keyword>` 搜索云端资源；`list` 默认列出云端资源，`list --installed` 列出本地安装清单。
+    - `search <keyword>` 搜索云端资源；`list [name]` 默认列出云端资源、可按 name 精确过滤，`list [name] --installed` 列出本地安装清单。
     - `install <power>[=<version>]` 未指定版本时选择云端最新版，相同版本幂等成功，不同版本执行升级或显式降级。
     - 生命周期安全，在任意执行阶段中断，系统都可以识别并纠正。
     - Search、默认 List 和 installed List 在原只读业务前无锁 Inspect 唯一活动 journal：合法 journal Warn 并提示 `apm fix`，损坏或不可读 journal Warn 后继续；三者都不执行 Recover。默认 List/Search 随后仅在 catalog 同步阶段短时、非阻塞获取 `apm.lock`，installed List 全程不获取锁。
-    - 默认 `list` 在 Inspect 和一次 Catalog Snapshot 同步后对每个 type/name 选择最新 SemVer 并输出（[ADR-027](adr/ADR-027-list-cloud-latest-only.md)）；`search` 从同一类不可变 Snapshot 本地过滤并同样选择最新 SemVer；`list --installed` 无锁刷新已安装 Agent 并读取 Config。`--agent=all` 继续输出成功记录和 partial error，但不承诺跨 catalog、Agent manifest、journal 与 target 的全局一致快照。
+    - 默认 `list` 在 Inspect 和一次 Catalog Snapshot 同步后对每个 type/name 选择最新 SemVer 并输出，可选 name 位置参数按区分大小写精确过滤（[ADR-027](adr/ADR-027-list-cloud-latest-only.md)）；`search` 从同一类不可变 Snapshot 本地过滤并同样选择最新 SemVer；`list --installed` 无锁刷新已安装 Agent 并读取 Config，同样支持 name 精确过滤，省略 `--agent` 或 `--agent=all` 时按 Agent ID 字典序分组缩进输出全部受支持 Agent，并区分未安装（`not installed`）与空清单（`no powers installed`）。`--agent=all` 继续输出成功记录和 partial error，但不承诺跨 catalog、Agent manifest、journal 与 target 的全局一致快照。
     - `cmd/apm` 的共享惰性 Catalog Manager 在默认 List/Search/Install 首次需要目录时才选择 `local|remote` provider；默认 Remote，错误不自动 fallback Local。installed List、Uninstall 和 Fix 不构造 provider。Install 仍为精确内容获取构造所选 Client，但四类 Power 显式精确 manifest 全命中时目录调用为零。
     - installed List、Install 和 Uninstall 在本地操作前扫描已注册 Agent 的根目录，生成当前命令内按 Agent ID 字典序的“已支持且已安装 Agent”快照；installed List 的快照是无锁观察，Install/Uninstall 的快照位于各自锁区间内。
     - Fix 在一次全局锁区间内恰好 Recover 一次并退出；没有 journal 时普通模式静默、verbose 模式 Debug，恢复成功时同步 Warn。损坏 journal 不能自动修复，Fix 会保留现场并非零退出。
@@ -70,7 +70,7 @@ Install 与 Uninstall 分别以独立 factory 和生命周期端口接线，不�
 | `codex` | `CODEX_HOME`，默认 `~/.codex` | `skills/<name>` | Codex CLI | 共享制品中的 Codex marketplace | 不支持 |
 | `hermes-agent` | `HERMES_HOME`，默认 `~/.hermes` | `skills/<name>` | Hermes CLI | `plugins/<name>`；CLI enable/disable | 不支持 |
 
-Registry 仅以 profile 根存在且为目录判断 Agent 已安装；`--agent=all` 按 Agent ID 字典序使用当前快照。Bibit 的接口与路径约束见 [Feature 018](features/018-bibit-agent/spec.md)，Plugin 的当前 canonical/派生边界见 [ADR-017](adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
+Registry 仅以 profile 根存在且为目录判断 Agent 已安装；install/uninstall 的 `--agent=all` 按 Agent ID 字典序使用当前快照，installed List 的省略 `--agent` 或 `--agent=all` 则按 Agent ID 字典序遍历全部受支持 Agent 并区分未安装与空清单。Bibit 的接口与路径约束见 [Feature 018](features/018-bibit-agent/spec.md)，Plugin 的当前 canonical/派生边界见 [ADR-017](adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
 Agent Power 仅 Bibit 支持（[Feature 019](features/019-agent-power/spec.md) 与 [ADR-015](adr/ADR-015-agent-power-bibit.md)；当前打包与目录契约见 [Feature 026](features/026-agent-package-assets/spec.md) 与 [ADR-023](adr/ADR-023-package-agent-with-assets.md)，云端契约见 APC ADR-006）：Agent 权威 content 为确定性 `.tar.gz`，归档根即资源根（必需 `agent.yaml` + 可选 `assets/`，无版本包裹目录）；Local canonical fixture 为 `agents/<name>/<version>/agent.yaml + assets/`，Remote exact content 为 `application/gzip` 归档；Cache 的 `PrepareAgent` 将完整目录按精确版本发布到 `cache/agents/<name>/<version>` 并物化 `staging/agents/<name>`，最终安装到 `<bibit根>/agents/<name>`（完整目录、不含版本层级，本地不版本化）。外部身份使用 `agent.name`，`agent.id` 仅供 Bibit 内部区分。`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`，`list --installed` 省略 `--agent` 时默认 `bibit`，`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`；显式 `--agent bibit` 允许，其它值（含 `all`）报错。
 

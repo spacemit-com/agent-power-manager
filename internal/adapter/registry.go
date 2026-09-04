@@ -132,6 +132,13 @@ func (r *Registry) ResolveAgent(agent domain.AgentID) (AgentAdapter, error) {
 	return adapter, nil
 }
 
+// SupportedAgents 按 Agent ID 字典序返回全部受支持智能体，不探测安装状态。
+func (r *Registry) SupportedAgents() []domain.AgentID {
+	ordered := slices.Clone(r.ordered)
+	slices.Sort(ordered)
+	return ordered
+}
+
 // RefreshInstalled 按 Agent ID 字典序探测并返回已安装智能体快照。
 func (r *Registry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	ordered := slices.Clone(r.ordered)

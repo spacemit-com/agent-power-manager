@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -10,10 +11,16 @@ import (
 func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
-		Use:   "list",
+		Use:   "list [name]",
 		Short: "List powers",
-		Args:  cobra.ExactArgs(0),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				flags.Name = strings.TrimSpace(args[0])
+				if flags.Name == "" {
+					return errors.New("name must not be empty")
+				}
+			}
 			if err := validateListFlags(command, flags); err != nil {
 				return err
 			}
@@ -42,7 +49,7 @@ func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 			return err
 		},
 	}
-	command.Flags().StringVar(&flags.Agent, "agent", "", "target agent ID or all; requires --installed")
+	command.Flags().StringVar(&flags.Agent, "agent", "", "target agent ID or all; only with --installed (defaults to all)")
 	command.Flags().BoolVar(&flags.Installed, "installed", false, "list powers installed for the target agent")
 	bindTypeFlag(command, &flags)
 	command.Flags().BoolVarP(&flags.All, "all", "a", false, "show description and tags")
@@ -57,5 +64,11 @@ func validateListFlags(command *cobra.Command, flags Flags) error {
 		}
 		return validatePowerType(flags)
 	}
-	return validateCommon(flags)
+	if flags.Type == "agent" {
+		return validateAgentTypeFlags(flags)
+	}
+	if strings.TrimSpace(flags.Agent) == "" && command.Flags().Changed("agent") {
+		return errors.New("--agent must not be empty")
+	}
+	return validatePowerType(flags)
 }

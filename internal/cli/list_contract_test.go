@@ -18,8 +18,30 @@ func TestRenderListWritesExactCloudAndInstalledLines(t *testing.T) {
 	if err := renderList(&output, result, Flags{}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := output.String(), "mcp/cloud@v2.0.0\ncodex/skill/local@v1.0.0\n"; got != want {
+	if got, want := output.String(), "mcp/cloud@v2.0.0\nskill/local@v1.0.0\n"; got != want {
 		t.Fatalf("renderList() = %q, want %q", got, want)
+	}
+}
+
+func TestRenderListGroupedInstalledAgents(t *testing.T) {
+	result := ListResult{
+		Powers: []ListedPower{{
+			Agent: domain.AgentCodex,
+			Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+		}},
+		Agents: []InstalledAgentSummary{
+			{Agent: domain.AgentBibit, State: InstalledAgentNotInstalled},
+			{Agent: domain.AgentClaudeCode, State: InstalledAgentEmpty},
+			{Agent: domain.AgentCodex, State: InstalledAgentListed},
+		},
+	}
+	var output strings.Builder
+	if err := renderList(&output, result, Flags{}); err != nil {
+		t.Fatal(err)
+	}
+	const want = "bibit\n  not installed\nclaude-code\n  no powers installed\ncodex\n  skill/demo@v1.0.0\n"
+	if got := output.String(); got != want {
+		t.Fatalf("renderList(grouped) = %q, want %q", got, want)
 	}
 }
 

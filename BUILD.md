@@ -116,8 +116,12 @@ gofmt -w cmd internal
 ./apm list
 ./apm list --type skill
 ./apm list --type mcp
+./apm list foo-before-summary
+./apm list foo-before-summary --type skill
+./apm list --installed
 ./apm list --installed --agent codex
 ./apm list --installed --agent all --type skill
+./apm list foo-before-summary --installed --agent codex
 ./apm install foo-before-summary --agent codex
 ./apm install foo-before-summary --agent bibit
 ./apm install foo-before-summary=v0.0.1 --agent codex --type skill
@@ -191,11 +195,18 @@ List 已实现两种独立模式（命令边界见 [ADR-002](ivory-tower/adr/ADR
 <type>/<name>@<version>
 ```
 
-Installed List 必须同时提供 `--installed --agent=<agent-id|all>`，无锁刷新 Agent 并读取清单后输出精确行：
+Installed List 提供 `--installed`，`--agent` 可选：具体 `--agent=<agent-id>` 无锁刷新 Agent 并读取清单后输出不含 Agent 前缀的精确行；省略 `--agent` 或 `--agent=all` 则按 Agent ID 字典序分组缩进输出全部受支持 Agent，未安装与空清单分别输出 `not installed` / `no powers installed`：
 
 ```text
-<agent>/<type>/<name>@<version>
+<type>/<name>@<version>
 ```
+
+```text
+<agent>
+  <type>/<name>@<version>
+```
+
+两种模式都接受可选位置参数 `name`（`list [name]`），按区分大小写的原始字符串精确匹配 `PowerRef.Name`；例如 `./apm list foo-before-summary` 只输出名为 `foo-before-summary` 的记录（Cloud 每个 type 一条、最新版本），`./apm list foo-before-summary --installed --agent codex` 只输出该 Agent 下的同名记录。
 
 例如 `./apm list --agent all` 是无效组合：它会非零退出，并在 stderr 报告 `--agent requires --installed` 和 usage。`--agent=all` 的 installed 读取若出现部分失败，会输出成功记录后以非零状态报告错误；fatal error 不输出业务行。已安装清单版本必须精确为 `vMAJOR.MINOR.PATCH`，APM 不会迁移或清理非法旧清单（[ADR-007](ivory-tower/adr/ADR-007-use-stateless-config-repository.md)）；Agent 刷新顺序见 [ADR-004](ivory-tower/adr/ADR-004-discover-installed-agents-before-local-operations.md)。
 

@@ -2,6 +2,26 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-04（后续：list --installed 的 --agent 可选并分组输出）
+
+分类：功能变更
+
+用户需求：`apm list --installed` 不再强制要求 `--agent`；省略 `--agent` 或 `--agent=all` 时按 Agent ID 字典序分组缩进输出全部受支持 Agent 的已安装清单，并显式区分「Agent 未安装」与「空清单」；指定具体 `--agent` 时文本行不再重复 `<agent>/` 前缀。契约见 [ADR-002](ivory-tower/adr/ADR-002-cli-agent-and-power-type-as-flags.md)。
+
+解决方案或完成结果：`adapter.Registry` 新增 `SupportedAgents()`（返回按 Agent ID 字典序排序的全部受支持 Agent），`AdapterRegistry` 接口同步扩展；`internal/cli` 的 `ListResult` 新增 `Agents []InstalledAgentSummary` 承载 installed all 模式的逐 Agent 状态（not-installed/empty/listed），`list` 校验允许省略 `--agent`（显式空白仍报 `--agent must not be empty`）；`internal/lifecycle` 的 installed all 路径遍历受支持 Agent、区分三态并保留 `PartialListError` 语义；渲染层去掉 Power 行的 Agent 前缀，all 模式按 Agent 分组缩进输出，JSON 顶层数组以 `{"agent":...,"state":...}` 表达未安装/空清单。ADR-002、Project Overview 与 BUILD 同步更新。
+
+验证结果或限制：`go test ./...`、`go vet ./...`、`gofmt -l cmd internal` 与 `go build -o /dev/null ./cmd/apm` 均以退出码 0 通过；新增/更新用例覆盖 CLI 省略 `--agent`、分组文本与 JSON 渲染、all 模式三态、name/type 过滤组合与 partial 失败，以及 `cmd/apm` 省略 `--agent` 列出全部受支持 Agent 的集成用例。
+
+## 2026-09-04（后续：list 支持 name 过滤）
+
+分类：功能变更
+
+用户需求：为 `apm list` 增加可选位置参数 `name`（不是 flag），对默认 Cloud 列表与 `list --installed` 都按名字精确过滤：`apm list beta` 仅显示名为 `beta` 的最新版记录。契约见 [ADR-002](ivory-tower/adr/ADR-002-cli-agent-and-power-type-as-flags.md)。
+
+解决方案或完成结果：`internal/cli` 的 `list` 命令 `Args` 由 `ExactArgs(0)` 改为 `MaximumNArgs(1)`、`Use` 改为 `list [name]`，RunE 解析并 trim 位置参数到 `flags.Name`（trim 后为空报 `name must not be empty`）；`internal/lifecycle` 的 `makeCatalogListResult` 与 `makeInstalledListResult` 均在 type 过滤旁增加 `flags.Name` 的区分大小写精确过滤。ADR-002 更新 `list [name]` 语法与 name 语义，Project Overview 与 BUILD 同步更新。
+
+验证结果或限制：`go test ./...`、`go vet ./...`、`gofmt -l cmd internal` 与 `go build -o /dev/null ./cmd/apm` 均以退出码 0 通过；新增/更新用例覆盖 CLI 传参、空 name 校验、Cloud 与 installed 的 name 精确过滤、以及 bundled-cloud 按 name 过滤只返回 `foo-before-summary@v0.1.0`。
+
 ## 2026-09-04
 
 分类：功能变更

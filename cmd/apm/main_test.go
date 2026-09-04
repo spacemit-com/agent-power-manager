@@ -237,6 +237,32 @@ func TestCatalogLifecycleCompositionDefersManagerForInstalledList(t *testing.T) 
 	}
 }
 
+func TestListInstalledOmittingAgentListsAllSupportedAgents(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	composition := newCatalogLifecycleCompositionWithManagerFactory(func() (lifecycle.CatalogManager, error) {
+		return nil, errors.New("invalid catalog source configuration")
+	})
+
+	list, err := composition.newListLifecycle()
+	if err != nil {
+		t.Fatalf("compose list lifecycle: %v", err)
+	}
+	result, err := list.List(context.Background(), cli.Flags{Installed: true})
+	if err != nil || len(result.Powers) != 0 {
+		t.Fatalf("List(installed, omitted agent) = %#v, %v, want empty powers without error", result, err)
+	}
+	if len(result.Agents) != 4 {
+		t.Fatalf("result.Agents = %#v, want 4 supported agents", result.Agents)
+	}
+	for _, summary := range result.Agents {
+		if summary.State != cli.InstalledAgentNotInstalled {
+			t.Fatalf("summary = %#v, want not-installed", summary)
+		}
+	}
+}
+
 func TestCatalogLifecycleCompositionRejectsTypedNilManagerAcrossListAndSearch(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("APM_HOME", root)
@@ -565,6 +591,34 @@ func TestNewListLifecycleListsBundledCloud(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("List(skill) = %#v, want bundled %#v", result, want)
+	}
+}
+
+func TestNewListLifecycleListsBundledCloudByName(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatalf("secure APM home: %v", err)
+	}
+	t.Setenv("APM_HOME", home)
+	cacheHome := t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatalf("secure cache home: %v", err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	useBundledLocalCloud(t)
+	changeToRepositoryRoot(t)
+
+	service, err := newListLifecycle()
+	if err != nil {
+		t.Fatalf("newListLifecycle() error = %v", err)
+	}
+	result, err := service.List(context.Background(), cli.Flags{Type: "skill", Name: "foo-before-summary"})
+	if err != nil {
+		t.Fatalf("List(skill foo-before-summary) error = %v", err)
+	}
+	want := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.1.0"}
+	if len(result.Powers) != 1 || result.Powers[0].Agent != "" || result.Powers[0].Power != want {
+		t.Fatalf("List(skill foo-before-summary) = %#v, want only %#v", result, want)
 	}
 }
 

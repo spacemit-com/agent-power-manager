@@ -117,6 +117,40 @@ func TestMakeCatalogListResultKeepsLatestDescriptionAndTags(t *testing.T) {
 	}
 }
 
+func TestMakeCatalogListResultFiltersByName(t *testing.T) {
+	refs := []domain.PowerRef{
+		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
+		{Type: domain.PowerTypeMCP, Name: "alpha", Version: "v2.0.0"},
+		{Type: domain.PowerTypeSkill, Name: "other", Version: "v1.0.0"},
+	}
+
+	got := makeCatalogListResult(cli.Flags{Name: "beta"}, catalogEntriesFromRefs(refs))
+	want := cli.ListResult{Powers: []cli.ListedPower{
+		{Power: refs[0], Description: "test power", Tags: []string{}},
+	}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("makeCatalogListResult() = %#v, want %#v", got, want)
+	}
+}
+
+func TestMakeCatalogListResultFiltersByNameKeepsLatest(t *testing.T) {
+	refs := []domain.PowerRef{
+		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.9.0"},
+		{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.10.0"},
+		{Type: domain.PowerTypeSkill, Name: "other", Version: "v3.0.0"},
+	}
+
+	got := makeCatalogListResult(cli.Flags{Name: "beta"}, catalogEntriesFromRefs(refs))
+	want := cli.ListResult{Powers: []cli.ListedPower{
+		{Power: refs[1], Description: "test power", Tags: []string{}},
+	}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("makeCatalogListResult() = %#v, want %#v", got, want)
+	}
+}
+
 func catalogEntriesFromRefs(refs []domain.PowerRef) []domain.CatalogEntry {
 	entries := make([]domain.CatalogEntry, 0, len(refs))
 	for _, ref := range refs {
@@ -164,6 +198,29 @@ func TestMakeInstalledListResultAppliesExactTypeFilter(t *testing.T) {
 		Agent: domain.AgentCodex,
 		Power: input[0].groups[domain.PowerTypePlugin][0].Ref,
 	}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("makeInstalledListResult() = %#v, want %#v", got, want)
+	}
+}
+
+func TestMakeInstalledListResultFiltersByName(t *testing.T) {
+	input := []agentPowerGroups{
+		{agent: domain.AgentCodex, groups: domain.InstalledPowerGroups{
+			domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"}}},
+		}},
+		{agent: domain.AgentCodex, groups: domain.InstalledPowerGroups{
+			domain.PowerTypeMCP: {{Ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: "other", Version: "v1.0.0"}}},
+		}},
+		{agent: domain.AgentClaudeCode, groups: domain.InstalledPowerGroups{
+			domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v2.0.0"}}},
+		}},
+	}
+
+	got := makeInstalledListResult(cli.Flags{Installed: true, Agent: "all", Name: "beta"}, input)
+	want := cli.ListResult{Powers: []cli.ListedPower{
+		{Agent: domain.AgentClaudeCode, Power: input[2].groups[domain.PowerTypeSkill][0].Ref},
+		{Agent: domain.AgentCodex, Power: input[0].groups[domain.PowerTypeSkill][0].Ref},
+	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("makeInstalledListResult() = %#v, want %#v", got, want)
 	}

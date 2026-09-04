@@ -16,6 +16,7 @@ type AdapterRegistry interface {
 	ResolveMCP(domain.AgentID) (adapter.MCPAdapter, error)
 	ResolvePlugin(domain.AgentID) (adapter.PluginAdapter, error)
 	ResolveAgent(domain.AgentID) (adapter.AgentAdapter, error)
+	SupportedAgents() []domain.AgentID
 	RefreshInstalled() (domain.AgentSnapshot, error)
 }
 

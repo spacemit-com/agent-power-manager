@@ -434,6 +434,8 @@ func (r *installFakeRegistry) ResolveAgent(agent domain.AgentID) (adapter.AgentA
 	return installFakeAgentAdapter{}, r.fixture.resolveErrors[agent]
 }
 
+func (*installFakeRegistry) SupportedAgents() []domain.AgentID { return nil }
+
 func (r *installFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	if r.fixture.beforeRefresh != nil {
 		r.fixture.beforeRefresh()

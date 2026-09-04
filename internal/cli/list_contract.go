@@ -20,6 +20,27 @@ type ListedPower struct {
 // ListResult 表示 CLI 可直接渲染的 List 业务结果。
 type ListResult struct {
 	Powers []ListedPower
+	// Agents 仅在 installed 的 all 模式（省略 --agent 或 --agent=all）下按 Agent 顺序汇总；
+	// Cloud 模式与具体 Agent 模式为 nil。
+	Agents []InstalledAgentSummary
+}
+
+// InstalledAgentState 表示 installed 列表中单个 Agent 的清单状态。
+type InstalledAgentState string
+
+const (
+	// InstalledAgentNotInstalled 表示 Agent profile 根不存在。
+	InstalledAgentNotInstalled InstalledAgentState = "not-installed"
+	// InstalledAgentEmpty 表示 Agent 已安装，但过滤后无任何能力可输出。
+	InstalledAgentEmpty InstalledAgentState = "empty"
+	// InstalledAgentListed 表示 Agent 过滤后至少有一条能力。
+	InstalledAgentListed InstalledAgentState = "listed"
+)
+
+// InstalledAgentSummary 保存 installed all 模式中单个 Agent 的清单状态。
+type InstalledAgentSummary struct {
+	Agent domain.AgentID
+	State InstalledAgentState
 }
 
 // AgentFailure 保存 all 模式中一个 Agent 的清单读取失败。

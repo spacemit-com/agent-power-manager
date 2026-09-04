@@ -22,8 +22,9 @@ func TestListInstalledActiveJournalWarnsThenRefreshesAndReads(t *testing.T) {
 	slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
 	t.Cleanup(func() { slog.SetDefault(originalLogger) })
 	fixture := listFixture{
-		inspection: transaction.InspectionResult{Active: true, Operation: transaction.OperationInstall, Agent: domain.AgentCodex, Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"}, OriginalPhase: transaction.PhasePublishing},
-		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
+		inspection:      transaction.InspectionResult{Active: true, Operation: transaction.OperationInstall, Agent: domain.AgentCodex, Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v2.0.0"}, OriginalPhase: transaction.PhasePublishing},
+		snapshot:        domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
+		supportedAgents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex},
 		groups: map[domain.AgentID]domain.InstalledPowerGroups{
 			domain.AgentClaudeCode: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "alpha", Version: "v1.0.0"}}}},
 			domain.AgentCodex:      {domain.PowerTypePlugin: {{Ref: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "beta", Version: "v2.0.0"}}}},
@@ -50,6 +51,33 @@ func TestListInstalledActiveJournalWarnsThenRefreshesAndReads(t *testing.T) {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 		}
+	}
+}
+
+func TestListInstalledFiltersByName(t *testing.T) {
+	var calls []string
+	service := newListService(t, &calls, listFixture{
+		snapshot:        domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
+		supportedAgents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentClaudeCode: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"}}}},
+			domain.AgentCodex: {
+				domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "other", Version: "v2.0.0"}}},
+				domain.PowerTypeMCP:   {{Ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: "beta", Version: "v1.0.0"}}},
+			},
+		},
+	})
+
+	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all", Name: "beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []cli.ListedPower{
+		{Agent: domain.AgentClaudeCode, Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"}},
+		{Agent: domain.AgentCodex, Power: domain.PowerRef{Type: domain.PowerTypeMCP, Name: "beta", Version: "v1.0.0"}},
+	}
+	if !reflect.DeepEqual(result.Powers, want) {
+		t.Fatalf("List() = %#v, want %#v", result, want)
 	}
 }
 
@@ -95,9 +123,11 @@ func TestListInstalledFatalPathsSuppressResults(t *testing.T) {
 	}
 }
 
-func TestListInstalledEmptySnapshotReturnsNonNilEmptyResult(t *testing.T) {
+func TestListInstalledEmptySnapshotMarksAllNotInstalled(t *testing.T) {
 	var calls []string
-	service := newListService(t, &calls, listFixture{})
+	service := newListService(t, &calls, listFixture{
+		supportedAgents: []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes},
+	})
 	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
 	if err != nil || result.Powers == nil || len(result.Powers) != 0 {
 		t.Fatalf("List() = (%#v, %v), want non-nil empty powers without error", result, err)
@@ -105,15 +135,51 @@ func TestListInstalledEmptySnapshotReturnsNonNilEmptyResult(t *testing.T) {
 	if want := []string{"inspect", "refresh"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
+	want := []cli.InstalledAgentSummary{
+		{Agent: domain.AgentBibit, State: cli.InstalledAgentNotInstalled},
+		{Agent: domain.AgentClaudeCode, State: cli.InstalledAgentNotInstalled},
+		{Agent: domain.AgentCodex, State: cli.InstalledAgentNotInstalled},
+		{Agent: domain.AgentHermes, State: cli.InstalledAgentNotInstalled},
+	}
+	if !reflect.DeepEqual(result.Agents, want) {
+		t.Fatalf("result.Agents = %#v, want %#v", result.Agents, want)
+	}
+}
+
+func TestListInstalledMarksEmptyManifestAgent(t *testing.T) {
+	var calls []string
+	service := newListService(t, &calls, listFixture{
+		snapshot:        domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit, domain.AgentCodex}},
+		supportedAgents: []domain.AgentID{domain.AgentBibit, domain.AgentCodex},
+		groups: map[domain.AgentID]domain.InstalledPowerGroups{
+			domain.AgentBibit: {},
+			domain.AgentCodex: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}}}},
+		},
+	})
+	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []cli.InstalledAgentSummary{
+		{Agent: domain.AgentBibit, State: cli.InstalledAgentEmpty},
+		{Agent: domain.AgentCodex, State: cli.InstalledAgentListed},
+	}
+	if !reflect.DeepEqual(result.Agents, want) {
+		t.Fatalf("result.Agents = %#v, want %#v", result.Agents, want)
+	}
+	if len(result.Powers) != 1 || result.Powers[0].Agent != domain.AgentCodex {
+		t.Fatalf("result.Powers = %#v, want codex skill", result.Powers)
+	}
 }
 
 func TestListInstalledAllReturnsPartialAndContinuesAfterAgentFailure(t *testing.T) {
 	var calls []string
 	claudeErr := errors.New("claude config failed")
 	service := newListService(t, &calls, listFixture{
-		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
-		groups:     map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentCodex: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}}}}},
-		configErrs: map[domain.AgentID]error{domain.AgentClaudeCode: claudeErr},
+		snapshot:        domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex}},
+		supportedAgents: []domain.AgentID{domain.AgentClaudeCode, domain.AgentCodex},
+		groups:          map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentCodex: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}}}}},
+		configErrs:      map[domain.AgentID]error{domain.AgentClaudeCode: claudeErr},
 	})
 	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
 	var partial *cli.PartialListError
@@ -134,9 +200,10 @@ func TestListInstalledAllKeepsFailureOrderAndReadsLaterAgents(t *testing.T) {
 	claudeErr := errors.New("claude config failed")
 	codexErr := errors.New("codex config failed")
 	service := newListService(t, &calls, listFixture{
-		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}},
-		groups:     map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentHermes: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "later", Version: "v1.0.0"}}}}},
-		configErrs: map[domain.AgentID]error{domain.AgentBibit: bibitErr, domain.AgentClaudeCode: claudeErr, domain.AgentCodex: codexErr},
+		snapshot:        domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes}},
+		supportedAgents: []domain.AgentID{domain.AgentBibit, domain.AgentClaudeCode, domain.AgentCodex, domain.AgentHermes},
+		groups:          map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentHermes: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "later", Version: "v1.0.0"}}}}},
+		configErrs:      map[domain.AgentID]error{domain.AgentBibit: bibitErr, domain.AgentClaudeCode: claudeErr, domain.AgentCodex: codexErr},
 	})
 	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
 	var partial *cli.PartialListError
@@ -161,9 +228,10 @@ func TestListInstalledDamagedJournalWarnsAndContinues(t *testing.T) {
 	slog.SetDefault(logging.NewLogger(&stdout, &stderr, false))
 	t.Cleanup(func() { slog.SetDefault(originalLogger) })
 	service := newListService(t, &calls, listFixture{
-		inspectErr: errors.New("damaged journal"),
-		snapshot:   domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
-		groups:     map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentCodex: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "visible", Version: "v1.0.0"}}}}},
+		inspectErr:      errors.New("damaged journal"),
+		snapshot:        domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}},
+		supportedAgents: []domain.AgentID{domain.AgentCodex},
+		groups:          map[domain.AgentID]domain.InstalledPowerGroups{domain.AgentCodex: {domain.PowerTypeSkill: {{Ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "visible", Version: "v1.0.0"}}}}},
 	})
 	result, err := service.List(context.Background(), cli.Flags{Installed: true, Agent: "all"})
 	if err != nil || len(result.Powers) != 1 || result.Powers[0].Agent != domain.AgentCodex {

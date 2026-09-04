@@ -33,17 +33,7 @@ func renderPowers(writer io.Writer, powers []ListedPower, all, asJSON bool) erro
 func renderPowersJSON(writer io.Writer, powers []ListedPower, all bool) error {
 	records := make([]powerJSON, 0, len(powers))
 	for _, power := range powers {
-		record := powerJSON{
-			Agent:   string(power.Agent),
-			Type:    string(power.Power.Type),
-			Name:    power.Power.Name,
-			Version: power.Power.Version,
-		}
-		if all {
-			record.Description = power.Description
-			record.Tags = power.Tags
-		}
-		records = append(records, record)
+		records = append(records, toPowerJSON(power, all))
 	}
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")
@@ -53,25 +43,42 @@ func renderPowersJSON(writer io.Writer, powers []ListedPower, all bool) error {
 	return nil
 }
 
-func renderPowerText(writer io.Writer, power ListedPower, all bool) error {
-	prefix := ""
-	if power.Agent != "" {
-		prefix = string(power.Agent) + "/"
+// toPowerJSON 将一条 Power 复制为 JSON 记录；description 与 tags 仅在 all 时填充。
+func toPowerJSON(power ListedPower, all bool) powerJSON {
+	record := powerJSON{
+		Agent:   string(power.Agent),
+		Type:    string(power.Power.Type),
+		Name:    power.Power.Name,
+		Version: power.Power.Version,
 	}
-	line := prefix + string(power.Power.Type) + "/" + power.Power.Name + "@" + power.Power.Version + "\n"
+	if all {
+		record.Description = power.Description
+		record.Tags = power.Tags
+	}
+	return record
+}
+
+func renderPowerText(writer io.Writer, power ListedPower, all bool) error {
+	return renderPowerLine(writer, power, all, "")
+}
+
+// renderPowerLine 渲染一条不含 Agent 前缀的 Power 行；indent 用于分组模式下的小节缩进。
+func renderPowerLine(writer io.Writer, power ListedPower, all bool, indent string) error {
+	line := indent + string(power.Power.Type) + "/" + power.Power.Name + "@" + power.Power.Version + "\n"
 	if _, err := io.WriteString(writer, line); err != nil {
 		return fmt.Errorf("write power result: %w", err)
 	}
 	if !all {
 		return nil
 	}
+	metaIndent := indent + "  "
 	if power.Description != "" {
-		if _, err := io.WriteString(writer, "  description: "+power.Description+"\n"); err != nil {
+		if _, err := io.WriteString(writer, metaIndent+"description: "+power.Description+"\n"); err != nil {
 			return fmt.Errorf("write power description: %w", err)
 		}
 	}
 	if len(power.Tags) > 0 {
-		if _, err := io.WriteString(writer, "  tags: "+strings.Join(power.Tags, ", ")+"\n"); err != nil {
+		if _, err := io.WriteString(writer, metaIndent+"tags: "+strings.Join(power.Tags, ", ")+"\n"); err != nil {
 			return fmt.Errorf("write power tags: %w", err)
 		}
 	}

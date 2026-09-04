@@ -161,6 +161,8 @@ func (r *uninstallFakeRegistry) ResolveAgent(agent domain.AgentID) (adapter.Agen
 	return uninstallFakeAgentAdapter{}, r.fixture.resolveErrors[agent]
 }
 
+func (*uninstallFakeRegistry) SupportedAgents() []domain.AgentID { return nil }
+
 func (r *uninstallFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	recordUninstallEvent(r.calls, r.fixture, "refresh")
 	return r.fixture.snapshot, r.fixture.refreshErr

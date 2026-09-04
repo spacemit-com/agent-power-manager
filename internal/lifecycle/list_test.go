@@ -31,7 +31,8 @@ type listFixture struct {
 	catalog    catalog.Snapshot
 	syncStatus catalog.SyncStatus
 
-	beforeRefresh func()
+	supportedAgents []domain.AgentID
+	beforeRefresh   func()
 }
 
 type listFakeInspector struct {
@@ -73,6 +74,9 @@ func (*listFakeRegistry) ResolvePlugin(domain.AgentID) (adapter.PluginAdapter, e
 	return nil, nil
 }
 func (*listFakeRegistry) ResolveAgent(domain.AgentID) (adapter.AgentAdapter, error) { return nil, nil }
+func (r *listFakeRegistry) SupportedAgents() []domain.AgentID {
+	return r.fixture.supportedAgents
+}
 func (r *listFakeRegistry) RefreshInstalled() (domain.AgentSnapshot, error) {
 	if r.fixture.beforeRefresh != nil {
 		r.fixture.beforeRefresh()
@@ -143,6 +147,21 @@ func TestListCatalogInspectsBeforeTakingOneSnapshot(t *testing.T) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 	if want := (cli.ListResult{Powers: []cli.ListedPower{{Power: ref, Description: "test power", Tags: []string{}}}}); !reflect.DeepEqual(result, want) {
+		t.Fatalf("List() = %#v, want %#v", result, want)
+	}
+}
+
+func TestListCatalogFiltersByName(t *testing.T) {
+	var calls []string
+	beta := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"}
+	other := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "other", Version: "v2.0.0"}
+	service := newListService(t, &calls, listFixture{cloudRefs: []domain.PowerRef{beta, other}})
+
+	result, err := service.List(context.Background(), cli.Flags{Name: "beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (cli.ListResult{Powers: []cli.ListedPower{{Power: beta, Description: "test power", Tags: []string{}}}}); !reflect.DeepEqual(result, want) {
 		t.Fatalf("List() = %#v, want %#v", result, want)
 	}
 }

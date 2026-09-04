@@ -14,11 +14,14 @@ type catalogPowerKey struct {
 	name      string
 }
 
-// makeCatalogListResult 将目录条目复制为 CLI 列表结果，按类型与名称去重仅保留最高 SemVer 版本并完成排序。
+// makeCatalogListResult 将目录条目复制为 CLI 列表结果，按可选 type/name 精确过滤、按类型与名称去重仅保留最高 SemVer 版本并完成排序。
 func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.ListResult {
 	latest := make(map[catalogPowerKey]cli.ListedPower)
 	for _, entry := range entries {
 		if flags.Type != "" && entry.Ref.Type != domain.PowerType(flags.Type) {
+			continue
+		}
+		if flags.Name != "" && entry.Ref.Name != flags.Name {
 			continue
 		}
 		power := cli.ListedPower{Power: entry.Ref, Description: entry.Description, Tags: entry.Tags}
@@ -37,22 +40,32 @@ func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.L
 	return cli.ListResult{Powers: powers}
 }
 
-// makeInstalledListResult 展平各 Agent 能力并完成过滤排序。
+// makeInstalledListResult 展平各 Agent 能力，按可选 type/name 精确过滤并完成排序。
 func makeInstalledListResult(flags cli.Flags, inputs []agentPowerGroups) cli.ListResult {
 	powers := make([]cli.ListedPower, 0)
 	for _, input := range inputs {
-		for _, installed := range input.groups {
-			for _, power := range installed {
-				if flags.Type != "" && power.Ref.Type != domain.PowerType(flags.Type) {
-					continue
-				}
-				powers = append(powers, cli.ListedPower{Agent: input.agent, Power: power.Ref, Description: power.Description, Tags: power.Tags})
-			}
-		}
+		powers = append(powers, filterAgentPowers(input.agent, flags, input.groups)...)
 	}
 
 	sortListedPowers(powers)
 	return cli.ListResult{Powers: powers}
+}
+
+// filterAgentPowers 将单个 Agent 的已安装能力按可选 type/name 精确过滤为 CLI 列表记录。
+func filterAgentPowers(agent domain.AgentID, flags cli.Flags, groups domain.InstalledPowerGroups) []cli.ListedPower {
+	powers := make([]cli.ListedPower, 0)
+	for _, installed := range groups {
+		for _, power := range installed {
+			if flags.Type != "" && power.Ref.Type != domain.PowerType(flags.Type) {
+				continue
+			}
+			if flags.Name != "" && power.Ref.Name != flags.Name {
+				continue
+			}
+			powers = append(powers, cli.ListedPower{Agent: agent, Power: power.Ref, Description: power.Description, Tags: power.Tags})
+		}
+	}
+	return powers
 }
 
 func sortListedPowers(powers []cli.ListedPower) {

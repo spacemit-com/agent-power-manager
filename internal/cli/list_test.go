@@ -65,10 +65,12 @@ func TestListValidatesConditionalAgentBeforeFactory(t *testing.T) {
 	}{
 		{name: "cloud", args: []string{"list"}},
 		{name: "cloud type", args: []string{"list", "--type=skill"}},
+		{name: "cloud name", args: []string{"list", "beta"}},
+		{name: "cloud empty name", args: []string{"list", " \t "}, wantErr: "name must not be empty"},
 		{name: "cloud explicit agent", args: []string{"list", "--agent=all"}, wantErr: "--agent requires --installed"},
 		{name: "cloud explicit empty agent", args: []string{"list", "--agent="}, wantErr: "--agent requires --installed"},
-		{name: "installed missing agent", args: []string{"list", "--installed"}, wantErr: "--agent is required"},
-		{name: "installed whitespace agent", args: []string{"list", "--installed", "--agent= \t "}, wantErr: "--agent is required"},
+		{name: "installed without agent", args: []string{"list", "--installed"}},
+		{name: "installed whitespace agent", args: []string{"list", "--installed", "--agent= \t "}, wantErr: "--agent must not be empty"},
 	}
 
 	for _, tt := range tests {
@@ -123,6 +125,31 @@ func TestListPassesOriginalInstalledAgentAndType(t *testing.T) {
 	}
 }
 
+func TestListPassesNameToLifecycle(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want cli.Flags
+	}{
+		{name: "cloud", args: []string{"list", " beta "}, want: cli.Flags{Name: "beta"}},
+		{name: "installed", args: []string{"list", "beta", "--installed", "--agent=codex"}, want: cli.Flags{Installed: true, Agent: "codex", Name: "beta"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			lifecycle := &recordingListLifecycle{}
+			entry := newListEntry(t, &stdout, &stderr, func() (cli.ListLifecycle, error) { return lifecycle, nil })
+
+			if err := entry.Execute(tt.args); err != nil {
+				t.Fatalf("Execute(%q) error = %v", tt.args, err)
+			}
+			if lifecycle.flags != tt.want {
+				t.Fatalf("List flags = %#v, want %#v", lifecycle.flags, tt.want)
+			}
+		})
+	}
+}
+
 func TestListRendersExactCloudAndInstalledLines(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -146,16 +173,23 @@ func TestListRendersExactCloudAndInstalledLines(t *testing.T) {
 				Agent: domain.AgentCodex,
 				Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "local", Version: "v1.2.3"},
 			}}},
-			want: "codex/skill/local@v1.2.3\n",
+			want: "skill/local@v1.2.3\n",
 		},
 		{
 			name: "all installed",
 			args: []string{"list", "--installed", "--agent=all"},
-			result: cli.ListResult{Powers: []cli.ListedPower{{
-				Agent: domain.AgentClaudeCode,
-				Power: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "shared", Version: "v3.0.0"},
-			}}},
-			want: "claude-code/plugin/shared@v3.0.0\n",
+			result: cli.ListResult{
+				Powers: []cli.ListedPower{{
+					Agent: domain.AgentClaudeCode,
+					Power: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "shared", Version: "v3.0.0"},
+				}},
+				Agents: []cli.InstalledAgentSummary{
+					{Agent: domain.AgentBibit, State: cli.InstalledAgentNotInstalled},
+					{Agent: domain.AgentClaudeCode, State: cli.InstalledAgentListed},
+					{Agent: domain.AgentCodex, State: cli.InstalledAgentEmpty},
+				},
+			},
+			want: "bibit\n  not installed\nclaude-code\n  plugin/shared@v3.0.0\ncodex\n  no powers installed\n",
 		},
 	}
 
@@ -176,6 +210,57 @@ func TestListRendersExactCloudAndInstalledLines(t *testing.T) {
 				t.Fatalf("stderr = %q, want empty", stderr.String())
 			}
 		})
+	}
+}
+
+func TestListRendersGroupedInstalledJSON(t *testing.T) {
+	result := cli.ListResult{
+		Powers: []cli.ListedPower{{
+			Agent:       domain.AgentCodex,
+			Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+			Description: "a demo skill",
+			Tags:        []string{"alpha"},
+		}},
+		Agents: []cli.InstalledAgentSummary{
+			{Agent: domain.AgentBibit, State: cli.InstalledAgentNotInstalled},
+			{Agent: domain.AgentClaudeCode, State: cli.InstalledAgentEmpty},
+			{Agent: domain.AgentCodex, State: cli.InstalledAgentListed},
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	entry := newListEntry(t, &stdout, &stderr, func() (cli.ListLifecycle, error) {
+		return &recordingListLifecycle{result: result}, nil
+	})
+
+	if err := entry.Execute([]string{"list", "--installed", "--json", "--all"}); err != nil {
+		t.Fatalf("Execute error = %v", err)
+	}
+	want := `[
+  {
+    "agent": "bibit",
+    "state": "not-installed"
+  },
+  {
+    "agent": "claude-code",
+    "state": "empty"
+  },
+  {
+    "agent": "codex",
+    "type": "skill",
+    "name": "demo",
+    "version": "v1.0.0",
+    "description": "a demo skill",
+    "tags": [
+      "alpha"
+    ]
+  }
+]
+`
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
 
@@ -249,7 +334,7 @@ func TestListPartialFailureRendersSuccessesThenReturnsError(t *testing.T) {
 	if !errors.Is(err, readErr) {
 		t.Fatalf("Execute() error = %v, want %v", err, readErr)
 	}
-	if got, want := stdout.String(), "codex/skill/demo@v1.0.0\n"; got != want {
+	if got, want := stdout.String(), "skill/demo@v1.0.0\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	assertOneErrorAndUsage(t, stderr.String())
@@ -283,7 +368,7 @@ func TestListPartialRenderFailureJoinsWriterAndAllAgentCauses(t *testing.T) {
 	if !errors.As(err, &partial) {
 		t.Fatalf("Execute() error = %v, want PartialListError", err)
 	}
-	if got, want := stdout.String(), "codex/skill/first@v1.0.0\n"; got != want {
+	if got, want := stdout.String(), "skill/first@v1.0.0\n"; got != want {
 		t.Fatalf("stdout = %q, want completed prefix %q", got, want)
 	}
 	assertOneErrorAndUsage(t, stderr.String())
@@ -356,7 +441,7 @@ func TestListRejectsTypedNilLifecycleService(t *testing.T) {
 	assertOneErrorAndUsage(t, stderr.String())
 }
 
-func TestListHelpExplainsAgentRequiresInstalled(t *testing.T) {
+func TestListHelpExplainsAgentOptionalWithInstalled(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	entry := newListEntry(t, &stdout, &stderr, func() (cli.ListLifecycle, error) {
 		t.Fatal("help called List factory")
@@ -366,8 +451,8 @@ func TestListHelpExplainsAgentRequiresInstalled(t *testing.T) {
 	if err := entry.Execute([]string{"list", "--help"}); err != nil {
 		t.Fatalf("Execute(list --help) error = %v", err)
 	}
-	if got := stdout.String(); !strings.Contains(got, "--agent") || !strings.Contains(got, "requires --installed") {
-		t.Fatalf("list help = %q, want conditional Agent guidance", got)
+	if got := stdout.String(); !strings.Contains(got, "--agent") || !strings.Contains(got, "only with --installed") {
+		t.Fatalf("list help = %q, want optional Agent guidance", got)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())

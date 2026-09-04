@@ -29,7 +29,7 @@ Inspect without lock → Warn/Debug → continue original read-only business.
 - journal 损坏、不可读或校验失败时同步记录 damaged Warn，但不提示 Fix，因为 Fix 同样不能绕过严格校验；警告后继续原查询。
 - Inspect error 不成为 Search/List 的业务 error，不改变原查询结果、partial marker 或退出状态。一条只读命令至多记录一条 journal 检查 Warn。
 
-Search 在 Inspect 后查询 Cloud、筛选并返回结构化结果。默认 List 在 Inspect 后查询 Cloud。installed List 在 Inspect 后无锁调用 `RefreshInstalled`，再按 Agent 顺序读取 Config；具体 Agent 的刷新、校验或读取错误仍是 fatal error，`--agent=all` 仍收集逐 Agent 失败并返回成功记录与 `PartialListError`。三者都不获取全局锁、不调用 `Recover`，也没有 Release gate。
+Search 在 Inspect 后查询 Cloud、筛选并返回结构化结果。默认 List 在 Inspect 后查询 Cloud。installed List 在 Inspect 后无锁调用 `RefreshInstalled`，再按 Agent 顺序读取 Config；具体 Agent 的刷新、校验或读取错误仍是 fatal error，省略 `--agent` 或 `--agent=all` 仍遍历全部受支持 Agent、区分未安装与空清单，并收集逐 Agent 失败返回成功记录与 `PartialListError`。三者都不获取全局锁、不调用 `Recover`，也没有 Release gate。
 
 显式 Fix 的锁边界固定为：
 
