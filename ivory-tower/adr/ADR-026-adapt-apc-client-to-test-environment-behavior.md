@@ -42,6 +42,9 @@ Feature 028 的只读探测（见 [live-probe](../features/028-apc-api-adaptatio
    实际返回历史别名 `application/x-gzip`；content 校验把该别名归一化为 `application/gzip`
    后再与目录声明比较。归一化只作用于响应侧、只认精确的 `application/x-gzip`，目录元数据
    仍要求 IANA 声明 `application/gzip`（fail-closed 不扩大）。
+9. **tar 结束块后的 NUL 填充**：测试环境归档用 GNU tar blocking factor 20 生成，解压后在
+   tar 结束块之后还有 8192 字节的 NUL 填充（总长对齐到 10240 字节）。解包校验容忍结束块后的
+   纯 NUL 填充，但拒绝任何非零尾随字节，防拼接归档/多归档多态的安全约束不变。
 
 ## Consequences
 

@@ -545,6 +545,15 @@ func TestExtractArchiveRejectsShortEntryAndTrailingTarContent(t *testing.T) {
 	}
 }
 
+func TestExtractArchiveAcceptsNulPaddingAfterTarTerminator(t *testing.T) {
+	archive := stageTarGzWithNulPadding(t)
+	destination := filepath.Join(trustedTestDir(t), "resource")
+	if err := new(Client).extractArchive(context.Background(), archive, destination); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContentsAndMode(t, filepath.Join(destination, "safe.md"), "safe", 0o644)
+}
+
 func TestExtractArchiveRejectsConcatenatedAndTrailingGzipContent(t *testing.T) {
 	valid := testTarGzBytes(t, testTarEntry{name: "safe.md", body: []byte("safe")})
 	secondMember := testTarGzBytes(t, testTarEntry{name: "second.md", body: []byte("second")})
@@ -891,6 +900,27 @@ func stageTarGzWithTrailingContent(t *testing.T) *stagedContent {
 		t.Fatal(err)
 	}
 	plain.Write(bytes.Repeat([]byte{'X'}, 512))
+	return stageCompressedTar(t, func(output io.Writer) error {
+		_, err := output.Write(plain.Bytes())
+		return err
+	})
+}
+
+func stageTarGzWithNulPadding(t *testing.T) *stagedContent {
+	t.Helper()
+	var plain bytes.Buffer
+	writer := tar.NewWriter(&plain)
+	if err := writer.WriteHeader(&tar.Header{Name: "safe.md", Typeflag: tar.TypeReg, Mode: 0o644, Size: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write([]byte("safe")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// 模拟 GNU tar 把归档填充到 10240 字节（blocking factor 20）记录边界的 NUL 填充。
+	plain.Write(bytes.Repeat([]byte{0}, 8192))
 	return stageCompressedTar(t, func(output io.Writer) error {
 		_, err := output.Write(plain.Bytes())
 		return err

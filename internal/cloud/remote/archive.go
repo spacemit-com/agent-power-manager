@@ -578,13 +578,25 @@ func walkArchive(ctx context.Context, archive *os.File, compressedSize int64, vi
 			return err
 		}
 	}
-	var extra [1]byte
-	count, readErr := decompressed.Read(extra[:])
-	if count != 0 {
-		return unsafeRemoteFilesystem("remote tar contains content after its terminator")
-	}
-	if !errors.Is(readErr, io.EOF) {
-		return classifyArchiveError(ctx, "finish verified remote gzip content", readErr)
+	// 容忍 tar 结束块之后的 NUL 填充（GNU tar 等实现会把归档填充到 10240 字节记录边界），
+	// 但拒绝任何非零尾随字节，防止拼接归档或在终止块后隐藏内容。
+	padding := make([]byte, 4096)
+	for {
+		count, readErr := decompressed.Read(padding)
+		for _, character := range padding[:count] {
+			if character != 0 {
+				return unsafeRemoteFilesystem("remote tar contains non-zero content after its terminator")
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return classifyArchiveError(ctx, "finish verified remote gzip content", readErr)
+		}
+		if count == 0 {
+			return classifyArchiveError(ctx, "finish verified remote gzip content", io.ErrNoProgress)
+		}
 	}
 	closeErr := gzipReader.Close()
 	closed = true

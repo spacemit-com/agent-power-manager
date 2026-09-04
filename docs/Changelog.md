@@ -2,6 +2,16 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-03（后续修正：容忍 tar 结束块后的 NUL 填充）
+
+分类：功能变更
+
+用户需求：测试环境用 GNU tar blocking factor 20 生成 Skill 归档，解压后总长 10240 字节，tar 结束块之后还带 8192 字节 NUL 填充，导致 `apm install` 报 `extract remote skill archive: remote tar contains content after its terminator: cloud unsafe content`。将客户端适配为容忍结束块后的纯 NUL 填充，同时保持对非零尾随字节的拒绝。契约见 [ADR-026](ivory-tower/adr/ADR-026-adapt-apc-client-to-test-environment-behavior.md)，证据见 [live-probe](ivory-tower/features/028-apc-api-adaptation/live-probe.md)。
+
+解决方案或完成结果：`internal/cloud/remote` 的 `walkArchive` 把「结束块后读到任意字节即报错」改为循环读完剩余解压字节并逐一校验必须为 `0x00`；任何非零尾随字节仍返回 `cloud.ErrUnsafeContent`，正常 `io.EOF` 结束。防拼接归档/多归档多态的安全约束不变。
+
+验证结果或限制：新增用例 `TestExtractArchiveAcceptsNulPaddingAfterTarTerminator` 覆盖结束块后 8192 字节 NUL 填充的解包成功；既有 `stageTarGzWithTrailingContent`（512 字节 `X`）用例仍被拒绝，证明非零尾随 fail-closed 未扩大。注：测试环境 `code-helper` 归档为占位产物，只含 `./code-review-helper-v1.0.0.txt`、缺少 Skill 必需的 `SKILL.md`/`skill-card.md` marker，属服务端数据待补齐，客户端 marker 校验不做放宽。
+
 ## 2026-09-03（后续修正：接受 gzip 历史媒体类型别名）
 
 分类：功能变更
