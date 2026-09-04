@@ -10,9 +10,9 @@ import (
 
 func renderList(writer io.Writer, result ListResult, flags Flags) error {
 	if result.Agents != nil {
-		return renderInstalledAgents(writer, result, flags.All, flags.JSON)
+		return renderInstalledAgents(writer, result, flags.JSON)
 	}
-	return renderPowers(writer, result.Powers, allMetadata(flags.All), flags.JSON)
+	return renderPowers(writer, result.Powers, powerMetadata{}, flags.JSON)
 }
 
 // agentStateJSON 是 installed all 模式 JSON 输出中未安装/空清单 Agent 的状态记录。
@@ -21,16 +21,16 @@ type agentStateJSON struct {
 	State string `json:"state"`
 }
 
-func renderInstalledAgents(writer io.Writer, result ListResult, all, asJSON bool) error {
+func renderInstalledAgents(writer io.Writer, result ListResult, asJSON bool) error {
 	if asJSON {
-		return renderInstalledAgentsJSON(writer, result, all)
+		return renderInstalledAgentsJSON(writer, result)
 	}
-	return renderInstalledAgentsText(writer, result, all)
+	return renderInstalledAgentsText(writer, result)
 }
 
 // renderInstalledAgentsText 按 Agent 顺序输出小节标题，未安装/空清单输出状态，已安装输出缩进能力行。
-func renderInstalledAgentsText(writer io.Writer, result ListResult, all bool) error {
-	metadata := allMetadata(all)
+func renderInstalledAgentsText(writer io.Writer, result ListResult) error {
+	metadata := powerMetadata{}
 	byAgent := groupPowersByAgent(result.Powers)
 	for _, summary := range result.Agents {
 		if _, err := io.WriteString(writer, string(summary.Agent)+"\n"); err != nil {
@@ -57,8 +57,8 @@ func renderInstalledAgentsText(writer io.Writer, result ListResult, all bool) er
 }
 
 // renderInstalledAgentsJSON 输出顶层数组：未安装/空清单为状态记录，能力为原 power 对象，按 Agent 顺序交错。
-func renderInstalledAgentsJSON(writer io.Writer, result ListResult, all bool) error {
-	metadata := allMetadata(all)
+func renderInstalledAgentsJSON(writer io.Writer, result ListResult) error {
+	metadata := powerMetadata{}
 	byAgent := groupPowersByAgent(result.Powers)
 	records := make([]any, 0, len(result.Agents)+len(result.Powers))
 	for _, summary := range result.Agents {

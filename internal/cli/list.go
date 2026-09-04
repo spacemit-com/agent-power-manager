@@ -21,6 +21,9 @@ func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 					return errors.New("name must not be empty")
 				}
 			}
+			if flags.All && flags.Name == "" {
+				return errors.New("--all requires name")
+			}
 			if err := validateListFlags(command, flags); err != nil {
 				return err
 			}
@@ -52,7 +55,7 @@ func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 	command.Flags().StringVar(&flags.Agent, "agent", "", "target agent ID or all; only with --installed (defaults to all)")
 	command.Flags().BoolVar(&flags.Installed, "installed", false, "list powers installed for the target agent")
 	bindTypeFlag(command, &flags)
-	command.Flags().BoolVarP(&flags.All, "all", "a", false, "show description and tags")
+	command.Flags().BoolVarP(&flags.All, "all", "a", false, "show all versions for a named power (Cloud only)")
 	command.Flags().BoolVar(&flags.JSON, "json", false, "machine-readable JSON output")
 	return command
 }

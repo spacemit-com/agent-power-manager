@@ -95,6 +95,7 @@ func TestCLIParsesCommandsAndRejectsInvalidInput(t *testing.T) {
 	}{
 		{name: "search", args: []string{"search", "foo"}},
 		{name: "cloud list", args: []string{"list"}},
+		{name: "cloud list all requires name", args: []string{"list", "--all"}, wantErr: true, wantMessage: "--all requires name"},
 		{name: "cloud list by name", args: []string{"list", "beta"}},
 		{name: "installed list", args: []string{"list", "--agent=codex", "--installed"}},
 		{name: "installed list by name", args: []string{"list", "beta", "--agent=codex", "--installed"}},

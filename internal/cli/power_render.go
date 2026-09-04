@@ -23,7 +23,7 @@ type powerMetadata struct {
 	tags        bool
 }
 
-// allMetadata 返回 list --all 的元数据策略：description 与 tags 同开同关。
+// allMetadata 返回 search --all 的元数据策略：description 与 tags 同开同关。
 func allMetadata(all bool) powerMetadata {
 	return powerMetadata{description: all, tags: all}
 }

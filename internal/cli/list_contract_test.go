@@ -55,7 +55,7 @@ func TestRenderListWritesNothingForEmptyResult(t *testing.T) {
 	}
 }
 
-func TestRenderListAllWritesDescriptionAndTagsIndented(t *testing.T) {
+func TestRenderListAllWritesIdentityOnly(t *testing.T) {
 	result := ListResult{Powers: []ListedPower{{
 		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.2.3"},
 		Description: "a demo skill",
@@ -65,7 +65,7 @@ func TestRenderListAllWritesDescriptionAndTagsIndented(t *testing.T) {
 	if err := renderList(&output, result, Flags{All: true}); err != nil {
 		t.Fatal(err)
 	}
-	const want = "skill/demo@v1.2.3\n  description: a demo skill\n  tags: alpha, beta\n"
+	const want = "skill/demo@v1.2.3\n"
 	if got := output.String(); got != want {
 		t.Fatalf("renderList(all) = %q, want %q", got, want)
 	}
@@ -100,7 +100,7 @@ func TestRenderListJSONIdentityOnly(t *testing.T) {
 	}
 }
 
-func TestRenderListJSONWithAllIncludesDescriptionAndTags(t *testing.T) {
+func TestRenderListJSONWithAllIdentityOnly(t *testing.T) {
 	result := ListResult{Powers: []ListedPower{{
 		Agent:       domain.AgentCodex,
 		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
@@ -111,7 +111,7 @@ func TestRenderListJSONWithAllIncludesDescriptionAndTags(t *testing.T) {
 	if err := renderList(&output, result, Flags{All: true, JSON: true}); err != nil {
 		t.Fatal(err)
 	}
-	const want = "[\n  {\n    \"agent\": \"codex\",\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\",\n      \"beta\"\n    ]\n  }\n]\n"
+	const want = "[\n  {\n    \"agent\": \"codex\",\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"
 	if got := output.String(); got != want {
 		t.Fatalf("renderList(json+all) = %q, want %q", got, want)
 	}
