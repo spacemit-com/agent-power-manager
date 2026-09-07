@@ -84,23 +84,23 @@ func TestRenderListAllOmitsEmptyDescriptionAndTags(t *testing.T) {
 	}
 }
 
-func TestRenderListJSONIdentityOnly(t *testing.T) {
+func TestRenderListJSONIncludesDescriptionAndTags(t *testing.T) {
 	result := ListResult{Powers: []ListedPower{{
 		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
-		Description: "should be omitted",
-		Tags:        []string{"should", "be", "omitted"},
+		Description: "a demo skill",
+		Tags:        []string{"alpha", "beta"},
 	}}}
 	var output strings.Builder
 	if err := renderList(&output, result, Flags{JSON: true}); err != nil {
 		t.Fatal(err)
 	}
-	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"
+	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\",\n      \"beta\"\n    ]\n  }\n]\n"
 	if got := output.String(); got != want {
 		t.Fatalf("renderList(json) = %q, want %q", got, want)
 	}
 }
 
-func TestRenderListJSONWithAllIdentityOnly(t *testing.T) {
+func TestRenderListJSONWithAllIncludesDescriptionAndTags(t *testing.T) {
 	result := ListResult{Powers: []ListedPower{{
 		Agent:       domain.AgentCodex,
 		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "beta", Version: "v1.0.0"},
@@ -111,9 +111,23 @@ func TestRenderListJSONWithAllIdentityOnly(t *testing.T) {
 	if err := renderList(&output, result, Flags{All: true, JSON: true}); err != nil {
 		t.Fatal(err)
 	}
-	const want = "[\n  {\n    \"agent\": \"codex\",\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"
+	const want = "[\n  {\n    \"agent\": \"codex\",\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\",\n      \"beta\"\n    ]\n  }\n]\n"
 	if got := output.String(); got != want {
 		t.Fatalf("renderList(json+all) = %q, want %q", got, want)
+	}
+}
+
+func TestRenderListJSONNormalizesEmptyDescriptionAndTags(t *testing.T) {
+	result := ListResult{Powers: []ListedPower{{
+		Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "bare", Version: "v1.0.0"},
+	}}}
+	var output strings.Builder
+	if err := renderList(&output, result, Flags{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"bare\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"\",\n    \"tags\": []\n  }\n]\n"
+	if got := output.String(); got != want {
+		t.Fatalf("renderList(json, empty metadata) = %q, want %q", got, want)
 	}
 }
 

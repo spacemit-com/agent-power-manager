@@ -16,8 +16,10 @@
 - `apm list [name] --all`（或 `-a`）仅在提供 `name` 时有效，并保留该名称匹配的全部
   Cloud 版本，按 SemVer 降序输出；未提供 name 时在创建 lifecycle 前拒绝并提示
   `--all requires name`。
-- `--all` 不再控制描述/标签渲染；list 的文本和 JSON 输出始终是身份记录，installed
-  list 的离线语义保持不变。
+- `--all` 不再控制描述/标签渲染；list 的文本输出始终是身份记录，installed
+  list 的离线语义保持不变。（list 的 JSON 身份记录条款已被
+  [ADR-029](ADR-029-list-json-carries-description-and-tags.md) 取代：`list --json`
+  恒带 description/tags，文本仍身份精简。）
 - 新增 `apm show <name> [--type=<type>] [--version=vMAJOR.MINOR.PATCH] [--json]`。
   默认选择最新版本，指定 `--version` 时选择精确版本；跨类型同名必须提供 `--type`。
   文本输出固定包含 type、name、version、description、tags，JSON 输出单个对象且 tags

@@ -30,7 +30,8 @@
 
 - 不改变 `list` 不带 `--all` 时每个 `(type,name)` 只显示最高 SemVer 版本的语义。
 - 不改变 `list --installed` 的本地清单来源、Agent 分组、名称/类型过滤或精确版本记录。
-- 不再使用 `list -a/--all` 控制 description/tags 的附加渲染；详情统一由 `show` 提供。
+- 不再使用 `list -a/--all` 控制 description/tags 的附加渲染；详情文本统一由 `show` 提供，
+  `list --json` 作为机器接口恒带 description/tags（见 [ADR-029](../../adr/ADR-029-list-json-carries-description-and-tags.md)）。
 - 不新增 Cloud 分页、远程逐项 metadata 请求或本地缓存之外的数据源。
 - 不支持 `show --installed`、`show --agent` 或其它 Agent 本地状态查询。
 - 不在 `show` 中展示 content_type、content_size、content_md5 等传输校验字段。
@@ -51,8 +52,11 @@ apm list [name] --installed [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|a
   不做 latest 去重；输出排序为 type 升序、name 升序、version 按 SemVer 降序。
 - `list --all` 或 `list -a` 缺少位置参数 `name` 时在创建 lifecycle 前失败；错误应明确
   表达 `--all` 需要 `name`。
-- `--all` 不再打开 description/tags 的文本或 JSON 元数据字段。List 的身份行与既有
-  格式保持一致；`--json` 仍输出数组，记录只包含 agent（仅 installed）、type、name、version。
+- `--all` 不再打开 description/tags 的文本元数据字段；list 文本仍身份精简。`--json`
+  仍输出数组，且每条记录恒带 `description`（空为 `""`）与 `tags`（空为 `[]`）：Cloud
+  记录为 `type/name/version/description/tags`，installed 记录多 `agent`；`--agent=all`
+  分组的 `{agent,state}` 状态记录不变、listed 记录同样带元数据（见
+  [ADR-029](../../adr/ADR-029-list-json-carries-description-and-tags.md)）。
 - `list [name] --installed --all` 允许通过统一的 name 校验，并继续返回本地清单中该名称的
   精确记录；installed 清单本来就保留本地记录的具体版本，`--all` 不改变其结果，也不追加
   元数据。省略 name 时同样拒绝 `--all`。
@@ -133,8 +137,9 @@ Snapshot.List(type)
 ## 6. Compatibility and Documentation
 
 - 默认 `apm list`、`apm search`、`apm list --installed` 的非 `--all` 结果保持兼容。
-- `-a/--all` 的既有“追加 description/tags”行为被明确取代；调用方若需要元数据应改用
-  `apm show <name>`，若需要指定历史版本则使用 `--version`。
+- `-a/--all` 的既有“追加 description/tags”行为被明确取代；调用方若需要批量元数据应使用
+  `apm list --json`（ADR-029），若需要单个版本详情应使用 `apm show <name>`，若需要指定
+  历史版本则使用 `--version`。
 - 更新 ADR-002 中 list 语法与 latest 语义的相关条款，并新增 ADR-028 记录“名称限定的全版本
   展开 + 独立 Show 详情”决策。
 - BUILD 与 Project Overview 增加 `list <name> --all`、`show <name>` 示例，并移除 list
@@ -151,7 +156,8 @@ Snapshot.List(type)
   SemVer 降序、重复目录条目与空结果。
 - Lifecycle Show：最新版本默认选择、精确版本选择、跨类型歧义、类型过滤、not-found、
   stale snapshot 与 journal inspect 语义。
-- Rendering：List identity-only text/JSON；Show 单对象 text/JSON、tags 空数组、写入错误包装。
+- Rendering：List identity-only text / 带 description、tags 的 JSON（空值归一化）；Show 单对象
+  text/JSON、tags 空数组、写入错误包装。
 - Integration：bundled/local catalog 与 Remote fake catalog 覆盖新命令接线，既有 list/search/
   installed 行为不回归。
 

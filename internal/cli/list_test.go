@@ -252,7 +252,11 @@ func TestListRendersGroupedInstalledJSON(t *testing.T) {
     "agent": "codex",
     "type": "skill",
     "name": "demo",
-    "version": "v1.0.0"
+    "version": "v1.0.0",
+    "description": "a demo skill",
+    "tags": [
+      "alpha"
+    ]
   }
 ]
 `
@@ -495,7 +499,7 @@ func TestListRepeatedExecutionDoesNotLeakFlagsLoggerOrService(t *testing.T) {
 	}
 }
 
-func TestListAllAndJSONFlagsRenderIdentityOnly(t *testing.T) {
+func TestListAllAndJSONFlagsRendering(t *testing.T) {
 	result := cli.ListResult{Powers: []cli.ListedPower{{
 		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
 		Description: "a demo skill",
@@ -508,8 +512,8 @@ func TestListAllAndJSONFlagsRenderIdentityOnly(t *testing.T) {
 	}{
 		{name: "all text", args: []string{"list", "demo", "--all"}, want: "skill/demo@v1.0.0\n"},
 		{name: "short all", args: []string{"list", "demo", "-a"}, want: "skill/demo@v1.0.0\n"},
-		{name: "json identity", args: []string{"list", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"},
-		{name: "json all", args: []string{"list", "demo", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"},
+		{name: "json identity", args: []string{"list", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ]\n  }\n]\n"},
+		{name: "json all", args: []string{"list", "demo", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ]\n  }\n]\n"},
 		{name: "installed all", args: []string{"list", "demo", "--installed", "--agent=codex", "--all"}, want: "skill/demo@v1.0.0\n"},
 	}
 	for _, tt := range tests {

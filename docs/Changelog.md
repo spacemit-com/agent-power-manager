@@ -12,6 +12,16 @@
 
 验证结果或限制：`go test ./...`、`go test -race ./...`、`go vet ./...`、`gofmt -l` 与 `git diff --check` 均以退出码 0 通过；新增 `internal/domain` 的 `TestParseAPCTimestamp` 覆盖 RFC3339 Z/偏移/小数秒、无时区（含小数秒）与各类非法值，并断言无时区解析结果为 UTC；`internal/cloud/remote` 新增 list 无时区倒序接受、list 无时区升序拒绝、get 无时区时间戳（含 timeline）接受用例。
 
+## 2026-09-07（后续：list --json 携带 description/tags）
+
+分类：功能变更
+
+用户需求：`apm list` 文本已按 ADR-028 精简为身份行、详情统一走 `show`，但前端通过调用 apm 批量获取本地资源（`list --installed`）与云端资源（`list`）时需要每条记录都带 description 和 tags；`show` 是 Cloud-only、单 name、latest/单版本，覆盖不了本地清单与批量场景。
+
+解决方案或完成结果：`list --json` 改为机器接口、恒带 `description`（空为 `""`）与 `tags`（空为 `[]`、不为 `null`），与 `show --json` 的单条形状一致；Cloud 记录为 `type/name/version/description/tags`，installed 记录多 `agent`，`--agent=all` 分组的 `{agent,state}` 状态记录不变、listed 记录同样带元数据。实现上在 `internal/cli/list_render.go` 新增 list 专用 `listPowerJSON` 记录类型与 `toListPowerJSON`（nil tags 归一化为 `[]`），list 的 JSON 走 `renderListPowersJSON`、分组 JSON 改用该转换，与 search 共用的 `powerJSON`/`toPowerJSON` 保持不变，避免破坏 search「永远不输出 tags」的契约；list 文本仍身份精简、`search --json` 与 `show` 不变。契约见 [ADR-029](ivory-tower/adr/ADR-029-list-json-carries-description-and-tags.md)。
+
+验证结果或限制：`go test ./...`、`go test -race ./...`、`go vet ./...`、`gofmt -l` 与 `git diff --check` 均以退出码 0 通过；`internal/cli` 更新/新增用例覆盖 Cloud 单条、installed 单 Agent 与 `--agent=all` 分组的 JSON 元数据输出、空 description/tags 归一化为 `""`/`[]`，并保留 list 文本身份精简与 search JSON 无 tags 的既有断言。
+
 ## 2026-09-04（后续：list --all 展开指定名称版本并新增 show）
 
 分类：功能变更
