@@ -33,6 +33,27 @@ func useBundledLocalCloud(t *testing.T) {
 	t.Setenv("APC_BASE_URL", "")
 }
 
+func newBundledCLIEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntry {
+	t.Helper()
+	original := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(original) })
+	composition := newCatalogLifecycleComposition()
+	return cli.New(
+		stdout,
+		stderr,
+		func(verbose bool) { slog.SetDefault(logging.NewLogger(stdout, stderr, verbose)) },
+		composition.newSearchLifecycle,
+		composition.newListLifecycle,
+		composition.newInstallLifecycle,
+		newUninstallLifecycle,
+		newFixLifecycle,
+		newValidateLifecycle,
+		newSubmitLifecycle,
+		newSubmissionQueryLifecycle,
+		composition.newShowLifecycle,
+	)
+}
+
 type recordingPluginPackageDownloader struct {
 	ctx         context.Context
 	entry       domain.CatalogEntry
@@ -619,6 +640,116 @@ func TestNewListLifecycleListsBundledCloudByName(t *testing.T) {
 	want := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.1.0"}
 	if len(result.Powers) != 1 || result.Powers[0].Agent != "" || result.Powers[0].Power != want {
 		t.Fatalf("List(skill foo-before-summary) = %#v, want only %#v", result, want)
+	}
+}
+
+func TestNewListLifecycleListsBundledCloudAllVersionsByName(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatalf("secure APM home: %v", err)
+	}
+	t.Setenv("APM_HOME", home)
+	cacheHome := t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatalf("secure cache home: %v", err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	useBundledLocalCloud(t)
+	changeToRepositoryRoot(t)
+
+	service, err := newListLifecycle()
+	if err != nil {
+		t.Fatalf("newListLifecycle() error = %v", err)
+	}
+	result, err := service.List(context.Background(), cli.Flags{Type: "skill", Name: "foo-before-summary", All: true})
+	if err != nil {
+		t.Fatalf("List(skill foo-before-summary --all) error = %v", err)
+	}
+	if len(result.Powers) != 2 {
+		t.Fatalf("List(skill foo-before-summary --all) returned %d powers, want 2: %#v", len(result.Powers), result)
+	}
+	wantVersions := []string{"v0.1.0", "v0.0.1"}
+	for index, wantVersion := range wantVersions {
+		if got := result.Powers[index].Power.Version; got != wantVersion {
+			t.Fatalf("List(... --all)[%d] version = %q, want %q; result=%#v", index, got, wantVersion, result)
+		}
+	}
+}
+
+func TestBundledCLIRejectsListAllWithoutName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	useBundledLocalCloud(t)
+	changeToRepositoryRoot(t)
+	var stdout, stderr bytes.Buffer
+	if err := newBundledCLIEntry(t, &stdout, &stderr).Execute([]string{"list", "--all"}); err == nil || !strings.Contains(err.Error(), "--all requires name") {
+		t.Fatalf("Execute(list --all) error = %v, want --all requires name", err)
+	}
+}
+
+func TestNewShowLifecycleListsBundledCloudLatestAndExactVersion(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatalf("secure APM home: %v", err)
+	}
+	t.Setenv("APM_HOME", home)
+	cacheHome := t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatalf("secure cache home: %v", err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	useBundledLocalCloud(t)
+	changeToRepositoryRoot(t)
+
+	service, err := newCatalogLifecycleComposition().newShowLifecycle()
+	if err != nil {
+		t.Fatalf("newShowLifecycle() error = %v", err)
+	}
+	latest, err := service.Show(context.Background(), cli.Flags{Name: "foo-before-summary", Type: "skill"})
+	if err != nil {
+		t.Fatalf("Show(latest) error = %v", err)
+	}
+	if latest.Power.Power.Version != "v0.1.0" || latest.Power.Description != "Use when preparing a user-facing summary or completion note." {
+		t.Fatalf("Show(latest) = %#v, want v0.1.0 bundled metadata", latest)
+	}
+	exact, err := service.Show(context.Background(), cli.Flags{Name: "foo-before-summary", Type: "skill", Version: "v0.0.1"})
+	if err != nil {
+		t.Fatalf("Show(exact) error = %v", err)
+	}
+	if exact.Power.Power.Version != "v0.0.1" || exact.Power.Description == latest.Power.Description {
+		t.Fatalf("Show(exact) = %#v, want v0.0.1 metadata distinct from latest", exact)
+	}
+}
+
+func TestBundledCLIShowLatestAndExactVersion(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatalf("secure APM home: %v", err)
+	}
+	cacheHome := t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatalf("secure cache home: %v", err)
+	}
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	useBundledLocalCloud(t)
+	changeToRepositoryRoot(t)
+
+	var stdout, stderr bytes.Buffer
+	entry := newBundledCLIEntry(t, &stdout, &stderr)
+	if err := entry.Execute([]string{"show", "foo-before-summary", "--type=skill"}); err != nil {
+		t.Fatalf("Execute(show latest) error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "type: skill\nname: foo-before-summary\nversion: v0.1.0\n") || !strings.Contains(stdout.String(), "description: Use when preparing a user-facing summary or completion note.") {
+		t.Fatalf("show latest output = %q", stdout.String())
+	}
+	stdout.Reset()
+	if err := entry.Execute([]string{"show", "foo-before-summary", "--type=skill", "--version=v0.0.1", "--json"}); err != nil {
+		t.Fatalf("Execute(show exact json) error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"version": "v0.0.1"`) || !strings.Contains(stdout.String(), `"description": "Use when preparing any user-facing summary`) {
+		t.Fatalf("show exact output = %q", stdout.String())
 	}
 }
 

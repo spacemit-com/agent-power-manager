@@ -23,7 +23,7 @@ type powerMetadata struct {
 	tags        bool
 }
 
-// allMetadata 返回 list --all 的元数据策略：description 与 tags 同开同关。
+// allMetadata 返回兼容调用方的成组元数据策略；当前 List 不使用该策略，Show 会显式开启字段。
 func allMetadata(all bool) powerMetadata {
 	return powerMetadata{description: all, tags: all}
 }

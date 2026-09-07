@@ -2,6 +2,23 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-04（后续：list --all 展开指定名称版本并新增 show）
+
+分类：功能变更
+
+用户需求：将 `apm list -a/--all` 改为仅对指定 name 展开全部 Cloud 版本，并新增 `apm show <name>` 详情查询，支持精确版本。
+
+解决方案或完成结果：`list <name> --all` 按 SemVer 降序保留该名称全部版本，缺少 name 时在 lifecycle 前拒绝；`show` 默认返回最新版本，`--version` 返回精确版本，文本与 JSON 输出描述、标签等详情。新增 ADR-028，并同步 ADR-002、Project Overview、BUILD 与 bundled-cloud 集成覆盖。
+
+相关提交：
+
+- `47d9a38` feat: expand list all versions for named power
+- `7820121` feat(list): scope all flag to named versions
+- `dc1a2b2` feat(show): add catalog detail lifecycle
+- `3e55fae` feat(cli): add show command and lifecycle wiring
+
+验证结果或限制：新增 `cmd/apm` 集成测试覆盖 named list 全版本、unnamed `--all` 拒绝、show 最新/精确版本及 JSON；相关测试与全量验证随功能提交执行。
+
 ## 2026-09-04（后续：search 去掉 -a/--all，默认显示 description 不显示 tags）
 
 分类：功能变更

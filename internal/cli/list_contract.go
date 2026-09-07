@@ -8,8 +8,8 @@ import (
 	"apm/internal/domain"
 )
 
-// ListedPower 表示 List 可渲染的一条 Power；Cloud 记录的 Agent 为空，已安装记录的 Agent 必填。
-// Description 与 Tags 仅在 --all 时参与文本或 JSON 输出。
+// ListedPower 表示 List/Show 可渲染的一条 Power；Cloud 记录的 Agent 为空，已安装记录的 Agent 必填。
+// Description 与 Tags 由 Show 展示，List 仅携带它们供生命周期结果复用。
 type ListedPower struct {
 	Agent       domain.AgentID
 	Power       domain.PowerRef

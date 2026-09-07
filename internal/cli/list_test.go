@@ -69,6 +69,8 @@ func TestListValidatesConditionalAgentBeforeFactory(t *testing.T) {
 		{name: "cloud empty name", args: []string{"list", " \t "}, wantErr: "name must not be empty"},
 		{name: "cloud explicit agent", args: []string{"list", "--agent=all"}, wantErr: "--agent requires --installed"},
 		{name: "cloud explicit empty agent", args: []string{"list", "--agent="}, wantErr: "--agent requires --installed"},
+		{name: "all without name", args: []string{"list", "--all"}, wantErr: "--all requires name"},
+		{name: "short all without name", args: []string{"list", "-a"}, wantErr: "--all requires name"},
 		{name: "installed without agent", args: []string{"list", "--installed"}},
 		{name: "installed whitespace agent", args: []string{"list", "--installed", "--agent= \t "}, wantErr: "--agent must not be empty"},
 	}
@@ -133,6 +135,8 @@ func TestListPassesNameToLifecycle(t *testing.T) {
 	}{
 		{name: "cloud", args: []string{"list", " beta "}, want: cli.Flags{Name: "beta"}},
 		{name: "installed", args: []string{"list", "beta", "--installed", "--agent=codex"}, want: cli.Flags{Installed: true, Agent: "codex", Name: "beta"}},
+		{name: "all versions", args: []string{"list", "beta", "--all"}, want: cli.Flags{Name: "beta", All: true}},
+		{name: "short all versions", args: []string{"list", "beta", "-a"}, want: cli.Flags{Name: "beta", All: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -232,7 +236,7 @@ func TestListRendersGroupedInstalledJSON(t *testing.T) {
 		return &recordingListLifecycle{result: result}, nil
 	})
 
-	if err := entry.Execute([]string{"list", "--installed", "--json", "--all"}); err != nil {
+	if err := entry.Execute([]string{"list", "demo", "--installed", "--json", "--agent=all", "--all"}); err != nil {
 		t.Fatalf("Execute error = %v", err)
 	}
 	want := `[
@@ -248,11 +252,7 @@ func TestListRendersGroupedInstalledJSON(t *testing.T) {
     "agent": "codex",
     "type": "skill",
     "name": "demo",
-    "version": "v1.0.0",
-    "description": "a demo skill",
-    "tags": [
-      "alpha"
-    ]
+    "version": "v1.0.0"
   }
 ]
 `
@@ -495,7 +495,7 @@ func TestListRepeatedExecutionDoesNotLeakFlagsLoggerOrService(t *testing.T) {
 	}
 }
 
-func TestListAllAndJSONFlagsRenderMetadata(t *testing.T) {
+func TestListAllAndJSONFlagsRenderIdentityOnly(t *testing.T) {
 	result := cli.ListResult{Powers: []cli.ListedPower{{
 		Power:       domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
 		Description: "a demo skill",
@@ -506,10 +506,11 @@ func TestListAllAndJSONFlagsRenderMetadata(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "all text", args: []string{"list", "--all"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n  tags: alpha\n"},
-		{name: "short all", args: []string{"list", "-a"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n  tags: alpha\n"},
+		{name: "all text", args: []string{"list", "demo", "--all"}, want: "skill/demo@v1.0.0\n"},
+		{name: "short all", args: []string{"list", "demo", "-a"}, want: "skill/demo@v1.0.0\n"},
 		{name: "json identity", args: []string{"list", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"},
-		{name: "json all", args: []string{"list", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ]\n  }\n]\n"},
+		{name: "json all", args: []string{"list", "demo", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\"\n  }\n]\n"},
+		{name: "installed all", args: []string{"list", "demo", "--installed", "--agent=codex", "--all"}, want: "skill/demo@v1.0.0\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

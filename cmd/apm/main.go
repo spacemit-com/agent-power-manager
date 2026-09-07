@@ -39,10 +39,21 @@ func main() {
 		newValidateLifecycle,
 		newSubmitLifecycle,
 		newSubmissionQueryLifecycle,
+		catalogLifecycles.newShowLifecycle,
 	)
 	if err := entry.Execute(os.Args[1:]); err != nil {
 		os.Exit(1)
 	}
+}
+
+func (composition *catalogLifecycleComposition) newShowLifecycle() (cli.ShowLifecycle, error) {
+	repository := config.NewJSONRepository()
+	registry := adapter.NewRegistry()
+	transactions, err := transaction.NewManager(repository, registry)
+	if err != nil {
+		return nil, fmt.Errorf("create transaction manager: %w", err)
+	}
+	return lifecycle.NewShow(transactions, composition.manager)
 }
 
 // catalogLifecycleComposition 在命令入口共享一个惰性目录 Manager，避免无目录需求的命令触发 Cloud 配置。
