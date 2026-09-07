@@ -825,6 +825,7 @@ func TestListSubmissionsRejectsInvalidResponses(t *testing.T) {
 		{name: "name filter mismatch", query: domain.SubmissionListQuery{Name: "other"}, body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T10:00:00Z"}]}`},
 		{name: "invalid timestamp", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"yesterday"}]}`},
 		{name: "increasing created at", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-08-24T09:00:00Z"},{"submission_id":"sub_2","type":"skill","name":"demo","version":"v1.0.1","status":"validating","created_at":"2026-08-24T10:00:00Z"}]}`},
+		{name: "increasing timezone-less created at", body: `{"items":[{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-09-07T10:17:57"},{"submission_id":"sub_2","type":"skill","name":"demo","version":"v1.0.1","status":"validating","created_at":"2026-09-07T10:17:58"}]}`},
 		{name: "missing items", body: `{}`},
 		{name: "duplicate JSON key", body: `{"items":[],"items":[]}`},
 		{name: "trailing JSON value", body: `{"items":[]} {}`},
@@ -892,6 +893,26 @@ func TestListSubmissionsAcceptsTwentyItemsWithEqualCreatedAt(t *testing.T) {
 	}
 }
 
+func TestListSubmissionsAcceptsTimezoneLessCreatedAt(t *testing.T) {
+	body := `{"items":[` +
+		`{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","status":"received","created_at":"2026-09-07T10:17:58"},` +
+		`{"submission_id":"sub_2","type":"skill","name":"demo","version":"v1.0.1","status":"validating","created_at":"2026-09-07T10:17:57"}` +
+		`]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+	got, err := client.ListSubmissions(context.Background(), domain.SubmissionListQuery{})
+	if err != nil || len(got.Items) != 2 {
+		t.Fatalf("ListSubmissions() = %+v, %v", got, err)
+	}
+	if got.Items[0].CreatedAt != "2026-09-07T10:17:58" || got.Items[1].CreatedAt != "2026-09-07T10:17:57" {
+		t.Fatalf("ListSubmissions() created_at = %q, %q", got.Items[0].CreatedAt, got.Items[1].CreatedAt)
+	}
+}
+
 func TestGetSubmissionRejectsInvalidResponses(t *testing.T) {
 	timeline := `[{"event_id":"evt_1","event_type":"submission_received","status_from":"","status_to":"received","timestamp":"2026-08-24T10:00:00Z","message":"submission received"},{"event_id":"evt_2","event_type":"review_requested","status_from":"received","status_to":"review_pending","timestamp":"2026-08-24T10:02:00Z","message":"review requested"}]`
 	tests := []struct {
@@ -956,6 +977,26 @@ func TestGetSubmissionAcceptsPresentZeroValuesAndUnknownFields(t *testing.T) {
 	}
 	if got.ContentAvailable || got.ValidationErrors == nil || got.Timeline == nil || len(got.ValidationErrors) != 0 || len(got.Timeline) != 2 {
 		t.Fatalf("GetSubmission() present zero values = %+v", got)
+	}
+}
+
+func TestGetSubmissionAcceptsTimezoneLessTimestamps(t *testing.T) {
+	body := `{"submission_id":"sub_1","type":"skill","name":"demo","version":"v1.0.0","description":"does things","message":"first release","status":"review_pending","created_at":"2026-09-07T10:17:58","updated_at":"2026-09-07T10:19:00","content_available":true,"validation_errors":["missing card"],"review_comment":"","published_version":"","timeline":[{"event_id":"evt_1","event_type":"submission_received","status_from":"","status_to":"received","timestamp":"2026-09-07T10:17:58","message":"submission received"},{"event_id":"evt_2","event_type":"review_requested","status_from":"received","status_to":"review_pending","timestamp":"2026-09-07T10:19:00","message":"review requested"}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+	got, err := client.GetSubmission(context.Background(), "sub_1")
+	if err != nil {
+		t.Fatalf("GetSubmission() error = %v", err)
+	}
+	if got.CreatedAt != "2026-09-07T10:17:58" || got.UpdatedAt != "2026-09-07T10:19:00" {
+		t.Fatalf("GetSubmission() timestamps = %q, %q", got.CreatedAt, got.UpdatedAt)
+	}
+	if len(got.Timeline) != 2 || got.Timeline[0].Timestamp != "2026-09-07T10:17:58" || got.Timeline[1].Timestamp != "2026-09-07T10:19:00" {
+		t.Fatalf("GetSubmission() timeline = %#v", got.Timeline)
 	}
 }
 

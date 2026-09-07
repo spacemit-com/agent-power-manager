@@ -2,6 +2,16 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-07
+
+分类：缺陷修复
+
+用户需求：`submission get`/`submission list` 此前只接受严格 RFC3339 时间戳，而测试环境实际返回无时区 ISO 8601（如 `2026-09-07T10:17:58`），导致 get/list 校验 `created_at` 时失败并报 `timestamp "..." is not RFC3339: cloud invalid response`。将其解析放宽为与 catalog `published_at` 一致的「RFC3339 或无时区 ISO 8601」。契约见 [ADR-026](ivory-tower/adr/ADR-026-adapt-apc-client-to-test-environment-behavior.md)。
+
+解决方案或完成结果：`internal/domain` 新增导出函数 `ParseAPCTimestamp`，作为 catalog 与 submission 唯一的时间戳格式定义：先尝试 `time.RFC3339`/`time.RFC3339Nano`（含小数秒与 UTC/偏移量），再匹配无时区 ISO 8601 正则并用 `time.Parse("2006-01-02T15:04:05", ...)` 解析（无时区按 UTC 解释，保证排序比较确定）；`internal/domain/catalog.go` 的 `isCatalogPublishedAt` 改为复用该函数，并删除原 `catalogTimestampWithoutZone` 正则（顺带拒绝旧正则放过的不可能日期）；`internal/cloud/remote` 的 `parseRequiredSubmissionTimestamp` 改为调用 `domain.ParseAPCTimestamp`，保留 `cloud.ErrInvalidResponse` 哨兵语义，覆盖详情 `created_at`/`updated_at`、list `created_at` 与 timeline `timestamp` 四个调用点。
+
+验证结果或限制：`go test ./...`、`go test -race ./...`、`go vet ./...`、`gofmt -l` 与 `git diff --check` 均以退出码 0 通过；新增 `internal/domain` 的 `TestParseAPCTimestamp` 覆盖 RFC3339 Z/偏移/小数秒、无时区（含小数秒）与各类非法值，并断言无时区解析结果为 UTC；`internal/cloud/remote` 新增 list 无时区倒序接受、list 无时区升序拒绝、get 无时区时间戳（含 timeline）接受用例。
+
 ## 2026-09-04（后续：list --all 展开指定名称版本并新增 show）
 
 分类：功能变更

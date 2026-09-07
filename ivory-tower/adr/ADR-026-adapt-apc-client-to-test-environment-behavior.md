@@ -33,7 +33,8 @@ Feature 028 的只读探测（见 [live-probe](../features/028-apc-api-adaptatio
    userinfo 或认证请求的跨源跳转（凭据不扩散）。
 5. **目录 schema 容忍**：顶层/分组 `schema_version` 改为可选（缺省视为 v1）；item 容忍
    `schema_version` 与 `download_url`；MCP 条目 `message` 可空；`published_at` 接受 RFC3339 或
-   无时区 ISO 8601。
+   无时区 ISO 8601。Submission 详情/列表的 `created_at`/`updated_at`/`timeline[].timestamp`
+   同样接受 RFC3339 或无时区 ISO 8601，无时区值在排序比较中按 UTC 解释。
 6. **HTTP/2 无 Content-Length**：CDN 经 HTTP/2 返回目录时不带 `Content-Length`，目录下载以
    `MaxCatalogSize` 为上界读取；最终大小与哈希仍由目录版本响应 + sha256/size 校验兜底。
 7. **MCP 资源额外字段**：MCP 资源 JSON 容忍服务端额外返回的 `type`/`message`/`content_md5`
@@ -53,6 +54,8 @@ Feature 028 的只读探测（见 [live-probe](../features/028-apc-api-adaptatio
 - 代价与风险：客户端偏离 `APC-API.md`，若服务端后续修正目录/认证/类型，客户端需再次对齐；宽松
   点（MCP gzip→json、目录 schema 可选、无时区时间戳）在服务端改正后仍兼容。
 - 代价与风险：`published_at` 无时区值按原样展示，不做时区换算，跨时区比较可能不一致（当前仅展示）。
+- 代价与风险：Submission 无时区时间戳按 UTC 解释以参与 list/timeline 排序比较；同一响应内格式
+  一致时相对顺序不变，但与带时区值混用时可能产生跨时区边界差异（服务端当前按统一格式返回）。
 - 后续动作：推动 APC 侧修正 `APC-API.md` 或客户端契约；测试环境 CA 链（环境问题）由基础设施补齐，
   产品代码保持 TLS 校验开启。
 

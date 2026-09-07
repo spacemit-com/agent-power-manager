@@ -436,9 +436,9 @@ func parseRequiredSubmissionTimestamp(value *string) (time.Time, error) {
 	if value == nil {
 		return time.Time{}, fmt.Errorf("timestamp is missing: %w", cloud.ErrInvalidResponse)
 	}
-	parsed, err := time.Parse(time.RFC3339, *value)
+	parsed, err := domain.ParseAPCTimestamp(*value)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("timestamp %q is not RFC3339: %w", *value, errors.Join(cloud.ErrInvalidResponse, err))
+		return time.Time{}, errors.Join(cloud.ErrInvalidResponse, err)
 	}
 	return parsed, nil
 }

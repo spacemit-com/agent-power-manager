@@ -2,9 +2,7 @@ package domain
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
-	"time"
 )
 
 // CatalogVersion 表示目录原始 JSON 字节的内容地址及其长度。
@@ -133,16 +131,9 @@ func isLowerHex(value string, length int) bool {
 	return true
 }
 
-// catalogTimestampWithoutZone 匹配测试环境返回的无时区 ISO 8601 时间戳（可带 1-9 位小数秒）。
-var catalogTimestampWithoutZone = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?$`)
-
-// isCatalogPublishedAt 接受 RFC3339（含纳秒）或测试环境实际返回的无时区 ISO 8601 时间戳。
+// isCatalogPublishedAt 接受 RFC3339（含纳秒）或测试环境实际返回的无时区 ISO 8601 时间戳；
+// 格式定义复用 ParseAPCTimestamp，避免与 submission 时间戳校验漂移。
 func isCatalogPublishedAt(value string) bool {
-	if _, err := time.Parse(time.RFC3339, value); err == nil {
-		return true
-	}
-	if _, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return true
-	}
-	return catalogTimestampWithoutZone.MatchString(value)
+	_, err := ParseAPCTimestamp(value)
+	return err == nil
 }
