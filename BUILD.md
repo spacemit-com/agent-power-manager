@@ -25,6 +25,25 @@ go build -o ./apm ./cmd/apm
 
 构建完成后，可执行文件位于 `./apm`。
 
+## Debian 软件包（Bianbu）
+
+在 Bianbu 开发板的源码根目录安装构建依赖后执行：
+
+```bash
+sudo apt-get install debhelper golang-go ca-certificates
+dpkg-buildpackage -us -uc -b
+sudo apt-get install ../agent-power-manager_0.0.1_riscv64.deb
+/usr/bin/apm --help
+```
+
+打包过程使用 Go modules 联网获取由 `go.mod` 和 `go.sum` 锁定的依赖；可按组织要求通过
+`GOPROXY` 选择模块代理。构建使用本机 Go 工具链并执行 `go mod verify` 与 `go test ./...`。
+`DEB_BUILD_OPTIONS=nocheck` 只用于明确跳过测试的构建，不能替代发布前验证。
+
+软件包只安装 `/usr/bin/apm` 和包文档，不创建服务或系统用户。`apt remove` 与
+`apt purge` 都保留用户的 `~/.apm`、APM 缓存、Agent 资源和配置；重装不会迁移或重置这些
+数据。此约定见 [ADR-030](ivory-tower/adr/ADR-030-package-cli-and-preserve-user-data.md)。
+
 ## Cloud Provider 配置
 
 APM 把 Local 与 Remote provider 静态链接到同一个二进制，并由 `cmd/apm` 的 `newCloudClient` 在每次 lifecycle 构造时创建独立 `ProviderRegistry`、注册 factory 后只打开被选中的 provider（[ADR-016](ivory-tower/adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）。默认 provider 是 `remote`，默认 APC 测试环境根地址为 `https://developer.bianbu.xyz`（[ADR-026](ivory-tower/adr/ADR-026-adapt-apc-client-to-test-environment-behavior.md)）：

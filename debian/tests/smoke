@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+apm_test_root=$(mktemp -d)
+cleanup() {
+    rm -rf "$apm_test_root"
+}
+trap cleanup EXIT HUP INT TERM
+
+# 使用专用目录隔离 APM 与 Agent 数据，禁止访问真实用户状态或 Agent CLI。
+export APM_HOME="$apm_test_root/state-home"
+export XDG_CACHE_HOME="$apm_test_root/cache"
+export CODEX_HOME="$apm_test_root/codex"
+export CLAUDE_CONFIG_DIR="$apm_test_root/claude"
+export HERMES_HOME="$apm_test_root/hermes"
+export BIANBU_AGENT_HOME="$apm_test_root/bibit"
+mkdir -p "$APM_HOME" "$XDG_CACHE_HOME"
+
+apm_source_root=${APM_SOURCE_ROOT:-$(pwd -P)}
+fixture="$apm_source_root/internal/cloud/resources/mcps/company-tools/v0.0.1/MCP.json"
+
+test -f "$fixture"
+cd "$apm_test_root"
+/usr/bin/apm --help
+/usr/bin/apm list --installed --json
+/usr/bin/apm validate "$fixture" --type mcp --json
