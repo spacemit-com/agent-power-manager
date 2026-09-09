@@ -745,7 +745,7 @@ func TestBundledCLIShowLatestAndExactVersion(t *testing.T) {
 		t.Fatalf("show latest output = %q", stdout.String())
 	}
 	stdout.Reset()
-	if err := entry.Execute([]string{"show", "foo-before-summary", "--type=skill", "--version=v0.0.1", "--json"}); err != nil {
+	if err := entry.Execute([]string{"show", "foo-before-summary=v0.0.1", "--type=skill", "--json"}); err != nil {
 		t.Fatalf("Execute(show exact json) error = %v", err)
 	}
 	if !strings.Contains(stdout.String(), `"version": "v0.0.1"`) || !strings.Contains(stdout.String(), `"description": "Use when preparing any user-facing summary`) {

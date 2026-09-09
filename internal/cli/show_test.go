@@ -47,7 +47,7 @@ func TestShowPassesNameTypeAndVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	lifecycle := &recordingShowLifecycle{result: cli.ShowResult{Power: cli.ListedPower{Power: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.2.3"}, Description: "demo desc", Tags: []string{"tag"}}}}
 	entry := newShowEntry(t, &stdout, &stderr, func() (cli.ShowLifecycle, error) { return lifecycle, nil })
-	if err := entry.Execute([]string{"show", "demo", "--type=skill", "--version=v1.2.3"}); err != nil {
+	if err := entry.Execute([]string{"show", "demo=v1.2.3", "--type=skill"}); err != nil {
 		t.Fatalf("Execute(show) error = %v", err)
 	}
 	if lifecycle.flags != (cli.Flags{Name: "demo", Type: "skill", Version: "v1.2.3"}) {
@@ -83,20 +83,47 @@ func TestShowRendersLabeledFieldsAndEmptyTags(t *testing.T) {
 	}
 }
 
-func TestShowValidatesCanonicalNameAndVersionBeforeFactory(t *testing.T) {
-	for _, args := range [][]string{{"show", "Bad Name"}, {"show", "demo", "--version=1.0.0"}} {
-		var stdout, stderr bytes.Buffer
-		factoryCalls := 0
-		entry := newShowEntry(t, &stdout, &stderr, func() (cli.ShowLifecycle, error) {
-			factoryCalls++
-			return &recordingShowLifecycle{}, nil
+func TestShowValidatesNameAndVersionBeforeFactory(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "invalid name", args: []string{"show", "Bad Name"}, wantErr: "invalid power name"},
+		{name: "non-canonical version", args: []string{"show", "demo=1.0.0"}, wantErr: "invalid power version"},
+		{name: "empty version", args: []string{"show", "demo="}, wantErr: "power version must not be empty"},
+		{name: "empty name", args: []string{"show", "=v1.0.0"}, wantErr: "power name must not be empty"},
+		{name: "extra equals", args: []string{"show", "demo=v1.2.3=extra"}, wantErr: "invalid power version"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			factoryCalls := 0
+			entry := newShowEntry(t, &stdout, &stderr, func() (cli.ShowLifecycle, error) {
+				factoryCalls++
+				return &recordingShowLifecycle{}, nil
+			})
+			err := entry.Execute(test.args)
+			if err == nil {
+				t.Fatalf("Execute(%q) unexpectedly succeeded", test.args)
+			}
+			if !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("Execute(%q) error = %v, want containing %q", test.args, err, test.wantErr)
+			}
+			if factoryCalls != 0 {
+				t.Fatalf("factory calls = %d, want 0 for %q", factoryCalls, test.args)
+			}
 		})
-		if err := entry.Execute(args); err == nil {
-			t.Fatalf("Execute(%q) unexpectedly succeeded", args)
-		}
-		if factoryCalls != 0 {
-			t.Fatalf("factory calls = %d, want 0 for %q", factoryCalls, args)
-		}
+	}
+}
+
+func TestShowRejectsVersionFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	entry := newShowEntry(t, &stdout, &stderr, func() (cli.ShowLifecycle, error) {
+		t.Fatal("factory called for removed --version flag")
+		return nil, nil
+	})
+	if err := entry.Execute([]string{"show", "demo", "--version=v1.2.3"}); err == nil {
+		t.Fatalf("Execute(show --version) unexpectedly succeeded")
 	}
 }
 

@@ -12,14 +12,16 @@ import (
 func newShowCommand(newLifecycle ShowLifecycleFactory) *cobra.Command {
 	var flags Flags
 	command := &cobra.Command{
-		Use:   "show [name]",
+		Use:   "show <name>[=<version>]",
 		Short: "Show power details",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			flags.Name = strings.TrimSpace(args[0])
-			if flags.Name == "" {
-				return errors.New("name must not be empty")
+			name, version, err := parsePower(args[0])
+			if err != nil {
+				return err
 			}
+			flags.Name = strings.TrimSpace(name)
+			flags.Version = version
 			if !domain.IsCanonicalPowerName(flags.Name) {
 				return fmt.Errorf("invalid power name %q", flags.Name)
 			}
@@ -49,7 +51,6 @@ func newShowCommand(newLifecycle ShowLifecycleFactory) *cobra.Command {
 		},
 	}
 	bindTypeFlag(command, &flags)
-	command.Flags().StringVar(&flags.Version, "version", "", "specific power version (defaults to latest)")
 	command.Flags().BoolVar(&flags.JSON, "json", false, "machine-readable JSON output")
 	return command
 }
