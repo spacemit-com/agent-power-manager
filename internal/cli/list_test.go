@@ -73,6 +73,7 @@ func TestListValidatesConditionalAgentBeforeFactory(t *testing.T) {
 		{name: "short all without name", args: []string{"list", "-a"}, wantErr: "--all requires name"},
 		{name: "installed without agent", args: []string{"list", "--installed"}},
 		{name: "installed whitespace agent", args: []string{"list", "--installed", "--agent= \t "}, wantErr: "--agent must not be empty"},
+		{name: "installed unknown agent", args: []string{"list", "--installed", "--agent=claude"}, wantErr: "invalid --agent \"claude\""},
 	}
 
 	for _, tt := range tests {

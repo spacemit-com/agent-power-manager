@@ -73,5 +73,8 @@ func validateListFlags(command *cobra.Command, flags Flags) error {
 	if strings.TrimSpace(flags.Agent) == "" && command.Flags().Changed("agent") {
 		return errors.New("--agent must not be empty")
 	}
+	if err := validateAgentValue(flags); err != nil {
+		return err
+	}
 	return validatePowerType(flags)
 }

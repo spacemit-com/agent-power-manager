@@ -17,6 +17,21 @@ const (
 	AgentBibit AgentID = "bibit"
 )
 
+// KnownAgentIDs 返回 `--agent` 标志可接受的智能体标识：特殊值 `all` 在前，其余按字典序排列。
+func KnownAgentIDs() []AgentID {
+	return []AgentID{AllAgents, AgentBibit, AgentClaudeCode, AgentCodex, AgentHermes}
+}
+
+// IsKnownAgentID 报告 id 是否为 `--agent` 标志可接受的智能体标识。
+func IsKnownAgentID(id AgentID) bool {
+	for _, candidate := range KnownAgentIDs() {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
+}
+
 // AgentSnapshot 表示某一时刻可用的智能体集合。
 type AgentSnapshot struct {
 	Agents []AgentID

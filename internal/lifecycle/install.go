@@ -203,7 +203,7 @@ func installAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.Age
 		return agents, nil
 	}
 	if !snapshot.Contains(target) {
-		return nil, fmt.Errorf("install power for agent %q: unsupported or not installed", target)
+		return nil, fmt.Errorf("install power for agent %q: unsupported or not installed%s", target, availableAgentSuffix(flags, snapshot))
 	}
 	return []domain.AgentID{target}, nil
 }

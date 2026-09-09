@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"apm/internal/domain"
 )
 
 var canonicalInstallVersion = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -32,6 +34,9 @@ func validateCommon(flags Flags) error {
 	if strings.TrimSpace(flags.Agent) == "" {
 		return errors.New("--agent is required")
 	}
+	if err := validateAgentValue(flags); err != nil {
+		return err
+	}
 	return validatePowerType(flags)
 }
 
@@ -40,12 +45,34 @@ func validateAgentTypeFlags(flags Flags) error {
 	if err := validatePowerType(flags); err != nil {
 		return err
 	}
+	if err := validateAgentValue(flags); err != nil {
+		return err
+	}
 	switch flags.Agent {
 	case "", "bibit":
 		return nil
 	default:
 		return fmt.Errorf("--type agent only supports --agent bibit, got %q", flags.Agent)
 	}
+}
+
+// validateAgentValue 校验 --agent 取值为已知智能体标识，非法时列出可选值；空值交给调用方的 required/empty 检查。
+func validateAgentValue(flags Flags) error {
+	agent := strings.TrimSpace(flags.Agent)
+	if agent == "" || domain.IsKnownAgentID(domain.AgentID(agent)) {
+		return nil
+	}
+	return fmt.Errorf("invalid --agent %q: must be %s", flags.Agent, agentOptionList())
+}
+
+// agentOptionList 返回 --agent 可选值的展示文本，all 在前、其余按字典序，末尾用 "or" 连接。
+func agentOptionList() string {
+	ids := domain.KnownAgentIDs()
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = string(id)
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + ", or " + parts[len(parts)-1]
 }
 
 func validatePowerType(flags Flags) error {

@@ -111,7 +111,7 @@ func uninstallAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.A
 		return agents, nil
 	}
 	if !snapshot.Contains(target) {
-		return nil, fmt.Errorf("uninstall power for agent %q: unsupported or not installed", target)
+		return nil, fmt.Errorf("uninstall power for agent %q: unsupported or not installed%s", target, availableAgentSuffix(flags, snapshot))
 	}
 	return []domain.AgentID{target}, nil
 }

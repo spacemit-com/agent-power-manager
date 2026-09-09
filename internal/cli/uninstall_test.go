@@ -104,6 +104,7 @@ func TestUninstallRejectsInvalidInputBeforeFactory(t *testing.T) {
 		{name: "whitespace name", args: []string{"uninstall", " \t ", "--agent=all"}, want: "power name must not be empty"},
 		{name: "missing agent", args: []string{"uninstall", "demo"}, want: "--agent is required"},
 		{name: "whitespace agent", args: []string{"uninstall", "demo", "--agent= \t "}, want: "--agent is required"},
+		{name: "invalid agent", args: []string{"uninstall", "demo", "--agent=foo"}, want: "invalid --agent \"foo\""},
 		{name: "invalid type", args: []string{"uninstall", "demo", "--agent=all", "--type=other"}, want: "invalid --type \"other\""},
 		{name: "extra argument", args: []string{"uninstall", "demo", "extra", "--agent=all"}, want: "accepts 1 arg(s), received 2"},
 	}

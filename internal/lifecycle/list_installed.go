@@ -30,7 +30,7 @@ func installedListAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]doma
 		return snapshot.Ordered(), nil
 	}
 	if !snapshot.Contains(target) {
-		return nil, fmt.Errorf("list installed powers for agent %q: unsupported or not installed", target)
+		return nil, fmt.Errorf("list installed powers for agent %q: unsupported or not installed%s", target, availableAgentSuffix(flags, snapshot))
 	}
 	return []domain.AgentID{target}, nil
 }
