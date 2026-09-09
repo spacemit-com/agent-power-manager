@@ -19,8 +19,8 @@
 - `list [name] --all`（`-a` 为短选项）参数与 Cloud 生命周期语义。
 - `list --all` 缺少 `[name]` 时的 CLI 校验与错误提示。
 - Cloud 列表按名称精确筛选后展开全部版本，并按既定类型、名称、SemVer 降序排序。
-- 新增 `show [name]` 命令及 `--type`、`--version`、`--json` 选项。
-- `show` 默认选择指定名称的最新版本，显式 `--version` 时选择精确版本。
+- 新增 `show [name]` 命令及 `--type`、`--json` 选项，版本经 `<name>[=<version>]` 指定。
+- `show` 默认选择指定名称的最新版本，显式 `<name>=<version>` 时选择精确版本。
 - `show` 的文本与 JSON 单对象输出，至少包含 type、name、version、description、tags。
 - Cloud 目录类型歧义、名称/版本不存在、版本格式非法等错误语义。
 - CLI、lifecycle、渲染层及根命令 factory 接线的自动化测试。
@@ -65,13 +65,13 @@ apm list [name] --installed [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|a
 ### 3.2 Show
 
 ```text
-apm show <name> [--type=<skill|plugin|mcp|agent>] [--version=<vMAJOR.MINOR.PATCH>] [--json]
+apm show <name>[=<version>] [--type=<skill|plugin|mcp|agent>] [--json]
 ```
 
 - `name` 必填且按现有 canonical Power 名称规则校验；空白名称拒绝。
 - `--type` 省略时按名称在目录中的唯一类型推断；同名跨多个 Power 类型时返回歧义错误，
   要求显式 `--type`。指定类型后只在该类型中查询。
-- `--version` 省略时使用该名称的最新 SemVer；提供时只接受规范的 `vMAJOR.MINOR.PATCH`
+- `<name>=<version>` 省略版本时使用该名称的最新 SemVer；提供时只接受规范的 `vMAJOR.MINOR.PATCH`
   并查询精确版本。版本不存在返回 not-found 错误，不回退到其它版本。
 - `show` 只查询 Cloud catalog snapshot；不访问 installed Agent 清单，不接受 `--agent`。
 - 文本输出为单个对象的稳定字段顺序：
@@ -139,7 +139,7 @@ Snapshot.List(type)
 - 默认 `apm list`、`apm search`、`apm list --installed` 的非 `--all` 结果保持兼容。
 - `-a/--all` 的既有“追加 description/tags”行为被明确取代；调用方若需要批量元数据应使用
   `apm list --json`（ADR-029），若需要单个版本详情应使用 `apm show <name>`，若需要指定
-  历史版本则使用 `--version`。
+  历史版本则使用 `<name>=<version>`。
 - 更新 ADR-002 中 list 语法与 latest 语义的相关条款，并新增 ADR-028 记录“名称限定的全版本
   展开 + 独立 Show 详情”决策。
 - BUILD 与 Project Overview 增加 `list <name> --all`、`show <name>` 示例，并移除 list
@@ -165,7 +165,7 @@ Snapshot.List(type)
 
 1. `apm list <name> --all` 输出该名称全部可安装版本，默认 `apm list <name>` 仍只输出最新版。
 2. `apm list --all` 与 `apm list -a` 在缺少 name 时均在 lifecycle 前失败。
-3. `apm show <name>` 默认展示最新版的 type/name/version/description/tags；`--version` 展示
+3. `apm show <name>` 默认展示最新版的 type/name/version/description/tags；`<name>=<version>` 展示
    指定版本；`--json` 输出单对象。
 4. 同名跨类型、未知名称、未知版本和非法版本均返回可诊断错误，不访问 installed 状态或回退其它版本。
 5. 全量测试、race、vet、构建与 `git diff --check` 通过，文档与 ADR 引用新契约。

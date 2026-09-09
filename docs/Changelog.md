@@ -4,6 +4,27 @@
 
 ## 2026-09-09
 
+分类：功能变更
+
+用户需求：把 `apm show` 的版本指定方式从 `--version` flag 改为位置参数
+`<name>[=<version>]`，与 `install <power>[=<version>]` 风格一致；`list` 保持不变，
+`--version` 彻底移除。
+
+解决方案或完成结果：`internal/cli/show.go` 复用 `parsePower` 拆分位置参数，name 去首尾空白后走
+`domain.IsCanonicalPowerName` 校验，version 非空时走 `domain.CanonicalPowerVersion` 校验；删除
+`--version` flag 注册。CLI 测试改用 `show demo=v1.2.3`，并新增空 version、空 name、多余 `=`、
+`--version` 未知 flag 等前置拒绝用例；`cmd/apm` 集成测试改用 `show foo-before-summary=v0.0.1`。
+BUILD、ADR-002、ADR-028、Project Overview 与 Feature 029 spec 同步新契约。
+
+相关提交：
+
+- `131f8c0` feat(show): specify exact version with <name>=<version>
+
+验证结果或限制：板端（Bianbu riscv64、Go 1.26.0）`go test ./...`、`go vet ./...`、gofmt
+检查与构建均通过。
+
+## 2026-09-09
+
 分类：新增功能
 
 用户需求：根据项目准备 `debian/` 目录，使 APM 能在

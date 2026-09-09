@@ -20,8 +20,8 @@
   list 的离线语义保持不变。（list 的 JSON 身份记录条款已被
   [ADR-029](ADR-029-list-json-carries-description-and-tags.md) 取代：`list --json`
   恒带 description/tags，文本仍身份精简。）
-- 新增 `apm show <name> [--type=<type>] [--version=vMAJOR.MINOR.PATCH] [--json]`。
-  默认选择最新版本，指定 `--version` 时选择精确版本；跨类型同名必须提供 `--type`。
+- 新增 `apm show <name>[=<version>] [--type=<type>] [--json]`。
+  默认选择最新版本，指定 `=<version>` 时选择精确版本；跨类型同名必须提供 `--type`。
   文本输出固定包含 type、name、version、description、tags，JSON 输出单个对象且 tags
   始终为数组。Show 只读取 Cloud catalog，不访问 installed 状态，也不自动 fallback。
 

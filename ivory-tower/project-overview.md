@@ -16,7 +16,7 @@ Power配置记录、文件锁等治理功能，不替代目标 Agent 的运行�
 
 - 包含：
     - 提供 `search`、`list`、`install`、`uninstall`、`fix`、`validate`、`submit`、`submission get|list` 等 CLI 能力。
-    - `search <keyword>` 搜索云端资源；`list [name]` 默认列出云端资源、可按 name 精确过滤，`list [name] --all` 展开指定名称的全部版本，`list [name] --installed` 列出本地安装清单；`show <name>` 查看 Cloud Power 详情并可用 `--version` 指定版本。
+    - `search <keyword>` 搜索云端资源；`list [name]` 默认列出云端资源、可按 name 精确过滤，`list [name] --all` 展开指定名称的全部版本，`list [name] --installed` 列出本地安装清单；`show <name>[=<version>]` 查看 Cloud Power 详情并可用 `=version` 指定精确版本。
     - `install <power>[=<version>]` 未指定版本时选择云端最新版，相同版本幂等成功，不同版本执行升级或显式降级。
     - 生命周期安全，在任意执行阶段中断，系统都可以识别并纠正。
     - Search、默认 List 和 installed List 在原只读业务前无锁 Inspect 唯一活动 journal：合法 journal Warn 并提示 `apm fix`，损坏或不可读 journal Warn 后继续；三者都不执行 Recover。默认 List/Search 随后仅在 catalog 同步阶段短时、非阻塞获取 `apm.lock`，installed List 全程不获取锁。

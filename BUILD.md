@@ -139,7 +139,7 @@ gofmt -w cmd internal
 ./apm list foo-before-summary --all
 ./apm list foo-before-summary --type skill
 ./apm show foo-before-summary --type skill
-./apm show foo-before-summary --type skill --version v0.0.1 --json
+./apm show foo-before-summary=v0.0.1 --type skill --json
 ./apm list --installed
 ./apm list --installed --agent codex
 ./apm list --installed --agent all --type skill
@@ -231,7 +231,7 @@ Installed List 提供 `--installed`，`--agent` 可选：具体 `--agent=<agent-
 
 两种模式都接受可选位置参数 `name`（`list [name]`），按区分大小写的原始字符串精确匹配 `PowerRef.Name`；例如 `./apm list foo-before-summary` 只输出名为 `foo-before-summary` 的记录（Cloud 每个 type 一条、最新版本），`./apm list foo-before-summary --all` 展开该名称的全部 Cloud 版本，`./apm list foo-before-summary --installed --agent codex` 只输出该 Agent 下的同名记录。`--all`/`-a` 未提供 name 时会被拒绝。
 
-`show <name>` 只查询 Cloud catalog，默认显示最新版本；`--version=vMAJOR.MINOR.PATCH` 选择精确版本，跨类型同名时提供 `--type`。文本显示 type、name、version、description、tags；`--json` 输出单个对象。
+`show <name>[=<version>]` 只查询 Cloud catalog，默认显示最新版本；`=vMAJOR.MINOR.PATCH` 选择精确版本，跨类型同名时提供 `--type`。文本显示 type、name、version、description、tags；`--json` 输出单个对象。
 
 例如 `./apm list --agent all` 是无效组合：它会非零退出，并在 stderr 报告 `--agent requires --installed` 和 usage。`--agent=all` 的 installed 读取若出现部分失败，会输出成功记录后以非零状态报告错误；fatal error 不输出业务行。已安装清单版本必须精确为 `vMAJOR.MINOR.PATCH`，APM 不会迁移或清理非法旧清单（[ADR-007](ivory-tower/adr/ADR-007-use-stateless-config-repository.md)）；Agent 刷新顺序见 [ADR-004](ivory-tower/adr/ADR-004-discover-installed-agents-before-local-operations.md)。
 
