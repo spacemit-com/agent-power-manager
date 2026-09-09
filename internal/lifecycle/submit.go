@@ -47,6 +47,7 @@ func (s *SubmitService) Submit(ctx context.Context, flags cli.Flags, args []stri
 		Version:        content.Version,
 		Description:    content.Description,
 		Message:        content.Message,
+		Definition:     content.Definition,
 		ContentType:    content.ContentType,
 		Content:        content.Bytes,
 		ContentMD5:     content.MD5,

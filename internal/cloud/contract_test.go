@@ -896,6 +896,13 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 				t.Fatalf("Submit() = %#v, want accepted/received", result)
 			}
 			server.assertReceivedSubmission(t, test.powerType, test.name, test.version, test.description, message, test.contentType)
+			if test.powerType == domain.PowerTypeMCP {
+				server.assertReceivedMCPDefinition(t, domain.MCPServer{
+					Transport: domain.MCPTransportStdio,
+					Command:   "npx",
+					Args:      []string{"-y", "@modelcontextprotocol/server-filesystem", "/workspace"},
+				})
+			}
 		})
 	}
 

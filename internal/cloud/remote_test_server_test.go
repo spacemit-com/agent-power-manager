@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -526,5 +527,35 @@ func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, wan
 	wantMD5 := md5.Sum(got.content)
 	if got.metadata["content_md5"] != hex.EncodeToString(wantMD5[:]) {
 		t.Fatalf("metadata content_md5 = %v, want %q", got.metadata["content_md5"], hex.EncodeToString(wantMD5[:]))
+	}
+	if want != domain.PowerTypeMCP {
+		if _, present := got.metadata["definition"]; present {
+			t.Fatalf("metadata contains definition for %s: %#v", want, got.metadata["definition"])
+		}
+	}
+}
+
+func (fixture *canonicalRemoteServer) assertReceivedMCPDefinition(t *testing.T, want domain.MCPServer) {
+	t.Helper()
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	if len(fixture.submissions) == 0 {
+		t.Fatal("submissions received = 0, want at least 1")
+	}
+	got := fixture.submissions[len(fixture.submissions)-1]
+	if got.parseErr != nil {
+		t.Fatalf("submission parse error: %v", got.parseErr)
+	}
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wantMap map[string]any
+	if err := json.Unmarshal(raw, &wantMap); err != nil {
+		t.Fatal(err)
+	}
+	definition, ok := got.metadata["definition"].(map[string]any)
+	if !ok || !reflect.DeepEqual(definition, wantMap) {
+		t.Fatalf("metadata definition = %#v, want %#v", got.metadata["definition"], wantMap)
 	}
 }

@@ -18,12 +18,14 @@ func (mcpSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	if err != nil {
 		return source{}, err
 	}
+	definition := resource.Definition.Clone()
 	return source{
 		validation: Validation{
 			Type: domain.PowerTypeMCP, Name: resource.Name, Version: resource.Version,
 			Description: resource.Description, FileCount: 1, ContentSize: int64(len(raw)),
 		},
 		contentType: "application/json",
+		definition:  &definition,
 		build: func() ([]byte, error) {
 			return CanonicalizeJSON(raw)
 		},

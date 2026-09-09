@@ -26,13 +26,14 @@ const maxActiveSubmissions = 20
 
 // submissionMetadataDTO 是 multipart 中 metadata part 的传输类型。
 type submissionMetadataDTO struct {
-	SchemaVersion int              `json:"schema_version"`
-	Type          domain.PowerType `json:"type"`
-	Name          string           `json:"name"`
-	Version       string           `json:"version"`
-	Description   string           `json:"description"`
-	Message       string           `json:"message"`
-	ContentMD5    string           `json:"content_md5"`
+	SchemaVersion int               `json:"schema_version"`
+	Type          domain.PowerType  `json:"type"`
+	Name          string            `json:"name"`
+	Version       string            `json:"version"`
+	Description   string            `json:"description"`
+	Message       string            `json:"message"`
+	Definition    *domain.MCPServer `json:"definition,omitempty"`
+	ContentMD5    string            `json:"content_md5"`
 }
 
 type submissionReceiptDTO struct {
@@ -97,6 +98,9 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 	if message == "" {
 		return domain.SubmissionResult{}, errors.New("submit remote resource message is required")
 	}
+	if request.Type == domain.PowerTypeMCP && request.Definition == nil {
+		return domain.SubmissionResult{}, errors.New("submit remote MCP resource requires definition")
+	}
 	metadata, err := json.Marshal(submissionMetadataDTO{
 		SchemaVersion: 1,
 		Type:          request.Type,
@@ -104,6 +108,7 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 		Version:       request.Version,
 		Description:   request.Description,
 		Message:       message,
+		Definition:    request.Definition,
 		ContentMD5:    request.ContentMD5,
 	})
 	if err != nil {

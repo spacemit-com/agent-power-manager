@@ -31,7 +31,8 @@ type SubmissionRequest struct {
 	Version        string
 	Description    string
 	Message        string
-	ContentType    string // "application/gzip" 或 "application/json"
+	Definition     *MCPServer // 仅 MCP 提交携带；其余类型为 nil，不进入 metadata
+	ContentType    string     // "application/gzip" 或 "application/json"
 	Content        []byte
 	ContentMD5     string
 	IdempotencyKey string

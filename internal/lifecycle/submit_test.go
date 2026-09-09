@@ -52,6 +52,48 @@ func TestSubmitPreparesAndUploads(t *testing.T) {
 	if request.ContentType == "" || request.ContentMD5 == "" || request.IdempotencyKey == "" || len(request.Content) == 0 {
 		t.Fatalf("SubmissionRequest missing content fields: %#v", request)
 	}
+	if request.Definition != nil {
+		t.Fatalf("skill SubmissionRequest definition = %#v, want nil", request.Definition)
+	}
+}
+
+func TestSubmitMCPCarriesDefinition(t *testing.T) {
+	client := &recordingSubmissionClient{
+		receipt: domain.SubmissionResult{SubmissionID: "sub_1", Status: domain.SubmissionReceived},
+	}
+	service, err := NewSubmit(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeVersionedLifecycleMCP(t, t.TempDir())
+
+	result, err := service.Submit(context.Background(), cli.Flags{Type: "mcp", Message: "first"}, []string{path})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if result.SubmissionID != "sub_1" || result.Status != string(domain.SubmissionReceived) {
+		t.Fatalf("Submit() = %#v", result)
+	}
+	if len(client.submitCalls) != 1 {
+		t.Fatalf("cloud Submit calls = %d, want 1", len(client.submitCalls))
+	}
+	request := client.submitCalls[0]
+	if request.Type != domain.PowerTypeMCP || request.ContentType != "application/json" || len(request.Content) == 0 {
+		t.Fatalf("SubmissionRequest = %#v", request)
+	}
+	if request.Definition == nil || request.Definition.Transport != domain.MCPTransportHTTP || request.Definition.URL != "https://mcp.example.com/mcp" {
+		t.Fatalf("SubmissionRequest definition = %#v, want http definition", request.Definition)
+	}
+}
+
+func writeVersionedLifecycleMCP(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "mcp.json")
+	contents := `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo mcp","definition":{"transport":"http","url":"https://mcp.example.com/mcp"}}`
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestSubmitForwardsCloudError(t *testing.T) {

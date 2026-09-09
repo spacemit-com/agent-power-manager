@@ -4,6 +4,27 @@
 
 ## 2026-09-09
 
+分类：缺陷修复
+
+用户需求：APC 提交 MCP 资源时 `definition` 需随 metadata 上传，否则服务端按 metadata 重建资源文件时
+把 definition 置 null，发布的 MCP 资源无法安装（实测 nws 发布文件字节与其申报 content_md5 不一致）。
+
+解决方案或完成结果：`domain.SubmissionRequest` 新增 `Definition *MCPServer`；`internal/submission` 的
+MCP loader 从严格解析后的资源中提取 definition 并经 `MCPServer.Clone()` 防御性复制后透传至 `Content`；
+`lifecycle.Submit` 传入请求；`internal/cloud/remote` 的 `submissionMetadataDTO` 新增
+`definition,omitempty`，MCP 时输出与资源文件内一致的嵌套定义、其余类型省略，并对远程 MCP 缺失 definition
+的调用 fail loud。`content` part 与 `content_md5` 规则不变。APC-API.md 同步 metadata 契约：`definition`
+仅 MCP 携带、其余类型不携带。
+
+验证结果或限制：`gofmt`、`go vet` 与构建通过；`internal/domain`、`internal/submission` 全量测试、
+`internal/lifecycle -run Submit`、`internal/cloud/remote -run Submit` 通过，新增 remote/submission/
+lifecycle/domain/contract 各层用例覆盖 MCP 携带 definition、非 MCP 不携带、MCP 缺失 definition 拒绝。
+`internal/cloud` 契约测试的 submit_* 子用例（含 submit_mcp 的 definition 断言）通过；其 catalog 下载段
+与 `internal/cloud/remote` 的 agent 下载用例在本机沙箱因根目录属主映射（uid 65534）失败/挂起，与本次
+改动无关。
+
+## 2026-09-09
+
 分类：功能变更
 
 用户需求：当 `--agent` 指定非法值时，报错需打印可选的 agent 选项，与 `--type` 的报错风格对齐。

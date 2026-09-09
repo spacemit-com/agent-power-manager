@@ -81,6 +81,9 @@ func TestSubmitAgentUsesGzipPart(t *testing.T) {
 		if _, legacy := metadata["change_summary"]; legacy {
 			t.Fatalf("metadata contains legacy change_summary: %#v", metadata)
 		}
+		if _, present := metadata["definition"]; present {
+			t.Fatalf("agent metadata contains definition: %#v", metadata)
+		}
 		if contentType != "application/gzip" || filename != "demo-v1.0.0.tar.gz" || !bytes.Equal(content, raw) {
 			t.Fatalf("content type/filename/bytes = %q/%q/%q", contentType, filename, content)
 		}
@@ -119,6 +122,9 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 		if _, legacy := metadata["change_summary"]; legacy {
 			t.Fatalf("metadata contains legacy change_summary: %#v", metadata)
 		}
+		if _, present := metadata["definition"]; present {
+			t.Fatalf("skill metadata contains definition: %#v", metadata)
+		}
 		if contentType != "application/gzip" || string(content) != "bytes" {
 			t.Fatalf("content type/bytes = %q/%q", contentType, content)
 		}
@@ -149,6 +155,60 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 	}
 	if gotIdem != "k" {
 		t.Fatalf("Idempotency-Key = %q", gotIdem)
+	}
+}
+
+func TestSubmitMCPIncludesDefinitionInMetadata(t *testing.T) {
+	content := []byte(`{"definition":{"transport":"http","url":"https://mcp.example.com/mcp"},"description":"demo mcp","name":"demo","schema_version":1,"version":"v1.0.0"}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		metadata, contentType, filename, body := readSubmissionParts(t, r)
+		definition, ok := metadata["definition"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata definition = %#v, want object", metadata["definition"])
+		}
+		if definition["transport"] != "http" || definition["url"] != "https://mcp.example.com/mcp" {
+			t.Fatalf("metadata definition = %#v", definition)
+		}
+		if _, present := definition["command"]; present {
+			t.Fatalf("metadata definition contains forbidden command field: %#v", definition)
+		}
+		if contentType != "application/json" || filename != "demo-v1.0.0.json" || !bytes.Equal(body, content) {
+			t.Fatalf("content type/filename/bytes = %q/%q/%q", contentType, filename, body)
+		}
+		if metadata["content_md5"] != md5Hex(content) {
+			t.Fatalf("metadata content_md5 = %v, want %q", metadata["content_md5"], md5Hex(content))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/api-server/apc/api/v1/submissions/sub_1"}`))
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
+		Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0", Description: "demo mcp",
+		Message: "first", Definition: &domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://mcp.example.com/mcp"},
+		ContentType: "application/json", Content: content, ContentMD5: md5Hex(content), IdempotencyKey: "k",
+	})
+	if err != nil || got.Outcome != domain.SubmissionAccepted {
+		t.Fatalf("Submit() = %+v, %v", got, err)
+	}
+}
+
+func TestSubmitRejectsMCPWithoutDefinitionBeforeRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+	client := newTestSubmissionClient(t, server)
+	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+		Type: domain.PowerTypeMCP, Message: "fixture", ContentType: "application/json", Content: []byte("x"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires definition") {
+		t.Fatalf("Submit() error = %v, want requires-definition error", err)
+	}
+	if requests != 0 {
+		t.Fatalf("server requests = %d, want 0", requests)
 	}
 }
 
@@ -361,10 +421,14 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 			}))
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
-			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+			request := domain.SubmissionRequest{
 				Type: tt.requestType, Message: "fixture", ContentType: tt.contentType, Content: []byte("x"),
 				ContentMD5: "x", IdempotencyKey: "k",
-			})
+			}
+			if tt.requestType == domain.PowerTypeMCP {
+				request.Definition = &domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://mcp.example.com/mcp"}
+			}
+			_, err := client.Submit(context.Background(), request)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
@@ -420,10 +484,14 @@ func TestSubmitWritesMultipartContentFilenames(t *testing.T) {
 			}))
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
-			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+			request := domain.SubmissionRequest{
 				Type: tt.requestType, Name: "demo", Version: "v1.0.0", Message: "fixture",
 				ContentType: tt.contentType, Content: []byte("x"), ContentMD5: "x", IdempotencyKey: "k",
-			})
+			}
+			if tt.requestType == domain.PowerTypeMCP {
+				request.Definition = &domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://mcp.example.com/mcp"}
+			}
+			_, err := client.Submit(context.Background(), request)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}

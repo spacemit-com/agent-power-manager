@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -97,6 +98,10 @@ func TestPrepareMCPProducesCanonicalJSON(t *testing.T) {
 	if string(got.Bytes) != want {
 		t.Fatalf("Bytes = %s, want full canonical resource %s", got.Bytes, want)
 	}
+	wantDef := domain.MCPServer{Transport: domain.MCPTransportStdio, Command: "npx", Args: []string{"-y", "@foo/mcp"}}
+	if got.Definition == nil || !reflect.DeepEqual(*got.Definition, wantDef) {
+		t.Fatalf("Definition = %#v, want %#v", got.Definition, wantDef)
+	}
 }
 
 func TestPrepareRequiresMessage(t *testing.T) {
@@ -177,6 +182,13 @@ func TestPrepareAllTypesUseRequestMessageOnly(t *testing.T) {
 			}
 			if got.Message != "first release" {
 				t.Fatalf("Message = %q", got.Message)
+			}
+			if test.powerType == domain.PowerTypeMCP {
+				if got.Definition == nil {
+					t.Fatalf("MCP Definition = nil, want non-nil")
+				}
+			} else if got.Definition != nil {
+				t.Fatalf("%s Definition = %#v, want nil", test.powerType, got.Definition)
 			}
 		})
 	}

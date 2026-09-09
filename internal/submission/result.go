@@ -34,6 +34,7 @@ type Content struct {
 	Version     string
 	Description string
 	Message     string
+	Definition  *domain.MCPServer // 仅 MCP 提交携带
 	ContentType string
 	Bytes       []byte
 	MD5         string

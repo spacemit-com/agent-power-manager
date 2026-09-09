@@ -34,6 +34,7 @@ func TestSubmissionRequestPreservesFields(t *testing.T) {
 		Version:        "v1.0.0",
 		Description:    "demo resource",
 		Message:        "initial submission",
+		Definition:     &MCPServer{Transport: MCPTransportHTTP, URL: "https://mcp.example.com/mcp"},
 		ContentType:    "application/gzip",
 		Content:        []byte("bytes"),
 		ContentMD5:     "8c7dd922ad47494fc02c388e12c00eac",
@@ -41,6 +42,9 @@ func TestSubmissionRequestPreservesFields(t *testing.T) {
 	}
 	if request.Type != PowerTypeSkill || request.Name != "demo" || request.Message != "initial submission" || len(request.Content) == 0 || request.ContentMD5 == "" {
 		t.Fatal("SubmissionRequest fields must be preserved")
+	}
+	if request.Definition == nil || request.Definition.Transport != MCPTransportHTTP || request.Definition.URL != "https://mcp.example.com/mcp" {
+		t.Fatal("SubmissionRequest definition must be preserved")
 	}
 }
 

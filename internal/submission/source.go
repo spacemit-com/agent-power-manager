@@ -16,6 +16,7 @@ type sourceLoader interface {
 type source struct {
 	validation  Validation
 	contentType string
+	definition  *domain.MCPServer // 仅 MCP 提交携带；其余类型为 nil
 	build       func() ([]byte, error)
 }
 
