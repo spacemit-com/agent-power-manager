@@ -1,6 +1,6 @@
 # Feature 030：Debian 打包与用户数据保留
 
-- Status：Design approved in conversation; written spec awaiting review
+- Status：Approved
 - Date：2026-09-09
 - Related ADRs：[ADR-030](../../adr/ADR-030-package-cli-and-preserve-user-data.md)
 
