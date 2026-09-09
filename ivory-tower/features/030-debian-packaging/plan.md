@@ -39,7 +39,7 @@
 
 **Interfaces:** 输入为 `go.mod/go.sum` 与 `./cmd/apm`；输出为原生二进制包，包含 `/usr/bin/apm`。Task 2 使用该包的安装清单和命令入口。
 
-- [ ] **Step 1：核实工作区和板端状态。**
+- [x] **Step 1：核实工作区和板端状态。**
 
 按 using-git-worktrees 技能在执行阶段选择隔离工作区；先检查当前分支及未提交改动。只读检查板端：
 
@@ -50,7 +50,7 @@ ssh -o BatchMode=yes -o ConnectTimeout=8 bianbu@10.0.91.51 \
 
 分别解释缺包、缺目录和 sudo 结果，不把预期的查询非零视为连通性失败。若目标目录已存在，读取其 Git 状态与内容，确认同步范围。若 `/usr/bin/apm` 属于其他包或是未管理的现有文件，先保留该现场并报告冲突，不能覆盖。
 
-- [ ] **Step 2：替换构建与安装模板。**
+- [x] **Step 2：替换构建与安装模板。**
 
 `debian/control` 使用以下主要内容，保留已核实的 maintainer：
 
@@ -108,7 +108,7 @@ clean 的 chmod 仅限已核实的专用构建目录，处理 Go modules 缓存�
 增加 `debian/source/options` 的 `extend-diff-ignore = "(^|/)debian/\.build(/|$)"` 并以
 源码归档内容实测，不仅依赖规则文本。
 
-- [ ] **Step 3：完善包元数据和文档。**
+- [x] **Step 3：完善包元数据和文档。**
 
 将当前 `0.0.1` changelog 条目补全为本次首次可用打包记录，保留 suite。
 按 File Structure 删除已检查的无效模板文件。`README.Debian` 明确普通用户运行、
@@ -129,7 +129,7 @@ sudo apt-get install ../agent-power-manager_0.0.1_riscv64.deb
 /usr/bin/apm --help
 ```
 
-- [ ] **Step 4：同步并验证真实构建。**
+- [x] **Step 4：同步并验证真实构建。**
 
 提交前检查 `git diff --check`。创建板端目标目录，仅同步本次构建所需的已跟踪源码与
 明确新增的打包文件；不得使用带删除的 rsync，不携带 `.git`、本地构建缓存和
@@ -150,7 +150,7 @@ dpkg-deb -c ../agent-power-manager_0.0.1_riscv64.deb
 成员，确认无 `debian/.build`；在这之后执行 clean，确认专用目录消失且源码未改变。
 若网络失败，用标准 `GOPROXY` 选定可用来源重试并记录，不关闭 TLS 或 checksum。
 
-- [ ] **Step 5：提交构建交付。**
+- [x] **Step 5：提交构建交付。**
 
 仅 stage File Structure 中本任务修改的 Debian 文件及 `BUILD.md`，提交
 `build: package APM CLI for Bianbu with Go modules`。记录提交号和包 SHA-256。
@@ -159,7 +159,7 @@ dpkg-deb -c ../agent-power-manager_0.0.1_riscv64.deb
 
 **Interfaces:** 消费 Task 1 生成的包及 `/usr/bin/apm`；输出离线 smoke test 和 remove/purge/reinstall 验证记录。
 
-- [ ] **Step 1：添加可复用离线 smoke test。**
+- [x] **Step 1：添加可复用离线 smoke test。**
 
 `debian/tests/control` 内容：
 
@@ -198,7 +198,7 @@ cd "$apm_test_root"
 `sh debian/tests/smoke`；确认 CLI 不要求真实 Agent 安装或访问 Cloud。若已有 CLI
 契约使空 installed list 非零，先检查原因并只调整 fixture，不改变应用行为。
 
-- [ ] **Step 2：创建保留验证数据与快照。**
+- [x] **Step 2：创建保留验证数据与快照。**
 
 在板端用 `mktemp -d /home/bianbu/apm-deb-verify.XXXXXX` 创建私有目录，记录其解析后的
 绝对路径。沿用 smoke 的六个隔离环境变量，运行一次 installed list 创建合法初始状态。
@@ -217,7 +217,7 @@ find data -printf '%P %y %m %u %g %l\n' | LC_ALL=C sort
 baseline 包含内容、类型、权限、所有者和链接目标，不包含 atime/mtime。
 快照之间不运行 APM，避免应用自身写状态干扰包卸载验证。
 
-- [ ] **Step 3：执行 remove、purge 和重装验证。**
+- [x] **Step 3：执行 remove、purge 和重装验证。**
 
 使用已记录的精确包路径，逐条执行，任何失败均停止后续破坏性步骤并报告当前状态：
 
@@ -240,7 +240,7 @@ test ! -e /usr/bin/apm
 若 sudo 不可用，报告需要用户完成的确切命令和原因，不尝试获取或输出密码。
 测试目录可保留为验收证据并报告路径，不清理真实用户资源。
 
-- [ ] **Step 4：纳入测试文件后重建最终包并安装。**
+- [x] **Step 4：纳入测试文件后重建最终包并安装。**
 
 将 smoke 文件同步到板端，重新执行默认 `dpkg-buildpackage -us -uc -b`，安装最终包。
 执行 `sh debian/tests/smoke`；记录最终产物校验和。仅因文件变更进行本次重建，
@@ -250,25 +250,25 @@ test ! -e /usr/bin/apm
 
 **Interfaces:** 消费前两项的提交号、包文件和验证日志；输出可复查的完成记录。
 
-- [ ] **Step 1：填写 verification.md。**
+- [x] **Step 1：填写 verification.md。**
 
 记录日期、开发板 OS/架构/Go/debhelper 版本、源码提交、联网配置、构建命令和退出码、
 全部 Go 测试结果、包路径及 SHA-256、包文件清单、smoke 输出、remove/purge 的快照
 比较结果、最终安装状态和保留的测试证据路径。任何实际限制单列，不伪造成功结果。
 
-- [ ] **Step 2：完成计划检查并提交证据。**
+- [x] **Step 2：完成计划检查并提交证据。**
 
 对照 spec §1–7 检查覆盖，勾选已完成步骤。运行 `git diff --check` 并确认文档相对链接
 指向现存文件；纯文档修改不重复构建。提交 `docs: record Debian package validation`。
 
-- [ ] **Step 3：记录一次完整任务 Changelog。**
+- [x] **Step 3：记录一次完整任务 Changelog。**
 
 只有所有必须验收均成功时，读取 `/home/liangff/.codex/docs/Changelog.md`，在项目
 `docs/Changelog.md` 顶部增加一条记录，填写用户需求、所有已有设计/计划/实现/测试/
 验证提交、结果和限制。提交 `docs: record completed Debian packaging task`，该记录自身
 提交号在交付消息中给出，避免自引用。若任何必须验收阻塞，不添加完成记录。
 
-- [ ] **Step 4：交付。**
+- [x] **Step 4：交付。**
 
 提供最终包的板端绝对路径、构建和安装命令、测试结果、卸载保留范围以及 Git 提交号。
 明确板上最终已安装版本，说明只清理过哪些任务产物；不推送或发布。

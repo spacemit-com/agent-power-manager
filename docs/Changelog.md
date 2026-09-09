@@ -2,6 +2,35 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-09
+
+分类：新增功能
+
+用户需求：根据项目准备 `debian/` 目录，使 APM 能在
+`bianbu@10.0.91.51:/home/bianbu/Workspace/deb/apm/agent-power-manager` 构建、安装和
+运行；卸载时保留用户数据。允许联网下载 Go modules。
+
+相关提交：
+
+- `5a0fbff` docs: design Debian packaging and user data retention
+- `c69b44b` docs: plan Debian packaging and board validation
+- `269a721` build: package APM CLI for Bianbu with Go modules
+
+解决方案或完成结果：完善 debhelper compat 13 打包规则，以 Go 1.26 本机工具链联网下载并
+校验 `go.mod/go.sum`，运行全量测试并生成 `/usr/bin/apm`。包只含 CLI 和标准文档，依赖
+`ca-certificates`，无 maintainer script、服务或系统用户；remove 与 purge 均不触及
+`~/.apm`、APM cache 或 Agent 根目录。Go 1.26 的压缩 DWARF 与板端 `dwz` 不兼容，规则
+明确跳过 `dh_dwz`，保留其它 debhelper 阶段。native 源归档通过 `tar-ignore` 排除
+`debian/.build`。完整决策见 ADR-030，验证见 Feature 030。
+
+验证结果或限制：在 Bianbu 4.0.6 riscv64、Go 1.26.0、debhelper 13.24.2ubuntu1-bb1 上，
+`dpkg-buildpackage -us -uc -b`（含 `go mod download`、`go mod verify`、`go test ./...`）
+退出 0，锁文件未变；`go test ./...`、`go vet ./...`、gofmt 检查和本地 CLI 构建均通过。
+生成包 SHA-256 为 `af17a1f623db66ce1270c8e6e5aa6d13982685a6c8ba7a9cf46895486eb89a7e`，仅含
+`/usr/bin/apm` 与文档。板端实际安装、普通用户运行、remove、purge、最终重装均完成；
+隔离状态、缓存、四个 Agent 根及符号链接在安装前、remove 后和 purge 后的内容、权限、
+所有者与链接目标快照完全一致。最终 `agent-power-manager 0.0.1` 为已安装状态。
+
 ## 2026-09-07
 
 分类：缺陷修复

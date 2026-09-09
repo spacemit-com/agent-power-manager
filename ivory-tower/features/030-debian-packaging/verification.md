@@ -41,14 +41,11 @@ marker 后生成归档，归档成员中不存在该目录。随后 `debian/rule
 
 ## 运行与数据保留
 
-板端账户的 `sudo -n true` 返回“interactive authentication is required”，因此本轮
-不能把包安装到真实 `/usr`，也不能对系统 dpkg 数据库执行 remove/purge。
+为不触及真实用户数据，在 `/home/bianbu/apm-deb-system-verify.ulPNeL` 创建隔离
+状态、缓存、Codex、Claude、Hermes 与 Bibit 根目录，并记录内容 SHA-256、类型、
+权限、所有者和符号链接目标。系统 dpkg 过程验证：
 
-为不触及系统或真实用户数据，在 `/home/bianbu/apm-deb-verify-clean.MFzpq1` 的
-私有假根运行真实 dpkg 安装、remove、purge、重装。假根预置板端实际
-`ca-certificates` 版本，并把 dpkg 日志保存在验证目录。过程验证：
-
-1. 安装包后存在可执行的 `root/usr/bin/apm`。
+1. 通过 `apt-get install` 安装包后存在可执行的 `/usr/bin/apm`。
 2. 使用六个隔离环境变量运行 `--help`、`list --installed --json` 与 MCP
    `validate --json`；不访问真实 Agent CLI。
 3. `remove` 后程序已移除，状态、缓存、Codex、Claude、Hermes 与 Bibit 目录的
@@ -56,6 +53,5 @@ marker 后生成归档，归档成员中不存在该目录。随后 `debian/rule
 4. 重装后 `purge` 仍保持同一快照，最后重装并由 dpkg 状态确认
    `install ok installed`。
 
-实际系统安装、`/usr/bin/apm --help`、系统 remove/purge 与最终系统重装尚待拥有
-sudo 认证的操作执行；所需命令见 Feature 030 实施计划的 Task 2 Step 3。该限制不影响
-已验证的包构建、包内容或假根 dpkg 生命周期结果。
+最终系统状态为 `agent-power-manager 0.0.1` 已安装，`/usr/bin/apm --help` 退出 0。
+隔离验证目录保留在开发板上作为证据；未修改真实用户状态或 Agent 资源。
