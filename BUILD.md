@@ -316,7 +316,9 @@ Uninstall 先从 manifest 取得精确版本；没有记录时直接返回未执
 
 Skill、Agent、MCP 与 Plugin 共用唯一活动 journal。唯一正式 schema v1 shared envelope 通过 `filesystem`、`agent-cli` 与 `plugin` driver 路由，并且只允许与 driver 匹配的互斥载荷；旧平铺或其他格式返回 `ErrInvalidJournal`，文件原样保留。Search 与两种 List 只告警；Fix、Install 或 Uninstall 才在全局锁内串行恢复未完成事务。Fix/recovery 只读取 journal、Adapter、manifest 和已发布的本地 artifact，不选择 provider、不连接 Cloud、不重新下载或派生内容。版本边界见 [ADR-011](ivory-tower/adr/ADR-011-reset-journal-schema-before-release.md)，当前 Plugin 架构见 [ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
-自动化测试绝不能调用真实 Agent CLI。MCP/Plugin 测试应只把临时 fake-bin 置于 `PATH`，将 `APM_HOME`、`XDG_CACHE_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME`、`BIANBU_AGENT_HOME` 全部指向 `t.TempDir()` 下的隔离路径，并断言每次执行路径都位于 fake-bin。仓库集成测试已按此约束覆盖四个 Agent 的 Plugin 首装、幂等、升级、降级、卸载和中断恢复；不得调用真实 `bianbu-agent` 或其他 Agent CLI。
+仓库单元测试、集成测试及默认 CI 绝不能调用真实 Agent CLI。MCP/Plugin 测试应只把临时 fake-bin 置于 `PATH`，将 `APM_HOME`、`XDG_CACHE_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME`、`BIANBU_AGENT_HOME` 全部指向 `t.TempDir()` 下的隔离路径，并断言每次执行路径都位于 fake-bin。仓库集成测试已按此约束覆盖四个 Agent 的 Plugin 首装、幂等、升级、降级、卸载和中断恢复；这些测试不得调用真实 `bianbu-agent` 或其他 Agent CLI。
+
+用户显式要求 agent 执行实际安装/卸载功能测试时，使用独立的 [测试指引](docs/testing/install-uninstall.md) 和 [报告模板](docs/testing/install-uninstall-report-template.md)。该流程使用固定云端资源及真实 CLI，文件型资源隔离到临时目录，MCP 使用真实 agent 环境；不纳入 `go test ./...` 或默认 CI。
 
 ## 清理本地构建产物
 
