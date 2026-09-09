@@ -6,6 +6,26 @@
 
 分类：功能变更
 
+用户需求：当 `--agent` 指定非法值时，报错需打印可选的 agent 选项，与 `--type` 的报错风格对齐。
+
+解决方案或完成结果：新增 `domain.KnownAgentIDs`/`domain.IsKnownAgentID` 枚举 `--agent` 合法取值
+（`all`、`bibit`、`claude-code`、`codex`、`hermes-agent`）；CLI 新增 `validateAgentValue`，在
+`validateCommon`/`validateAgentTypeFlags`/`validateListFlags` 中对未知 agent 报
+`invalid --agent %q: must be all, bibit, claude-code, codex, or hermes-agent`。lifecycle 的
+`installAgents`/`uninstallAgents`/`installedListAgents` 对“已知但未安装”的 agent 报错追加
+`(available agents: …)`（`--type agent` 仅支持 bibit，不追加；快照为空不追加）。
+
+相关提交：
+
+- `e4fa923` feat(cli): list selectable agents when --agent is invalid
+
+验证结果或限制：板端（Bianbu riscv64、Go 1.26.0）`go test ./...`、`go vet ./...`、gofmt
+检查与构建均通过。
+
+## 2026-09-09
+
+分类：功能变更
+
 用户需求：把 `apm show` 的版本指定方式从 `--version` flag 改为位置参数
 `<name>[=<version>]`，与 `install <power>[=<version>]` 风格一致；`list` 保持不变，
 `--version` 彻底移除。
