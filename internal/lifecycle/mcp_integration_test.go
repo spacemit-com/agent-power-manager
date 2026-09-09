@@ -35,11 +35,13 @@ printf '%s|%s\n' "$0" "$*" >> "$FAKE_MCP_CALLS"
 
 case "$agent:$1:$2" in
   bianbu-agent:mcp:get)
-    name=$4; state="$FAKE_MCP_STATE/$agent-$name"
-    if [ -f "$state" ]; then printf '{"name":"%s"}\n' "$name"; exit 0; fi
-    printf "No MCP server named '%s' found." "$name" >&2; exit 1 ;;
+    name=$3; state="$FAKE_MCP_STATE/$agent-$name"
+    if [ -f "$state" ]; then printf '{"id":"mcp.%s","content_digest":"fake","root":"/fake/%s"}\n' "$name" "$name"; exit 0; fi
+    printf 'null\n'; exit 0 ;;
   bianbu-agent:mcp:add)
     name=$3; : > "$FAKE_MCP_STATE/$agent-$name" ;;
+  bianbu-agent:mcp:install)
+    source=$3; base=${source##*/}; name=${base#mcp.}; : > "$FAKE_MCP_STATE/$agent-$name" ;;
   bianbu-agent:mcp:remove)
     name=$3; /bin/rm -f "$FAKE_MCP_STATE/$agent-$name" ;;
   codex:mcp:get)

@@ -19,7 +19,7 @@ APM 已为 Codex、Claude Code 与 Hermes 提供 Skill、MCP、Plugin 的统一 
 - 新增内置 Agent ID `bibit`，完整适配 Skill、MCP 与 Plugin。
 - Bibit 默认根目录为 `~/.bianbu-agent`，允许 `BIANBU_AGENT_HOME` 覆盖。
 - Bibit Skill 发布到 `skills/<name>`，不做内容转换。
-- Bibit MCP 以独立 Adapter 实现理想化的 Codex 同款命令契约，便于后续独立演进。
+- Bibit MCP 以独立 Adapter 对齐板端已安装 CLI `bianbu-agent 0.1.17` 的实测契约，便于后续独立演进。
 - Bibit Plugin 发布到 `plugins/<name>`，目录存在即表示 Agent 状态，不调用 Plugin enable/disable CLI。
 - Cloud 每个 Plugin 版本只维护一个完整多 Agent 原始包。
 - APM 每个 Plugin 版本只下载和缓存一份共享、不可变制品，同时生成 Codex 与 Claude 两份 marketplace。
@@ -58,16 +58,16 @@ Bibit 复用 profile 驱动的 filesystem Skill Adapter，发布目标为 `<bibi
 
 ### MCP
 
-Bibit MCP 使用独立 `bibit_mcp.go`，不与 `codex_mcp.go` 共享命令协议实现，只复用 `cli_runner`、MCP 公共类型、输入校验和 mutation 映射。初始理想契约为：
+Bibit MCP 使用独立 `bibit_mcp.go`，不与 `codex_mcp.go` 共享命令协议实现，只复用 `cli_runner`、MCP 公共类型、输入校验和 mutation 映射。契约对齐板端已安装 CLI `bianbu-agent 0.1.17`（依据 `bianbu-agent-cli-guide.md` 与实测）：
 
 ```text
-bianbu-agent mcp get --json <name>
+bianbu-agent mcp get <name>
 bianbu-agent mcp add <name> -- <command> [args...]
-bianbu-agent mcp add <name> --url <url>
+bianbu-agent mcp install <package-dir>   # 目录名必须是公开 ID mcp.<name>，HTTP 传输走此入口
 bianbu-agent mcp remove <name>
 ```
 
-`get` 成功返回一个 `name` 精确匹配的 JSON 对象；不存在时 stderr 为 `No MCP server named '<name>' found.`。输出截断、JSON 损坏、名称不匹配、CLI 不存在或未知失败均返回 unknown/fail closed。
+`get` 接受短名或完整 ID，短名归一化为公开 ID `mcp.<name>`；存在时成功返回一个 `id` 精确匹配 `mcp.<name>` 的 JSON 对象，不存在时输出字面量 `null`（两者 exit 均为 0）。`add` 仅支持 stdio；HTTP 传输由适配器写临时目录包（`mcp.json` 的 `transport` 为 `streamable-http`）后经 `mcp install` 安装。输出截断、JSON 损坏、`id` 不匹配、CLI 不存在或未知失败均返回 unknown/fail closed。
 
 ### Plugin
 

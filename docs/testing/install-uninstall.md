@@ -141,12 +141,14 @@ Plugin 的隔离必须同时覆盖真实 CLI。写入前，根据所安装 CLI �
 
 | Agent | 精确状态查询 |
 | --- | --- |
-| Bibit | `bianbu-agent mcp get --json nws` |
+| Bibit | `bianbu-agent mcp get nws` |
 | Codex | `codex mcp get --json nws` |
 | Claude | `claude mcp get nws` |
 | Hermes | `hermes mcp list`，从结果精确匹配名称 `nws` |
 
 安装后确认 `nws` 存在，并核对 CLI 可展示的传输类型、URL 或启动命令与本次云端 MCP 定义一致；APM 的清单还必须记录 `v1.0.0`。若 CLI 不展示完整定义，报告可验证字段及限制，不猜测；不得打印 token 或敏感环境变量值。
+
+Bibit 的公开 ID 为 `mcp.<name>`；`mcp get` 不存在时输出字面量 `null`（exit 0），存在时输出含 `id` 的对象，两者都不报错，因此不能以非零退出码判断不存在。`mcp get` 不展示 transport/url，核对 HTTP 定义时可只读检查 `<agent根>/mcps/mcp.<name>/mcp.json`。
 
 卸载后确认 `nws` 不存在，并比较基线中的其他 MCP 配置未发生变化。`list` 可能连接服务，耗时或连接失败应记录；本项不以天气工具调用成功为通过条件，但查询结果不明确时不能宣称完成验证。
 

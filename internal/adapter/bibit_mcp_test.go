@@ -2,26 +2,65 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 )
 
 func TestBibitMCPAdapterCommands(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
-		{result: agentCLIResult{Stdout: `{"name":"demo"}`}},
-		{}, {}, {},
+		{result: agentCLIResult{Stdout: `{"id":"mcp.demo"}`}},
+		{}, {},
 	}}
 	subject := newBibitMCPAdapter(runner)
 	_, _ = subject.Inspect(context.Background(), "demo")
 	_, _ = subject.Add(context.Background(), mcpRef("demo"), stdioServer("npx", "-y", "pkg"))
-	_, _ = subject.Add(context.Background(), mcpRef("demo"), httpServer("https://example.com/mcp"))
 	_, _ = subject.Remove(context.Background(), mcpRef("demo"))
 	assertMCPCommands(t, runner, "bianbu-agent", [][]string{
-		{"mcp", "get", "--json", "demo"},
+		{"mcp", "get", "demo"},
 		{"mcp", "add", "demo", "--", "npx", "-y", "pkg"},
-		{"mcp", "add", "demo", "--url", "https://example.com/mcp"},
 		{"mcp", "remove", "demo"},
 	})
+}
+
+func TestBibitMCPAdapterAddHTTPInstallsPackage(t *testing.T) {
+	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
+		successfulMCPResponse(`{"content_digest":"fake","id":"mcp.demo"}`),
+	}}
+	var created []string
+	var files []string
+	subject := newBibitMCPAdapter(runner)
+	subject.mkdtemp = func(_, _ string) (string, error) { return "/tmp/apm-bibit-mcp-http", nil }
+	subject.mkdirAll = func(path string, _ os.FileMode) error { created = append(created, path); return nil }
+	subject.writeFile = func(_ string, data []byte, _ os.FileMode) error { files = append(files, string(data)); return nil }
+	subject.removeAll = func(_ string) error { return nil }
+
+	result, err := subject.Add(context.Background(), mcpRef("demo"), httpServer("https://example.com/mcp"))
+	if err != nil || result.State != MCPMutationApplied {
+		t.Fatalf("Add(http) = %+v, %v; want applied", result, err)
+	}
+	assertMCPCommands(t, runner, "bianbu-agent", [][]string{
+		{"mcp", "install", "/tmp/apm-bibit-mcp-http/mcp.demo"},
+	})
+	if len(created) != 1 || created[0] != "/tmp/apm-bibit-mcp-http/mcp.demo" {
+		t.Fatalf("created dirs = %#v, want single package directory", created)
+	}
+	if len(files) != 1 {
+		t.Fatalf("written files = %d, want 1", len(files))
+	}
+	var document struct {
+		DisplayName string  `json:"display_name"`
+		Transport   string  `json:"transport"`
+		URL         string  `json:"url"`
+		Timeout     float64 `json:"timeout_seconds"`
+	}
+	if err := json.Unmarshal([]byte(files[0]), &document); err != nil {
+		t.Fatalf("mcp.json is invalid: %v", err)
+	}
+	if document.DisplayName != "demo" || document.Transport != "streamable-http" || document.URL != "https://example.com/mcp" || document.Timeout != 30.0 {
+		t.Fatalf("mcp.json = %#v", document)
+	}
 }
 
 func TestBibitMCPInspectAcceptsOnlyUnambiguousResults(t *testing.T) {
@@ -31,14 +70,15 @@ func TestBibitMCPInspectAcceptsOnlyUnambiguousResults(t *testing.T) {
 		want     MCPPresence
 		wantErr  error
 	}{
-		{name: "present", response: successfulMCPResponse(`{"name":"demo"}`), want: MCPPresent},
-		{name: "exact absent stderr", response: failedMCPResponse("No MCP server named 'demo' found."), want: MCPAbsent},
-		{name: "absent stderr with extra output", response: failedMCPResponse("warning\nNo MCP server named 'demo' found."), wantErr: ErrMCPStateUnknown},
-		{name: "malformed JSON", response: successfulMCPResponse(`{"name":`), wantErr: ErrMCPStateUnknown},
-		{name: "second JSON value", response: successfulMCPResponse(`{"name":"demo"} {}`), wantErr: ErrMCPStateUnknown},
-		{name: "wrong name", response: successfulMCPResponse(`{"name":"other"}`), wantErr: ErrMCPStateUnknown},
-		{name: "stdout truncated", response: truncatedMCPResponse(`{"name":"demo"}`), wantErr: ErrMCPStateUnknown},
-		{name: "stderr truncated", response: queuedMCPResponse{result: agentCLIResult{Path: "/fake/bianbu-agent", Stdout: `{"name":"demo"}`, Started: true, StderrTruncated: true}}, wantErr: ErrMCPStateUnknown},
+		{name: "present", response: successfulMCPResponse(`{"id":"mcp.demo"}`), want: MCPPresent},
+		{name: "absent null", response: successfulMCPResponse("null"), want: MCPAbsent},
+		{name: "absent null with trailing newline", response: successfulMCPResponse("null\n"), want: MCPAbsent},
+		{name: "wrong id", response: successfulMCPResponse(`{"id":"mcp.other"}`), wantErr: ErrMCPStateUnknown},
+		{name: "missing id", response: successfulMCPResponse(`{"content_digest":"fake"}`), wantErr: ErrMCPStateUnknown},
+		{name: "malformed JSON", response: successfulMCPResponse(`{"id":`), wantErr: ErrMCPStateUnknown},
+		{name: "second JSON value", response: successfulMCPResponse(`{"id":"mcp.demo"} {}`), wantErr: ErrMCPStateUnknown},
+		{name: "stdout truncated", response: truncatedMCPResponse(`{"id":"mcp.demo"}`), wantErr: ErrMCPStateUnknown},
+		{name: "stderr truncated", response: queuedMCPResponse{result: agentCLIResult{Path: "/fake/bianbu-agent", Stdout: `{"id":"mcp.demo"}`, Started: true, StderrTruncated: true}}, wantErr: ErrMCPStateUnknown},
 		{name: "CLI unavailable", response: queuedMCPResponse{err: ErrAgentCLIUnavailable}, wantErr: ErrMCPStateUnknown},
 	}
 	for _, tt := range tests {
@@ -48,7 +88,7 @@ func TestBibitMCPInspectAcceptsOnlyUnambiguousResults(t *testing.T) {
 			if presence != tt.want || (tt.wantErr != nil && !errors.Is(err, tt.wantErr)) || (tt.wantErr == nil && err != nil) {
 				t.Fatalf("Inspect() = %q, %v; want %q, %v", presence, err, tt.want, tt.wantErr)
 			}
-			assertMCPCommands(t, runner, "bianbu-agent", [][]string{{"mcp", "get", "--json", "demo"}})
+			assertMCPCommands(t, runner, "bianbu-agent", [][]string{{"mcp", "get", "demo"}})
 		})
 	}
 }
