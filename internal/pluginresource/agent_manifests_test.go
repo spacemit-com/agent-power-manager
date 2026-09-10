@@ -37,8 +37,8 @@ func TestAgentManifestGenerationIsDeterministicAndUsesExactSchemas(t *testing.T)
 	paths := []string{
 		codexManifestPath,
 		claudeManifestPath,
-		filepath.Join(".hermes-plugin", "plugin.yaml"),
-		filepath.Join(".hermes-plugin", "__init__.py"),
+		hermesManifestPath,
+		hermesInitPath,
 	}
 	for _, relative := range paths {
 		firstBytes, err := os.ReadFile(filepath.Join(first, relative))
@@ -74,7 +74,7 @@ func TestAgentManifestGenerationIsDeterministicAndUsesExactSchemas(t *testing.T)
 		"skills":      []any{"./skills/"},
 	})
 
-	hermesBytes, err := os.ReadFile(filepath.Join(first, ".hermes-plugin", "plugin.yaml"))
+	hermesBytes, err := os.ReadFile(filepath.Join(first, hermesManifestPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestAgentManifestGenerationIsDeterministicAndUsesExactSchemas(t *testing.T)
 	if !reflect.DeepEqual(hermes, wantHermes) {
 		t.Fatalf("Hermes manifest = %#v, want %#v", hermes, wantHermes)
 	}
-	initBytes, err := os.ReadFile(filepath.Join(first, ".hermes-plugin", "__init__.py"))
+	initBytes, err := os.ReadFile(filepath.Join(first, hermesInitPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestAgentManifestPartialGenerationCannotValidateSharedArtifact(t *testing.T
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}
 	pluginPath := filepath.Join(root, "plugins", ref.Name)
 	writeCanonicalPluginPackage(t, pluginPath, ref, "Demo")
-	if err := os.WriteFile(filepath.Join(pluginPath, ".hermes-plugin"), []byte("block directory"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginPath, hermesManifestPath), []byte("block directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	manifest, err := pluginartifact.LoadAPCPluginManifest(ref, pluginPath)
@@ -170,7 +170,7 @@ func (partialAgentManifestBuilder) Build(ref domain.PowerRef, _ string, pluginPa
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(pluginPath, ".hermes-plugin"), []byte("block directory"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginPath, hermesManifestPath), []byte("block directory"), 0o600); err != nil {
 		return err
 	}
 	return writeAgentManifests(pluginPath, canonical)

@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	hermesManifestPath = ".hermes-plugin/plugin.yaml"
-	hermesInitPath     = ".hermes-plugin/__init__.py"
+	// hermes CLI 直接从插件目录读取 plugin.yaml 与 __init__.py，不支持 .hermes-plugin/ 子目录包裹。
+	hermesManifestPath = "plugin.yaml"
+	hermesInitPath     = "__init__.py"
 	hermesInitContents = "def register(ctx):\n    return None\n"
 )
 

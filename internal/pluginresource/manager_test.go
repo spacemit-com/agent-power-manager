@@ -75,8 +75,8 @@ func TestEnsureBuildsOneCompleteSharedArtifactFromLocalCloud(t *testing.T) {
 	for _, required := range []string{
 		filepath.Join(".codex-plugin", "plugin.json"),
 		filepath.Join(".claude-plugin", "plugin.json"),
-		filepath.Join(".hermes-plugin", "__init__.py"),
-		filepath.Join(".hermes-plugin", "plugin.yaml"),
+		filepath.Join("__init__.py"),
+		filepath.Join("plugin.yaml"),
 	} {
 		if _, err := os.Stat(filepath.Join(artifact.PluginPath, required)); err != nil {
 			t.Fatalf("stat shared Plugin entry %q: %v", required, err)

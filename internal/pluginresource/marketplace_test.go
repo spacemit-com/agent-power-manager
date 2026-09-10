@@ -335,7 +335,7 @@ func TestLookupRejectsExtraCapabilityNativeAndMarketplaceFilesWithoutReplacingIm
 		"plugins/demo/commands/demo.md",
 		"plugins/demo/.codex-plugin/extra.json",
 		"plugins/demo/.claude-plugin/extra.json",
-		"plugins/demo/.hermes-plugin/debug.py",
+		"plugins/demo/extra.py",
 		".agents/plugins/extra.json",
 		".claude-plugin/extra.json",
 	} {

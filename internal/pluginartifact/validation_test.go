@@ -28,8 +28,8 @@ func TestValidateSharedRequiresEveryDerivedFile(t *testing.T) {
 	for _, relative := range []string{
 		"plugins/demo/.codex-plugin/plugin.json",
 		"plugins/demo/.claude-plugin/plugin.json",
-		"plugins/demo/.hermes-plugin/plugin.yaml",
-		"plugins/demo/.hermes-plugin/__init__.py",
+		"plugins/demo/plugin.yaml",
+		"plugins/demo/__init__.py",
 		".agents/plugins/marketplace.json",
 		".claude-plugin/marketplace.json",
 	} {
@@ -60,7 +60,7 @@ func TestValidateSharedRejectsPathsOutsideFinalClosedWorld(t *testing.T) {
 		{name: "MCP capability", relative: "plugins/demo/MCP/server.json"},
 		{name: "Codex native extra file", relative: "plugins/demo/.codex-plugin/extra.json"},
 		{name: "Claude native extra directory", relative: "plugins/demo/.claude-plugin/extra/value.json"},
-		{name: "Hermes native extra file", relative: "plugins/demo/.hermes-plugin/extra.py"},
+		{name: "Hermes legacy manifest path", relative: "plugins/demo/.hermes-plugin/plugin.yaml"},
 		{name: "Codex marketplace sibling", relative: ".agents/plugins/extra.json"},
 		{name: "Codex marketplace parent extra", relative: ".agents/extra.json"},
 		{name: "Claude marketplace sibling", relative: ".claude-plugin/extra.json"},
@@ -96,7 +96,7 @@ func TestValidateMarketplaceRejectsExtraNativeAndMarketplaceFiles(t *testing.T) 
 	// 捕获错误变更：Agent-specific recovery 校验绕过完整共享 artifact 的相对路径闭集。
 	for _, relative := range []string{
 		"plugins/demo/commands/demo.md",
-		"plugins/demo/.hermes-plugin/debug.py",
+		"plugins/demo/extra.py",
 		".agents/plugins/debug.json",
 		".claude-plugin/debug.json",
 	} {
@@ -150,9 +150,8 @@ func TestValidateSharedRejectsWrongCaseGeneratedEntries(t *testing.T) {
 		{name: "Codex manifest", relative: "plugins/demo/.codex-plugin/plugin.json", wrong: "plugins/demo/.codex-plugin/PLUGIN.JSON"},
 		{name: "Claude directory", relative: "plugins/demo/.claude-plugin", wrong: "plugins/demo/.CLAUDE-PLUGIN"},
 		{name: "Claude manifest", relative: "plugins/demo/.claude-plugin/plugin.json", wrong: "plugins/demo/.claude-plugin/PLUGIN.JSON"},
-		{name: "Hermes directory", relative: "plugins/demo/.hermes-plugin", wrong: "plugins/demo/.HERMES-PLUGIN"},
-		{name: "Hermes manifest", relative: "plugins/demo/.hermes-plugin/plugin.yaml", wrong: "plugins/demo/.hermes-plugin/PLUGIN.YAML"},
-		{name: "Hermes initializer", relative: "plugins/demo/.hermes-plugin/__init__.py", wrong: "plugins/demo/.hermes-plugin/__INIT__.PY"},
+		{name: "Hermes manifest", relative: "plugins/demo/plugin.yaml", wrong: "plugins/demo/PLUGIN.YAML"},
+		{name: "Hermes initializer", relative: "plugins/demo/__init__.py", wrong: "plugins/demo/__INIT__.PY"},
 		{name: "agents directory", relative: ".agents", wrong: ".AGENTS"},
 		{name: "marketplace plugins directory", relative: ".agents/plugins", wrong: ".agents/Plugins"},
 		{name: "Codex marketplace", relative: ".agents/plugins/marketplace.json", wrong: ".agents/plugins/Marketplace.json"},
@@ -186,10 +185,10 @@ func TestValidateSharedRejectsGeneratedSchemaAndCanonicalDrift(t *testing.T) {
 		{name: "Claude skills type", relative: "plugins/demo/.claude-plugin/plugin.json", old: `"skills":["./skills/"]`, replacement: `"skills":"./skills/"`},
 		{name: "Claude missing description", relative: "plugins/demo/.claude-plugin/plugin.json", old: `,"description":"Canonical description"`, replacement: ``},
 		{name: "Claude duplicate field", relative: "plugins/demo/.claude-plugin/plugin.json", old: `"name":"demo"`, replacement: `"name":"demo","name":"other"`},
-		{name: "Hermes author drift", relative: "plugins/demo/.hermes-plugin/plugin.yaml", old: "author: APM", replacement: "author: Other"},
-		{name: "Hermes missing author", relative: "plugins/demo/.hermes-plugin/plugin.yaml", old: "author: APM\n", replacement: ""},
-		{name: "Hermes unknown field", relative: "plugins/demo/.hermes-plugin/plugin.yaml", old: "author: APM", replacement: "author: APM\nskills: ./skills/"},
-		{name: "Hermes initializer drift", relative: "plugins/demo/.hermes-plugin/__init__.py", old: "return None", replacement: "pass"},
+		{name: "Hermes author drift", relative: "plugins/demo/plugin.yaml", old: "author: APM", replacement: "author: Other"},
+		{name: "Hermes missing author", relative: "plugins/demo/plugin.yaml", old: "author: APM\n", replacement: ""},
+		{name: "Hermes unknown field", relative: "plugins/demo/plugin.yaml", old: "author: APM", replacement: "author: APM\nskills: ./skills/"},
+		{name: "Hermes initializer drift", relative: "plugins/demo/__init__.py", old: "return None", replacement: "pass"},
 		{name: "Codex marketplace drift", relative: ".agents/plugins/marketplace.json", old: `"path":"./plugins/demo"`, replacement: `"path":"../demo"`},
 		{name: "Claude marketplace drift", relative: ".claude-plugin/marketplace.json", old: `"owner":{"name":"APM"}`, replacement: `"owner":{"name":"Other"}`},
 	}
@@ -285,8 +284,8 @@ func writeValidSharedArtifact(t *testing.T) (string, domain.PowerRef) {
 		"plugins/demo/skills/demo/skill-card.md":  "# Skill Card\n",
 		"plugins/demo/.codex-plugin/plugin.json":  `{"name":"demo","version":"1.2.3","description":"Canonical description","skills":"./skills/"}`,
 		"plugins/demo/.claude-plugin/plugin.json": `{"name":"demo","version":"1.2.3","description":"Canonical description","skills":["./skills/"]}`,
-		"plugins/demo/.hermes-plugin/plugin.yaml": "name: demo\nversion: 1.2.3\ndescription: Canonical description\nauthor: APM\n",
-		"plugins/demo/.hermes-plugin/__init__.py": "def register(ctx):\n    return None\n",
+		"plugins/demo/plugin.yaml": "name: demo\nversion: 1.2.3\ndescription: Canonical description\nauthor: APM\n",
+		"plugins/demo/__init__.py": "def register(ctx):\n    return None\n",
 		".agents/plugins/marketplace.json":        `{"name":"apm-demo","interface":{"displayName":"demo"},"plugins":[{"name":"demo","source":{"source":"local","path":"./plugins/demo"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Coding"}]}`,
 		".claude-plugin/marketplace.json":         `{"name":"apm-demo","owner":{"name":"APM"},"metadata":{"description":"Canonical description","version":"1.2.3"},"plugins":[{"name":"demo","source":"./plugins/demo","description":"Canonical description"}]}`,
 	}

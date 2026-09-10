@@ -230,8 +230,8 @@ func writeValidMarketplaceRecoveryArtifact(t *testing.T, root string, ref domain
 		filepath.Join("plugins", actualName, "skills", actualName, "skill-card.md"): "# Skill Card\n",
 		filepath.Join("plugins", actualName, ".codex-plugin", "plugin.json"):        fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","skills":"./skills/"}`, actualName, nativeVersion),
 		filepath.Join("plugins", actualName, ".claude-plugin", "plugin.json"):       fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","skills":["./skills/"]}`, actualName, nativeVersion),
-		filepath.Join("plugins", actualName, ".hermes-plugin", "plugin.yaml"):       fmt.Sprintf("name: %s\nversion: %s\ndescription: Demo\nauthor: APM\n", actualName, nativeVersion),
-		filepath.Join("plugins", actualName, ".hermes-plugin", "__init__.py"):       "def register(ctx):\n    return None\n",
+		filepath.Join("plugins", actualName, "plugin.yaml"):       fmt.Sprintf("name: %s\nversion: %s\ndescription: Demo\nauthor: APM\n", actualName, nativeVersion),
+		filepath.Join("plugins", actualName, "__init__.py"):       "def register(ctx):\n    return None\n",
 		filepath.Join(".agents", "plugins", "marketplace.json"): fmt.Sprintf(`{
   "name":"apm-%s",
   "interface":{"displayName":%q},
@@ -1642,7 +1642,7 @@ func TestRecoverMarketplacePluginRejectsIncompleteRequiredTargetArtifactBeforeWr
 		{
 			name: "extra native file",
 			mutate: func(f *marketplaceRecoveryFixture) string {
-				path := filepath.Join(f.targetSource, "plugins", f.target.ActualName, ".hermes-plugin", "debug.py")
+				path := filepath.Join(f.targetSource, "plugins", f.target.ActualName, "extra.py")
 				if err := os.WriteFile(path, []byte("debug\n"), 0o600); err != nil {
 					f.t.Fatal(err)
 				}

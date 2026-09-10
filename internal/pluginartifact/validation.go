@@ -21,8 +21,8 @@ import (
 const (
 	codexManifestPath     = ".codex-plugin/plugin.json"
 	claudeManifestPath    = ".claude-plugin/plugin.json"
-	hermesManifestPath    = ".hermes-plugin/plugin.yaml"
-	hermesInitPath        = ".hermes-plugin/__init__.py"
+	hermesManifestPath    = "plugin.yaml"
+	hermesInitPath        = "__init__.py"
 	codexMarketplacePath  = ".agents/plugins/marketplace.json"
 	claudeMarketplacePath = ".claude-plugin/marketplace.json"
 	localPluginPrefix     = "./plugins/"
@@ -435,7 +435,7 @@ func validateSharedClosedWorld(root, logicalName string, manifest APCPluginManif
 	allowedDirectories := map[string]struct{}{
 		".agents": {}, ".agents/plugins": {}, ".claude-plugin": {}, "plugins": {}, pluginPrefix: {},
 		pluginPrefix + "/skills": {}, pluginPrefix + "/.codex-plugin": {},
-		pluginPrefix + "/.claude-plugin": {}, pluginPrefix + "/.hermes-plugin": {},
+		pluginPrefix + "/.claude-plugin": {},
 	}
 	allowedFiles := map[string]struct{}{
 		filepath.ToSlash(codexMarketplacePath):                    {},

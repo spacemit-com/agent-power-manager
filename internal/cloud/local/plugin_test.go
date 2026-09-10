@@ -43,7 +43,7 @@ func TestLocalClientDownloadsOneSharedPluginPackage(t *testing.T) {
 			t.Fatalf("stat downloaded shared entry %q: %v", required, err)
 		}
 	}
-	for _, forbidden := range []string{".codex-plugin", ".claude-plugin", ".hermes-plugin", ".agents"} {
+	for _, forbidden := range []string{".codex-plugin", ".claude-plugin", ".hermes-plugin", "plugin.yaml", "__init__.py", ".agents"} {
 		if _, err := os.Lstat(filepath.Join(destination, forbidden)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("generated path %q stat error = %v, want absent", forbidden, err)
 		}

@@ -213,7 +213,7 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 		if info, err := os.Stat(filepath.Join(hermesHome, "plugins", actualName)); err != nil || !info.IsDir() {
 			t.Fatalf("Hermes target %q is not a directory: %v", actualName, err)
 		}
-		manifest, err := os.ReadFile(filepath.Join(hermesHome, "plugins", actualName, ".hermes-plugin", "plugin.yaml"))
+		manifest, err := os.ReadFile(filepath.Join(hermesHome, "plugins", actualName, "plugin.yaml"))
 		if err != nil || !strings.Contains(string(manifest), "version: "+strings.TrimPrefix(target.version, "v")) {
 			t.Fatalf("Hermes logical target version = %q, %v; want %s", manifest, err, target.version)
 		}
@@ -541,7 +541,7 @@ func (h *isolatedPluginHarness) assertManagedPlugin(agent domain.AgentID, releas
 	if statErr != nil || !info.IsDir() {
 		h.t.Fatalf("filesystem target for %q = %v, %v", agent, info, statErr)
 	}
-	manifest, err := os.ReadFile(filepath.Join(target, ".hermes-plugin", "plugin.yaml"))
+	manifest, err := os.ReadFile(filepath.Join(target, "plugin.yaml"))
 	if err != nil || !strings.Contains(string(manifest), "version: "+strings.TrimPrefix(release, "v")) {
 		h.t.Fatalf("filesystem target for %q version = %q, %v; want %s", agent, manifest, err, release)
 	}
@@ -713,8 +713,8 @@ func assertCompleteAcceptancePluginTree(t *testing.T, root string) {
 		"apc-plugin.json",
 		filepath.Join(".codex-plugin", "plugin.json"),
 		filepath.Join(".claude-plugin", "plugin.json"),
-		filepath.Join(".hermes-plugin", "plugin.yaml"),
-		filepath.Join(".hermes-plugin", "__init__.py"),
+		filepath.Join("plugin.yaml"),
+		filepath.Join("__init__.py"),
 		filepath.Join("skills", "demo-plugin", "SKILL.md"),
 		filepath.Join("skills", "demo-plugin", "skill-card.md"),
 	} {
