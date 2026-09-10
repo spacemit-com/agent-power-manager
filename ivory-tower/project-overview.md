@@ -78,7 +78,7 @@ Agent 内容身份闭环（[ADR-019](adr/ADR-019-align-agent-submission-lifecycl
 
 ### Plugin 当前安装与卸载边界
 
-当前 Plugin 语义以 [Feature 020](features/020-cloud-client-providers/spec.md)、[ADR-017](adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 和 [ADR-021](adr/ADR-021-cache-versioned-resource-catalog.md) 为准；[ADR-014](adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅作为被取代的历史背景。Cloud 的 `DownloadPlugin(ctx, entry, destination)` 使用同一 CatalogEntry，只把 canonical `apc-plugin.json + skills/...` 写入 Plugin Resource 提供的目标目录；Cloud 不生成 marketplace 或 Agent 原生配置。每个逻辑 Plugin 版本只有一份共享 artifact：
+当前 Plugin 语义以 [Feature 020](features/020-cloud-client-providers/spec.md)、[ADR-017](adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 和 [ADR-021](adr/ADR-021-cache-versioned-resource-catalog.md) 为准；Hermes 派生 manifest 的根目录布局见 [ADR-031](adr/ADR-031-hermes-plugin-manifest-lives-at-plugin-root.md)。[ADR-014](adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅作为被取代的历史背景。Cloud 的 `DownloadPlugin(ctx, entry, destination)` 使用同一 CatalogEntry，只把 canonical `apc-plugin.json + skills/...` 写入 Plugin Resource 提供的目标目录；Cloud 不生成 marketplace 或 Agent 原生配置。每个逻辑 Plugin 版本只有一份共享 artifact：
 
 ```text
 cache/plugins/<logical-name>/<version>/
@@ -88,8 +88,8 @@ cache/plugins/<logical-name>/<version>/
     ├── apc-plugin.json
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
-    ├── .hermes-plugin/plugin.yaml
-    ├── .hermes-plugin/__init__.py
+    ├── plugin.yaml
+    ├── __init__.py
     └── skills/...
 ```
 

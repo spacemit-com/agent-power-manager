@@ -2,6 +2,32 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-10
+
+分类：缺陷修复
+
+用户需求：修复 APM 安装 hermes 插件失败——真实 hermes CLI（v0.16.0）从 `~/.hermes/plugins/<name>/`
+直接读取 `plugin.yaml` 与含 `register(ctx)` 的 `__init__.py`，而 APM 把两者派生到 `.hermes-plugin/`
+子目录，导致 `hermes plugins list --json` 不发现插件、`hermes plugins enable` 却成功（其存在性检查
+只看目录存在），插件从不加载，且后续 Inspect 把它判为 absent，破坏 install → list → reinstall →
+uninstall 的一致性。
+
+解决方案或完成结果：`pluginresource.writeAgentManifests` 与 `pluginartifact` 的派生 manifest 路径由
+`.hermes-plugin/plugin.yaml`、`.hermes-plugin/__init__.py` 改为插件目录根的 `plugin.yaml`、`__init__.py`；
+派生 closed-world 不再允许 `.hermes-plugin/` 目录，使旧布局成为非法路径。manifest 内容
+（name/version/description/author）与 `__init__.py` 内容、hermes adapter（`plugins list --json` /
+`enable` / `disable`）与 filesystem transaction 均不变。新增 ADR-031 记录该布局修正，并同步 BUILD、
+Project Overview 的布局图与 ADR 引用。
+
+相关提交：
+
+- `cfeda59` fix(plugin): publish hermes manifest at plugin root
+
+验证结果或限制：`go build ./...`、`go vet ./...`、`go test ./...` 全量通过（含 pluginresource、
+pluginartifact、transaction、lifecycle、cloud/local 的既有与新增用例）；本机 hermes v0.16.0 实测：
+根目录布局下 `hermes plugins list --json` 正确列出插件（name/version/source=user）、enable/disable
+正常，旧 `.hermes-plugin/` 布局下列表为空。
+
 ## 2026-09-09
 
 分类：缺陷修复

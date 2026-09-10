@@ -293,7 +293,7 @@ Agent Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-powe
 
 ### Plugin 共享 artifact 与操作顺序
 
-Plugin 当前架构以 [Feature 020](ivory-tower/features/020-cloud-client-providers/spec.md)、[ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 和 [ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md) 为准；[ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅解释共享不可变 artifact 的历史来源。Cloud 不托管 marketplace 或 Agent 原生配置；`DownloadPlugin(ctx, entry, destination)` 使用同一 CatalogEntry，把 `apc-plugin.json + skills/...` canonical package 写入调用方目录。Plugin Resource 每个逻辑 Plugin 版本只下载一次，在唯一 cache-miss 临时根内生成并复验派生内容后，以以下布局原子发布共享、不可变制品：
+Plugin 当前架构以 [Feature 020](ivory-tower/features/020-cloud-client-providers/spec.md)、[ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 和 [ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md) 为准；Hermes 派生 manifest 的根目录布局见 [ADR-031](ivory-tower/adr/ADR-031-hermes-plugin-manifest-lives-at-plugin-root.md)。[ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅解释共享不可变 artifact 的历史来源。Cloud 不托管 marketplace 或 Agent 原生配置；`DownloadPlugin(ctx, entry, destination)` 使用同一 CatalogEntry，把 `apc-plugin.json + skills/...` canonical package 写入调用方目录。Plugin Resource 每个逻辑 Plugin 版本只下载一次，在唯一 cache-miss 临时根内生成并复验派生内容后，以以下布局原子发布共享、不可变制品：
 
 ```text
 cache/plugins/<logical-name>/<version>/
@@ -303,8 +303,8 @@ cache/plugins/<logical-name>/<version>/
     ├── apc-plugin.json
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
-    ├── .hermes-plugin/plugin.yaml
-    ├── .hermes-plugin/__init__.py
+    ├── plugin.yaml
+    ├── __init__.py
     └── skills/...
 ```
 
