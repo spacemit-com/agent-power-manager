@@ -54,8 +54,8 @@ case "$agent:$1:$2" in
     name=$3; /bin/rm -f "$FAKE_MCP_STATE/$agent-$name" ;;
   claude:mcp:get)
     name=$3; state="$FAKE_MCP_STATE/$agent-$name"
-    if [ -f "$state" ]; then printf '%s:\n  Scope: User\n' "$name"; exit 0; fi
-    echo "No MCP server found with name: $name" >&2; exit 1 ;;
+    if [ -f "$state" ]; then printf '%s:\n  Scope: User config (available in all your projects)\n' "$name"; exit 0; fi
+    printf 'No MCP server found with name: "%s". No MCP servers are configured.\n' "$name" >&2; exit 1 ;;
   claude:mcp:add)
     if [ "$5" = "--transport" ]; then name=$7; else name=$5; fi
     : > "$FAKE_MCP_STATE/$agent-$name" ;;

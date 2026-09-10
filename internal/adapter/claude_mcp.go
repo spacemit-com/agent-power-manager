@@ -23,7 +23,8 @@ func (adapter *claudeMCPAdapter) Inspect(ctx context.Context, name string) (MCPP
 	}
 	combined := result.Stdout + "\n" + result.Stderr
 	if runErr != nil {
-		if strings.Contains(combined, "No MCP server found with name: "+name) {
+		// 真实 CLI 的 not-found 消息给 name 加引号：No MCP server found with name: "demo".
+		if strings.Contains(combined, `No MCP server found with name: "`+name+`"`) {
 			return MCPAbsent, nil
 		}
 		return inspectUnknown(domain.AgentClaudeCode, name, result, runErr)
@@ -44,7 +45,11 @@ func (adapter *claudeMCPAdapter) Inspect(ctx context.Context, name string) (MCPP
 			continue
 		}
 		targetScopes++
-		if trimmed != "Scope: User" {
+		// 真实 CLI 的 scope 行形如 "Scope: User config (available in all your projects)"；
+		// 取 "Scope:" 后的首个空白分隔 token，仅当为 "User" 才算 user scope。
+		scope := strings.TrimSpace(strings.TrimPrefix(trimmed, "Scope:"))
+		fields := strings.Fields(scope)
+		if len(fields) == 0 || fields[0] != "User" {
 			return inspectUnknown(domain.AgentClaudeCode, name, result, fmt.Errorf("target section has non-user scope %q", trimmed))
 		}
 	}

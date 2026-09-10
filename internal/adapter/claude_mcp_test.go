@@ -43,10 +43,11 @@ func TestClaudeMCPInspectRejectsNonUserOrUnclearScope(t *testing.T) {
 		want     MCPPresence
 		wantErr  error
 	}{
-		{name: "user present", response: successfulMCPResponse("demo:\n  Scope: User\n  Status: Connected\n  Type: stdio\n"), want: MCPPresent},
-		{name: "absent", response: failedMCPResponse("No MCP server found with name: demo"), want: MCPAbsent},
-		{name: "local only", response: successfulMCPResponse("demo:\n  Scope: Local\n  Status: Connected\n"), wantErr: ErrMCPStateUnknown},
-		{name: "project only", response: successfulMCPResponse("demo:\n  Scope: Project\n  Status: Connected\n"), wantErr: ErrMCPStateUnknown},
+		{name: "user present", response: successfulMCPResponse("demo:\n  Scope: User config (available in all your projects)\n  Status: Connected\n  Type: stdio\n"), want: MCPPresent},
+		{name: "user present legacy exact scope", response: successfulMCPResponse("demo:\n  Scope: User\n  Status: Connected\n  Type: stdio\n"), want: MCPPresent},
+		{name: "absent", response: failedMCPResponse(`No MCP server found with name: "demo". No MCP servers are configured.`), want: MCPAbsent},
+		{name: "local only", response: successfulMCPResponse("demo:\n  Scope: Local config (private to you in this project)\n  Status: Connected\n"), wantErr: ErrMCPStateUnknown},
+		{name: "project only", response: successfulMCPResponse("demo:\n  Scope: Project config (shared via .mcp.json)\n  Status: Connected\n"), wantErr: ErrMCPStateUnknown},
 		{name: "missing scope", response: successfulMCPResponse("demo:\n  Status: Connected\n"), wantErr: ErrMCPStateUnknown},
 		{name: "unrelated user scope", response: successfulMCPResponse("demo:\n  Scope: Local\nother:\n  Scope: User\n"), wantErr: ErrMCPStateUnknown},
 		{name: "duplicate target section", response: successfulMCPResponse("demo:\n  Scope: User\ndemo:\n  Scope: User\n"), wantErr: ErrMCPStateUnknown},
