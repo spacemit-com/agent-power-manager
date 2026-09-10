@@ -6,6 +6,30 @@
 
 分类：缺陷修复
 
+用户需求：修复 APM 安装 claude MCP 失败——`claude mcp get <name>` 的 not-found 消息给 name 加引号
+（`No MCP server found with name: "demo".`），user scope 行是 `Scope: User config (available in all
+your projects)` 而非裸 `Scope: User`；适配器却匹配不带引号的 name 并要求 scope 精确等于 `Scope: User`，
+导致 absent 与 present 都落入 inspectUnknown，安装在校验阶段就失败、到不了 `mcp add`。
+
+解决方案或完成结果：`internal/adapter/claude_mcp.go` 的 Inspect 改为匹配带引号的 not-found 消息；
+scope 解析由精确等于 `Scope: User` 改为取 `Scope:` 后的首个空白分隔 token 且仅接受 `User`（兼容旧
+`Scope: User`，接受 `Scope: User config (…)`，拒绝 `Local`/`Project` 与空值）。Add/Remove argv 与
+其它 Agent 的 MCP adapter 不变；同步更新 adapter 单测 fixture 与 lifecycle 集成测试的 fake `claude`
+脚本，使其镜像真实 CLI 输出。
+
+相关提交：
+
+- `4455ed0` fix(mcp): align claude MCP inspect with real CLI output
+
+验证结果或限制：`go build ./...`、`go vet ./...`、`go test ./...` 全量通过（含 adapter 与 lifecycle
+的既有与新增用例）；本机 claude v2.1.175 实测确认 `mcp get` 的 present（user/local/project 三种 scope
+描述）、absent（带引号、stderr、exit 1）输出格式，以及 `mcp add`（stdio/http）与 `mcp remove`
+的退出码 0。
+
+## 2026-09-10
+
+分类：缺陷修复
+
 用户需求：修复 APM 安装 hermes 插件失败——真实 hermes CLI（v0.16.0）从 `~/.hermes/plugins/<name>/`
 直接读取 `plugin.yaml` 与含 `register(ctx)` 的 `__init__.py`，而 APM 把两者派生到 `.hermes-plugin/`
 子目录，导致 `hermes plugins list --json` 不发现插件、`hermes plugins enable` 却成功（其存在性检查
