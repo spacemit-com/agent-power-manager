@@ -59,19 +59,19 @@ func TestUninstallPluginMarketplaceDelegatesCleanupForNonConflictStates(t *testi
 		{
 			name:            "plugin only",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			wantMissing:     true,
 		},
 		{
 			name:            "both complete",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			wantMissing:     false,
 		},
 		{
 			name:            "missing cache does not block",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			setExists:       true,
 			exists:          false,
 			wantMissing:     false,
@@ -118,7 +118,7 @@ func TestUninstallPluginMarketplaceExactManagedStateUsesLocator(t *testing.T) {
 			"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
 		},
 		pluginFacts: map[string]adapter.PluginFact{
-			"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 		},
 		pluginRequestSink: &requests,
 	})
@@ -134,7 +134,7 @@ func TestUninstallPluginMarketplaceExactManagedStateUsesLocator(t *testing.T) {
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
-	if len(requests) != 1 || requests[0].Target != (adapter.PluginTarget{ActualName: "demo", Selector: "demo"}) || requests[0].Marketplace == nil || requests[0].Marketplace.Source != "/cache/plugins/demo/v1.0.0" {
+	if len(requests) != 1 || requests[0].Target != (adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}) || requests[0].Marketplace == nil || requests[0].Marketplace.Source != "/cache/plugins/demo/v1.0.0" {
 		t.Fatalf("requests = %+v, want exact located marketplace", requests)
 	}
 }
@@ -152,7 +152,7 @@ func TestUninstallPluginMarketplaceToleratesDamagedCacheRoot(t *testing.T) {
 			"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
 		},
 		pluginFacts: map[string]adapter.PluginFact{
-			"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 		},
 		pluginResources:    resources,
 		transactionResults: map[domain.AgentID]transaction.UninstallResult{domain.AgentCodex: {}},
@@ -180,7 +180,7 @@ func TestUninstallPluginMarketplaceRejectsConflict(t *testing.T) {
 		{
 			name:            "wrong source",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/other"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 		},
 		{
 			name:            "wrong selector",

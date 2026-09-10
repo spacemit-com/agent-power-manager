@@ -169,8 +169,8 @@ func newMarketplaceRecoveryFixture(t *testing.T, operation Operation, phase Phas
 	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 	writeValidMarketplaceRecoveryArtifact(t, targetSource, targetRef)
 	writeValidMarketplaceRecoveryArtifact(t, previousSource, previousRef)
-	target := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
-	previous := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	target := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
+	previous := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
 	journal := Journal{
 		SchemaVersion: 1,
 		TransactionID: "00112233445566778899aabbccddeeff",

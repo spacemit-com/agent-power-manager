@@ -103,7 +103,7 @@ func TestValidatePluginRequests(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	var typedNil *nilPluginValidationAdapter
 	pluginAdapter := &marketplacePluginValidationAdapter{}
-	target := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	target := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
 	marketplace := adapter.MarketplaceTarget{Name: "apm-demo", Source: filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")}
 	install := PluginInstallRequest{
 		Agent: domain.AgentCodex, Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
@@ -138,8 +138,8 @@ func TestValidatePluginMarketplaceRequests(t *testing.T) {
 	previousSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 	targetMarketplace := adapter.MarketplaceTarget{Name: "apm-demo", Source: targetSource}
 	previousMarketplace := adapter.MarketplaceTarget{Name: "apm-demo", Source: previousSource}
-	targetPlugin := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
-	previousPlugin := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	targetPlugin := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
+	previousPlugin := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
 	var typedNilMarketplaceAdapter *marketplacePluginValidationAdapter
 	firstInstall := PluginInstallRequest{
 		Agent:   domain.AgentCodex,

@@ -33,12 +33,20 @@ func (s *InstallService) installPlugin(ctx context.Context, agent domain.AgentID
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("derive Plugin runtime name: %w", err)
 	}
-	target := adapter.PluginTarget{ActualName: runtimeName, Selector: runtimeName}
 
 	pluginAdapter, err := s.registry.ResolvePlugin(agent)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("resolve Plugin adapter for agent %q: %w", agent, err)
 	}
+
+	// marketplace 部署使用完整 selector（<name>@apm-<name>），filesystem 部署沿用裸实际名。
+	selector := runtimeName
+	if pluginAdapter.DeploymentMode() == domain.PluginDeploymentMarketplace {
+		if selector, err = domain.PluginSelector(ref); err != nil {
+			return cli.InstallItem{}, fmt.Errorf("derive Plugin selector: %w", err)
+		}
+	}
+	target := adapter.PluginTarget{ActualName: runtimeName, Selector: selector}
 
 	switch pluginAdapter.DeploymentMode() {
 	case domain.PluginDeploymentMarketplace:
@@ -103,9 +111,13 @@ func (s *InstallService) installMarketplacePlugin(
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("derive previous Plugin actual name: %w", err)
 		}
+		previousSelector, err := domain.PluginSelector(previous)
+		if err != nil {
+			return cli.InstallItem{}, fmt.Errorf("derive previous Plugin selector: %w", err)
+		}
 		if _, err := s.transactions.UninstallPlugin(ctx, transaction.PluginUninstallRequest{
 			Agent: agent, Power: previous, Adapter: pluginAdapter,
-			Target:             adapter.PluginTarget{ActualName: previousName, Selector: previousName},
+			Target:             adapter.PluginTarget{ActualName: previousName, Selector: previousSelector},
 			Marketplace:        &adapter.MarketplaceTarget{Name: marketplace.Name, Source: marketplace.Source},
 			MarketplaceAdapter: marketplaceAdapter,
 		}); err != nil {
@@ -191,7 +203,11 @@ func (s *InstallService) installMarketplacePluginReplace(
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("derive previous Plugin actual name: %w", err)
 	}
-	previousTarget := adapter.PluginTarget{ActualName: previousName, Selector: previousName}
+	previousSelector, err := domain.PluginSelector(previous)
+	if err != nil {
+		return cli.InstallItem{}, fmt.Errorf("derive previous Plugin selector: %w", err)
+	}
+	previousTarget := adapter.PluginTarget{ActualName: previousName, Selector: previousSelector}
 	previousMarketplace := marketplaceTarget(previousMarketplaceResource)
 	request := transaction.PluginInstallRequest{
 		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, Previous: powerRefPointer(previous), Adapter: pluginAdapter,

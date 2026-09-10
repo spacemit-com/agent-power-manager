@@ -66,9 +66,13 @@ func (s *UninstallService) uninstallMarketplacePlugin(
 	if decideUninstallState(true, facts.state).action == actionRejectState {
 		return transaction.UninstallResult{}, fmt.Errorf("installed marketplace/Plugin state conflicts with manifest: %w", transaction.ErrIndeterminateState)
 	}
+	selector, err := domain.PluginSelector(ref)
+	if err != nil {
+		return transaction.UninstallResult{}, fmt.Errorf("derive installed Plugin selector: %w", err)
+	}
 	return s.transactions.UninstallPlugin(ctx, transaction.PluginUninstallRequest{
 		Agent: agent, Power: ref, Adapter: pluginAdapter,
-		Target:             adapter.PluginTarget{ActualName: actualName, Selector: actualName},
+		Target:             adapter.PluginTarget{ActualName: actualName, Selector: selector},
 		Marketplace:        &adapter.MarketplaceTarget{Name: marketplace.Name, Source: marketplace.Source},
 		MarketplaceAdapter: marketplaceAdapter,
 	})

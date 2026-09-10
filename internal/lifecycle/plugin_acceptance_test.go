@@ -101,7 +101,7 @@ case "$agent:$1:$2:$3" in
     for entry in "$markets"/*; do
       [ -f "$entry" ] || continue
       name=${entry##*/}; source=$(/bin/cat "$entry")
-      printf '%s{"name":"%s","source":"directory","url":"%s"}' "$separator" "$name" "$source"
+      printf '%s{"name":"%s","source":"directory","path":"%s","installLocation":"%s"}' "$separator" "$name" "$source" "$source"
       separator=,
     done
     printf ']\n' ;;
@@ -468,6 +468,15 @@ func (h *pluginAcceptanceHarness) runtimeName(artifact pluginresource.Artifact) 
 	return name
 }
 
+func (h *pluginAcceptanceHarness) selector(artifact pluginresource.Artifact) string {
+	h.t.Helper()
+	selector, err := domain.PluginSelector(artifact.Power)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return selector
+}
+
 func (h *pluginAcceptanceHarness) callLines() []string {
 	h.t.Helper()
 	contents, err := os.ReadFile(h.calls)
@@ -629,7 +638,7 @@ func (h *pluginAcceptanceHarness) setPlugin(logical, release string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		h.t.Fatal(err)
 	}
-	selector := logical
+	selector := domain.PluginSelectorFromParts(logical, domain.PluginMarketplaceNameFromRuntime(logical))
 	if err := os.WriteFile(path, []byte(selector), 0o600); err != nil {
 		h.t.Fatal(err)
 	}
@@ -865,12 +874,12 @@ func TestPluginAcceptanceFirstRepeatUninstallAndIsolation(t *testing.T) {
 			if agent == domain.AgentCodex {
 				h.assertMutationCallsSince(0,
 					h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(artifact), "--json"),
-					h.expectedCall("plugin", "add", "demo-plugin", "--json"),
+					h.expectedCall("plugin", "add", h.selector(artifact), "--json"),
 				)
 			} else {
 				h.assertMutationCallsSince(0,
 					h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(artifact), "--scope", "user"),
-					h.expectedCall("plugin", "install", "demo-plugin", "--scope", "user"),
+					h.expectedCall("plugin", "install", h.selector(artifact), "--scope", "user"),
 				)
 			}
 			callsAfterFirst := len(h.callLines())
@@ -893,12 +902,12 @@ func TestPluginAcceptanceFirstRepeatUninstallAndIsolation(t *testing.T) {
 			h.assertPlugins()
 			if agent == domain.AgentCodex {
 				h.assertMutationCallsSince(uninstallStart,
-					h.expectedCall("plugin", "remove", "demo-plugin", "--json"),
+					h.expectedCall("plugin", "remove", h.selector(artifact), "--json"),
 					h.expectedCall("plugin", "marketplace", "remove", h.marketplaceName(artifact), "--json"),
 				)
 			} else {
 				h.assertMutationCallsSince(uninstallStart,
-					h.expectedCall("plugin", "uninstall", "demo-plugin", "--scope", "user"),
+					h.expectedCall("plugin", "uninstall", h.selector(artifact), "--scope", "user"),
 					h.expectedCall("plugin", "marketplace", "remove", h.marketplaceName(artifact), "--scope", "user"),
 				)
 			}
@@ -1145,7 +1154,7 @@ func (h *pluginAcceptanceHarness) writeInstallJournal(logical, targetRelease, pr
 			Deployment: domain.PluginDeploymentMarketplace,
 			Target: adapter.PluginTarget{
 				ActualName: h.runtimeName(target),
-				Selector:   h.runtimeName(target),
+				Selector:   h.selector(target),
 			},
 			Marketplace: &transaction.PluginMarketplaceJournalPayload{
 				Name:         h.marketplaceName(target),
@@ -1158,7 +1167,7 @@ func (h *pluginAcceptanceHarness) writeInstallJournal(logical, targetRelease, pr
 		previousRef := h.ref(logical, previousRelease)
 		previousTarget := adapter.PluginTarget{
 			ActualName: h.runtimeName(previous),
-			Selector:   h.runtimeName(previous),
+			Selector:   h.selector(previous),
 		}
 		journal.Previous = &previousRef
 		journal.Plugin.Previous = &previousTarget
@@ -1185,7 +1194,7 @@ func (h *pluginAcceptanceHarness) writeUninstallJournal(logical, release string,
 			TargetPresent: pluginPresent,
 			Target: adapter.PluginTarget{
 				ActualName: h.runtimeName(artifact),
-				Selector:   h.runtimeName(artifact),
+				Selector:   h.selector(artifact),
 			},
 			Marketplace: &transaction.PluginMarketplaceJournalPayload{
 				Name:          h.marketplaceName(artifact),
@@ -1276,7 +1285,7 @@ func TestPluginAcceptanceActualFirstInstallPhaseWritesInterrupt(t *testing.T) {
 				h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(artifact), "--json"),
 			}
 			if test.barrier == "codex:plugin-add" {
-				wantCalls = append(wantCalls, h.expectedCall("plugin", "add", "demo-plugin", "--json"))
+				wantCalls = append(wantCalls, h.expectedCall("plugin", "add", "demo-plugin@apm-demo-plugin", "--json"))
 			}
 			h.assertCallsSince(0, wantCalls...)
 
@@ -1408,7 +1417,7 @@ func TestPluginAcceptanceActualVersionSwitchPhaseWritesInterrupt(t *testing.T) {
 				h.expectedCall("plugin", "list", "--json"),
 				h.expectedCall("plugin", "marketplace", "list", "--json"),
 				h.expectedCall("plugin", "list", "--json"),
-				h.expectedCall("plugin", "remove", "demo-plugin", "--json"),
+				h.expectedCall("plugin", "remove", "demo-plugin@apm-demo-plugin", "--json"),
 			}
 			if test.phase == transaction.PhaseUnregisteringOldMarketplace || test.phase == transaction.PhaseRegisteringNewMarketplace || test.phase == transaction.PhaseAddingNewPlugin {
 				wantCalls = append(wantCalls, h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"))
@@ -1417,7 +1426,7 @@ func TestPluginAcceptanceActualVersionSwitchPhaseWritesInterrupt(t *testing.T) {
 				wantCalls = append(wantCalls, h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(target), "--json"))
 			}
 			if test.phase == transaction.PhaseAddingNewPlugin {
-				wantCalls = append(wantCalls, h.expectedCall("plugin", "add", "demo-plugin", "--json"))
+				wantCalls = append(wantCalls, h.expectedCall("plugin", "add", "demo-plugin@apm-demo-plugin", "--json"))
 			}
 			h.assertCallsSince(start, wantCalls...)
 
@@ -1557,7 +1566,7 @@ func TestPluginAcceptanceActualRollingBackPhaseKeepsFakeExecutablePinned(t *test
 		h.assertMarketplace("demo-plugin", h.marketplaceSource(target), true)
 		h.assertPlugins()
 		h.assertMutationCallsSince(installStart,
-			h.expectedCall("plugin", "remove", "demo-plugin", "--json"),
+			h.expectedCall("plugin", "remove", "demo-plugin@apm-demo-plugin", "--json"),
 			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
 			h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(target), "--json"),
 		)
@@ -1589,7 +1598,7 @@ func TestPluginAcceptanceActualRollingBackPhaseKeepsFakeExecutablePinned(t *test
 			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
 			h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"),
 			h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(old), "--json"),
-			h.expectedCall("plugin", "add", "demo-plugin", "--json"),
+			h.expectedCall("plugin", "add", "demo-plugin@apm-demo-plugin", "--json"),
 		)
 		h.assertOnlyFakeExecutables()
 	})
@@ -1650,10 +1659,10 @@ func TestFixPluginAcceptanceRecoversEveryMarketplaceCLIMutation(t *testing.T) {
 			if test.firstInstall {
 				mutations = append(mutations, h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(target), "--json"))
 				if test.phase == transaction.PhaseAddingNewPlugin {
-					mutations = append(mutations, h.expectedCall("plugin", "add", h.runtimeName(target), "--json"))
+					mutations = append(mutations, h.expectedCall("plugin", "add", h.selector(target), "--json"))
 				}
 			} else {
-				mutations = append(mutations, h.expectedCall("plugin", "remove", "demo-plugin", "--json"))
+				mutations = append(mutations, h.expectedCall("plugin", "remove", "demo-plugin@apm-demo-plugin", "--json"))
 				if test.phase != transaction.PhaseRemovingOldPlugin {
 					mutations = append(mutations, h.expectedCall("plugin", "marketplace", "remove", "apm-demo-plugin", "--json"))
 				}
@@ -1661,7 +1670,7 @@ func TestFixPluginAcceptanceRecoversEveryMarketplaceCLIMutation(t *testing.T) {
 					mutations = append(mutations, h.expectedCall("plugin", "marketplace", "add", h.marketplaceSource(target), "--json"))
 				}
 				if test.phase == transaction.PhaseAddingNewPlugin {
-					mutations = append(mutations, h.expectedCall("plugin", "add", h.runtimeName(target), "--json"))
+					mutations = append(mutations, h.expectedCall("plugin", "add", h.selector(target), "--json"))
 				}
 			}
 			h.assertMutationCallsSince(start, mutations...)
@@ -1783,7 +1792,7 @@ func TestFixPluginAcceptanceUninstallInterruptionTable(t *testing.T) {
 		h.assertManifest("demo-plugin", "v0.0.1", true)
 		h.assertMarketplace("demo-plugin", h.marketplaceSource(artifact), true)
 		h.assertPlugins()
-		h.assertMutationCallsSince(start, h.expectedCall("plugin", "remove", "demo-plugin", "--json"))
+		h.assertMutationCallsSince(start, h.expectedCall("plugin", "remove", "demo-plugin@apm-demo-plugin", "--json"))
 		if err := h.fix.Fix(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -1818,7 +1827,7 @@ func TestPluginAcceptanceActualUninstallPhaseWritesInterrupt(t *testing.T) {
 			h.expectedCall("plugin", "list", "--json"),
 			h.expectedCall("plugin", "marketplace", "list", "--json"),
 			h.expectedCall("plugin", "list", "--json"),
-			h.expectedCall("plugin", "remove", "demo-plugin", "--json"),
+			h.expectedCall("plugin", "remove", "demo-plugin@apm-demo-plugin", "--json"),
 		)
 		cancel()
 		answer := <-completed

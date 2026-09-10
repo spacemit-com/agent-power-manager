@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"apm/internal/adapter"
+	"apm/internal/domain"
 	"apm/internal/pluginresource"
 	"apm/internal/transaction"
 )
@@ -41,7 +42,8 @@ func classifyMarketplacePluginTarget(
 		facts.state = targetConflict
 		return facts
 	}
-	if pluginPresent && (pluginFact.ActualName != runtimeName || pluginFact.Selector != runtimeName) {
+	expectedSelector := domain.PluginSelectorFromParts(runtimeName, expected.Name)
+	if pluginPresent && (pluginFact.ActualName != runtimeName || pluginFact.Selector != expectedSelector) {
 		facts.state = targetConflict
 		return facts
 	}

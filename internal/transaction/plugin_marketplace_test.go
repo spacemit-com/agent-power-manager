@@ -154,7 +154,7 @@ func newMarketplacePluginFixture(t *testing.T) *marketplacePluginFixture {
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v2.0.0")
-	target := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	target := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
 
 	fixture := &marketplacePluginFixture{}
 	fixture.journals = &recordingMarketplaceJournalStore{events: &fixture.events}
@@ -300,7 +300,7 @@ func TestMarketplacePluginVersionSwitchOrder(t *testing.T) {
 
 func configureMarketplaceVersionSwitch(fixture *marketplacePluginFixture) (adapter.PluginTarget, adapter.MarketplaceTarget) {
 	previous := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
-	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
 	previousMarketplace := adapter.MarketplaceTarget{
 		Name: "apm-demo", Source: filepath.Join(filepath.Dir(fixture.request.Marketplace.Target.Source), "v1.0.0"),
 	}

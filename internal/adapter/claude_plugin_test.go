@@ -9,13 +9,13 @@ import (
 
 func TestClaudePluginInspectAndMutations(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
-		successfulMCPResponse(`[{"id":"demo-plugin","scope":"user","enabled":false}]`),
+		successfulMCPResponse(`[{"id":"demo-plugin@apm-demo-plugin","scope":"user","enabled":false}]`),
 		successfulMCPResponse(""),
 		successfulMCPResponse(""),
 	}}
 	adapter := newClaudePluginAdapter(runner)
 	fact, err := adapter.Inspect(context.Background(), "demo-plugin")
-	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin", Selector: "demo-plugin"}) {
+	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin", Selector: "demo-plugin@apm-demo-plugin"}) {
 		t.Fatalf("Inspect() = %#v, %v", fact, err)
 	}
 	target := PluginTarget{ActualName: fact.ActualName, Selector: fact.Selector}
@@ -27,8 +27,8 @@ func TestClaudePluginInspectAndMutations(t *testing.T) {
 	}
 	assertPluginCommands(t, runner, "claude", [][]string{
 		{"plugin", "list", "--json"},
-		{"plugin", "install", "demo-plugin", "--scope", "user"},
-		{"plugin", "uninstall", "demo-plugin", "--scope", "user"},
+		{"plugin", "install", "demo-plugin@apm-demo-plugin", "--scope", "user"},
+		{"plugin", "uninstall", "demo-plugin@apm-demo-plugin", "--scope", "user"},
 	})
 }
 
@@ -45,13 +45,18 @@ func TestClaudePluginMarketplaceInspectCommandsAndFacts(t *testing.T) {
 			want: MarketplaceFact{Presence: MarketplaceAbsent, Name: "apm-demo"},
 		},
 		{
-			name: "present directory url",
-			list: `[{"name":"apm-demo","source":"directory","url":"` + root + `"}]`,
+			name: "present directory path",
+			list: `[{"name":"apm-demo","source":"directory","path":"` + root + `"}]`,
 			want: MarketplaceFact{Presence: MarketplacePresent, Name: "apm-demo", Source: root},
 		},
 		{
-			name: "present local repo",
-			list: `[{"name":"apm-demo","source":"local","repo":"` + root + `"}]`,
+			name: "present local installLocation",
+			list: `[{"name":"apm-demo","source":"local","installLocation":"` + root + `"}]`,
+			want: MarketplaceFact{Presence: MarketplacePresent, Name: "apm-demo", Source: root},
+		},
+		{
+			name: "present identical path and installLocation",
+			list: `[{"name":"apm-demo","source":"directory","path":"` + root + `","installLocation":"` + root + `"}]`,
 			want: MarketplaceFact{Presence: MarketplacePresent, Name: "apm-demo", Source: root},
 		},
 	}
@@ -70,11 +75,11 @@ func TestClaudePluginMarketplaceInspectCommandsAndFacts(t *testing.T) {
 func TestClaudePluginMarketplaceInspectRejectsAmbiguousInvalidOrTruncatedOutput(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "cache", "plugins", "claude-code", "demo", "v0.1.0")
 	tests := []queuedMCPResponse{
-		successfulMCPResponse(`[{"name":"apm-demo","source":"directory","url":"` + root + `"},{"name":"apm-demo","source":"directory","url":"` + root + `"}]`),
+		successfulMCPResponse(`[{"name":"apm-demo","source":"directory","path":"` + root + `"},{"name":"apm-demo","source":"directory","path":"` + root + `"}]`),
 		successfulMCPResponse(`[{"name":"apm-demo","source":"github","repo":"owner/repo"}]`),
-		successfulMCPResponse(`[{"name":"apm-demo","source":"directory","url":"relative/cache"}]`),
+		successfulMCPResponse(`[{"name":"apm-demo","source":"directory","path":"relative/cache"}]`),
 		successfulMCPResponse(`[{"name":"apm-demo","source":"directory"}]`),
-		successfulMCPResponse(`[{"name":"apm-demo","source":"directory","url":"` + root + `","repo":"` + root + `"}]`),
+		successfulMCPResponse(`[{"name":"apm-demo","source":"directory","path":"` + root + `","installLocation":"` + filepath.Join(root, "other") + `"}]`),
 		successfulMCPResponse(`null`),
 		successfulMCPResponse(`[] {}`),
 		truncatedMCPResponse(`[]`),

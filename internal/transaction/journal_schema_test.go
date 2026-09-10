@@ -80,7 +80,7 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v2.0.0")
 	previousSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
-	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
 
 	firstInstall := Journal{
 		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverPlugin,
@@ -88,7 +88,7 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 		Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"},
 			Marketplace: &PluginMarketplaceJournalPayload{
 				Name: "apm-demo", TargetSource: targetSource,
 			},
@@ -107,7 +107,7 @@ func TestPluginMarketplaceValidJournalPhaseMatrix(t *testing.T) {
 	uninstall.Operation = OperationUninstall
 	uninstall.Plugin = &PluginJournalPayload{
 		Deployment:    domain.PluginDeploymentMarketplace,
-		Target:        adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+		Target:        adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"},
 		TargetPresent: true,
 		Marketplace: &PluginMarketplaceJournalPayload{
 			Name: "apm-demo", TargetSource: targetSource, TargetPresent: true,
@@ -177,14 +177,14 @@ func TestPluginMarketplaceJournalRejectsMissingPayloadInEveryOperation(t *testin
 	targetSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v2.0.0")
 	previousSource := filepath.Join(cacheHome, "apm", "plugins", "demo", "v1.0.0")
 	previousRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
-	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo"}
+	previousTarget := adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}
 	firstInstall := Journal{
 		SchemaVersion: 1, TransactionID: "00112233445566778899aabbccddeeff", Driver: DriverPlugin,
 		Operation: OperationInstall, Phase: PhaseRegisteringMarketplace, Agent: domain.AgentCodex,
 		Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"},
 			Marketplace: &PluginMarketplaceJournalPayload{
 				Name: "apm-demo", TargetSource: targetSource,
 			},
@@ -205,7 +205,7 @@ func TestPluginMarketplaceJournalRejectsMissingPayloadInEveryOperation(t *testin
 	uninstall.Phase = PhaseRemovingPlugin
 	uninstall.Plugin = &PluginJournalPayload{
 		Deployment:    domain.PluginDeploymentMarketplace,
-		Target:        adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+		Target:        adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"},
 		TargetPresent: true,
 		Marketplace: &PluginMarketplaceJournalPayload{
 			Name: "apm-demo", TargetSource: targetSource, TargetPresent: true,
@@ -239,7 +239,7 @@ func TestPluginMarketplaceInvalidJournalPayloads(t *testing.T) {
 			Power: domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v2.0.0"},
 			Plugin: &PluginJournalPayload{
 				Deployment: domain.PluginDeploymentMarketplace,
-				Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+				Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"},
 				Marketplace: &PluginMarketplaceJournalPayload{
 					Name: "apm-demo", TargetSource: targetSource,
 				},
@@ -335,7 +335,7 @@ func validPluginMarketplaceJournal(t *testing.T) Journal {
 		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"},
 		Plugin: &PluginJournalPayload{
 			Deployment: domain.PluginDeploymentMarketplace,
-			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo"},
+			Target:     adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"},
 			Marketplace: &PluginMarketplaceJournalPayload{
 				Name: "apm-demo", TargetSource: targetSource,
 			},

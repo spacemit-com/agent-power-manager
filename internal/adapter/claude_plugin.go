@@ -21,7 +21,7 @@ func (adapter *claudePluginAdapter) DeploymentMode() domain.PluginDeploymentMode
 	return domain.PluginDeploymentMarketplace
 }
 
-// InspectMarketplace 只接受 Claude directory/local 类型中唯一的 url 或 repo 本地绝对路径。
+// InspectMarketplace 只接受 Claude directory/local 类型中唯一的 path/installLocation 本地绝对路径。
 func (adapter *claudePluginAdapter) InspectMarketplace(ctx context.Context, name string) (MarketplaceFact, error) {
 	if !isSafeMarketplaceName(name) {
 		return MarketplaceFact{}, fmt.Errorf("inspect marketplace name %q: %w", name, ErrInvalidPlugin)
@@ -31,10 +31,10 @@ func (adapter *claudePluginAdapter) InspectMarketplace(ctx context.Context, name
 		return MarketplaceFact{}, pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, runErr)
 	}
 	var marketplaces []struct {
-		Name   string `json:"name"`
-		Source string `json:"source"`
-		URL    string `json:"url"`
-		Repo   string `json:"repo"`
+		Name            string `json:"name"`
+		Source          string `json:"source"`
+		Path            string `json:"path"`
+		InstallLocation string `json:"installLocation"`
 	}
 	if err := decodePluginJSON(result.Stdout, &marketplaces); err != nil {
 		return MarketplaceFact{}, pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, err)
@@ -50,11 +50,19 @@ func (adapter *claudePluginAdapter) InspectMarketplace(ctx context.Context, name
 		if marketplace.Source != "directory" && marketplace.Source != "local" {
 			return MarketplaceFact{}, pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, fmt.Errorf("marketplace %q has non-local source type %q", name, marketplace.Source))
 		}
-		candidates := make([]string, 0, 1)
-		for _, candidate := range []string{marketplace.URL, marketplace.Repo} {
-			if strings.TrimSpace(candidate) != "" {
-				candidates = append(candidates, candidate)
+		// 真实 CLI 同时返回相等的 path 与 installLocation；去重后必须唯一。
+		candidates := make([]string, 0, 2)
+		seen := make(map[string]struct{}, 2)
+		for _, candidate := range []string{marketplace.Path, marketplace.InstallLocation} {
+			trimmed := strings.TrimSpace(candidate)
+			if trimmed == "" {
+				continue
 			}
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			candidates = append(candidates, trimmed)
 		}
 		if len(candidates) != 1 {
 			return MarketplaceFact{}, pluginStateUnknown(domain.AgentClaudeCode, "marketplace list", result, fmt.Errorf("marketplace %q has %d local source fields", name, len(candidates)))

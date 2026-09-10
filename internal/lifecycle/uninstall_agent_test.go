@@ -24,7 +24,7 @@ func TestUninstallPluginDispatchesThroughPluginAdapterOnly(t *testing.T) {
 		marketplaceFacts: map[string]adapter.MarketplaceFact{
 			"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
 		},
-		pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+		pluginFact: adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 	})
 
 	result, err := service.Uninstall(context.Background(), cli.Flags{Agent: "codex", Type: "plugin", Name: "demo"})

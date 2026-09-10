@@ -25,14 +25,14 @@ func TestClassifyMarketplacePluginTarget(t *testing.T) {
 		{
 			name:            "both complete",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			cacheExists:     true,
 			want:            targetComplete,
 		},
 		{
 			name:            "both complete but cache missing",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			want:            targetIncomplete,
 		},
 		{
@@ -44,13 +44,13 @@ func TestClassifyMarketplacePluginTarget(t *testing.T) {
 		{
 			name:            "plugin only",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			want:            targetIncomplete,
 		},
 		{
 			name:            "wrong source",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/other"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			cacheExists:     true,
 			want:            targetConflict,
 		},

@@ -10,13 +10,13 @@ import (
 
 func TestCodexPluginInspectAndMutations(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
-		successfulMCPResponse(`{"installed":[{"name":"demo-plugin","pluginId":"demo-plugin","enabled":false}]}`),
+		successfulMCPResponse(`{"installed":[{"name":"demo-plugin","pluginId":"demo-plugin@apm-demo-plugin","enabled":false}]}`),
 		successfulMCPResponse(""),
 		successfulMCPResponse(""),
 	}}
 	adapter := newCodexPluginAdapter(runner)
 	fact, err := adapter.Inspect(context.Background(), "demo-plugin")
-	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin", Selector: "demo-plugin"}) {
+	if err != nil || fact != (PluginFact{Presence: PluginPresent, ActualName: "demo-plugin", Selector: "demo-plugin@apm-demo-plugin"}) {
 		t.Fatalf("Inspect() = %#v, %v", fact, err)
 	}
 	target := PluginTarget{ActualName: fact.ActualName, Selector: fact.Selector}
@@ -28,8 +28,8 @@ func TestCodexPluginInspectAndMutations(t *testing.T) {
 	}
 	assertPluginCommands(t, runner, "codex", [][]string{
 		{"plugin", "list", "--json"},
-		{"plugin", "add", "demo-plugin", "--json"},
-		{"plugin", "remove", "demo-plugin", "--json"},
+		{"plugin", "add", "demo-plugin@apm-demo-plugin", "--json"},
+		{"plugin", "remove", "demo-plugin@apm-demo-plugin", "--json"},
 	})
 }
 

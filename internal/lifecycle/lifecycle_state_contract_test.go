@@ -230,14 +230,14 @@ func contractInstallFixture(power contractPower, manifest, target string) instal
 		switch target {
 		case "present":
 			fixture.pluginFacts = map[string]adapter.PluginFact{
-				contractName: {Presence: adapter.PluginPresent, ActualName: contractName, Selector: contractName},
+				contractName: {Presence: adapter.PluginPresent, ActualName: contractName, Selector: contractName + "@" + contractMarketplaceName},
 			}
 		case "complete":
 			fixture.marketplaceFacts = map[string]adapter.MarketplaceFact{
 				contractMarketplaceName: {Presence: adapter.MarketplacePresent, Name: contractMarketplaceName, Source: source},
 			}
 			fixture.pluginFacts = map[string]adapter.PluginFact{
-				contractName: {Presence: adapter.PluginPresent, ActualName: contractName, Selector: contractName},
+				contractName: {Presence: adapter.PluginPresent, ActualName: contractName, Selector: contractName + "@" + contractMarketplaceName},
 			}
 		case "incomplete":
 			fixture.marketplaceFacts = map[string]adapter.MarketplaceFact{
@@ -280,7 +280,7 @@ func contractUninstallFixture(power contractPower, manifest, target string) unin
 				fixture.marketplaceFacts = map[string]adapter.MarketplaceFact{
 					contractMarketplaceName: {Presence: adapter.MarketplacePresent, Name: contractMarketplaceName, Source: contractPluginSource(contractRemovedVersion)},
 				}
-				fixture.pluginFact = adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: contractName, Selector: contractName}
+				fixture.pluginFact = adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: contractName, Selector: contractName + "@" + contractMarketplaceName}
 			case "incomplete":
 				fixture.marketplaceFacts = map[string]adapter.MarketplaceFact{
 					contractMarketplaceName: {Presence: adapter.MarketplacePresent, Name: contractMarketplaceName, Source: contractPluginSource(contractRemovedVersion)},

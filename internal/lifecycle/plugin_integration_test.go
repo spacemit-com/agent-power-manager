@@ -93,7 +93,7 @@ case "$agent:$1:$2:$3" in
   codex:plugin:add:*) printf '%s' "$3" > "$plugin" ;;
   codex:plugin:remove:*) /bin/rm -f "$plugin" ;;
   claude:plugin:marketplace:list)
-    if [ -f "$market" ]; then printf '[{"name":"%s","source":"directory","url":"%s"}]\n' "$marketplace_name" "$(/bin/cat "$market")"
+    if [ -f "$market" ]; then printf '[{"name":"%s","source":"directory","path":"%s","installLocation":"%s"}]\n' "$marketplace_name" "$(/bin/cat "$market")" "$(/bin/cat "$market")"
     else printf '[]\n'; fi ;;
   claude:plugin:marketplace:add) printf '%s' "$4" > "$market" ;;
   claude:plugin:marketplace:remove) /bin/rm -f "$market" ;;
@@ -530,7 +530,7 @@ func (h *isolatedPluginHarness) assertManagedPlugin(agent domain.AgentID, releas
 	}
 	if agent == domain.AgentCodex || agent == domain.AgentClaudeCode {
 		contents, readErr := os.ReadFile(target)
-		if readErr != nil || string(contents) != "demo-plugin" {
+		if readErr != nil || string(contents) != "demo-plugin@apm-demo-plugin" {
 			h.t.Fatalf("marketplace target for %q = %q, %v", agent, contents, readErr)
 		}
 		if _, err := os.Stat(h.marketplaceState(agent)); err != nil {
@@ -863,7 +863,7 @@ func TestPluginIntegrationSearchPreservesAndFixRecoversInterruptedMarketplaceJou
 	if err != nil {
 		t.Fatal(err)
 	}
-	selector := runtimeName
+	selector := domain.PluginSelectorFromParts(runtimeName, marketplace.Name)
 	if err := os.WriteFile(filepath.Join(harness.state, "plugin-codex"), []byte(selector), 0o600); err != nil {
 		t.Fatal(err)
 	}

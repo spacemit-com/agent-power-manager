@@ -32,7 +32,7 @@ func PluginRuntimeName(ref PowerRef) (string, error) {
 	return ref.Name, nil
 }
 
-// PluginMarketplaceName 返回逻辑 Plugin 对应的固定 marketplace 名称。
+// PluginMarketplaceName 返回逻辑 Plugin 对应的固定 marketplace 名称（apm-<name>）。
 func PluginMarketplaceName(ref PowerRef) (string, error) {
 	if ref.Type != PowerTypePlugin || !isSafePluginSegment(ref.Name) {
 		return "", fmt.Errorf("plugin reference %+v: %w", ref, ErrInvalidPluginIdentity)
@@ -40,7 +40,31 @@ func PluginMarketplaceName(ref PowerRef) (string, error) {
 	if _, err := canonicalAPMPluginVersion(ref.Version); err != nil {
 		return "", err
 	}
-	return "apm-" + ref.Name, nil
+	return PluginMarketplaceNameFromRuntime(ref.Name), nil
+}
+
+// PluginMarketplaceNameFromRuntime 返回运行时名对应的固定 marketplace 名称（apm-<name>）。
+// 仅供已通过 PluginRuntimeName 或其他安全校验、只有名称字符串的调用方使用。
+func PluginMarketplaceNameFromRuntime(runtimeName string) string {
+	return "apm-" + runtimeName
+}
+
+// PluginSelector 返回 marketplace 部署下目标 Agent 使用的完整 selector（<name>@apm-<name>）。
+func PluginSelector(ref PowerRef) (string, error) {
+	name, err := PluginRuntimeName(ref)
+	if err != nil {
+		return "", err
+	}
+	marketplaceName, err := PluginMarketplaceName(ref)
+	if err != nil {
+		return "", err
+	}
+	return PluginSelectorFromParts(name, marketplaceName), nil
+}
+
+// PluginSelectorFromParts 由已解析的运行时名与 marketplace 名组装 selector（<name>@<marketplace>）。
+func PluginSelectorFromParts(actualName, marketplaceName string) string {
+	return actualName + "@" + marketplaceName
 }
 
 func canonicalAPMPluginVersion(version string) (string, error) {

@@ -67,7 +67,7 @@ func TestInstallPluginMarketplaceFirstInstallUsesLocalArtifact(t *testing.T) {
 		t.Fatalf("requests = %d, want 1", len(requests))
 	}
 	request := requests[0]
-	if request.Previous != nil || request.Target != (adapter.PluginTarget{ActualName: "demo", Selector: "demo"}) {
+	if request.Previous != nil || request.Target != (adapter.PluginTarget{ActualName: "demo", Selector: "demo@apm-demo"}) {
 		t.Fatalf("request = %+v, want exact first-install target", request)
 	}
 	if request.Marketplace == nil || request.Marketplace.Target != (adapter.MarketplaceTarget{Name: "apm-demo", Source: "/cache/plugins/demo/v2.0.0"}) || request.Marketplace.Previous != nil {
@@ -147,7 +147,7 @@ func TestInstallPluginMarketplaceSwitchUsesPreviousLookupOnly(t *testing.T) {
 			"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
 		},
 		pluginFacts: map[string]adapter.PluginFact{
-			"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 		},
 	})
 
@@ -201,7 +201,7 @@ func TestInstallPluginMarketplaceRepairsThenFirstInstalls(t *testing.T) {
 		{
 			name:            "plugin only",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplaceAbsent, Name: "apm-demo"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 		},
 	}
 	for _, test := range tests {
@@ -303,7 +303,7 @@ func TestInstallPluginMarketplaceFailsClosedOnManagedAnomalies(t *testing.T) {
 		{
 			name:            "wrong source",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/other"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			wantErr:         transaction.ErrIndeterminateState,
 		},
 		{
@@ -315,7 +315,7 @@ func TestInstallPluginMarketplaceFailsClosedOnManagedAnomalies(t *testing.T) {
 		{
 			name:            "damaged old cache",
 			marketplaceFact: adapter.MarketplaceFact{Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"},
-			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"},
+			pluginFact:      adapter.PluginFact{Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"},
 			lookupErr:       cacheDamage,
 			wantErr:         cacheDamage,
 		},
@@ -481,7 +481,7 @@ func TestInstallPluginPreviousLookupNeverDownloadsOldVersion(t *testing.T) {
 	service := newInstallService(t, &calls, installFixture{
 		installed: map[domain.AgentID]domain.PowerRef{domain.AgentCodex: previous}, pluginMode: domain.PluginDeploymentMarketplace,
 		marketplaceFacts: map[string]adapter.MarketplaceFact{"apm-demo": {Presence: adapter.MarketplacePresent, Name: "apm-demo", Source: "/cache/plugins/demo/v1.0.0"}},
-		pluginFacts:      map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo"}},
+		pluginFacts:      map[string]adapter.PluginFact{"demo": {Presence: adapter.PluginPresent, ActualName: "demo", Selector: "demo@apm-demo"}},
 		pluginResources:  resources,
 	})
 
