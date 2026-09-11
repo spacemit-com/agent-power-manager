@@ -18,17 +18,18 @@ untrusted entry mutation: cloud unsafe content`。`~/.cache/apm` 与 `.tmp` 本�
 MCP 临时父目录与 catalog 下载目标）与 `internal/catalog.verifyRepositoryDirectoryTrust`（覆盖
 `~/.apm/catalog.json` 的父目录链）的 mode 判定由「拒绝任何 `0o022` 位」收窄为「只拒绝其他人可写
 （`0o002`）」：`0775`/`0770`/`2775` 等组可写目录改为放行，并通过新增的 `groupWritable` 判定结果由
-持有路径的调用方输出一次 warning（新增 `logging.WarnOnce`，同一目录每进程只提示一次，字段
-`path`/`mode`）；`0777`/`0702` 等其他人可写目录（root 拥有的 sticky 例外除外）仍以
-`cloud.ErrUnsafeContent` fail closed。属主检查、逐级 `O_NOFOLLOW` 固定、fd 相对名称型操作、
-device/inode 复验、`rootSticky` 的“直接子项须属主为当前 euid”规则、APM 自身创建目录的 `0700`、
-catalog 文件的 `0600`、非 Unix 平台 fail-closed 分支与 Agent 根目录（本就不检查）全部不变；判定
-只看 mode 低 9 位，故 setgid 的 `2775` 按 `0775` 处理。决策与残留风险见
+持有路径的调用方输出一次 warning（新增 `logging.WarnGroupWritableDirectory`，按目录路径在进程内
+去重且两条链共用去重空间，字段 `path`/`mode`）；`0777`/`0702` 等其他人可写目录（root 拥有的
+sticky 例外除外）仍以 `cloud.ErrUnsafeContent` fail closed。属主检查、逐级 `O_NOFOLLOW` 固定、
+fd 相对名称型操作、device/inode 复验、`rootSticky` 的“直接子项须属主为当前 euid”规则、APM 自身
+创建目录的 `0700`、catalog 文件的 `0600`、非 Unix 平台 fail-closed 分支与 Agent 根目录（本就不
+检查）全部不变；判定只看 mode 低 9 位，故 setgid 的 `2775` 按 `0775` 处理。决策与残留风险见
 [ADR-032](ivory-tower/adr/ADR-032-accept-group-writable-trusted-directories.md)。
 
 相关提交：
 
 - `ccd7665` fix(security): accept group-writable trusted local directories
+- `b67d0fd` fix(logging): dedupe group-writable directory warning by path
 
 验证结果或限制：`gofmt -l` 与 `go vet ./...` 干净，`go build ./...` 通过；`go test ./...` 全量通过，
 `go test -race ./internal/cloud/remote/ ./internal/catalog/ ./internal/logging/` 通过。新增用例守护
@@ -36,13 +37,24 @@ catalog 文件的 `0600`、非 Unix 平台 fail-closed 分支与 Agent 根目录
 `TestVerifyDirectoryTrustStickyPolicy`、`TestOpenPinnedDirectoryAcceptsGroupWritableAncestor`，以及
 `internal/catalog` 的 `TestVerifyRepositoryDirectoryTrustModePolicy`、
 `TestRepositoryLoadAcceptsGroupWritableParent`、`TestRepositoryLoadRejectsOtherWritableParent`；
-`internal/logging` 的 `TestWarnOnceEmitsOnlyFirstEvent` 守护告警去重。既有依赖组可写即拒绝的
-`TestGetMCPRejectsWritableInjectedTemporaryParentWithoutRequest` 与
+`internal/logging` 的 `TestWarnGroupWritableDirectoryEmitsOncePerPath` 守护按路径去重。既有依赖组
+可写即拒绝的 `TestGetMCPRejectsWritableInjectedTemporaryParentWithoutRequest` 与
 `TestDownloadAgentRejectsWritableDirectoryTrustViolationsWithoutRequest` 改为显式 `chmod 0777`，
-使其继续覆盖 other-writable 的 fail-closed 路径。限制：残留风险为同组账号仍可改名或删除受检目录链
-上的目录项（造成产物落入不可达目录或 DoS），APM 不承诺隔离同组 Byzantine 写者；告警只按目录路径
-去重，不解析组成员，用户只能 `chmod g-w` 消除。本次未在真实宽权限设备上跑端到端安装，需要在板端按
-[安装/卸载功能测试指引](testing/install-uninstall.md) 另行验证。
+使其继续覆盖 other-writable 的 fail-closed 路径。
+
+设备端验证（Bianbu 4.0.6 / riscv64，主机 `k3`，`bianbu@10.0.91.51`；修复前后二进制同机对比，
+设备上未改动任何既有目录权限）：`apm list` 判定矩阵 9 个用例全部符合预期——修复前 + `cache` `0775`
+失败并复现原错误；修复后 `cache` `0775`、父目录 `0775`、`APM_HOME` `0775` 均成功且各自只输出一行
+告警，`0777` 一律失败（remote 报 `remote directory mode 0777 permits untrusted entry mutation`，
+catalog 报 `catalog directory mode 0777 permits untrusted entry mutation`），`0700` 成功且无告警；
+设备真实 `~/.config`（`0775`）作为祖先时，修复前失败、修复后成功并对 `~/.config` 与缓存目录各输出
+一行告警。修复后在 `0775` 缓存目录下完成 Skill `foo-before-summary=v0.0.1`（Codex，隔离
+`APM_HOME`/`XDG_CACHE_HOME`/`CODEX_HOME`）的完整闭环：安装 `installed`、落地内容与缓存制品
+`diff -r` 一致、同版本重装 `unchanged`、卸载 `completed`、目标目录与清单条目消失、重复卸载
+`unexecuted`，全程无活动事务残留，真实 `~/.codex` 未产生变化。限制：残留风险为同组账号仍可改名
+或删除受检目录链上的目录项（造成产物落入不可达目录或 DoS），APM 不承诺隔离同组 Byzantine 写者；
+告警只按目录路径去重，不解析组成员，用户只能 `chmod g-w` 消除。本次设备验证只覆盖 `apm list` 与
+Codex Skill 一类，未按 [安装/卸载功能测试指引](testing/install-uninstall.md) 跑全 agent/全类型矩阵。
 
 ## 2026-09-10
 
