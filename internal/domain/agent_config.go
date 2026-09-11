@@ -21,8 +21,10 @@ type AgentConfig struct {
 	Agent         AgentInfo `yaml:"agent"`
 }
 
-// AgentInfo 表示 agent.yaml 的 agent 区块稳定字段。id 仅供 Bibit 内部区分，
-// 外部身份必须使用 name+version；description 与 soul 只要求 trim 后非空。
+// AgentInfo 表示 agent.yaml 的 agent 区块稳定字段。id 是 Bibit 内部身份标识，外部身份
+// 必须使用 name+version；资源作者还须让 id 与 name 取相同值，因为 Bibit 按 agent.id 定位
+// 已安装的 agents/<agent.name> 目录，取值不同会导致「能列出、按 ID 查不到」。APM 只校验
+// id trim 后非空，不比较二者（ADR-033）；description 与 soul 只要求 trim 后非空。
 type AgentInfo struct {
 	ID          string        `yaml:"id"`
 	Name        string        `yaml:"name"`

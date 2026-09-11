@@ -5,6 +5,7 @@
 - Decision Makers：APM maintainers
 - Related Feature：[Feature 026](../features/026-agent-package-assets/spec.md)
 - Related APC Decision：[APC ADR-006](../../../apc/ivory-tower/adr/ADR-006-package-agent-with-assets.md)
+- Related ADR：[ADR-033](ADR-033-require-agent-id-to-equal-agent-name.md)（`agent.id` 必须与 `agent.name` 取相同值）
 
 ## Context
 

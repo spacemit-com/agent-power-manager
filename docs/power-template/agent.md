@@ -14,9 +14,9 @@ schema_version: 1
 
 agent:
   # ---- 必填基础信息 ----
-  id: e5249d373e67                  # Bibit 内部唯一 ID，非外部资源名称
+  id: bibit-edge-assistant          # 必须与 name 相同：Bibit 按 agent.id 定位 agents/<agent.name> 目录
   version: v1.2.0                   # vMAJOR.MINOR.PATCH
-  name: bibit-edge-assistant        # 外部资源名称（canonical），不允许包含空格
+  name: bibit-edge-assistant        # 外部资源名称（canonical），不允许包含空格；须与 id 相同
   description: Edge-first assistant powered by Bibit Intent for device operations and general tasks
   soul: |-
     你是 Bibit 端侧优先智能助手，负责在 Bianbu 设备上帮助用户完成系统查询、
@@ -68,7 +68,7 @@ agent:
 - 根闭集为必需普通文件 `agent.yaml` 与可选 `assets/` 目录，不允许其它根条目；`assets/` 内只允许普通文件与目录；归档根不额外包裹 `<name>/` 版本目录。
 - 单文档，所有 mapping 键为字符串且无重复，根与 `agent` 均为 mapping。
 - 五个必填字段：整数 `schema_version: 1`；`agent.id`/`agent.name`/`agent.version`/`agent.description`/`agent.soul` 均为 trim 后非空字符串。
-- `agent.name` 是外部 PowerRef 名称（canonical Power name）；`agent.version` 为 `vMAJOR.MINOR.PATCH`；`agent.id` 仅供 Bibit 内部区分，不与 PowerRef name 比较。
+- `agent.name` 是外部 PowerRef 名称（canonical Power name）；`agent.version` 为 `vMAJOR.MINOR.PATCH`；`agent.id` 是 Bibit 内部身份标识，但必须与 `agent.name` 取相同值——Bibit 按 `agent.id` 定位已安装的 `agents/<agent.name>` 目录，取值不同会「能列出、按 ID 查不到」。APM 不比较二者（[ADR-033](../ivory-tower/adr/ADR-033-require-agent-id-to-equal-agent-name.md)），故该错误不会出现在 `validate` 结果中。
 - `metadata.avatar` 可选：存在时必须引用 `assets/` 下以 `.png` 结尾的真实普通文件，大小 `1..1 MiB`、宽高均为 `128..1024` 像素且为正方形；不校验 DPI、色彩空间或透明度。
 - 其余字段原样透传；APM 不校验 model/tools/skills/mcps/hooks/permissions 等扩展字段的业务枚举与约束。
 - 提交 content 为确定性 `tar.gz`，Content-Type 为 `application/gzip`，MD5 针对归档原始字节。
