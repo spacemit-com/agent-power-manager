@@ -11,11 +11,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"apm/internal/domain"
+	"apm/internal/logging"
 	"golang.org/x/sys/unix"
 )
 
@@ -199,6 +201,7 @@ func versionForCatalogBytes(data []byte) domain.CatalogVersion {
 }
 
 // openParent 从根目录逐级固定并按 owner/mode 验证目录；pathname 操作信任 current EUID。
+// 组可写目录按 ADR-032 放行并告警。
 func (platform *unixRepositoryPlatform) openParent(path string) (*pinnedRepositoryDirectory, error) {
 	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return nil, fmt.Errorf("catalog parent %q must be absolute and clean", path)
@@ -219,7 +222,14 @@ func (platform *unixRepositoryPlatform) openParent(path string) (*pinnedReposito
 		if repositoryNodeType(stat) != unix.S_IFDIR {
 			return false, fs.ErrInvalid
 		}
-		return verifyRepositoryDirectoryTrust(stat, requireCurrentOwner)
+		sticky, groupWritable, trustErr := verifyRepositoryDirectoryTrust(stat, requireCurrentOwner)
+		if trustErr != nil {
+			return false, trustErr
+		}
+		if groupWritable {
+			warnGroupWritableCatalogDirectory(displayPath, stat)
+		}
+		return sticky, nil
 	}
 
 	sticky, err := verify(current, currentPath)
@@ -256,23 +266,43 @@ func (platform *unixRepositoryPlatform) openParent(path string) (*pinnedReposito
 	return &pinnedRepositoryDirectory{file: current, path: path, ops: platform.ops}, nil
 }
 
-func verifyRepositoryDirectoryTrust(stat unix.Stat_t, requireCurrentOwner bool) (bool, error) {
+// verifyRepositoryDirectoryTrust 判定一个物理目录是否可作为 catalog 目录项的受信父目录：
+// 属主必须是 root 或当前 euid，且不得被其他用户写入（0o002）。组可写（0o020）不再构成
+// 拒绝条件，改为通过 groupWritable 上报，由持有路径的调用方输出一次告警；残留的同组
+// 写者风险与信任边界说明见 ADR-032 和 ADR-021。
+func verifyRepositoryDirectoryTrust(stat unix.Stat_t, requireCurrentOwner bool) (sticky bool, groupWritable bool, err error) {
 	euid := uint32(os.Geteuid())
 	owner := stat.Uid
 	if owner != 0 && owner != euid {
-		return false, fmt.Errorf("catalog directory owner uid %d is not trusted", owner)
+		return false, false, fmt.Errorf("catalog directory owner uid %d is not trusted", owner)
 	}
 	if requireCurrentOwner && owner != euid {
-		return false, fmt.Errorf("entry below a root-owned sticky directory must be owned by euid %d", euid)
+		return false, false, fmt.Errorf("entry below a root-owned sticky directory must be owned by euid %d", euid)
 	}
 	permissions := uint32(stat.Mode) & 0o777
 	if permissions&0o022 == 0 {
-		return false, nil
+		return false, false, nil
 	}
-	if owner == 0 && uint32(stat.Mode)&uint32(unix.S_ISVTX) != 0 {
-		return true, nil
+	rootSticky := owner == 0 && uint32(stat.Mode)&uint32(unix.S_ISVTX) != 0
+	if !rootSticky {
+		if permissions&0o002 != 0 {
+			return false, false, fmt.Errorf("catalog directory mode %04o permits untrusted entry mutation", permissions)
+		}
+		// 组可写（0o020）按 ADR-032 放行，由持有路径的调用方输出一次告警。
+		return false, true, nil
 	}
-	return false, fmt.Errorf("catalog directory mode %04o permits untrusted entry mutation", permissions)
+	return true, false, nil
+}
+
+// warnGroupWritableCatalogDirectory 对放行的组可写目录输出一次告警：该目录所在组的其他
+// 账号仍可改名或删除其中的目录项，调用方须知晓这一残留风险（ADR-032）。
+func warnGroupWritableCatalogDirectory(displayPath string, stat unix.Stat_t) {
+	logging.WarnOnce(
+		"catalog-group-writable-directory:"+displayPath,
+		"local directory permits group entry mutation",
+		slog.String("path", displayPath),
+		slog.String("mode", fmt.Sprintf("%04o", uint32(stat.Mode)&0o777)),
+	)
 }
 
 func (directory *pinnedRepositoryDirectory) close() error {

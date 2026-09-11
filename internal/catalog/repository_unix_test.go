@@ -616,6 +616,78 @@ func TestRepositoryLoadRejectsRootOwnedStickyFinalParent(t *testing.T) {
 	}
 }
 
+// TestVerifyRepositoryDirectoryTrustModePolicy 固定 ADR-032 的 mode 判定矩阵：仅
+// other-writable 构成拒绝条件，group-writable 放行并上报。
+func TestVerifyRepositoryDirectoryTrustModePolicy(t *testing.T) {
+	euid := uint32(os.Geteuid())
+	directoryMode := func(mode uint32, owner uint32) unix.Stat_t {
+		return unix.Stat_t{Mode: unix.S_IFDIR | mode, Uid: owner}
+	}
+	tests := []struct {
+		name              string
+		stat              unix.Stat_t
+		wantSticky        bool
+		wantGroupWritable bool
+		wantRejected      bool
+	}{
+		{name: "current euid private", stat: directoryMode(0o700, euid)},
+		{name: "current euid world readable", stat: directoryMode(0o755, euid)},
+		{name: "current euid group writable", stat: directoryMode(0o775, euid), wantGroupWritable: true},
+		{name: "current euid group writable setgid", stat: directoryMode(0o2775, euid), wantGroupWritable: true},
+		{name: "current euid other writable", stat: directoryMode(0o777, euid), wantRejected: true},
+		{name: "current euid other only writable", stat: directoryMode(0o702, euid), wantRejected: true},
+		{name: "root private", stat: directoryMode(0o700, 0)},
+		{name: "root group writable", stat: directoryMode(0o775, 0), wantGroupWritable: true},
+		{name: "root other writable", stat: directoryMode(0o777, 0), wantRejected: true},
+		{name: "root sticky other writable", stat: directoryMode(0o777|unix.S_ISVTX, 0), wantSticky: true},
+		{name: "root sticky group writable", stat: directoryMode(0o775|unix.S_ISVTX, 0), wantSticky: true},
+		{name: "root sticky without write bits", stat: directoryMode(0o750|unix.S_ISVTX, 0)},
+		{name: "foreign owner", stat: directoryMode(0o700, euid+1), wantRejected: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sticky, groupWritable, err := verifyRepositoryDirectoryTrust(tt.stat, false)
+			if tt.wantRejected {
+				if err == nil {
+					t.Fatal("verifyRepositoryDirectoryTrust() error = nil, want rejection")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("verifyRepositoryDirectoryTrust() error = %v, want acceptance", err)
+			}
+			if sticky != tt.wantSticky || groupWritable != tt.wantGroupWritable {
+				t.Fatalf("verifyRepositoryDirectoryTrust() = %t, %t, want %t, %t", sticky, groupWritable, tt.wantSticky, tt.wantGroupWritable)
+			}
+		})
+	}
+}
+
+// TestRepositoryLoadAcceptsGroupWritableParent 校验 0775 父目录不再阻断 catalog 读取。
+func TestRepositoryLoadAcceptsGroupWritableParent(t *testing.T) {
+	root := trustedRepositoryDir(t)
+	if err := os.Chmod(root, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	path := writeRepositoryFile(t, root, "catalog.json", validCatalogJSON(), 0o600)
+	if _, _, err := newTestRepository(t, path).Load(); err != nil {
+		t.Fatalf("Load() error = %v, want group-writable parent accepted", err)
+	}
+}
+
+// TestRepositoryLoadRejectsOtherWritableParent 校验 0777 父目录仍 fail closed。
+func TestRepositoryLoadRejectsOtherWritableParent(t *testing.T) {
+	root := trustedRepositoryDir(t)
+	path := writeRepositoryFile(t, root, "catalog.json", validCatalogJSON(), 0o600)
+	if err := os.Chmod(root, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := newTestRepository(t, path).Load(); err == nil {
+		t.Fatal("Load() error = nil, want other-writable parent rejected")
+	}
+}
+
 func TestRepositoryReplaceCommittedCleanupPerformsSecondDirectorySync(t *testing.T) {
 	oldData := validCatalogJSON()
 	newData := repositoryCatalogVariant(t, "replacement message")

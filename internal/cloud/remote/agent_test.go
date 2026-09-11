@@ -342,7 +342,11 @@ func TestDownloadAgentRejectsWritableDirectoryTrustViolationsWithoutRequest(t *t
 	})
 	parent := trustedTestDir(t)
 	untrusted := filepath.Join(parent, "untrusted")
-	if err := os.Mkdir(untrusted, 0o777); err != nil {
+	if err := os.Mkdir(untrusted, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// 显式 Chmod，避免进程 umask 把目录软化成 0775（ADR-032 下可接受）。
+	if err := os.Chmod(untrusted, 0o777); err != nil {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(untrusted, "agent")

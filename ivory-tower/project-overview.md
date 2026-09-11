@@ -114,7 +114,7 @@ APM 支持仅供测试使用的 `APM_HOME` 环境变量，使测试能在临时�
 | 项目 | 要求或约束 |
 | --- | --- |
 | 性能与可靠性 | 命令执行中失败由 CLI 统一记录。Search/默认 List 仅在 catalog 同步阶段短时获取非阻塞全局锁，随后基于不可变 Snapshot 进行本地查询；installed List 全程无锁。有效旧 catalog 可在 provider/update 失败时 stale 降级并 warning，但锁竞争、取消和本地安全失败不降级。跨 journal/catalog/manifest/target 的全局一致读取仍不承诺。Fix、Install 与 Uninstall 的恢复由全局锁串行化（[ADR-003](adr/ADR-003-serialize-lifecycle-and-recover-journal.md)、[ADR-021](adr/ADR-021-cache-versioned-resource-catalog.md)）。 |
-| 安全与合规 | MCP CLI 不经 shell，动态解析 PATH，单次调用固定 30 秒超时且 stdout/stderr 有界；状态输出不匹配时 fail closed 并保留 journal。MCP 定义不包含密钥字段，HTTP endpoint 只允许 HTTPS。Remote 以 CatalogEntry 验证 Content-Type、size、MD5、归档限制与已知归档/可执行签名。Catalog Repository 拒绝 symlink/hardlink、非私有 mode、不可信目录链和可检测替换；pathname 操作将 current EUID 视为受信任主体，advisory lock 只串行守约发布者，不承诺隔离恶意同 EUID 在最终 `fstatat`→`unlinkat` 窄窗的替换（ADR-021）。其它受信目录链同样不把同一 euid 主动篡改纳入隔离边界。 |
+| 安全与合规 | MCP CLI 不经 shell，动态解析 PATH，单次调用固定 30 秒超时且 stdout/stderr 有界；状态输出不匹配时 fail closed 并保留 journal。MCP 定义不包含密钥字段，HTTP endpoint 只允许 HTTPS。Remote 以 CatalogEntry 验证 Content-Type、size、MD5、归档限制与已知归档/可执行签名。Catalog Repository 拒绝 symlink/hardlink、非私有 mode、不可信目录链和可检测替换。`~/.cache/apm` 与 `~/.apm` 两条目录链的判定为：属主必须是 root 或当前 euid，拒绝其他用户可写的目录，接受组可写目录并每个路径输出一次 warning（[ADR-032](adr/ADR-032-accept-group-writable-trusted-directories.md)）；pathname 操作将 current EUID 视为受信任主体，advisory lock 只串行守约发布者，不承诺隔离恶意同 EUID 在最终 `fstatat`→`unlinkat` 窄窗的替换（ADR-021）。其它受信目录链同样不把同一 euid 主动篡改纳入隔离边界。 |
 | 技术与交付 | APM 仅在相关命令中通过 Agent 根目录是否存在来感知安装状态，不承担目标 Agent 的安装、卸载、实时监控或运行时职责。 |
 
 ## Risks and Decisions

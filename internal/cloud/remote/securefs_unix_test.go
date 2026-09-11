@@ -5,6 +5,7 @@ package remote
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"apm/internal/cloud"
@@ -155,7 +156,7 @@ func TestVerifyDirectoryTrustRejectsForeignOwner(t *testing.T) {
 		Uid:  uint32(os.Geteuid()) + 1,
 	}
 
-	if _, err := verifyDirectoryTrust(stat, directoryTrustPolicy{}, false); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if _, _, err := verifyDirectoryTrust(stat, directoryTrustPolicy{}, false); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("verifyDirectoryTrust() error = %v, want foreign parent owner ErrUnsafeContent", err)
 	}
 }
@@ -177,32 +178,132 @@ func TestOpenPinnedDirectoryAcceptsTestingTempDirBelowRootStickyAncestor(t *test
 func TestVerifyDirectoryTrustRequiresCurrentOwnerBelowRootStickyDirectory(t *testing.T) {
 	policy := directoryTrustPolicy{allowRootOwnedSticky: true}
 	stickyRoot := unix.Stat_t{Mode: unix.S_IFDIR | unix.S_ISVTX | 0o777, Uid: 0}
-	sticky, err := verifyDirectoryTrust(stickyRoot, policy, false)
-	if err != nil || !sticky {
-		t.Fatalf("verifyDirectoryTrust(root sticky) = %t, %v, want true, nil", sticky, err)
+	sticky, groupWritable, err := verifyDirectoryTrust(stickyRoot, policy, false)
+	if err != nil || !sticky || groupWritable {
+		t.Fatalf("verifyDirectoryTrust(root sticky) = %t, %t, %v, want true, false, nil", sticky, groupWritable, err)
 	}
 
 	ownedChild := unix.Stat_t{Mode: unix.S_IFDIR | 0o700, Uid: uint32(os.Geteuid())}
-	sticky, err = verifyDirectoryTrust(ownedChild, policy, true)
-	if err != nil || sticky {
-		t.Fatalf("verifyDirectoryTrust(current-euid child) = %t, %v, want false, nil", sticky, err)
+	sticky, groupWritable, err = verifyDirectoryTrust(ownedChild, policy, true)
+	if err != nil || sticky || groupWritable {
+		t.Fatalf("verifyDirectoryTrust(current-euid child) = %t, %t, %v, want false, false, nil", sticky, groupWritable, err)
 	}
+	// 组可写目录按 ADR-032 放行并上报，由调用方输出一次告警。
 	writableOwnedChild := ownedChild
 	writableOwnedChild.Mode = unix.S_IFDIR | 0o770
-	if _, err := verifyDirectoryTrust(writableOwnedChild, policy, true); !errors.Is(err, cloud.ErrUnsafeContent) {
-		t.Fatalf("verifyDirectoryTrust(group-writable current-euid child) error = %v, want ErrUnsafeContent", err)
+	sticky, groupWritable, err = verifyDirectoryTrust(writableOwnedChild, policy, true)
+	if err != nil || sticky || !groupWritable {
+		t.Fatalf("verifyDirectoryTrust(group-writable current-euid child) = %t, %t, %v, want false, true, nil", sticky, groupWritable, err)
 	}
 
 	foreignChild := ownedChild
 	foreignChild.Uid++
-	if _, err := verifyDirectoryTrust(foreignChild, policy, true); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if _, _, err := verifyDirectoryTrust(foreignChild, policy, true); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("verifyDirectoryTrust(foreign child) error = %v, want ErrUnsafeContent", err)
 	}
 }
 
 func TestVerifyDirectoryTrustRejectsNonStickyWritableDirectory(t *testing.T) {
 	stat := unix.Stat_t{Mode: unix.S_IFDIR | 0o777, Uid: 0}
-	if _, err := verifyDirectoryTrust(stat, directoryTrustPolicy{allowRootOwnedSticky: true}, false); !errors.Is(err, cloud.ErrUnsafeContent) {
+	if _, _, err := verifyDirectoryTrust(stat, directoryTrustPolicy{allowRootOwnedSticky: true}, false); !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("verifyDirectoryTrust(non-sticky writable root) error = %v, want ErrUnsafeContent", err)
+	}
+}
+
+// TestVerifyDirectoryTrustModePolicy 固定 ADR-032 的 mode 判定矩阵：仅 other-writable
+// 构成拒绝条件，group-writable 放行并上报。
+func TestVerifyDirectoryTrustModePolicy(t *testing.T) {
+	euid := uint32(os.Geteuid())
+	policy := directoryTrustPolicy{allowRootOwnedSticky: true}
+	directoryMode := func(mode uint32, owner uint32) unix.Stat_t {
+		return unix.Stat_t{Mode: unix.S_IFDIR | mode, Uid: owner}
+	}
+	tests := []struct {
+		name              string
+		stat              unix.Stat_t
+		wantSticky        bool
+		wantGroupWritable bool
+		wantUnsafe        bool
+	}{
+		{name: "current euid private", stat: directoryMode(0o700, euid)},
+		{name: "current euid world readable", stat: directoryMode(0o755, euid)},
+		{name: "current euid group writable", stat: directoryMode(0o775, euid), wantGroupWritable: true},
+		{name: "current euid group only writable", stat: directoryMode(0o770, euid), wantGroupWritable: true},
+		{name: "current euid group writable setgid", stat: directoryMode(0o2775, euid), wantGroupWritable: true},
+		{name: "current euid other writable", stat: directoryMode(0o777, euid), wantUnsafe: true},
+		{name: "current euid other only writable", stat: directoryMode(0o702, euid), wantUnsafe: true},
+		{name: "current euid sticky group writable", stat: directoryMode(0o775|unix.S_ISVTX, euid), wantGroupWritable: true},
+		{name: "root private", stat: directoryMode(0o700, 0)},
+		{name: "root group writable", stat: directoryMode(0o775, 0), wantGroupWritable: true},
+		{name: "root other writable", stat: directoryMode(0o777, 0), wantUnsafe: true},
+		{name: "root sticky other writable", stat: directoryMode(0o777|unix.S_ISVTX, 0), wantSticky: true},
+		{name: "root sticky group writable", stat: directoryMode(0o775|unix.S_ISVTX, 0), wantSticky: true},
+		{name: "root sticky without write bits", stat: directoryMode(0o750|unix.S_ISVTX, 0)},
+		{name: "foreign owner", stat: directoryMode(0o700, euid+1), wantUnsafe: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sticky, groupWritable, err := verifyDirectoryTrust(tt.stat, policy, false)
+			if tt.wantUnsafe {
+				if !errors.Is(err, cloud.ErrUnsafeContent) {
+					t.Fatalf("verifyDirectoryTrust() error = %v, want ErrUnsafeContent", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("verifyDirectoryTrust() error = %v, want acceptance", err)
+			}
+			if sticky != tt.wantSticky || groupWritable != tt.wantGroupWritable {
+				t.Fatalf("verifyDirectoryTrust() = %t, %t, want %t, %t", sticky, groupWritable, tt.wantSticky, tt.wantGroupWritable)
+			}
+		})
+	}
+}
+
+// TestVerifyDirectoryTrustStickyPolicy 校验 root-owned sticky 例外只在 policy 允许时生效：
+// openOptionalEmpty 传入零策略，因此既存目标目录本身不得依赖该例外。
+func TestVerifyDirectoryTrustStickyPolicy(t *testing.T) {
+	stickyWritable := unix.Stat_t{Mode: unix.S_IFDIR | unix.S_ISVTX | 0o777, Uid: 0}
+	if _, _, err := verifyDirectoryTrust(stickyWritable, directoryTrustPolicy{}, false); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("verifyDirectoryTrust(sticky without policy) error = %v, want ErrUnsafeContent", err)
+	}
+
+	stickyGroupWritable := unix.Stat_t{Mode: unix.S_IFDIR | unix.S_ISVTX | 0o775, Uid: 0}
+	sticky, groupWritable, err := verifyDirectoryTrust(stickyGroupWritable, directoryTrustPolicy{}, false)
+	if err != nil || sticky || !groupWritable {
+		t.Fatalf("verifyDirectoryTrust(group-writable sticky without policy) = %t, %t, %v, want false, true, nil", sticky, groupWritable, err)
+	}
+}
+
+// TestOpenPinnedDirectoryAcceptsGroupWritableAncestor 校验 0775 祖先目录不再阻断固定，
+// 同时 other-writable 目录仍 fail closed。
+func TestOpenPinnedDirectoryAcceptsGroupWritableAncestor(t *testing.T) {
+	parent := trustedTestDir(t)
+
+	groupWritable := filepath.Join(parent, "cache")
+	if err := os.Mkdir(groupWritable, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(groupWritable, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	directory, err := openPinnedDirectory(groupWritable)
+	if err != nil {
+		t.Fatalf("openPinnedDirectory(0775 ancestor) error = %v, want group-writable directory accepted", err)
+	}
+	if err := directory.close(); err != nil {
+		t.Fatalf("close pinned group-writable directory: %v", err)
+	}
+
+	otherWritable := filepath.Join(parent, "world")
+	if err := os.Mkdir(otherWritable, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(otherWritable, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openPinnedDirectory(otherWritable); !errors.Is(err, cloud.ErrUnsafeContent) {
+		t.Fatalf("openPinnedDirectory(0777 ancestor) error = %v, want ErrUnsafeContent", err)
 	}
 }

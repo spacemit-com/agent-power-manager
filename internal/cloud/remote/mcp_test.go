@@ -279,7 +279,8 @@ func TestGetMCPRejectsWritableInjectedTemporaryParentWithoutRequest(t *testing.T
 		serveValidContent(t, w, r, remoteMCPRef, contents)
 	})
 	root := trustedTestDir(t)
-	if err := os.Chmod(root, 0o770); err != nil {
+	// other-writable 仍是拒绝条件；group-writable 按 ADR-032 放行。
+	if err := os.Chmod(root, 0o777); err != nil {
 		t.Fatal(err)
 	}
 	client.mcpTempParent = root

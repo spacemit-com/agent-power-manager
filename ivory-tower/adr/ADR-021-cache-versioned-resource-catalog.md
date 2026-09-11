@@ -31,7 +31,8 @@ fallback。同步失败时，有效旧 catalog 可供 stale list/search 和已�
 
 Repository 只接受物理普通文件，以 `0600`、100 MiB 上限、严格 schema 和精确 SHA-256/size
 校验加载与原子发布 `catalog.json`；symlink、hardlink、可检测的目录项替换和不可信目录链均
-fail closed。该 pathname 安全模型明确把 current EUID 视为受信任主体：parent advisory lock
+fail closed。目录链的“不可信”判定（拒绝对其他用户可写、接受组可写并告警）由
+[ADR-032](ADR-032-accept-group-writable-trusted-directories.md) 固定。该 pathname 安全模型明确把 current EUID 视为受信任主体：parent advisory lock
 只串行遵守 Repository 协议的发布者，不承诺隔离恶意同 EUID 进程绕过该锁并在 POSIX 最终
 `fstatat` 到 `unlinkat` 的 syscall 窄窗替换目录项。检测到的替换仍拒绝删除；若威胁模型需要
 覆盖同凭据 Byzantine 写者，必须另行采用进程/目录隔离或具备 fd-bound conditional unlink

@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"apm/internal/cloud"
+	"apm/internal/logging"
 	"golang.org/x/sys/unix"
 )
 
@@ -105,7 +107,7 @@ type directoryTrustPolicy struct {
 
 // openPinnedDirectory 从文件系统根开始逐级固定现有物理目录，每一级都拒绝符号链接。
 // root-owned sticky 目录仅信任当前 euid 拥有的直接子目录；若其为终点，后续名称型
-// 创建和发布仍须使用 O_EXCL 或 no-replace 语义。
+// 创建和发布仍须使用 O_EXCL 或 no-replace 语义。组可写目录按 ADR-032 放行并告警。
 func openPinnedDirectory(path string) (*pinnedDirectory, error) {
 	return openPinnedDirectoryWithPolicy(path, directoryTrustPolicy{allowRootOwnedSticky: true})
 }
@@ -131,9 +133,12 @@ func openPinnedDirectoryWithPolicy(path string, policy directoryTrustPolicy) (*p
 			}
 			return false, fmt.Errorf("verify pinned remote directory %q: %w", displayPath, errors.Join(cloud.ErrUnsafeContent, statErr))
 		}
-		sticky, trustErr := verifyDirectoryTrust(stat, policy, requireCurrentOwner)
+		sticky, groupWritable, trustErr := verifyDirectoryTrust(stat, policy, requireCurrentOwner)
 		if trustErr != nil {
 			return false, fmt.Errorf("verify pinned remote directory %q: %w", displayPath, trustErr)
+		}
+		if groupWritable {
+			warnGroupWritableDirectory(displayPath, stat)
 		}
 		return sticky, nil
 	}
@@ -171,28 +176,34 @@ func openPinnedDirectoryWithPolicy(path string, policy directoryTrustPolicy) (*p
 }
 
 // verifyDirectoryTrust 建立所有名称型 *at 操作的父目录信任不变量：OS/root 与当前
-// 进程受信，目录必须由 root 或当前 euid 拥有且不可被其他主体写入。任何 root-owned
-// sticky 目录都可保护当前 euid 的直接条目；同一 euid 主动篡改不在
-// 本隔离边界内，后续 device/inode 复验仅用于发现损坏，不能替代该信任不变量。
-func verifyDirectoryTrust(stat unix.Stat_t, policy directoryTrustPolicy, requireCurrentOwner bool) (bool, error) {
+// 进程受信，目录必须由 root 或当前 euid 拥有，且不得被其他用户写入（0o002）。组可写
+// （0o020）不再构成拒绝条件，改为通过 groupWritable 上报，由持有路径的调用方输出一次
+// 告警；残留的同组写者风险见 ADR-032。任何 root-owned sticky 目录都可保护当前 euid 的
+// 直接条目；同一 euid 主动篡改不在本隔离边界内，后续 device/inode 复验仅用于发现损坏，
+// 不能替代该信任不变量。
+func verifyDirectoryTrust(stat unix.Stat_t, policy directoryTrustPolicy, requireCurrentOwner bool) (sticky bool, groupWritable bool, err error) {
 	euid := uint32(os.Geteuid())
 	owner := stat.Uid
 	if owner != 0 && owner != euid {
-		return false, unsafeRemoteFilesystem("remote directory owner uid %d is not trusted", owner)
+		return false, false, unsafeRemoteFilesystem("remote directory owner uid %d is not trusted", owner)
 	}
 	if requireCurrentOwner && owner != euid {
-		return false, unsafeRemoteFilesystem("entry directly below root-owned sticky directory must be owned by current euid %d", euid)
+		return false, false, unsafeRemoteFilesystem("entry directly below root-owned sticky directory must be owned by current euid %d", euid)
 	}
 
 	permissions := uint32(stat.Mode) & 0o777
 	if permissions&0o022 == 0 {
-		return false, nil
+		return false, false, nil
 	}
 	rootSticky := policy.allowRootOwnedSticky && owner == 0 && uint32(stat.Mode)&uint32(unix.S_ISVTX) != 0
 	if !rootSticky {
-		return false, unsafeRemoteFilesystem("remote directory mode %04o permits untrusted entry mutation", permissions)
+		if permissions&0o002 != 0 {
+			return false, false, unsafeRemoteFilesystem("remote directory mode %04o permits untrusted entry mutation", permissions)
+		}
+		// 组可写（0o020）按 ADR-032 放行，由持有路径的调用方输出一次告警。
+		return false, true, nil
 	}
-	return true, nil
+	return true, false, nil
 }
 
 func (directory *pinnedDirectory) close() error {
@@ -449,7 +460,11 @@ func (directory *pinnedDirectory) openOptionalEmpty(name string) (*pinnedEmptyDi
 	file := os.NewFile(uintptr(fd), filepath.Join(directory.path, name))
 	stat, statErr := statUnixFile(fd)
 	if statErr == nil && unixNodeType(stat) == unix.S_IFDIR && unixIdentity(stat) == unixIdentity(entryStat) {
-		_, statErr = verifyDirectoryTrust(stat, directoryTrustPolicy{}, false)
+		var groupWritable bool
+		_, groupWritable, statErr = verifyDirectoryTrust(stat, directoryTrustPolicy{}, false)
+		if statErr == nil && groupWritable {
+			warnGroupWritableDirectory(filepath.Join(directory.path, name), stat)
+		}
 	}
 	empty, emptyErr := pinnedDirectoryEmpty(file)
 	if statErr != nil || emptyErr != nil || !empty {
@@ -716,6 +731,17 @@ func statUnixFile(fd int) (unix.Stat_t, error) {
 	var stat unix.Stat_t
 	err := unix.Fstat(fd, &stat)
 	return stat, err
+}
+
+// warnGroupWritableDirectory 对放行的组可写目录输出一次告警：该目录所在组的其他账号
+// 仍可改名或删除其中的目录项，调用方须知晓这一残留风险（ADR-032）。
+func warnGroupWritableDirectory(displayPath string, stat unix.Stat_t) {
+	logging.WarnOnce(
+		"remote-group-writable-directory:"+displayPath,
+		"local directory permits group entry mutation",
+		slog.String("path", displayPath),
+		slog.String("mode", fmt.Sprintf("%04o", uint32(stat.Mode)&0o777)),
+	)
 }
 
 func unixIdentity(stat unix.Stat_t) fileIdentity {
