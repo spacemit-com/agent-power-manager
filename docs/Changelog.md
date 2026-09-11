@@ -2,6 +2,65 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-11（后续：agent.id 必须等于 agent.name）
+
+分类：缺陷修复
+
+用户需求：修正 Agent 资源的身份取值约定。以 `outputs/basic-agent/agent.yaml` 为样板，把
+`agent.id` 与 `agent.name` 取相同值这一约定落到 `../using-apm` 的模板与提交规则、`test-agent`
+资源（提交源与 `outputs/` 副本），以及仓库自身的 Agent 模板文档与内建 fixture 上。
+
+解决方案或完成结果：隔离实测显示 Runtime 在 `agents/` 下按 `agent.id` 定位已安装的 Agent 目录，
+而 APM 按 `agent.name` 发布目录（`internal/adapter/bibit_agent.go` 的 `TargetPath` 为
+`root/agents/<ref.Name>`）。`test-agent` 的 `id` 为 `test-agent-84a175a0-...`、`name` 为
+`test-agent`，于是安装成功、`apm list --installed --type agent` 也能列出，但 Runtime 按 ID 找不到该
+Agent；而且 APM 侧没有任何检查能拦住它——`internal/domain/agent_config.go` 的 `Validate` 只要求
+`agent.id` trim 后非空，`ValidatePowerRef` 只比较 `name`/`version`，四个 Agent 资源根在修正前全部
+`validate` 通过且 `warnings` 为空。因此这条只能作为资源创作规则，由模板、提交规则与 fixture 承载：
+新增 [ADR-033](ivory-tower/adr/ADR-033-require-agent-id-to-equal-agent-name.md)，并在
+[ADR-023](ivory-tower/adr/ADR-023-package-agent-with-assets.md) 与
+[project-overview](ivory-tower/project-overview.md)、`BUILD.md` 中引用。
+
+`../using-apm`：`templates/agent/agent.yaml` 的 `id`/`name` 改用同一个 `my-agent` 占位值，并按
+`basic-agent` 补齐 `zh_name`/`model`/`tools`/`skills`/`mcps`/`hooks` 可选字段骨架（标注 APM 不校验其
+业务语义）；`references/submission.md` 删去「Assign a distinct internal ID」并改为说明两者必须同值、
+APM 不比较、校验不会报错、不得手改已安装的 `agents/` 目录；`templates/README.md` 同步该规则并说明可选
+字段为示意；`SKILL.md` 的 Common mistakes 表新增该错误与纠正。
+
+`test-agent`：`outputs/test-agent/agent.yaml` 与提交源 `../test-agent/agent.yaml` 的 `id` 由
+`test-agent-84a175a0-1223-4e0a-9c70-6f98f2769926` 改为 `test-agent`（改 id 而非改 name：旧 id 含大写
+与十六进制片段，不满足 `IsCanonicalPowerName`），`version`/`description`/`soul` 逐字不变。
+
+仓库：`docs/power-template/agent.md` 的 `id` 示例由 `e5249d373e67` 改为与 name 相同的
+`bibit-edge-assistant`，其与 `docs/power-template/README.md` 的约束条由「`agent.id` 仅供 Bibit 内部
+区分，不与 PowerRef name 比较」改为「是 Bibit 内部身份标识但必须与 `agent.name` 同值」；内建 local
+fixture `internal/cloud/resources/agents/bianbu-agent-default/v1.0.0/agent.yaml` 的 `id` 由
+`bibit-internal-bianbu-agent-default` 改为 `bianbu-agent-default`，使 `BUILD.md` 记录的
+`install bianbu-agent-default=v1.0.0 --type agent` 开发流程在 Runtime 侧可用；
+`internal/domain/agent_config.go` 仅更新 `AgentInfo` 注释，代码行为零变化。`ivory-tower/features/`
+下的历史 spec/plan 保留原表述，不改写历史记录。
+
+相关提交：
+
+- `94d814e` docs(agent): require agent.id to equal agent.name
+
+验证结果或限制：四个 Agent 资源根（`../using-apm/templates/agent`、`outputs/test-agent`、
+`../test-agent`、内建 fixture）逐个断言 `agent.id == agent.name` 通过；`apm validate --type agent
+--json` 四者均 exit 0、`warnings` 为空，且外部身份不变（`name` 仍为 `my-agent`/`test-agent`/
+`test-agent`/`bianbu-agent-default`）；`APM_CLOUD_PROVIDER=local APM_CLOUD_LOCAL_ROOT=…` 下
+`apm show bianbu-agent-default --type agent --json` 与 `apm list --type agent` 正常解析修正后的
+fixture；`go build ./...`、`go vet ./...`、`go test -count=1 ./...` 全部通过，`gofmt -l internal/ cmd/`
+仅剩 2 个既有未格式化文件（`internal/pluginartifact/validation_test.go`、
+`internal/transaction/plugin_marketplace_recovery_test.go`，本次未触碰）；规范性旧表述
+（`不与 PowerRef name 比较`、`distinct internal ID`、`Assign a new internal agent.id`、
+`非外部资源名称`）在仓库文档与 `../using-apm` 中零命中。限制：Runtime 按 `agent.id`定位目录这一行为
+无法在本仓库、开发机或测试设备上复现（无可用 Runtime 环境），依据是用户的隔离实测与 Bibit 侧契约旁证
+（`RuntimeAgent` 以 `id` 为主键、Runtime 控制台把 agents 标为「专家」、Runtime 代理以
+`/api/v1/agents/<agent_id>` 寻址），故本次未执行 Runtime 侧端到端验证；APM 不强制该约束，作者写错时
+`validate`/`submit` 仍会成功。已发布的 `test-agent@v1.0.0` 与 `outputs/test-agent-1-v1.0.0.tar.gz`
+保持原样（后者是已发布内容的记录，不伪造），修正需要重新提交，是否升版本未定。后续可评估在
+`apm validate --type agent` 中把 `id != name` 报为 warning。
+
 ## 2026-09-11
 
 分类：缺陷修复
