@@ -2,6 +2,48 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-11
+
+分类：缺陷修复
+
+用户需求：放宽 APM 对 config/cache 目录权限的限制——只要目录仅对同组可写就应正常工作，使 APM 能在
+部分把家目录子目录建成宽权限的发行版镜像上开箱可用。实测 Bianbu 设备 `/home/bianbu/.cache` 为
+`drwxrwxr-x bianbu:bianbu`（`0775`）、会话 umask 为 `0002`，`apm list` 与安装因此在目录信任检查处
+直接失败：`verify pinned remote directory "/home/bianbu/.cache": remote directory mode 0775 permits
+untrusted entry mutation: cloud unsafe content`。`~/.cache/apm` 与 `.tmp` 本身由 APM 以 `0700` 创建，
+但 APM 从不改写既存父目录，而 XDG 只规定程序创建目录时用 `0700`，所以不能把“发行版把 `~/.cache`
+改成 `0700`”当作使用前提。
+
+解决方案或完成结果：`internal/cloud/remote.verifyDirectoryTrust`（覆盖 `~/.cache/apm` 的下载目标、
+MCP 临时父目录与 catalog 下载目标）与 `internal/catalog.verifyRepositoryDirectoryTrust`（覆盖
+`~/.apm/catalog.json` 的父目录链）的 mode 判定由「拒绝任何 `0o022` 位」收窄为「只拒绝其他人可写
+（`0o002`）」：`0775`/`0770`/`2775` 等组可写目录改为放行，并通过新增的 `groupWritable` 判定结果由
+持有路径的调用方输出一次 warning（新增 `logging.WarnOnce`，同一目录每进程只提示一次，字段
+`path`/`mode`）；`0777`/`0702` 等其他人可写目录（root 拥有的 sticky 例外除外）仍以
+`cloud.ErrUnsafeContent` fail closed。属主检查、逐级 `O_NOFOLLOW` 固定、fd 相对名称型操作、
+device/inode 复验、`rootSticky` 的“直接子项须属主为当前 euid”规则、APM 自身创建目录的 `0700`、
+catalog 文件的 `0600`、非 Unix 平台 fail-closed 分支与 Agent 根目录（本就不检查）全部不变；判定
+只看 mode 低 9 位，故 setgid 的 `2775` 按 `0775` 处理。决策与残留风险见
+[ADR-032](ivory-tower/adr/ADR-032-accept-group-writable-trusted-directories.md)。
+
+相关提交：
+
+- `ccd7665` fix(security): accept group-writable trusted local directories
+
+验证结果或限制：`gofmt -l` 与 `go vet ./...` 干净，`go build ./...` 通过；`go test ./...` 全量通过，
+`go test -race ./internal/cloud/remote/ ./internal/catalog/ ./internal/logging/` 通过。新增用例守护
+判定矩阵：`internal/cloud/remote` 的 `TestVerifyDirectoryTrustModePolicy`、
+`TestVerifyDirectoryTrustStickyPolicy`、`TestOpenPinnedDirectoryAcceptsGroupWritableAncestor`，以及
+`internal/catalog` 的 `TestVerifyRepositoryDirectoryTrustModePolicy`、
+`TestRepositoryLoadAcceptsGroupWritableParent`、`TestRepositoryLoadRejectsOtherWritableParent`；
+`internal/logging` 的 `TestWarnOnceEmitsOnlyFirstEvent` 守护告警去重。既有依赖组可写即拒绝的
+`TestGetMCPRejectsWritableInjectedTemporaryParentWithoutRequest` 与
+`TestDownloadAgentRejectsWritableDirectoryTrustViolationsWithoutRequest` 改为显式 `chmod 0777`，
+使其继续覆盖 other-writable 的 fail-closed 路径。限制：残留风险为同组账号仍可改名或删除受检目录链
+上的目录项（造成产物落入不可达目录或 DoS），APM 不承诺隔离同组 Byzantine 写者；告警只按目录路径
+去重，不解析组成员，用户只能 `chmod g-w` 消除。本次未在真实宽权限设备上跑端到端安装，需要在板端按
+[安装/卸载功能测试指引](testing/install-uninstall.md) 另行验证。
+
 ## 2026-09-10
 
 分类：缺陷修复
