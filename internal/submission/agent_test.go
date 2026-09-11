@@ -139,6 +139,67 @@ func TestValidateAgentReturnsDirectoryMetadata(t *testing.T) {
 	}
 }
 
+// TestValidateAgentWarnsWhenIDDiffersFromName 校验 agent.id 与 agent.name 取值不同时的 warning：
+// Bibit 按 agent.id 定位已安装的 agents/<name> 目录，取值不同会让 Agent 在 Runtime 侧按 ID
+// 找不到，但 APM 不比较二者，因此仍必须通过校验（ADR-033）。
+func TestValidateAgentWarnsWhenIDDiffersFromName(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentYAMLOnlyDir(t, dir, "schema_version: 1\nagent:\n"+
+		"  id: demo-agent-internal\n"+
+		"  name: demo-agent\n"+
+		"  version: v1.0.0\n"+
+		"  description: demo\n"+
+		"  soul: help safely\n")
+	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil: id 与 name 不同取值不是校验错误", err)
+	}
+	if got.Name != "demo-agent" {
+		t.Fatalf("Validate() name = %q, want demo-agent", got.Name)
+	}
+	if len(got.Warnings) != 1 {
+		t.Fatalf("Validate() warnings = %v, want exactly 1", got.Warnings)
+	}
+	for _, want := range []string{`agent.id "demo-agent-internal"`, `agent.name "demo-agent"`} {
+		if !strings.Contains(got.Warnings[0], want) {
+			t.Fatalf("warning %q does not mention %q", got.Warnings[0], want)
+		}
+	}
+}
+
+// TestValidateAgentDoesNotWarnWhenIDEqualsName 守护 id 与 name 相同取值不产生任何 warning。
+func TestValidateAgentDoesNotWarnWhenIDEqualsName(t *testing.T) {
+	dir := t.TempDir()
+	writeValidAgentDir(t, dir)
+	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if len(got.Warnings) != 0 {
+		t.Fatalf("Validate() warnings = %v, want none", got.Warnings)
+	}
+}
+
+// TestPrepareAgentAcceptsIDNameMismatch 守护 submit 路径不受 ADR-034 影响：
+// id 与 name 不同取值只影响 validate 的 warning，Prepare 仍必须成功。
+func TestPrepareAgentAcceptsIDNameMismatch(t *testing.T) {
+	root := t.TempDir()
+	writeAgentYAMLOnlyDir(t, root, "schema_version: 1\nagent:\n"+
+		"  id: demo-agent-internal\n"+
+		"  name: demo-agent\n"+
+		"  version: v1.0.0\n"+
+		"  description: demo\n"+
+		"  soul: help safely\n")
+	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: root, Message: "first"})
+	if err != nil {
+		t.Fatalf("Prepare() error = %v, want nil: id 与 name 不同取值不是提交错误", err)
+	}
+	if got.Name != "demo-agent" || got.Version != "v1.0.0" || got.ContentType != "application/gzip" {
+		t.Fatalf("Prepare() = %+v", got)
+	}
+	assertTarGzFiles(t, got.Bytes, []string{"agent.yaml"})
+}
+
 func TestPrepareAgentProducesDeterministicGzip(t *testing.T) {
 	root := t.TempDir()
 	writeValidAgentDir(t, root)

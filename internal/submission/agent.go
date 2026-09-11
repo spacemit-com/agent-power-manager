@@ -42,11 +42,27 @@ func (agentSourceLoader) Load(ctx context.Context, path string) (source, error) 
 	return source{
 		validation: Validation{
 			Type: domain.PowerTypeAgent, Name: validated.Config.Agent.Name, Version: validated.Config.Agent.Version,
-			Description: validated.Config.Agent.Description, FileCount: validated.FileCount, ContentSize: validated.ContentSize, Warnings: []string{},
+			Description: validated.Config.Agent.Description, FileCount: validated.FileCount, ContentSize: validated.ContentSize,
+			Warnings: agentIdentityWarnings(validated.Config.Agent),
 		},
 		contentType: "application/gzip",
 		build: func() ([]byte, error) {
 			return agentTarGz(snapshot)
 		},
 	}, nil
+}
+
+// agentIdentityWarnings 报告不影响 APM 校验、但会影响 Runtime 可用性的字段取值问题。
+// 目前只有一条：agent.id 必须与 agent.name 相同。Bibit 按 agent.id 定位已安装的
+// agents/<agent.name> 目录，取值不同时 Agent 仍能安装与列出，但 Runtime 按 ID 找不到；
+// APM 只校验 id trim 后非空、不比较二者（ADR-023/ADR-033），故这里只产出 warning，
+// 不改变 validate 的成功结果。返回空切片而非 nil，保持 `--json` 的 warnings 为 `[]`。
+func agentIdentityWarnings(info domain.AgentInfo) []string {
+	warnings := []string{}
+	if info.ID != info.Name {
+		warnings = append(warnings, fmt.Sprintf(
+			"agent.id %q must equal agent.name %q: Bibit locates the installed agents/<name> directory by agent.id, so a mismatch makes the Agent unreachable by ID at runtime",
+			info.ID, info.Name))
+	}
+	return warnings
 }

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"apm/internal/cli"
@@ -49,6 +50,31 @@ func TestValidateForwardsInvalidContent(t *testing.T) {
 	}
 }
 
+// TestValidateAgentOfflineReportsIDNameMismatch 校验 agent.id 与 agent.name 取值不同时，
+// warning 会传达到 CLI 契约且校验仍然成功、外部身份不变（ADR-034）。
+func TestValidateAgentOfflineReportsIDNameMismatch(t *testing.T) {
+	service, err := NewValidate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeLifecycleAgentYAML(t, t.TempDir(), lifecycleAgentYAMLMismatchedID)
+
+	result, err := service.Validate(context.Background(), cli.Flags{Type: "agent"}, []string{path})
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil: id 与 name 不同取值不是校验错误", err)
+	}
+	if result.Name != "demo-agent" || result.Version != "v1.0.0" {
+		t.Fatalf("Validate() = %#v", result)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("Validate() warnings = %v, want exactly 1", result.Warnings)
+	}
+	if !strings.Contains(result.Warnings[0], `agent.id "bibit-internal-demo"`) ||
+		!strings.Contains(result.Warnings[0], `agent.name "demo-agent"`) {
+		t.Fatalf("Validate() warning = %q, want both id and name", result.Warnings[0])
+	}
+}
+
 func TestValidateAgentOfflineMapsResult(t *testing.T) {
 	service, err := NewValidate()
 	if err != nil {
@@ -65,5 +91,8 @@ func TestValidateAgentOfflineMapsResult(t *testing.T) {
 	}
 	if result.FileCount != 1 || result.ContentSize != int64(len(lifecycleAgentYAML)) {
 		t.Fatalf("Validate() file count/size = %d/%d", result.FileCount, result.ContentSize)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Validate() warnings = %v, want none: id 与 name 同值不应告警", result.Warnings)
 	}
 }

@@ -3,7 +3,7 @@
 - Status：Accepted
 - Date：2026-09-11
 - Decision Makers：APM maintainers
-- Related ADR：[ADR-023](ADR-023-package-agent-with-assets.md)
+- Related ADR：[ADR-023](ADR-023-package-agent-with-assets.md)、[ADR-034](ADR-034-report-agent-id-name-mismatch-as-validate-warning.md)（已实现本文「后续动作」，并取代本文「不新增告警」的表述）
 
 ## Context
 
@@ -37,8 +37,9 @@ Agent 资源的 `agent.id` 必须与 `agent.name` 取相同值。
 - APM 的校验与安装行为完全不变：仍只要求 `agent.id` 为 trim 后非空字符串，仍按 `agent.name` 定位
   `<bibit根>/agents/<agent.name>/`，仍以 `agent.name`+`agent.version` 构成外部身份，仍不比较
   `agent.id` 与 `agent.name`。`id != name` 不是校验错误。
-- 这是资源创作规则，通过提交规则、模板与内建 fixture 固化，不新增校验、不新增告警、不自动改写
-  `agent.yaml`，也不改写已安装目录。
+- 这是资源创作规则，通过提交规则、模板与内建 fixture 固化，不新增校验、不自动改写 `agent.yaml`，
+  也不改写已安装目录。**（本条关于告警的部分已由 [ADR-034](ADR-034-report-agent-id-name-mismatch-as-validate-warning.md)
+  取代：`apm validate --type agent` 现在会输出一条 warning，但校验结果与 exit code 仍不变。）**
 - 权威样板为 `outputs/basic-agent/agent.yaml`（两者同为 `basic-agent`）。`test-agent`（提交源与
   `outputs/` 副本）与内建 local fixture `bianbu-agent-default` 改为相同取值。
 - 取值方向是「让 `id` 取 `name` 的值」，不是反过来：`agent.name` 与 `agent.id` 都必须同时满足 APM
@@ -56,8 +57,8 @@ Agent 资源的 `agent.id` 必须与 `agent.name` 取相同值。
   侧静默出现，发现依赖人工检查或运行时行为。
 - 代价与风险：已发布的 `test-agent@v1.0.0` 内容带此缺陷，修正需要重新提交；是否提升版本号由提交者
   决定。若下游曾按旧 `id` 记录绑定，重新提交后不会自动迁移。
-- 后续动作：可评估在 `apm validate --type agent` 中把 `id != name` 报为 warning，把静默失效变成可
-  发现的问题。本决策不包含该行为变更。
+- 后续动作：**已由 [ADR-034](ADR-034-report-agent-id-name-mismatch-as-validate-warning.md) 完成**——
+  `apm validate --type agent` 现在把 `id != name` 报为 warning，把静默失效变成可发现的问题。
 
 ## Alternatives Considered
 
