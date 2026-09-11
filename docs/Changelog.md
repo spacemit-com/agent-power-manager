@@ -2,6 +2,51 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-11（后续：validate 对 agent.id 与 agent.name 不一致输出 warning）
+
+分类：新增功能
+
+用户需求：把 `agent.id` 与 `agent.name` 取值不一致这一情况在 `apm validate --type agent` 中报为
+warning，使 ADR-033 记录的静默失效变成离线可发现的问题。
+
+解决方案或完成结果：`agent.id` 必须等于 `agent.name`（ADR-033），但此前 APM 侧没有任何信号——
+`internal/domain/agent_config.go` 的 `Validate` 只要求 `agent.id` trim 后非空，`ValidatePowerRef`
+只比较 `name`/`version`，所以 `id != name` 的资源 `apm validate --type agent --json` 返回 exit 0 且
+`warnings: []`，作者在本地无法自查，失效只在 Runtime 侧静默出现。现在由新增的
+`internal/submission.agentIdentityWarnings` 在 Agent loader 中产出该 warning，文案为
+`agent.id %q must equal agent.name %q: Bibit locates the installed agents/<name> directory by agent.id, so a mismatch makes the Agent unreachable by ID at runtime`；
+CLI 已有通道直接复用（`submission.Validation.Warnings` → `cli.ValidateResult.Warnings` → 纯文本的
+`warning: <text>` 行、`--json` 的 `warnings` 数组），未新增接口。
+
+边界：**只影响 `validate`**——校验成功且 exit code 仍为 0，资源仍可提交与安装；`install`/`uninstall`/
+cache/recovery 不检查该条件；`submit` 输出与退出码不变（`submission.Prepare` 只消费身份与统计字段，
+不读取 `Warnings`），故 submit 输出契约未变。比较为精确字符串比较、不做 trim 与大小写归一，因为
+Bibit 按字面值定位目录，`id: " demo-agent"` 与 `name: demo-agent` 实际会查找失败。无警告时返回空
+切片而非 nil，Agent 的 `--json` 输出保持 `"warnings": []` 而不退化为 `null`。决策与非目标见
+[ADR-034](ivory-tower/adr/ADR-034-report-agent-id-name-mismatch-as-validate-warning.md)；该 ADR 同时
+取代 [ADR-033](ivory-tower/adr/ADR-033-require-agent-id-to-equal-agent-name.md) 的「不新增告警」表述，
+ADR-033 的「后续动作」据此改为已完成。`docs/power-template/`、`ivory-tower/project-overview.md`、
+`BUILD.md` 与 `../using-apm` 中原文「APM 不比较二者、validate 不会报错」的表述同步改为「不把它当作
+校验错误，只输出一条 warning」。
+
+相关提交：
+
+- `488566a` feat(validate): warn when agent.id differs from agent.name
+
+验证结果或限制：`go build ./...`、`go vet ./...`、`go test -count=1 ./...` 全部通过，
+`go test -race -count=1 ./internal/submission/ ./internal/lifecycle/ ./internal/cli/ ./internal/domain/`
+通过，`gofmt -l internal/ cmd/` 仅剩 2 个既有未格式化文件（本次未触碰）。新增用例：
+`internal/submission` 的 `TestValidateAgentWarnsWhenIDDiffersFromName`（先失败后通过，确认断言的是
+新行为）、`TestValidateAgentDoesNotWarnWhenIDEqualsName`、`TestPrepareAgentAcceptsIDNameMismatch`
+（守护 submit 不受影响），`internal/lifecycle` 的 `TestValidateAgentOfflineReportsIDNameMismatch`
+（守护 warning 传达到 CLI 契约，已用「删掉透传即失败」的变异验证确认非空转）与
+`TestValidateAgentOfflineMapsResult` 的「同值不告警」断言。CLI 端到端实测：`id != name` 时 `--json`
+的 `warnings` 含 1 条、纯文本输出 1 行 `warning:`、两次 exit 均为 0；`../test-agent`、
+`../using-apm/templates/agent` 与内建 fixture `bianbu-agent-default` 三个 id 同值资源均输出
+`"warnings": []`。限制：warning 只出现在 validate，只跑 `submit` 的作者仍可能把该问题带上去；
+skill/plugin/mcp 三类 loader 从不初始化 `Warnings`，其 `--json` 输出本来就是 `null`，本次未统一；
+Runtime 按 `agent.id` 定位目录的行为仍无法在本地复现（同 ADR-033 的限制），故未做 Runtime 侧验证。
+
 ## 2026-09-11（后续：agent.id 必须等于 agent.name）
 
 分类：缺陷修复
