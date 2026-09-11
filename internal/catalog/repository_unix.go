@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -297,12 +296,7 @@ func verifyRepositoryDirectoryTrust(stat unix.Stat_t, requireCurrentOwner bool) 
 // warnGroupWritableCatalogDirectory 对放行的组可写目录输出一次告警：该目录所在组的其他
 // 账号仍可改名或删除其中的目录项，调用方须知晓这一残留风险（ADR-032）。
 func warnGroupWritableCatalogDirectory(displayPath string, stat unix.Stat_t) {
-	logging.WarnOnce(
-		"catalog-group-writable-directory:"+displayPath,
-		"local directory permits group entry mutation",
-		slog.String("path", displayPath),
-		slog.String("mode", fmt.Sprintf("%04o", uint32(stat.Mode)&0o777)),
-	)
+	logging.WarnGroupWritableDirectory(displayPath, uint32(stat.Mode)&0o777)
 }
 
 func (directory *pinnedRepositoryDirectory) close() error {

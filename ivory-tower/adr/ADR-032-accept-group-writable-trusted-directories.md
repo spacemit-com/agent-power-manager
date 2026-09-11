@@ -33,7 +33,7 @@ verify pinned remote directory "/home/bianbu/.cache": remote directory mode 0775
 
 - `owner` 必须为 root 或当前 euid（不变）。
 - `perm&0o002 != 0` 的非 root-sticky 目录仍然 fail closed（`0777`、`0702` 等）。
-- `perm&0o020 != 0` 的目录（`0775`、`0770`、`2775` 等）放行，并通过新的 `groupWritable` 判定结果上报；由持有路径的调用方经 `logging.WarnOnce` 输出一次 warning（`path` + `mode`），同一目录每进程只提示一次。
+- `perm&0o020 != 0` 的目录（`0775`、`0770`、`2775` 等）放行，并通过新的 `groupWritable` 判定结果上报；由持有路径的调用方经 `logging.WarnGroupWritableDirectory` 输出一次 warning（`path` + `mode`）。该 helper 按目录路径在进程内去重，且两条目录链共用同一去重空间——同一个目录在一次命令中可能被两条链、乃至同一链的两处（下载目标父目录与 catalog 暂存父目录）重复检查，按路径去重后每条命令对每个目录只输出一行，且不暴露检查来自哪一条链。
 - root 拥有的 sticky 目录仍是唯一允许 `0o002` 的例外（继续受 `directoryTrustPolicy.allowRootOwnedSticky` 与 catalog 的“最终父目录不得为 sticky”约束）。
 - 只看 mode 低 9 位；`setuid`/`setgid`/sticky 不影响判定，故 Debian 风格 `2775` 的目录按 `0775` 处理。
 
