@@ -285,8 +285,7 @@ func TestLocalClientDownloadsOneSharedPluginPackage(t *testing.T) {
     err := client.DownloadPlugin(context.Background(), pluginRef("v0.0.1"), destination)
     if err != nil { t.Fatal(err) }
     for _, required := range []string{
-        ".codex-plugin/plugin.json", ".claude-plugin/plugin.json",
-        ".hermes-plugin/__init__.py", ".hermes-plugin/plugin.yaml",
+        "apc-plugin.json", filepath.Join("skills", "demo-plugin", "SKILL.md"),
     } {
         if _, err := os.Stat(filepath.Join(destination, required)); err != nil { t.Fatalf("%s: %v", required, err) }
     }
@@ -309,8 +308,10 @@ Each version directory must contain one shared manifest/content set and one shar
 name: demo-plugin
 version: 0.0.1
 description: Shared Plugin fixture managed by APM Cloud
-author: APM
 ```
+
+> 后续修正（[ADR-036](../adr/ADR-036-per-agent-plugin-landing-filtering.md)）：派生 `plugin.yaml` 已移除
+> `author`，且不再与 Hermes 共用同一目录内容，而是写入 `landing/<agent-id>/plugins/<name>`。
 
 ```python
 def register(ctx):
@@ -411,7 +412,7 @@ func (a Artifact) MarketplaceFor(agent domain.AgentID) (Marketplace, error) {
 }
 ```
 
-Build both documents sequentially in one temporary root. Replace manifest identity expectations with logical name plus exact native version. Do not parse or validate `.hermes-plugin` here.
+Build both documents sequentially in one temporary root. Replace manifest identity expectations with logical name plus exact native version. The derived filesystem manifest is the plugin-root `plugin.yaml` (shared by Hermes and Bibit), so do not parse or validate any `.hermes-plugin` path here.
 
 - [ ] **Step 4: Run focused and package tests**
 

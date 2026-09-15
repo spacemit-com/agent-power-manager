@@ -5,6 +5,8 @@
 - Decision Makers：APM maintainers
 
 > 局部取代说明：本 ADR 修正 ADR-017 与 ADR-014 中 Hermes 派生 manifest 的布局。此前的 `.hermes-plugin/plugin.yaml` 与 `.hermes-plugin/__init__.py` 由本决策取代为插件目录根下的 `plugin.yaml` 与 `__init__.py`；Codex/Claude 的 `.codex-plugin/`、`.claude-plugin/` 布局及 `apc-plugin.json` 权威源、raw package 校验、marketplace 生成不变。
+>
+> 后续扩展：[ADR-035](ADR-035-share-derived-filesystem-plugin-manifest.md) 保留本 ADR 的「manifest 位于插件目录根」布局并新增 `schema_version: 1`；[ADR-036](ADR-036-per-agent-plugin-landing-filtering.md) 进一步把该根布局移入按 Agent 的落盘叶子 `landing/<agent-id>/plugins/<name>/`，并移除 `author`。本 ADR 中「Hermes 原生 manifest」的措辞据此更新，`plugin.yaml` 内容清单以 ADR-036 为准。
 
 ## Context
 
@@ -25,21 +27,21 @@ cache/plugins/<logical-name>/<version>/plugins/<logical-name>/
 ├── apc-plugin.json
 ├── .codex-plugin/plugin.json
 ├── .claude-plugin/plugin.json
-├── plugin.yaml          # Hermes 原生 manifest（原名 .hermes-plugin/plugin.yaml）
+├── plugin.yaml          # filesystem Agent manifest（原名 .hermes-plugin/plugin.yaml；ADR-035 起含 schema_version；ADR-036 起位于 landing/<agent-id>/plugins/<name>/ 且不含 author）
 ├── __init__.py          # Hermes 注册器（原名 .hermes-plugin/__init__.py）
 └── skills/...
 ```
 
-- 生成（`pluginresource.writeAgentManifests`）与复验（`pluginartifact.validateHermes`、closed-world 允许文件表）同步改为根目录路径。
+- 生成（`pluginresource.writeAgentManifests`）与复验（`pluginartifact.validateFilesystemPluginManifest`、closed-world 允许文件表）同步改为根目录路径。
 - 派生 artifact 的 closed-world 不再允许 `.hermes-plugin/` 目录，使旧布局成为非法路径，防止回归。
-- `plugin.yaml` 内容（`name/version/description/author`，`version` 为去 `v` 原生版本）与 `__init__.py` 内容（`def register(ctx): return None`）不变。
+- `__init__.py` 内容（`def register(ctx): return None`）不变；`plugin.yaml` 内容由 ADR-035 增加 `schema_version: 1`、由 ADR-036 移除 `author` 并改为每 Agent 独立落盘叶子，字段集为 `schema_version/name/version/description`，`version` 为去 `v` 原生版本。
 - Hermes adapter（`plugins list --json` / `enable` / `disable` / `TargetPath`）与 filesystem transaction 不读取 manifest 子路径，无需改动。
 
 ## Consequences
 
 - 正面影响：Hermes 插件安装后可被真实 CLI 发现、启用与加载，Inspect 与 manifest 状态一致。
 - 正面影响：旧 `.hermes-plugin/` 布局在 closed-world 中被显式拒绝，防止再次漂移。
-- 代价与风险：`plugin.yaml`/`__init__.py` 出现在共享插件目录根，与 Codex/Claude marketplace 插件源同处；Codex/Claude 只读取各自 `.codex-plugin`/`.claude-plugin` 子目录，忽略这两个文件（由既有 Codex/Claude 测试继续覆盖）。
+- 代价与风险：`plugin.yaml`/`__init__.py` 出现在插件目录根；ADR-036 起各 Agent 消费自己的落盘叶子，因此 Codex/Claude 的 marketplace source 与 Hermes/Bibit 的 staging 都不会看到其他 Agent 的文件。
 - 代价与风险：历史安装若残留 `.hermes-plugin/` 布局不会被自动迁移；APM 按当前正确布局重新安装即可覆盖。
 - 后续动作：Project Overview、BUILD 与 Changelog 引用本 ADR；Feature 016 作为本次修复的实现记录。
 

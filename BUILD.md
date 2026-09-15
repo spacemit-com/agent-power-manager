@@ -93,7 +93,7 @@ Catalog Repository 的平台边界独立于下文 Remote content 发布能力，
 - Skill：Local 复制 canonical fixture 目录；Remote 获取 `application/gzip`，先验证精确 metadata、size 与 32 位小写 MD5，再安全解包到调用方私有目录。版本化 cache 的命中、下载临时目标、原子发布和公共 staging 全部由 Cache 的 `PrepareSkill` 管理。
 - Agent：Local/Remote 都把资源根目录（`agent.yaml` + 可选 `assets/`）的完整目录树写到调用方私有目录；Remote content type 为 `application/gzip`，解包后执行权威 Agent 目录校验（[ADR-023](ivory-tower/adr/ADR-023-package-agent-with-assets.md)，云端契约见 APC ADR-006）。版本化 cache 与 staging 由 `PrepareAgent` 管理，安装前仍由 Bibit Agent Adapter 对完整目录执行同一权威校验。
 - MCP：Local/Remote 都严格解码 `application/json` 并返回克隆的 `MCPServer` 领域对象，不建立文件 cache；公共 HTTP endpoint 只允许无 userinfo 的绝对 HTTPS URL。
-- Plugin：Local fixture 与 Remote 解包结果只包含 `apc-plugin.json + skills/...`。`apc-plugin.json` 是唯一权威索引；Plugin Resource 严格复验 canonical 闭集，先确定性生成 Codex、Claude、Hermes 原生配置，再由 Codex/Claude marketplace builder 读取并复验对应原生 manifest 后生成 marketplace，最后一次原子发布共享 artifact。当前权威决策是 [ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)；[ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅保留为被取代的历史背景。
+- Plugin：Local fixture 与 Remote 解包结果只包含 `apc-plugin.json + skills/...`。`apc-plugin.json` 是唯一权威索引；Plugin Resource 严格复验 canonical 闭集，先按目标 Agent 确定性生成 `landing/<agent-id>/plugins/<name>` 落盘叶子（Codex/Claude 原生配置、Hermes/Bibit 的 `plugin.yaml`），再由 Codex/Claude marketplace builder 读取并复验对应原生 manifest 后生成 marketplace，最后一次原子发布共享 artifact。下载与派生次数不依赖目标 Agent，第二个 Agent 安装时直接复用。当前权威决策是 [ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 与 [ADR-036](ivory-tower/adr/ADR-036-per-agent-plugin-landing-filtering.md)；[ADR-035](ivory-tower/adr/ADR-035-share-derived-filesystem-plugin-manifest.md) 的单根共用布局与 [ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 均已被取代。
 
 Remote 的精确 content 受 20 MiB 客户端上限约束；Skill/Plugin/Agent 解包还限制为总大小 100 MiB、单文件 10 MiB、最多 1,000 个节点、深度 16、路径 255 字节和 100 倍解压倍率，并拒绝路径逃逸、链接、特殊节点、嵌套归档扩展名以及已知归档/可执行文件签名。Linux 与 macOS 支持完整的 descriptor-relative Skill/Plugin/Agent 目录发布和 MCP 临时 staging；FreeBSD 支持 descriptor-relative staging 和 MCP，但 Skill/Plugin/Agent 的目录发布以 `ENOTSUP` fail closed。Windows 及其它未实现平台的 Remote content 操作 fail closed；catalog 中存在条目不因此被描述为该平台可安装。
 
@@ -293,24 +293,23 @@ Agent Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-powe
 
 ### Plugin 共享 artifact 与操作顺序
 
-Plugin 当前架构以 [Feature 020](ivory-tower/features/020-cloud-client-providers/spec.md)、[ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md) 和 [ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md) 为准；Hermes 派生 manifest 的根目录布局见 [ADR-031](ivory-tower/adr/ADR-031-hermes-plugin-manifest-lives-at-plugin-root.md)。[ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅解释共享不可变 artifact 的历史来源。Cloud 不托管 marketplace 或 Agent 原生配置；`DownloadPlugin(ctx, entry, destination)` 使用同一 CatalogEntry，把 `apc-plugin.json + skills/...` canonical package 写入调用方目录。Plugin Resource 每个逻辑 Plugin 版本只下载一次，在唯一 cache-miss 临时根内生成并复验派生内容后，以以下布局原子发布共享、不可变制品：
+Plugin 当前架构以 [Feature 020](ivory-tower/features/020-cloud-client-providers/spec.md)、[ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)、[ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md) 与 [ADR-036](ivory-tower/adr/ADR-036-per-agent-plugin-landing-filtering.md) 为准；派生 `plugin.yaml` 的字段与落盘位置见 [ADR-031](ivory-tower/adr/ADR-031-hermes-plugin-manifest-lives-at-plugin-root.md) 与 ADR-036（[ADR-035](ivory-tower/adr/ADR-035-share-derived-filesystem-plugin-manifest.md) 的单根共用布局已被取代）。[ADR-014](ivory-tower/adr/ADR-014-share-multi-agent-plugin-artifacts.md) 仅解释共享不可变 artifact 的历史来源。Cloud 不托管 marketplace 或 Agent 原生配置；`DownloadPlugin(ctx, entry, destination)` 使用同一 CatalogEntry，把 `apc-plugin.json + skills/...` canonical package 写入调用方目录。Plugin Resource 每个逻辑 Plugin 版本只下载一次，在唯一 cache-miss 临时根内生成并复验派生内容后，以以下布局原子发布共享、不可变制品：
 
 ```text
 cache/plugins/<logical-name>/<version>/
-├── .agents/plugins/marketplace.json
-├── .claude-plugin/marketplace.json
-└── plugins/<logical-name>/
-    ├── apc-plugin.json
-    ├── .codex-plugin/plugin.json
-    ├── .claude-plugin/plugin.json
-    ├── plugin.yaml
-    ├── __init__.py
-    └── skills/...
+├── .agents/plugins/marketplace.json      # Codex；source ./landing/codex/plugins/<logical-name>
+├── .claude-plugin/marketplace.json       # Claude；source ./landing/claude-code/plugins/<logical-name>
+├── plugins/<logical-name>/               # canonical 包：apc-plugin.json + skills/...
+└── landing/<agent-id>/plugins/<logical-name>/
+    ├── codex/         .codex-plugin/plugin.json + skills/...
+    ├── claude-code/   .claude-plugin/plugin.json + skills/...
+    ├── hermes-agent/  plugin.yaml + __init__.py + skills/...
+    └── bibit/         plugin.yaml + skills/...   # 无 __init__.py 与其他 Agent 配置
 ```
 
-所有 Agent 的 Plugin 运行时名称和 `PluginTarget` selector 都是逻辑 `<name>`，Plugin 叶子固定为 `plugins/<name>`；版本只由 `PowerRef`、APM manifest、缓存版本目录和原生 manifest 表达。`Artifact.MarketplaceFor(agent)` 为 Codex/Claude 返回同一共享根上的 Agent 原生 marketplace；Hermes/Bibit 通过 `StageFilesystem(ref)` 物化同一 Plugin 叶子。
+所有 Agent 的 Plugin 运行时名称和 `PluginTarget` selector 都是逻辑 `<name>`，canonical 包固定为 `plugins/<name>`，安装内容来源为 `landing/<agent-id>/plugins/<name>`；版本只由 `PowerRef`、APM manifest、缓存版本目录和原生 manifest 表达。`Artifact.MarketplaceFor(agent)` 为 Codex/Claude 返回同一共享根上的 Agent 原生 marketplace（source 指向各自落盘叶子）；Hermes/Bibit 通过 `StageFilesystem(agent, ref)` 只物化本 Agent 的落盘叶子，因此安装目录不含其他 Agent 的配置。派生在 cache miss 的单次 pass 内完成且不依赖目标 Agent，因此先安装其中一个 filesystem Agent、再安装另一个时第二次安装命中已发布 artifact，不重新下载也不重新派生。`plugin.yaml` 只含 `schema_version: 1/name/version/description`，不含 `author`（Bibit 会以 `unknown plugin.yaml key: author` 拒绝）。
 
-Install 在锁内恢复和 Agent 选择后先处理显式规范 ref（四类 Power 通用）：每个所选 Agent 的 manifest 都精确命中时直接返回 `unchanged`，不会调用 Cloud、Plugin Resource、Adapter 或 Transaction；任一不匹配则回到既有 Cloud 解析路径。普通 Plugin 路径对每个 Agent 先读取 manifest，再统一调用 `ResolvePlugin(agent)`，随后按 `DeploymentMode` 分支。marketplace 分支先 `Locate` 目标（不同版本为旧版本）artifact 并 `InspectMarketplace`/`Inspect` 得到 Plugin 与 marketplace 事实，再以共享状态策略决策：无 manifest 且目标与 marketplace 都 absent 才全新安装；无 manifest 但存在任一 Plugin/marketplace 事实时按公共 `adapter.ErrTargetConflict` 拒绝；不同版本且 Plugin/marketplace/source 完整时执行原子版本切换，缺失或不完整但能证明归 APM 管理时记录一次 warning、先卸载清理再以目标 `CatalogEntry` `Ensure(ctx, entry)` 全新安装，身份或来源冲突仍 fail closed。filesystem 分支先完成旧目标或新目标的本地事实与物理缺失校验，再按相同状态策略决策，之后才以目标 `CatalogEntry` 调用 `Ensure(ctx, entry)`，执行 `StageFilesystem(ref)` 和 transaction。marketplace 首装注册目标 source、添加逻辑名 Plugin 并写 manifest；卸载已同时注销 marketplace，因此任意版本重装都按正常注册流程执行，artifact 缓存命中时不重新下载、缺失时才从 content source 获取。版本切换仍删除旧 Plugin、切换同名 marketplace source、重新添加逻辑名 Plugin 并写 manifest。Hermes/Bibit 使用同一个 `plugins/<name>` 目标执行可恢复 filesystem transaction；Hermes 保留 enable/disable，Bibit 不执行 Plugin CLI。
+Install 在锁内恢复和 Agent 选择后先处理显式规范 ref（四类 Power 通用）：每个所选 Agent 的 manifest 都精确命中时直接返回 `unchanged`，不会调用 Cloud、Plugin Resource、Adapter 或 Transaction；任一不匹配则回到既有 Cloud 解析路径。普通 Plugin 路径对每个 Agent 先读取 manifest，再统一调用 `ResolvePlugin(agent)`，随后按 `DeploymentMode` 分支。marketplace 分支先 `Locate` 目标（不同版本为旧版本）artifact 并 `InspectMarketplace`/`Inspect` 得到 Plugin 与 marketplace 事实，再以共享状态策略决策：无 manifest 且目标与 marketplace 都 absent 才全新安装；无 manifest 但存在任一 Plugin/marketplace 事实时按公共 `adapter.ErrTargetConflict` 拒绝；不同版本且 Plugin/marketplace/source 完整时执行原子版本切换，缺失或不完整但能证明归 APM 管理时记录一次 warning、先卸载清理再以目标 `CatalogEntry` `Ensure(ctx, entry)` 全新安装，身份或来源冲突仍 fail closed。filesystem 分支先完成旧目标或新目标的本地事实与物理缺失校验，再按相同状态策略决策，之后才以目标 `CatalogEntry` 调用 `Ensure(ctx, entry)`，执行 `StageFilesystem(agent, ref)` 和 transaction。marketplace 首装注册目标 source、添加逻辑名 Plugin 并写 manifest；卸载已同时注销 marketplace，因此任意版本重装都按正常注册流程执行，artifact 缓存命中时不重新下载、缺失时才从 content source 获取。版本切换仍删除旧 Plugin、切换同名 marketplace source、重新添加逻辑名 Plugin 并写 manifest。Hermes/Bibit 使用同一个 `plugins/<name>` 目标执行可恢复 filesystem transaction（内容分别来自各自落盘叶子）；Hermes 保留 enable/disable，Bibit 不执行 Plugin CLI。
 
 Uninstall 先从 manifest 取得精确版本；没有记录时直接返回未执行，不检查 Agent。Codex/Claude 先检查该 marketplace 与 Plugin，再离线 `Lookup` 并验证共享 artifact/source/selector，最后在 transaction 中移除 Plugin、注销专属 marketplace 并移除 manifest，同时保留共享 artifact；Hermes/Bibit 只处理逻辑名目录与 manifest。marketplace/Plugin 部分状态按新矩阵收敛：能证明归 APM 管理的缺失/不完整按缺失清理，source 或 selector 不匹配、artifact 缺失或损坏、Agent 事实不可读以及非法 journal 都会保留 manifest、artifact 和 journal 并 fail closed。旧版 Plugin 卸载 journal 若停留在 `rolling-back` 阶段，升级后会以 `ErrInvalidJournal` 暴露，需确认状态归属并删除残留 journal（spec §10 不提供兼容开关，此说明仅为可发现性）。Plugin Resource 与 recovery 共用中立只读 Validator，拒绝 symlink/特殊文件，并按消费路径复验原生 manifest 与已生成 marketplace；`fix`/recovery 只读取 journal、Adapter、manifest 和既有共享 artifact，绝不连接 Cloud、调用 Plugin Resource 或重建缓存，因此支持离线恢复。
 

@@ -45,7 +45,7 @@
 - 用例 ID、agent、Power 精确版本、工作目录、环境组及覆盖变量（不含凭据）。
 - 各步时间、完整命令与真实可执行文件路径、退出码、stdout/stderr 链接；超时及重试分别记录。
 - 安装前：APM 清单与实际资源不存在的证据。
-- 安装后：精确清单项、实际文件及内容核对，或真实 CLI 的注册、版本、source/selector 等证据。
+- 安装后：精确清单项、实际文件及内容核对，或真实 CLI 的注册、版本、source/selector 等证据。Plugin 用例还需记录安装目录的文件清单与共享 artifact 内落盘叶子 `landing/<agent-id>/plugins/<name>` 的对应关系，并明确目标目录**不存在**其他 Agent 的配置（`apc-plugin.json`、`__init__.py`、`.codex-plugin/`、`.claude-plugin/` 按 Agent 判定）。
 - 卸载后：清单项消失、实际目录/注册移除；Plugin marketplace 移除结果。
 - 真实环境前后对比：原有 Plugin、其他 MCP 配置是否变化，MCP 定义可验证字段及限制。
 - 事务和清理：有无活动 journal、执行过的 fix/补救命令、最终状态、删除或保留的临时目录。

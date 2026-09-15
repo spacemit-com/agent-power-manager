@@ -5,6 +5,8 @@
 - Decision Makers：APM maintainers
 
 > 取代说明（2026-08-26）：[ADR-022](ADR-022-unify-lifecycle-entry-state-semantics.md) 定向取代本文（连同 ADR-013 与 Feature 018）中的以下旧规则：Plugin 部分状态一律保留 manifest 并 fail closed（现按统一入口状态矩阵收敛）；Plugin 正常卸载保留 marketplace（现卸载同时删除 Plugin、注销专属 marketplace 并删除 manifest，仅保留 artifact cache）；只有 Plugin 支持显式精确版本 manifest 全命中的无 catalog 快速路径（现已扩展到四类 Power）。
+>
+> 布局修正：[ADR-031](ADR-031-hermes-plugin-manifest-lives-at-plugin-root.md) 取代本文与 ADR-017 中的 `.hermes-plugin/` 子目录布局，派生 manifest 改为插件目录根的 `plugin.yaml` 与 `__init__.py`；[ADR-035](ADR-035-share-derived-filesystem-plugin-manifest.md) 进一步明确 `plugin.yaml` 携带 `schema_version: 1`；[ADR-036](ADR-036-per-agent-plugin-landing-filtering.md) 取代 ADR-035 的单根共用布局，改为按目标 Agent 落入 `landing/<agent-id>/plugins/<name>` 且移除 `author`。下文布局示意已按此更新。
 
 ## Context
 
@@ -25,8 +27,8 @@ cache/plugins/<logical-name>/<version>/
 └── plugins/<logical-name>/
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
-    ├── .hermes-plugin/__init__.py
-    ├── .hermes-plugin/plugin.yaml
+    ├── plugin.yaml
+    ├── __init__.py
     └── ...
 ```
 

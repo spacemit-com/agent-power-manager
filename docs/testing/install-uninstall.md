@@ -119,8 +119,10 @@ Plugin 的隔离必须同时覆盖真实 CLI。写入前，根据所安装 CLI �
 
 - **Skill**：检查 `<agent根>/skills/foo-before-summary/SKILL.md` 及下载制品中附带文件确实落地，内容与本次制品一致；不能只检查目录存在。卸载后整个目标目录不存在。
 - **Bibit Agent**：检查 `<agent根>/agents/test-agent/agent.yaml`，以及云端包实际含有的 `assets/` 等内容；比较安装文件与本次缓存/制品内容，不强行要求源包没有的可选文件。卸载后整个 `test-agent` 目录不存在。
-- **Bibit Plugin**：检查 `<agent根>/plugins/superpowers` 下本次制品包含的 manifest 和 skills，确认内容完整；Bibit 不调用 Plugin CLI。卸载后目标目录不存在。
-- **Hermes Plugin**：检查 `<agent根>/plugins/superpowers` 内容，并用相同临时环境的 `hermes plugins list --json` 确认安装及启用状态。卸载后目录移除、CLI 无有效安装或启用记录。
+- **Bibit Plugin**：检查 `<agent根>/plugins/superpowers` 内容与本次制品的 skills 逐字节一致，且 `plugin.yaml` 只含 `schema_version: 1`、`name`、`version`、`description` 四个字段（不含 `author`）。安装目录**不得**出现 `apc-plugin.json`、`__init__.py`、`.codex-plugin/`、`.claude-plugin/` 或其他 Agent 的配置；出现任意一项即为失败。Bibit 不调用 Plugin CLI。卸载后目标目录不存在。
+- **Hermes Plugin**：检查 `<agent根>/plugins/superpowers` 内容与本次制品的 skills 逐字节一致，`plugin.yaml` 为同样四字段，且插件根存在 `__init__.py`（Hermes 注册器必需）；安装目录**不得**出现 `apc-plugin.json`、`.codex-plugin/`、`.claude-plugin/`。用相同临时环境的 `hermes plugins list --json` 确认安装及启用状态。卸载后目录移除、CLI 无有效安装或启用记录。
+
+以上两类 filesystem Agent 的内容均来自共享 artifact 内各自的落盘叶子 `landing/<agent-id>/plugins/superpowers`（`<agent-id>` 分别为 `bibit`、`hermes-agent`）；第二个 Agent 安装时复用同一 artifact，不重新下载或派生。
 
 ### Codex / Claude Plugin
 
@@ -131,7 +133,7 @@ Plugin 的隔离必须同时覆盖真实 CLI。写入前，根据所安装 CLI �
 | Codex | `codex plugin list --json` | `codex plugin marketplace list --json` |
 | Claude | `claude plugin list --json` | `claude plugin marketplace list --json` |
 
-安装后应存在逻辑名 `superpowers`，原生版本与 `v6.3.0` 对应，且绑定本次 APM 生成的 `apm-superpowers` 本地 marketplace；核对 source、selector、安装位置和原生 manifest/skills，路径应落在本次隔离范围。原生格式可能省略版本的 `v` 前缀，但不能接受不同版本。无法查询或解析实际状态时不判通过。
+安装后应存在逻辑名 `superpowers`，原生版本与 `v6.3.0` 对应，且绑定本次 APM 生成的 `apm-superpowers` 本地 marketplace；核对 source、selector、安装位置和原生 manifest/skills，路径应落在本次隔离范围。marketplace 条目的 `source` 必须是共享 artifact 内本 Agent 的落盘叶子（Codex 为 `./landing/codex/plugins/superpowers`，Claude 为 `./landing/claude-code/plugins/superpowers`），且 CLI 实际复制的安装目录只含本 Agent 的原生 manifest 与 skills，不含另外三个 Agent 的配置。原生格式可能省略版本的 `v` 前缀，但不能接受不同版本。无法查询或解析实际状态时不判通过。
 
 卸载后 Plugin 和专属 `apm-superpowers` marketplace 都应消失。APM 保留下载缓存/共享 artifact 是正常行为，不要求卸载删除 cache；缓存保留不能被误判为仍安装。
 

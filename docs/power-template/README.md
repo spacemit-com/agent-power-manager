@@ -34,7 +34,7 @@
 
 - 根下存在权威索引 `apc-plugin.json`：`schema_version` 为 `1`，`name`/`version`/`description` 走公共规则，`skills` 为非空且每项为单层 `skills/<canonical-name>` 相对路径、无重复。
 - `skills/` 下目录数与声明数一致（拒绝未声明 Skill 目录）；每个声明 Skill 目录含 `SKILL.md` + `skill-card.md`，并通过与独立 Skill 相同的校验；各内嵌 Skill 的 frontmatter name 全局唯一。
-- 只允许 `apc-plugin.json`、`skills/` 与已声明 Skill 子树，拒绝额外根 payload 与任何 Agent 原生 manifest。
+- 只允许 `apc-plugin.json`、`skills/` 与已声明 Skill 子树，拒绝额外根 payload 与任何 Agent 原生 manifest（`plugin.yaml` 由 APM 从 `apc-plugin.json` 派生，含 `schema_version: 1` 且不含 `author`，并按目标 Agent 落入独立落盘叶子）。
 
 ### MCP（单个完整 JSON 文件）
 

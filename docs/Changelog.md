@@ -2,6 +2,134 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-15（后续：共享 artifact 内按目标 Agent 落盘，plugin.yaml 去掉 author）
+
+分类：缺陷修复
+
+用户需求：Hermes 与 Bibit 的派生 `plugin.yaml` 统一去掉 `author`；同时发布到 Agent 的内容按目标过滤，
+不属于目标 Agent 的配置文件不得出现在安装目录中。
+
+解决方案或完成结果：派生 `plugin.yaml` 只保留 `schema_version: 1`、`name`、`version`、`description`
+四个字段（`FilesystemPluginManifest` 移除 `Author`），字节输出固定为四行；生成与复验仍共用同一
+struct 与 `reflect.DeepEqual`，`decodeExactRequiredYAML` 保持 `KnownFields(true)`，因此重新加入
+`author` 或其他未知键（含 `skills`）仍 fail closed。按目标过滤无法在单一共享插件根上实现（Hermes
+必需、Bibit 禁止 `__init__.py`；Bibit 还拒绝 `apc-plugin.json`、`.codex-plugin/`、
+`.claude-plugin/`，也会以 `unknown plugin.yaml key: author` 拒绝 `author`），因此共享 artifact 内为
+每个 Agent 分配独立落盘叶子，目录名即 Agent ID：
+
+```text
+cache/plugins/<name>/<version>/
+├── .agents/plugins/marketplace.json      # Codex；source ./landing/codex/plugins/<name>
+├── .claude-plugin/marketplace.json       # Claude；source ./landing/claude-code/plugins/<name>
+├── plugins/<name>/                       # canonical 包：apc-plugin.json + skills/...
+└── landing/<agent-id>/plugins/<name>/
+    ├── codex/         .codex-plugin/plugin.json + skills/...
+    ├── claude-code/   .claude-plugin/plugin.json + skills/...
+    ├── hermes-agent/  plugin.yaml + __init__.py + skills/...
+    └── bibit/         plugin.yaml + skills/...
+```
+
+固定顺序 `{codex, claude-code, hermes-agent, bibit}` 由 `pluginartifact.PluginLandingAgents()` 与
+`LandingRelativeDir`/`LandingPluginPath`/`LandingMarketplaceSource` 单点定义。Codex/Claude 的过滤由
+marketplace `source` 指向各自落盘叶子实现（真实 CLI 只复制 source 子树）；Hermes/Bibit 由
+`Manager.StageFilesystem(agent, ref)` 只复制 `landing/<agent-id>/plugins/<name>` 实现，安装目录不再
+出现其他 Agent 的配置。生成侧 `internal/pluginresource/agent_manifests.go` 的
+`writeAgentLandings` 写四个叶子（`__init__.py` 只写 Hermes 叶子），复验侧
+`ValidateShared` 复验 canonical 包、四个叶子与两份 marketplace 的精确相对路径闭集，并由
+`validateLandingSkillPayloads` 要求每个叶子的 `skills/` 子树与 canonical 逐字节相等（禁止
+symlink/hardlink 复用）。下载与派生次数不变：`Ensure`/`Lookup` 仍不携带 Agent，先装 Hermes 再装
+Bibit（或任意顺序）时第二次安装命中同一不可变 artifact，既不重新下载也不重新派生，不会触发
+「derived Plugin file already exists」冲突。
+
+边界：本变更前的 cache 没有 `landing/` 目录，`ValidateShared` 返回带可操作提示的 `ErrInvalid`（提示
+删除该 artifact 根以重新派生），`Lookup`/`Ensure` 不自动改写或清理不可变缓存。CLI flag、journal
+schema 与卸载语义均不变。文档同步：新增
+[ADR-036](ivory-tower/adr/ADR-036-per-agent-plugin-landing-filtering.md) 并将
+[ADR-035](ivory-tower/adr/ADR-035-share-derived-filesystem-plugin-manifest.md) 标记为被取代，
+同时更新 `BUILD.md`、`ivory-tower/project-overview.md`、Feature 018/020 的 spec 与 plan、
+`docs/power-template/plugin.md`、`docs/power-template/README.md`、`docs/testing/install-uninstall.md`
+与报告模板。
+
+相关提交：`9dced12`（代码与测试；承载本条目的文档提交不列入自身）。
+
+验证结果或限制：`gofmt -l` 干净、`go build ./...`、`go vet ./...`、`go test -count=1 -timeout 900s ./...`
+全部通过。新增与更新的用例：`internal/pluginartifact` 的 `writeValidSharedArtifact` 改为生成完整
+landing 布局，新增 `author` 注入、落盘叶子多余文件、Skill 漂移、marketplace source 回退到
+`./plugins/<name>`、旧布局缺 `landing/` 的 fail-closed 用例；`internal/pluginresource` 的
+`TestAgentLandingGenerationIsDeterministicAndUsesExactSchemas` 断言 `plugin.yaml` 逐字节为四行、
+`TestAgentLandingGenerationKeepsEachAgentOwnFilesOnly` 断言每个叶子只含本 Agent 文件、
+`TestStageFilesystemMaterializesOnlyTargetAgentLeaf` 断言 staging 只含目标叶子；
+`internal/lifecycle` 的 `TestPluginAcceptanceFilesystemAgentsReuseSharedArtifact` 以两种顺序断言第二次
+安装下载次数仍为 1 且 artifact 不变，并按 Agent 断言安装目录内容。限制：板端
+（`bianbu@10.0.91.51`，Bibit 0.1.61）真实安装/卸载复测需按 `docs/testing/install-uninstall.md`
+在板端执行，本轮尚未完成；Hermes↔Bibit 交叉复用无板端 `hermes` CLI，由上述本地集成用例覆盖。
+
+## 2026-09-15（后续：派生 plugin.yaml 由 Hermes 与 Bibit 共用并新增 schema_version）
+
+> 已被取代：该条目的 `author: APM` 字段与「单一共享插件根同时服务 Hermes 与 Bibit」布局已由上一条
+> ADR-036 变更取代，`schema_version: 1` 决策继续有效。
+
+分类：新增功能
+
+用户需求：Bibit 安装 Plugin 时同样需要 APM 从 `apc-plugin.json` 派生的 manifest，与 Hermes 使用相同的
+文件名与格式，但要在原格式上增加 `schema_version` 字段与取值；同时必须保持 Hermes 与 Bibit 在同一
+制品上的复用逻辑——某个 Agent 安装时已生成的 YAML，另一个 Agent 安装时应直接复用而不是重新生成。
+
+解决方案或完成结果：`plugin.yaml` 的路径与文件名不变（插件目录根
+`plugins/<logical-name>/plugin.yaml`，ADR-031），但语义从「Hermes 原生 manifest」改为 Hermes 与 Bibit
+共用的 filesystem Agent manifest，并新增 `pluginManifestSchemaVersion = 1`：
+
+```yaml
+schema_version: 1
+name: <name>
+version: <去 v 的原生版本>
+description: <canonical description>
+author: APM
+```
+
+生成侧 `internal/pluginresource/agent_manifests.go` 写
+`pluginartifact.FilesystemPluginManifest{SchemaVersion: 1, ...}`（原 `HermesPluginManifest`），复验侧
+`internal/pluginartifact/validation.go` 的 `expectedFilesystemPluginManifest` 返回同值并以
+`reflect.DeepEqual` 比较，`decodeExactRequiredYAML` 继续使用 `KnownFields(true)`，因此缺失
+`schema_version`、取值漂移（如 `2`）或类型漂移（如 `"1"`）都 fail closed；`schema_version` 是闭集内
+唯一新增字段。命名同步去 Hermes 专属含义：`HermesPluginManifest` → `FilesystemPluginManifest`、
+`hermesManifestPath`/`hermesInitPath`/`hermesInitContents` →
+`pluginManifestPath`/`pluginInitPath`/`pluginInitContents`、`expectedHermesManifest` →
+`expectedFilesystemPluginManifest`、`validateHermes` → `validateFilesystemPluginManifest`，Claude
+marketplace 的 owner 改用独立常量 `apmAuthor`。
+
+复用逻辑未新增任何按 Agent 分支：派生仍在 cache miss 的单次 pass 内完成且不依赖本次目标 Agent，
+`pluginresource.Ensure` 先 `Lookup`（命中即返回），未命中才在 `pathLock(artifact.Root)` 下二次
+`Lookup`，仍未命中才在新建的唯一临时根中构建并原子 `rename` 发布；因此先装 Hermes 再装 Bibit（或反
+序）时第二次安装命中同一不可变 artifact，既不重新下载也不重新派生，`writePrivateFile` 的
+「derived Plugin file already exists」防御分支在复用路径上不可达。Codex/Claude 的
+`.codex-plugin/plugin.json`、`.claude-plugin/plugin.json` 与两份 marketplace 完全不变——它们是各自
+CLI 的严格 schema，新增未知字段会被其解析器拒绝。
+
+边界：本变更前的 cache 其 `plugin.yaml` 缺少 `schema_version`，`Lookup` 会按 `ErrInvalid` 拒绝，
+`Ensure` 直接失败且不修改不可变缓存，需要人工清理 `cache/plugins/<name>/<version>`；不提供双 schema
+兼容分支，与 ADR-017「缺少权威字段的旧 artifact 视为损坏」一致。文档同步：新增
+[ADR-035](ivory-tower/adr/ADR-035-share-derived-filesystem-plugin-manifest.md)，并修正 ADR-014、
+ADR-017、ADR-031、`BUILD.md`、`ivory-tower/project-overview.md`、Feature 018/020 的 spec 与 plan、
+`docs/power-template/plugin.md`、`docs/power-template/README.md` 中过时的 `.hermes-plugin/` 布局与
+「Bibit 复用 Claude 版本身份」表述。
+
+相关提交：`9dced12`（该条目的 `schema_version`、命名与共用 manifest 改动随同一提交落地；其单根共用
+布局已被上一条 ADR-036 取代）。
+
+验证结果或限制：`gofmt -l internal/ cmd/` 干净（另修复 2 个既有未格式化测试文件）、`go build ./...`、
+`go vet ./...` 通过，`go test -count=1 ./...` 通过。新增与更新的用例：
+`internal/pluginartifact` 的 `writeValidSharedArtifact` 期望值改为含 `schema_version: 1`，并新增缺失/
+漂移/类型漂移三个 fail-closed 用例；`internal/pluginresource` 的
+`TestWriteAgentManifestsIsDeterministic`（生成两次字节一致 + `schema_version` 必须是首字段）；
+`internal/lifecycle` 的 `TestPluginAcceptanceFilesystemAgentsReuseSharedArtifact` 以 Hermes→Bibit 与
+Bibit→Hermes 两种顺序断言第二次安装后 Cloud 下载次数仍为 1 且 artifact 叶子树的文件集、字节、权限与
+mtime 快照完全不变（证明未重新派生），并复用 `assertTreesEqual` 证明两个 Agent 目标与共享 artifact
+一致。限制：本机无 bibit CLI，Bibit 侧「`plugin.yaml` 携带 `schema_version` 且容忍同目录
+`__init__.py`」依据 `bianbu-agent-cli-guide.md` 与板端验收记录
+`artifacts/install-uninstall/2026-09-10-k3/report.md` 的 bibit `plugin/superpowers@v6.3.0` PASS 用例，
+真实安装/卸载复测需按 `docs/testing/install-uninstall.md` 在板端执行。
+
 ## 2026-09-11（后续：validate 对 agent.id 与 agent.name 不一致输出 warning）
 
 分类：新增功能

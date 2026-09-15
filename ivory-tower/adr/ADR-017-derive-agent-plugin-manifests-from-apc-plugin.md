@@ -4,6 +4,8 @@
 - Date：2026-08-21
 - Decision Makers：APM maintainers
 
+> 局部取代说明：派生文件的插件根布局由 [ADR-031](ADR-031-hermes-plugin-manifest-lives-at-plugin-root.md) 修正（不再使用 `.hermes-plugin/` 子目录）；`plugin.yaml` 携带 `schema_version: 1` 且不含 `author`，并按目标 Agent 落入独立的落盘叶子，见 [ADR-035](ADR-035-share-derived-filesystem-plugin-manifest.md)（`schema_version`）与 [ADR-036](ADR-036-per-agent-plugin-landing-filtering.md)（按目标落盘，取代 ADR-035 的单根共用布局）。本 ADR 的 canonical 权威源、单次确定性派生与共享不可变 artifact 原则不变。
+
 ## Context
 
 [ADR-014](ADR-014-share-multi-agent-plugin-artifacts.md) 决定每个 Plugin 版本只保留一份共享不可变缓存，但假设 Cloud 原始包已经同时携带 Codex、Claude 与 Hermes 原生 manifest。APC 的权威 Plugin v1 契约改为只保存 `apc-plugin.json + skills/...`，并明确禁止开发者维护 Agent 原生 manifest。若 APM 只新增 Remote 下载而不改变构建边界，APC Plugin 在下载成功后仍无法被当前 Plugin Resource 消费，Local 与 Remote 也会产生不同格式。
@@ -25,7 +27,7 @@ skills/<declared-skill>/...
 
 - `.codex-plugin/plugin.json`；
 - `.claude-plugin/plugin.json`；
-- `.hermes-plugin/plugin.yaml` 与 `.hermes-plugin/__init__.py`；
+- 四个落盘叶子 `landing/<agent-id>/plugins/<logical-name>/`（ADR-036），其中 Hermes 叶子含 `plugin.yaml`（`schema_version: 1`，无 `author`）与 `__init__.py` 注册器，Bibit 叶子只含同字段 `plugin.yaml`；
 - Codex 与 Claude 的单 Plugin 本地 marketplace。
 
 生成结果与 canonical package 一起复验并一次 rename 到：
@@ -52,6 +54,7 @@ Cache hit 与 transaction recovery 只复验已有 canonical manifest、派生�
 - 正面影响：继续保留 ADR-014 的共享 artifact、双 marketplace、逻辑 selector 和离线恢复模型。
 - 代价与风险：APM builder 必须准确维护各 Agent 原生 manifest schema，并对历史 canonical Plugin 做兼容测试。
 - 代价与风险：旧 cache 缺少 canonical 权威文件后无法继续使用，需要开发阶段人工清理。
+- 代价与风险：派生 manifest 的 schema 变更（如 [ADR-035](ADR-035-share-derived-filesystem-plugin-manifest.md) 新增 `schema_version`）会使既有 cache fail closed，同样需要人工清理。
 - 代价与风险：Plugin Resource 的 validator 需要同时理解 raw canonical package 与最终派生 artifact 两个阶段。
 - 后续动作：将 ADR-014 标记为被本 ADR 取代；Feature 018 与 Project Overview 的 Cloud 原始包描述迁移到本 ADR。
 

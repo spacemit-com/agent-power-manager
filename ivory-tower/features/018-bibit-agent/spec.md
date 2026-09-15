@@ -76,9 +76,9 @@ Bibit Plugin Adapter 使用 filesystem deployment：
 - `TargetPath(<name>)` 返回 `<bibit-root>/plugins/<name>`；
 - `Inspect` 以目标物理目录存在为 present；
 - `Add`、`Remove` 是 filesystem transaction 的无 CLI 激活钩子，合法请求返回 applied；
-- 版本由 `<target>/.claude-plugin/plugin.json` 以及 APM manifest 表达。
+- 版本由 APM manifest 与 APM 在插件目录根派生的 `plugin.yaml` 表达。
 
-Hermes 同样改为 `<hermes-root>/plugins/<name>`，但继续通过 `hermes plugins list/enable/disable` 管理 Agent 启用状态，版本由 `.hermes-plugin/plugin.yaml` 表达。
+Hermes 同样改为 `<hermes-root>/plugins/<name>`，但继续通过 `hermes plugins list/enable/disable` 管理 Agent 启用状态；版本由落盘叶子 `<agent-id>/plugins/<name>` 内的 `plugin.yaml` 表达，该文件携带 `schema_version: 1` 且不含 `author`（[ADR-036](../adr/ADR-036-per-agent-plugin-landing-filtering.md)；原 [ADR-035](../adr/ADR-035-share-derived-filesystem-plugin-manifest.md) 的「Hermes 与 Bibit 共用同一目录内容」已被取代）。
 
 ## 共享 Plugin 资源
 
@@ -98,13 +98,12 @@ Local Cloud 示例布局：
 internal/cloud/resources/plugins/
 └── demo-plugin/
     └── v0.1.0/
-        ├── .codex-plugin/plugin.json
-        ├── .claude-plugin/plugin.json
-        ├── .hermes-plugin/__init__.py
-        ├── .hermes-plugin/plugin.yaml
+        ├── apc-plugin.json
         ├── skills/
         └── ...
 ```
+
+canonical 包只含 `apc-plugin.json` 与 `skills/...`；`.codex-plugin/plugin.json`、`.claude-plugin/plugin.json` 与 Hermes/Bibit 的 `plugin.yaml`、Hermes 注册器 `__init__.py` 都由 APM 在 cache miss 时按目标 Agent 派生到 `cache/plugins/<name>/<version>/landing/<agent-id>/plugins/<name>`，不属于 Cloud 内容（[ADR-017](../adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)、[ADR-036](../adr/ADR-036-per-agent-plugin-landing-filtering.md)）。安装目录只包含目标 Agent 落盘叶子的内容。
 
 下载操作将整个版本目录原样复制到调用方目标；不会按 Agent 裁剪，也不会修改或删除其他 Agent 的入口。原始包不得携带 APM 生成的 marketplace。
 
@@ -219,7 +218,7 @@ Journal 保持 schema v1、`plugin` driver、phase、direction 和 payload 结�
 - `internal/adapter/codex_plugin_test.go`、`claude_plugin_test.go`、`hermes_plugin_test.go`：纯逻辑 selector 与 Hermes 路径。
 - `internal/adapter/plugin.go`：更新 target 和 filesystem 激活钩子约束。
 - `internal/cloud/client.go`、`local_plugin.go` 及测试：共享下载接口与布局。
-- `internal/cloud/resources/plugins/demo-plugin/*`：合并 Agent 子目录，增加 Hermes 原生入口。
+- `internal/cloud/resources/plugins/demo-plugin/*`：合并为一份 canonical 包，不再预置任何 Agent 原生入口。
 - `internal/pluginresource/artifact.go`、`manager.go`、`marketplace.go`、两个 builder、filesystem helper 及测试：共享不可变制品。
 - `internal/pluginartifact/validation.go`：共享 artifact 的按需只读校验。
 - `internal/lifecycle/install_plugin.go`、`uninstall_plugin.go`、Plugin 集成/验收测试及 fake：通用 filesystem 流程与 Agent 无关资源。

@@ -769,11 +769,11 @@ Build twice in separate temp roots and byte-compare these files:
 ```text
 .codex-plugin/plugin.json
 .claude-plugin/plugin.json
-.hermes-plugin/plugin.yaml
-.hermes-plugin/__init__.py
+plugin.yaml
+__init__.py
 ```
 
-Assert Codex uses `skills: "./skills/"`, Claude uses `skills: ["./skills/"]`, both use native version without `v`, Hermes uses author `APM`, and `__init__.py` contains exactly a no-op `register(ctx)` function.
+Assert Codex uses `skills: "./skills/"`, Claude uses `skills: ["./skills/"]`, both use native version without `v`, the filesystem `plugin.yaml` uses `schema_version: 1` with only `schema_version/name/version/description` (no `author`, per ADR-036), and `__init__.py` contains exactly a no-op `register(ctx)` function. Per ADR-036 each Agent's derived files live under `landing/<agent-id>/plugins/<name>`, and the two marketplaces reference their own landing leaf.
 
 - [ ] **Step 3: Run RED**
 

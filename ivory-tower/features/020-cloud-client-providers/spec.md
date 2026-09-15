@@ -255,25 +255,24 @@ Local fixture 和 Remote 解包结果具有同一格式。raw package 禁止预�
 1. 下载 canonical package；
 2. 严格解析 `apc-plugin.json`，拒绝未知/重复字段、错误 schema、身份不一致、不安全或重复 skill 路径、缺失/额外 Skill；
 3. 保留 canonical package；
-4. 确定性生成 `.codex-plugin/plugin.json`、`.claude-plugin/plugin.json`、`.hermes-plugin/plugin.yaml` 与 `.hermes-plugin/__init__.py`；
+4. 按目标 Agent 确定性生成各自落盘叶子：`.codex-plugin/plugin.json`、`.claude-plugin/plugin.json`、Hermes/Bibit 的 `plugin.yaml`（含 `schema_version: 1`，不含 `author`）与 Hermes 注册器 `__init__.py`；
 5. 从生成的 manifest 生成 Codex 与 Claude 单 Plugin 本地 marketplace；
 6. 使用共享 validator 复验完整 artifact 后一次 rename 发布。
 
-生成覆盖当前全部正式适配 Agent，而不是只覆盖本次安装目标；Bibit filesystem Plugin 复用生成的 Claude 版本身份，Hermes 使用 Hermes manifest。逻辑 Plugin 名和 selector 继续是 `<name>`，版本只存在于 `PowerRef`、APM manifest、cache 版本目录与派生原生 manifest。
+生成覆盖当前全部正式适配 Agent，而不是只覆盖本次安装目标；每个 Agent 消费自己的落盘叶子（见 [ADR-036](../adr/ADR-036-per-agent-plugin-landing-filtering.md)），因此第二个 Agent 安装时命中已发布 artifact，不重新下载也不重新派生。逻辑 Plugin 名和 selector 继续是 `<name>`，版本只存在于 `PowerRef`、APM manifest、cache 版本目录与派生原生 manifest。
 
 最终布局继续是一份共享不可变 artifact：
 
 ```text
 cache/plugins/<name>/<version>/
-├── .agents/plugins/marketplace.json
-├── .claude-plugin/marketplace.json
-└── plugins/<name>/
-    ├── apc-plugin.json
-    ├── .codex-plugin/plugin.json
-    ├── .claude-plugin/plugin.json
-    ├── .hermes-plugin/plugin.yaml
-    ├── .hermes-plugin/__init__.py
-    └── skills/...
+├── .agents/plugins/marketplace.json      # Codex；source ./landing/codex/plugins/<name>
+├── .claude-plugin/marketplace.json       # Claude；source ./landing/claude-code/plugins/<name>
+├── plugins/<name>/                       # canonical 包：apc-plugin.json + skills/...
+└── landing/<agent-id>/plugins/<name>/
+    ├── codex/         .codex-plugin/plugin.json + skills/...
+    ├── claude-code/   .claude-plugin/plugin.json + skills/...
+    ├── hermes-agent/  plugin.yaml + __init__.py + skills/...
+    └── bibit/         plugin.yaml + skills/...
 ```
 
 Recovery 仍只读取 journal、Adapter、manifest 与现有 artifact，不连接 Cloud，不重新生成或修复 cache。缺少 `apc-plugin.json` 的旧 artifact 视为损坏并 fail closed。
@@ -330,7 +329,7 @@ Recovery 仍只读取 journal、Adapter、manifest 与现有 artifact，不连�
 ### Cache 与 Plugin
 
 - Skill/Agent 覆盖 hit、miss、并发同版本、下载失败、校验失败、rename 竞争、失败清理和 staging 原子替换。
-- Plugin fixture 断言 Cloud 只含 `apc-plugin.json`；Ensure 后才出现四类 Agent 派生配置与双 marketplace。
+- Plugin fixture 断言 Cloud 只含 `apc-plugin.json`；Ensure 后才出现四类 Agent 落盘叶子与双 marketplace（Codex/Claude marketplace 的 source 指向各自落盘叶子）。
 - Plugin 覆盖 schema、identity、skills 闭集、确定性生成、cache hit 不重建、旧 artifact fail closed 与离线 recovery。
 - 四 Agent install/upgrade/downgrade/uninstall/fix 的既有验收继续通过。
 
