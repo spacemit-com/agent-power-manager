@@ -40,7 +40,7 @@ var _ ArtifactLocator = (*Service)(nil)
 
 // artifactBuilder 在下载后的同一个 artifact 根目录中构建并复验共享派生内容。
 type artifactBuilder interface {
-	Build(domain.PowerRef, string, string) error
+	Build(domain.PowerRef, string) error
 	Validate(domain.PowerRef, string) error
 }
 
@@ -145,7 +145,7 @@ func (service *Service) Ensure(ctx context.Context, entry domain.CatalogEntry) (
 	if err := pluginartifact.ValidateRawPackage(ref, temporaryPluginPath); err != nil {
 		return Artifact{}, errors.Join(ErrInvalidArtifact, err)
 	}
-	if err := service.builder.Build(ref, temporaryRoot, temporaryPluginPath); err != nil {
+	if err := service.builder.Build(ref, temporaryRoot); err != nil {
 		return Artifact{}, fmt.Errorf("build plugin artifact: %w", err)
 	}
 	// 构建后再次复验，覆盖 APM 新生成的 marketplace 目录和文件。
@@ -234,9 +234,14 @@ func (service *Service) Exists(ref domain.PowerRef) (bool, error) {
 	return true, nil
 }
 
-// StageFilesystem 将共享 Plugin 叶子原子物化为 filesystem Agent 共用的无版本 staging 目录。
-func (service *Service) StageFilesystem(ref domain.PowerRef) (staging string, resultErr error) {
+// StageFilesystem 将指定 Agent 的落盘插件叶子原子物化为该 Agent 的无版本 staging 目录。
+// staging 只包含目标 Agent 消费的文件，因此文件系统型 Agent 的安装目录不会出现其他 Agent 的配置。
+func (service *Service) StageFilesystem(agent domain.AgentID, ref domain.PowerRef) (staging string, resultErr error) {
 	artifact, err := service.Lookup(ref)
+	if err != nil {
+		return "", err
+	}
+	pluginSource, err := artifact.LandingPath(agent)
 	if err != nil {
 		return "", err
 	}
@@ -248,12 +253,17 @@ func (service *Service) StageFilesystem(ref domain.PowerRef) (staging string, re
 	if err != nil {
 		return "", err
 	}
+	pluginSource, err = artifact.LandingPath(agent)
+	if err != nil {
+		return "", err
+	}
 	stageLock := service.pathLock(service.stagingRoot)
 	stageLock.Lock()
 	defer stageLock.Unlock()
 	if err := validateStagingDisjoint(
 		service.cacheRoot,
 		artifact,
+		pluginSource,
 		service.stagingRoot,
 		service.stagingTempRoot,
 	); err != nil {
@@ -280,7 +290,7 @@ func (service *Service) StageFilesystem(ref domain.PowerRef) (staging string, re
 	}()
 
 	target := filepath.Join(temporaryRoot, "plugins", ref.Name)
-	if err := service.files.copyDir(artifact.PluginPath, target); err != nil {
+	if err := service.files.copyDir(pluginSource, target); err != nil {
 		return "", fmt.Errorf("copy filesystem plugin artifact to staging: %w", err)
 	}
 	if err := service.files.mkdirAll(filepath.Dir(service.stagingRoot), 0o700); err != nil {

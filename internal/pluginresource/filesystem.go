@@ -57,7 +57,8 @@ func splitPath(path string) []string {
 }
 
 // validateStagingDisjoint 在任何递归清理前解析物理路径，拒绝 staging 与共享 cache/source 双向包含。
-func validateStagingDisjoint(cacheRoot string, artifact Artifact, stagingRoot, stagingTempRoot string) error {
+// pluginSource 必须是本次要物化的落盘插件叶子，避免只比较 canonical 叶子而漏掉落盘子树的别名。
+func validateStagingDisjoint(cacheRoot string, artifact Artifact, pluginSource, stagingRoot, stagingTempRoot string) error {
 	type namedPath struct {
 		name     string
 		logical  string
@@ -78,7 +79,7 @@ func validateStagingDisjoint(cacheRoot string, artifact Artifact, stagingRoot, s
 	}{
 		{name: "cache root", path: cacheRoot},
 		{name: "artifact root", path: artifact.Root},
-		{name: "Plugin source", path: artifact.PluginPath},
+		{name: "Plugin source", path: pluginSource},
 	} {
 		resolved, err := resolve(path.name, path.path)
 		if err != nil {

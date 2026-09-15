@@ -8,12 +8,16 @@ import (
 	"testing"
 
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 )
 
 func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 	// 捕获错误变更：Codex marketplace 的身份、source 或安装策略偏离原生约束。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo")
+	pluginPath, err := pluginartifact.LandingPluginPath(root, domain.AgentCodex, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".codex-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +31,7 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (codexMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
+	if err := (codexMarketplaceBuilder{}).Build(ref, root); err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 
@@ -63,8 +67,8 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 		t.Fatalf("plugins count = %d, want 1", len(document.Plugins))
 	}
 	plugin := document.Plugins[0]
-	if plugin.Name != "demo" || plugin.Source.Source != "local" || plugin.Source.Path != "./plugins/demo" {
-		t.Fatalf("plugin identity/source = %#v, want demo local ./plugins/demo", plugin)
+	if plugin.Name != "demo" || plugin.Source.Source != "local" || plugin.Source.Path != "./landing/codex/plugins/demo" {
+		t.Fatalf("plugin identity/source = %#v, want demo local ./landing/codex/plugins/demo", plugin)
 	}
 	if plugin.Policy.Installation != "AVAILABLE" || plugin.Policy.Authentication != "ON_INSTALL" || plugin.Category != "Coding" {
 		t.Fatalf("plugin policy/category = %#v/%q, want AVAILABLE ON_INSTALL/Coding", plugin.Policy, plugin.Category)
@@ -77,7 +81,10 @@ func TestCodexMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 func TestCodexMarketplaceRejectsIncompleteGeneratedManifest(t *testing.T) {
 	// 捕获错误变更：builder 接纳缺失 canonical description/skills 的 schema 漂移文件。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo")
+	pluginPath, err := pluginartifact.LandingPluginPath(root, domain.AgentCodex, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".codex-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +92,7 @@ func TestCodexMarketplaceRejectsIncompleteGeneratedManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (codexMarketplaceBuilder{}).Build(ref, root, pluginPath); !errors.Is(err, ErrInvalidArtifact) {
+	if err := (codexMarketplaceBuilder{}).Build(ref, root); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Build() error = %v, want ErrInvalidArtifact", err)
 	}
 }

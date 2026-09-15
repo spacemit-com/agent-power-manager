@@ -1,6 +1,7 @@
 package pluginresource
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -37,13 +38,11 @@ type claudeMarketplacePlugin struct {
 	Description string `json:"description"`
 }
 
-// Build 根据 Claude 原生 manifest 生成只含当前逻辑 Plugin 的本地 marketplace。
-func (claudeMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath string) error {
-	var manifest claudePluginManifest
-	if err := decodePluginManifest(pluginPath, claudeManifestPath, &manifest); err != nil {
-		return fmt.Errorf("decode Claude plugin manifest: %w", err)
-	}
-	if err := validateClaudePluginManifest(ref, manifest); err != nil {
+// Build 根据 Claude 落盘叶子内的原生 manifest 生成只含当前逻辑 Plugin 的本地 marketplace，
+// 其 plugin source 指向该落盘叶子，使 Claude 只复制属于自身的文件。
+func (claudeMarketplaceBuilder) Build(ref domain.PowerRef, root string) error {
+	manifest, err := readClaudeLandingManifest(ref, root)
+	if err != nil {
 		return err
 	}
 	document, err := newClaudeMarketplaceDocument(ref, manifest)
@@ -56,18 +55,10 @@ func (claudeMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath stri
 	return nil
 }
 
-// Validate 复验 Claude manifest，并按类型语义比较共享根中的 Claude marketplace。
+// Validate 复验 Claude 落盘 manifest，并按类型语义比较共享根中的 Claude marketplace。
 func (claudeMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error {
-	logicalName, err := domain.PluginRuntimeName(ref)
+	manifest, err := readClaudeLandingManifest(ref, root)
 	if err != nil {
-		return err
-	}
-	pluginPath := filepath.Join(root, "plugins", logicalName)
-	var manifest claudePluginManifest
-	if err := decodePluginManifest(pluginPath, claudeManifestPath, &manifest); err != nil {
-		return fmt.Errorf("decode Claude plugin manifest: %w", err)
-	}
-	if err := validateClaudePluginManifest(ref, manifest); err != nil {
 		return err
 	}
 	want, err := newClaudeMarketplaceDocument(ref, manifest)
@@ -84,10 +75,33 @@ func (claudeMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error
 	return nil
 }
 
+func readClaudeLandingManifest(ref domain.PowerRef, root string) (claudePluginManifest, error) {
+	logicalName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		return claudePluginManifest{}, err
+	}
+	landingPlugin, err := pluginartifact.LandingPluginPath(root, domain.AgentClaudeCode, logicalName)
+	if err != nil {
+		return claudePluginManifest{}, errors.Join(ErrInvalidArtifact, err)
+	}
+	var manifest claudePluginManifest
+	if err := decodePluginManifest(landingPlugin, claudeManifestPath, &manifest); err != nil {
+		return claudePluginManifest{}, fmt.Errorf("decode Claude plugin manifest: %w", err)
+	}
+	if err := validateClaudePluginManifest(ref, manifest); err != nil {
+		return claudePluginManifest{}, err
+	}
+	return manifest, nil
+}
+
 func newClaudeMarketplaceDocument(ref domain.PowerRef, manifest claudePluginManifest) (claudeMarketplaceDocument, error) {
 	marketplaceName, err := domain.PluginMarketplaceName(ref)
 	if err != nil {
 		return claudeMarketplaceDocument{}, err
+	}
+	source, err := pluginartifact.LandingMarketplaceSource(domain.AgentClaudeCode, manifest.Name)
+	if err != nil {
+		return claudeMarketplaceDocument{}, errors.Join(ErrInvalidArtifact, err)
 	}
 	document := claudeMarketplaceDocument{Name: marketplaceName}
 	document.Owner.Name = "APM"
@@ -95,7 +109,7 @@ func newClaudeMarketplaceDocument(ref domain.PowerRef, manifest claudePluginMani
 	document.Metadata.Version = manifest.Version
 	document.Plugins = []claudeMarketplacePlugin{{
 		Name:        manifest.Name,
-		Source:      localPluginSourcePrefix + manifest.Name,
+		Source:      source,
 		Description: manifest.Description,
 	}}
 	return document, nil

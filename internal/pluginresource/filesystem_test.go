@@ -165,6 +165,9 @@ func writeValidTestArtifact(t *testing.T, root string) {
 	if err := os.WriteFile(filepath.Join(root, "builder.txt"), []byte("built"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := writeTestLandingLeaves(root); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeOutsideSentinel(t *testing.T, root string) string {

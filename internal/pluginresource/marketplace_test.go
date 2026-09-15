@@ -13,17 +13,17 @@ import (
 
 	"apm/internal/cloud/local"
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 )
 
 func TestSharedMarketplaceBuilderBuildsBothDocumentsInOneRoot(t *testing.T) {
 	// 捕获错误变更：协调器只生成某个 Agent 的 marketplace，或把两份 source 指向不同 Plugin 叶子。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo")
-	if err := writeSharedTestPluginManifests(pluginPath, `{"name":"demo","version":"1.2.3"}`); err != nil {
+	if err := writeSharedTestPluginPackage(filepath.Join(root, "plugins", "demo"), `{"name":"demo","version":"1.2.3"}`); err != nil {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}
-	if err := (sharedMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
+	if err := (sharedMarketplaceBuilder{}).Build(ref, root); err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 
@@ -32,7 +32,7 @@ func TestSharedMarketplaceBuilderBuildsBothDocumentsInOneRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(codex.Plugins) != 1 || codex.Plugins[0].Name != "demo" ||
-		codex.Plugins[0].Source.Source != "local" || codex.Plugins[0].Source.Path != "./plugins/demo" {
+		codex.Plugins[0].Source.Source != "local" || codex.Plugins[0].Source.Path != "./landing/codex/plugins/demo" {
 		t.Fatalf("Codex marketplace plugins = %+v, want one logical demo entry", codex.Plugins)
 	}
 
@@ -40,7 +40,7 @@ func TestSharedMarketplaceBuilderBuildsBothDocumentsInOneRoot(t *testing.T) {
 	if err := decodeJSONFile(filepath.Join(root, claudeMarketplacePath), &claude); err != nil {
 		t.Fatal(err)
 	}
-	if len(claude.Plugins) != 1 || claude.Plugins[0].Name != "demo" || claude.Plugins[0].Source != "./plugins/demo" {
+	if len(claude.Plugins) != 1 || claude.Plugins[0].Name != "demo" || claude.Plugins[0].Source != "./landing/claude-code/plugins/demo" {
 		t.Fatalf("Claude marketplace plugins = %+v, want one logical demo entry", claude.Plugins)
 	}
 }
@@ -57,14 +57,14 @@ func TestSharedMarketplaceBuilderRejectsInvalidCanonicalIdentity(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			pluginPath := filepath.Join(root, "plugins", "demo")
-			if err := writeSharedTestPluginManifests(pluginPath, `{"name":"demo","version":"1.2.3","description":"Demo"}`); err != nil {
+			if err := writeSharedTestPluginPackage(pluginPath, `{"name":"demo","version":"1.2.3","description":"Demo"}`); err != nil {
 				t.Fatal(err)
 			}
 			if err := writeTestPluginManifest(pluginPath, "apc-plugin.json", test.manifest); err != nil {
 				t.Fatal(err)
 			}
 			ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}
-			if err := (sharedMarketplaceBuilder{}).Build(ref, root, pluginPath); !errors.Is(err, ErrInvalidArtifact) {
+			if err := (sharedMarketplaceBuilder{}).Build(ref, root); !errors.Is(err, ErrInvalidArtifact) {
 				t.Fatalf("Build() error = %v, want ErrInvalidArtifact", err)
 			}
 		})
@@ -77,7 +77,7 @@ func TestSharedMarketplaceNewBuildsCompleteArtifacts(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg-cache"))
 	t.Setenv("APM_HOME", filepath.Join(root, "home"))
 	download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
-		return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0"}`)
+		return writeSharedTestPluginPackage(destination, `{"name":"demo","version":"0.1.0"}`)
 	})
 	service, err := New(download)
 	if err != nil {
@@ -182,7 +182,7 @@ func TestEnsureRejectsInvalidSharedPackagesWithoutPublishingCache(t *testing.T) 
 		{
 			name: "raw package includes Hermes native manifest",
 			write: func(_ *testing.T, destination string) error {
-				return writeTestPluginManifest(destination, hermesManifestPath, "name: demo\n")
+				return writeTestPluginManifest(destination, pluginManifestPath, "name: demo\n")
 			},
 		},
 		{
@@ -233,7 +233,7 @@ func TestEnsureRejectsInvalidSharedPackagesWithoutPublishingCache(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			roots := newTestRoots(t)
 			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
-				if err := writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0"}`); err != nil {
+				if err := writeSharedTestPluginPackage(destination, `{"name":"demo","version":"0.1.0"}`); err != nil {
 					return err
 				}
 				return test.write(t, destination)
@@ -304,7 +304,7 @@ func TestLookupRequiresBothGeneratedMarketplacesWithoutReplacingImmutableCache(t
 			var calls atomic.Int32
 			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				calls.Add(1)
-				return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0"}`)
+				return writeSharedTestPluginPackage(destination, `{"name":"demo","version":"0.1.0"}`)
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
@@ -336,6 +336,12 @@ func TestLookupRejectsExtraCapabilityNativeAndMarketplaceFilesWithoutReplacingIm
 		"plugins/demo/.codex-plugin/extra.json",
 		"plugins/demo/.claude-plugin/extra.json",
 		"plugins/demo/extra.py",
+		"landing/codex/plugins/demo/.claude-plugin/extra.json",
+		"landing/claude-code/plugins/demo/.codex-plugin/extra.json",
+		"landing/hermes-agent/plugins/demo/apc-plugin.json",
+		"landing/bibit/plugins/demo/extra.py",
+		"landing/bibit/plugins/demo/__init__.py",
+		"landing/bibit/plugins/demo/.codex-plugin/plugin.json",
 		".agents/plugins/extra.json",
 		".claude-plugin/extra.json",
 	} {
@@ -344,7 +350,7 @@ func TestLookupRejectsExtraCapabilityNativeAndMarketplaceFilesWithoutReplacingIm
 			var calls atomic.Int32
 			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				calls.Add(1)
-				return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0"}`)
+				return writeSharedTestPluginPackage(destination, `{"name":"demo","version":"0.1.0"}`)
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
@@ -374,13 +380,13 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 	validCodex := `{
   "name":"apm-demo",
   "interface":{"displayName":"demo"},
-	  "plugins":[{"name":"demo","source":{"source":"local","path":"./plugins/demo"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Coding"}]
+	  "plugins":[{"name":"demo","source":{"source":"local","path":"./landing/codex/plugins/demo"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Coding"}]
 }`
 	validClaude := `{
   "name":"apm-demo",
   "owner":{"name":"APM"},
   "metadata":{"description":"Demo","version":"0.1.0"},
-	  "plugins":[{"name":"demo","source":"./plugins/demo","description":"Demo"}]
+	  "plugins":[{"name":"demo","source":"./landing/claude-code/plugins/demo","description":"Demo"}]
 }`
 	tests := []struct {
 		name   string
@@ -407,7 +413,7 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 		{
 			name: "wrong local source",
 			mutate: func(t *testing.T, root string) {
-				writeFileForTest(t, filepath.Join(root, codexMarketplacePath), `{"name":"apm-demo","interface":{"displayName":"demo"},"plugins":[{"name":"demo","source":{"source":"local","path":"./plugins/other"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Coding"}]}`)
+				writeFileForTest(t, filepath.Join(root, codexMarketplacePath), `{"name":"apm-demo","interface":{"displayName":"demo"},"plugins":[{"name":"demo","source":{"source":"local","path":"./landing/codex/plugins/other"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Coding"}]}`)
 			},
 		},
 		{
@@ -425,13 +431,13 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 		{
 			name: "wrong Claude source",
 			mutate: func(t *testing.T, root string) {
-				writeFileForTest(t, filepath.Join(root, claudeMarketplacePath), strings.Replace(validClaude, "./plugins/demo", "./plugins/other", 1))
+				writeFileForTest(t, filepath.Join(root, claudeMarketplacePath), strings.Replace(validClaude, "./landing/claude-code/plugins/demo", "./landing/claude-code/plugins/other", 1))
 			},
 		},
 		{
 			name: "manifest changed after publish",
 			mutate: func(t *testing.T, root string) {
-				writeFileForTest(t, filepath.Join(root, "plugins", "demo", claudeManifestPath), `{"name":"other","version":"0.1.0","description":"Demo","skills":["./skills/"]}`)
+				writeFileForTest(t, filepath.Join(root, filepath.FromSlash("landing/codex/plugins/demo"), codexManifestPath), `{"name":"other","version":"0.1.0","description":"Demo","skills":["./skills/"]}`)
 			},
 		},
 	}
@@ -442,7 +448,7 @@ func TestLookupSemanticallyValidatesImmutableMarketplaceAndManifest(t *testing.T
 			var calls atomic.Int32
 			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				calls.Add(1)
-				return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0"}`)
+				return writeSharedTestPluginPackage(destination, `{"name":"demo","version":"0.1.0"}`)
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
@@ -486,7 +492,7 @@ func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCach
 			var calls atomic.Int32
 			download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 				calls.Add(1)
-				return writeSharedTestPluginManifests(destination, `{"name":"demo","version":"0.1.0","description":"Demo"}`)
+				return writeSharedTestPluginPackage(destination, `{"name":"demo","version":"0.1.0","description":"Demo"}`)
 			})
 			service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, builtInBuilder())
 			ref := testPluginRef()
@@ -494,7 +500,11 @@ func TestLookupRejectsCodexKnownFieldTypeCorruptionWithoutReplacingImmutableCach
 			if err != nil {
 				t.Fatalf("initial Ensure() error = %v", err)
 			}
-			manifestPath := filepath.Join(artifact.PluginPath, codexManifestPath)
+			landing, err := artifact.LandingPath(domain.AgentCodex)
+			if err != nil {
+				t.Fatalf("LandingPath() error = %v", err)
+			}
+			manifestPath := filepath.Join(landing, codexManifestPath)
 			writeFileForTest(t, manifestPath, test.manifest)
 
 			if _, err := service.Lookup(ref); !errors.Is(err, ErrInvalidArtifact) {
@@ -563,9 +573,9 @@ type observingArtifactBuilder struct {
 	buildCalls atomic.Int32
 }
 
-func (builder *observingArtifactBuilder) Build(ref domain.PowerRef, root, pluginPath string) error {
+func (builder *observingArtifactBuilder) Build(ref domain.PowerRef, root string) error {
 	builder.buildCalls.Add(1)
-	return builder.delegate.Build(ref, root, pluginPath)
+	return builder.delegate.Build(ref, root)
 }
 
 func (builder *observingArtifactBuilder) Validate(ref domain.PowerRef, root string) error {
@@ -580,7 +590,7 @@ func writeTestPluginManifest(pluginPath, relativePath, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
 
-func writeSharedTestPluginManifests(pluginPath, content string) error {
+func writeSharedTestPluginPackage(pluginPath, content string) error {
 	var native struct {
 		Name        string `json:"name"`
 		Version     string `json:"version"`
@@ -643,10 +653,19 @@ func writeSymlinkScenario(t *testing.T, agent domain.AgentID, scenario, destinat
 	}
 	switch scenario {
 	case "manifest parent":
+		// 派生写入的目标是落盘插件叶子内的原生 manifest 目录；该目录被 symlink 时写入会逃逸 artifact。
 		if err := os.WriteFile(filepath.Join(external, "plugin.json"), []byte(manifest), 0o600); err != nil {
 			return err
 		}
-		return os.Symlink(external, filepath.Join(destination, filepath.Dir(manifestPath)))
+		artifactRoot := filepath.Dir(filepath.Dir(destination))
+		landing, err := pluginartifact.LandingPluginPath(artifactRoot, agent, "demo")
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(landing, 0o700); err != nil {
+			return err
+		}
+		return os.Symlink(external, filepath.Join(landing, filepath.Dir(manifestPath)))
 	case "plugin root":
 		if err := writeTestPluginManifest(external, manifestPath, manifest); err != nil {
 			return err

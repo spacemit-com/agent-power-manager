@@ -15,10 +15,8 @@ import (
 	"apm/internal/utils/jsonstrict"
 )
 
-const localPluginSourcePrefix = "./plugins/"
-
-// sharedMarketplaceBuilder 在同一个临时 Artifact 根内顺序生成并复验两份 marketplace。
-// 它先从唯一 canonical 索引生成全部 Agent manifest，再生成两份 marketplace。
+// sharedMarketplaceBuilder 在同一个临时 Artifact 根内顺序生成并复验全部派生内容。
+// 它先从唯一 canonical 索引生成四个 Agent 的落盘插件叶子，再生成两份 marketplace。
 type sharedMarketplaceBuilder struct {
 	codex  codexMarketplaceBuilder
 	claude claudeMarketplaceBuilder
@@ -98,18 +96,23 @@ func builtInBuilder() artifactBuilder {
 	return sharedMarketplaceBuilder{}
 }
 
-func (builder sharedMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath string) error {
+func (builder sharedMarketplaceBuilder) Build(ref domain.PowerRef, root string) error {
+	logicalName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		return errors.Join(ErrInvalidArtifact, err)
+	}
+	pluginPath := filepath.Join(root, "plugins", logicalName)
 	manifest, err := pluginartifact.LoadAPCPluginManifest(ref, pluginPath)
 	if err != nil {
 		return errors.Join(ErrInvalidArtifact, err)
 	}
-	if err := writeAgentManifests(pluginPath, manifest); err != nil {
+	if err := writeAgentLandings(root, pluginPath, manifest); err != nil {
 		return err
 	}
-	if err := builder.codex.Build(ref, root, pluginPath); err != nil {
+	if err := builder.codex.Build(ref, root); err != nil {
 		return fmt.Errorf("build Codex marketplace: %w", err)
 	}
-	if err := builder.claude.Build(ref, root, pluginPath); err != nil {
+	if err := builder.claude.Build(ref, root); err != nil {
 		return fmt.Errorf("build Claude marketplace: %w", err)
 	}
 	return nil

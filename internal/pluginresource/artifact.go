@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 )
 
 // Downloader 下载指定版本的完整共享 Plugin artifact；CatalogEntry 是权威 metadata，
@@ -20,7 +21,8 @@ type Downloader interface {
 type Manager interface {
 	Ensure(context.Context, domain.CatalogEntry) (Artifact, error)
 	Lookup(domain.PowerRef) (Artifact, error)
-	StageFilesystem(domain.PowerRef) (string, error)
+	// StageFilesystem 只物化指定 Agent 的落盘插件叶子，目标 Agent 不会看到其他 Agent 的配置。
+	StageFilesystem(domain.AgentID, domain.PowerRef) (string, error)
 	Locate(domain.PowerRef) (Artifact, error)
 	Exists(domain.PowerRef) (bool, error)
 }
@@ -45,13 +47,28 @@ type Marketplace struct {
 }
 
 // Artifact 描述不携带 Agent 身份的共享、不可变 Plugin artifact。
-// Codex 与 Claude marketplace 必须位于同一个 Root，PluginPath 使用逻辑名称。
+// Codex 与 Claude marketplace 必须位于同一个 Root；PluginPath 是 canonical 包叶子，
+// 各 Agent 消费的派生内容位于 Root 下 LandingPath(agent) 对应的落盘插件叶子。
 type Artifact struct {
 	Power                   domain.PowerRef
 	Root                    string
 	PluginPath              string
 	CodexMarketplaceSource  string
 	ClaudeMarketplaceSource string
+}
+
+// LandingPath 返回指定 Agent 在共享 artifact 内的落盘插件叶子绝对路径；
+// 该叶子就是目标 Agent 安装目录的完整内容来源，不支持的 Agent 返回错误。
+func (artifact Artifact) LandingPath(agent domain.AgentID) (string, error) {
+	logicalName, err := domain.PluginRuntimeName(artifact.Power)
+	if err != nil {
+		return "", fmt.Errorf("plugin artifact identity: %w", errors.Join(ErrInvalidArtifact, err))
+	}
+	landing, err := pluginartifact.LandingPluginPath(artifact.Root, agent, logicalName)
+	if err != nil {
+		return "", fmt.Errorf("plugin artifact landing path: %w", errors.Join(ErrInvalidArtifact, err))
+	}
+	return landing, nil
 }
 
 // MarketplaceFor 返回指定 marketplace Agent 对应的资源层注册信息。

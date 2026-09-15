@@ -8,12 +8,16 @@ import (
 	"testing"
 
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 )
 
 func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 	// 捕获错误变更：Claude marketplace 未保留原生作者、版本、描述或本地 source。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo")
+	pluginPath, err := pluginartifact.LandingPluginPath(root, domain.AgentClaudeCode, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".claude-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +31,7 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (claudeMarketplaceBuilder{}).Build(ref, root, pluginPath); err != nil {
+	if err := (claudeMarketplaceBuilder{}).Build(ref, root); err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 
@@ -63,8 +67,8 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 		t.Fatalf("plugins count = %d, want 1", len(document.Plugins))
 	}
 	plugin := document.Plugins[0]
-	if plugin.Name != "demo" || plugin.Source != "./plugins/demo" || plugin.Description != "Demo tools" {
-		t.Fatalf("plugin = %#v, want demo ./plugins/demo/Demo tools", plugin)
+	if plugin.Name != "demo" || plugin.Source != "./landing/claude-code/plugins/demo" || plugin.Description != "Demo tools" {
+		t.Fatalf("plugin = %#v, want demo ./landing/claude-code/plugins/demo/Demo tools", plugin)
 	}
 	if _, err := os.Lstat(filepath.Join(root, ".agents", "plugins", "marketplace.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Codex marketplace stat error = %v, want not exist", err)
@@ -74,7 +78,10 @@ func TestClaudeMarketplaceGeneratesSingleLocalPluginDocument(t *testing.T) {
 func TestClaudeMarketplaceRejectsIncompleteGeneratedManifest(t *testing.T) {
 	// 捕获错误变更：builder 接纳缺失 canonical description/skills 的 schema 漂移文件。
 	root := t.TempDir()
-	pluginPath := filepath.Join(root, "plugins", "demo")
+	pluginPath, err := pluginartifact.LandingPluginPath(root, domain.AgentClaudeCode, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(pluginPath, ".claude-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +89,7 @@ func TestClaudeMarketplaceRejectsIncompleteGeneratedManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
-	if err := (claudeMarketplaceBuilder{}).Build(ref, root, pluginPath); !errors.Is(err, ErrInvalidArtifact) {
+	if err := (claudeMarketplaceBuilder{}).Build(ref, root); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Build() error = %v, want ErrInvalidArtifact", err)
 	}
 }

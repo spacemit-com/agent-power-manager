@@ -1,6 +1,7 @@
 package pluginresource
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -40,13 +41,11 @@ type codexMarketplacePlugin struct {
 	Category string `json:"category"`
 }
 
-// Build 根据 Codex 原生 manifest 生成只含当前逻辑 Plugin 的本地 marketplace。
-func (codexMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath string) error {
-	var manifest codexPluginManifest
-	if err := decodePluginManifest(pluginPath, codexManifestPath, &manifest); err != nil {
-		return fmt.Errorf("decode Codex plugin manifest: %w", err)
-	}
-	if err := validateCodexPluginManifest(ref, manifest); err != nil {
+// Build 根据 Codex 落盘叶子内的原生 manifest 生成只含当前逻辑 Plugin 的本地 marketplace，
+// 其 plugin source 指向该落盘叶子，使 Codex 只复制属于自身的文件。
+func (codexMarketplaceBuilder) Build(ref domain.PowerRef, root string) error {
+	manifest, err := readCodexLandingManifest(ref, root)
+	if err != nil {
 		return err
 	}
 	document, err := newCodexMarketplaceDocument(ref, manifest)
@@ -59,18 +58,10 @@ func (codexMarketplaceBuilder) Build(ref domain.PowerRef, root, pluginPath strin
 	return nil
 }
 
-// Validate 复验 Codex manifest，并按类型语义比较共享根中的 Codex marketplace。
+// Validate 复验 Codex 落盘 manifest，并按类型语义比较共享根中的 Codex marketplace。
 func (codexMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error {
-	logicalName, err := domain.PluginRuntimeName(ref)
+	manifest, err := readCodexLandingManifest(ref, root)
 	if err != nil {
-		return err
-	}
-	pluginPath := filepath.Join(root, "plugins", logicalName)
-	var manifest codexPluginManifest
-	if err := decodePluginManifest(pluginPath, codexManifestPath, &manifest); err != nil {
-		return fmt.Errorf("decode Codex plugin manifest: %w", err)
-	}
-	if err := validateCodexPluginManifest(ref, manifest); err != nil {
 		return err
 	}
 	want, err := newCodexMarketplaceDocument(ref, manifest)
@@ -87,16 +78,39 @@ func (codexMarketplaceBuilder) Validate(ref domain.PowerRef, root string) error 
 	return nil
 }
 
+func readCodexLandingManifest(ref domain.PowerRef, root string) (codexPluginManifest, error) {
+	logicalName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		return codexPluginManifest{}, err
+	}
+	landingPlugin, err := pluginartifact.LandingPluginPath(root, domain.AgentCodex, logicalName)
+	if err != nil {
+		return codexPluginManifest{}, errors.Join(ErrInvalidArtifact, err)
+	}
+	var manifest codexPluginManifest
+	if err := decodePluginManifest(landingPlugin, codexManifestPath, &manifest); err != nil {
+		return codexPluginManifest{}, fmt.Errorf("decode Codex plugin manifest: %w", err)
+	}
+	if err := validateCodexPluginManifest(ref, manifest); err != nil {
+		return codexPluginManifest{}, err
+	}
+	return manifest, nil
+}
+
 func newCodexMarketplaceDocument(ref domain.PowerRef, manifest codexPluginManifest) (codexMarketplaceDocument, error) {
 	marketplaceName, err := domain.PluginMarketplaceName(ref)
 	if err != nil {
 		return codexMarketplaceDocument{}, err
 	}
+	source, err := pluginartifact.LandingMarketplaceSource(domain.AgentCodex, manifest.Name)
+	if err != nil {
+		return codexMarketplaceDocument{}, errors.Join(ErrInvalidArtifact, err)
+	}
 	document := codexMarketplaceDocument{Name: marketplaceName}
 	document.Interface.DisplayName = manifest.Name
 	plugin := codexMarketplacePlugin{Name: manifest.Name, Category: "Coding"}
 	plugin.Source.Source = "local"
-	plugin.Source.Path = localPluginSourcePrefix + manifest.Name
+	plugin.Source.Path = source
 	plugin.Policy.Installation = "AVAILABLE"
 	plugin.Policy.Authentication = "ON_INSTALL"
 	document.Plugins = []codexMarketplacePlugin{plugin}

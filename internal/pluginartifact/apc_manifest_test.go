@@ -248,7 +248,7 @@ func TestAPCPluginRawPackageRejectsPathsOutsideDeclaredSkillWorld(t *testing.T) 
 		{name: "Claude manifest", relative: ".claude-plugin/plugin.json"},
 		{name: "Hermes manifest", relative: "plugin.yaml"},
 		{name: "Hermes initializer", relative: "__init__.py"},
-		{name: "Hermes legacy manifest", relative: ".hermes-plugin/plugin.yaml"},
+		{name: "filesystem legacy manifest path", relative: ".hermes-plugin/plugin.yaml"},
 		{name: "Codex marketplace", relative: ".agents/plugins/marketplace.json"},
 		{name: "Claude marketplace alias", relative: "marketplaces/.claude-plugin/marketplace.json"},
 		{name: "wrong-case canonical marker alias", relative: "APC-PLUGIN.JSON"},

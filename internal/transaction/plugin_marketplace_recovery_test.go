@@ -13,6 +13,7 @@ import (
 
 	"apm/internal/adapter"
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 )
 
 type marketplaceRecoveryAdapter struct {
@@ -224,26 +225,64 @@ func writeValidMarketplaceRecoveryArtifact(t *testing.T, root string, ref domain
 		t.Fatal(err)
 	}
 	nativeVersion := strings.TrimPrefix(ref.Version, "v")
+	// canonical index 与四个按 Agent 落盘的插件叶子；plugin.yaml 精确为四字段，不再包含 author。
+	canonicalManifest := fmt.Sprintf(`{"schema_version":1,"name":%q,"version":%q,"description":"Demo","skills":[%q]}`, actualName, ref.Version, "skills/"+actualName)
+	codexManifest := fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","skills":"./skills/"}`, actualName, nativeVersion)
+	claudeManifest := fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","skills":["./skills/"]}`, actualName, nativeVersion)
+	pluginYAML := fmt.Sprintf("schema_version: 1\nname: %s\nversion: %s\ndescription: Demo\n", actualName, nativeVersion)
+	initFile := "def register(ctx):\n    return None\n"
+	skillFiles := map[string]string{
+		filepath.Join("skills", actualName, "SKILL.md"):      "# Demo\n",
+		filepath.Join("skills", actualName, "skill-card.md"): "# Skill Card\n",
+	}
+	landings := map[domain.AgentID]map[string]string{
+		domain.AgentCodex: {
+			filepath.Join(".codex-plugin", "plugin.json"): codexManifest,
+		},
+		domain.AgentClaudeCode: {
+			filepath.Join(".claude-plugin", "plugin.json"): claudeManifest,
+		},
+		domain.AgentHermes: {
+			"plugin.yaml": pluginYAML,
+			"__init__.py": initFile,
+		},
+		domain.AgentBibit: {
+			"plugin.yaml": pluginYAML,
+		},
+	}
 	files := map[string]string{
-		filepath.Join("plugins", actualName, "apc-plugin.json"):                     fmt.Sprintf(`{"schema_version":1,"name":%q,"version":%q,"description":"Demo","skills":[%q]}`, actualName, ref.Version, "skills/"+actualName),
-		filepath.Join("plugins", actualName, "skills", actualName, "SKILL.md"):      "# Demo\n",
-		filepath.Join("plugins", actualName, "skills", actualName, "skill-card.md"): "# Skill Card\n",
-		filepath.Join("plugins", actualName, ".codex-plugin", "plugin.json"):        fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","skills":"./skills/"}`, actualName, nativeVersion),
-		filepath.Join("plugins", actualName, ".claude-plugin", "plugin.json"):       fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo","skills":["./skills/"]}`, actualName, nativeVersion),
-		filepath.Join("plugins", actualName, "plugin.yaml"):       fmt.Sprintf("name: %s\nversion: %s\ndescription: Demo\nauthor: APM\n", actualName, nativeVersion),
-		filepath.Join("plugins", actualName, "__init__.py"):       "def register(ctx):\n    return None\n",
-		filepath.Join(".agents", "plugins", "marketplace.json"): fmt.Sprintf(`{
+		filepath.Join("plugins", actualName, "apc-plugin.json"): canonicalManifest,
+	}
+	for relative, contents := range skillFiles {
+		files[filepath.Join("plugins", actualName, relative)] = contents
+	}
+	for agent, extra := range landings {
+		landing, err := pluginartifact.LandingPluginPath(root, agent, actualName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		relativeLanding, err := filepath.Rel(root, landing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for relative, contents := range skillFiles {
+			files[filepath.Join(relativeLanding, relative)] = contents
+		}
+		for relative, contents := range extra {
+			files[filepath.Join(relativeLanding, relative)] = contents
+		}
+	}
+	files[filepath.Join(".agents", "plugins", "marketplace.json")] = fmt.Sprintf(`{
   "name":"apm-%s",
   "interface":{"displayName":%q},
   "plugins":[{"name":%q,"source":{"source":"local","path":%q},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Coding"}]
-		}`, ref.Name, ref.Name, actualName, "./plugins/"+actualName),
-		filepath.Join(".claude-plugin", "marketplace.json"): fmt.Sprintf(`{
+		}`, ref.Name, ref.Name, actualName, "./landing/codex/plugins/"+actualName)
+	files[filepath.Join(".claude-plugin", "marketplace.json")] = fmt.Sprintf(`{
   "name":"apm-%s",
   "owner":{"name":"APM"},
   "metadata":{"description":"Demo","version":%q},
   "plugins":[{"name":%q,"source":%q,"description":"Demo"}]
-		}`, ref.Name, nativeVersion, actualName, "./plugins/"+actualName),
-	}
+		}`, ref.Name, nativeVersion, actualName, "./landing/claude-code/plugins/"+actualName)
 	for relative, contents := range files {
 		path := filepath.Join(root, relative)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -1619,7 +1658,7 @@ func TestRecoverMarketplacePluginRejectsIncompleteRequiredTargetArtifactBeforeWr
 		{
 			name: "changed native manifest identity",
 			mutate: func(f *marketplaceRecoveryFixture) string {
-				path := filepath.Join(f.targetSource, "plugins", f.target.ActualName, ".codex-plugin", "plugin.json")
+				path := filepath.Join(f.targetSource, "landing", "codex", "plugins", f.target.ActualName, ".codex-plugin", "plugin.json")
 				if err := os.WriteFile(path, []byte(`{"name":"other-v2.0.0","version":"2.0.0"}`), 0o600); err != nil {
 					f.t.Fatal(err)
 				}
@@ -1724,7 +1763,7 @@ func TestRecoverMarketplacePluginRejectsCodexKnownFieldTypeCorruptionBeforeWrite
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseCommitting, false)
 			setMarketplaceRecoveryState(fixture, "target", true, false)
-			manifestPath := filepath.Join(fixture.targetSource, "plugins", fixture.target.ActualName, ".codex-plugin", "plugin.json")
+			manifestPath := filepath.Join(fixture.targetSource, "landing", "codex", "plugins", fixture.target.ActualName, ".codex-plugin", "plugin.json")
 			if err := os.WriteFile(manifestPath, []byte(test.manifest), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -1745,7 +1784,7 @@ func TestRecoverMarketplacePluginRejectsCodexKnownFieldTypeCorruptionBeforeWrite
 func TestRecoverMarketplacePluginRollbackValidatesCompletePreviousArtifactBeforeWrites(t *testing.T) {
 	// 捕获错误变更：需要恢复旧 Plugin 时仅校验 previous source 目录存在便开始注册和安装。
 	fixture := newMarketplaceRecoveryFixture(t, OperationInstall, PhaseRollingBack, true)
-	manifest := filepath.Join(fixture.previousSource, "plugins", fixture.previous.ActualName, ".codex-plugin", "plugin.json")
+	manifest := filepath.Join(fixture.previousSource, "landing", "codex", "plugins", fixture.previous.ActualName, ".codex-plugin", "plugin.json")
 	if err := os.WriteFile(manifest, []byte(`{"name":"other-v1.0.0","version":"1.0.0"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}

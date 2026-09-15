@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,7 @@ import (
 	"apm/internal/catalog"
 	"apm/internal/cloud/local"
 	"apm/internal/domain"
+	"apm/internal/pluginartifact"
 	"apm/internal/utils/filesystem"
 )
 
@@ -72,14 +74,27 @@ func TestEnsureBuildsOneCompleteSharedArtifactFromLocalCloud(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(artifact.PluginPath, "skills", "demo-plugin", "SKILL.md")); err != nil {
 		t.Fatalf("stat Plugin skill: %v", err)
 	}
-	for _, required := range []string{
-		filepath.Join(".codex-plugin", "plugin.json"),
-		filepath.Join(".claude-plugin", "plugin.json"),
-		filepath.Join("__init__.py"),
-		filepath.Join("plugin.yaml"),
-	} {
+	// canonical 叶子只保留 apc-plugin.json 与声明 Skill；派生内容全部位于各 Agent 的落盘叶子。
+	for _, required := range []string{"apc-plugin.json", filepath.Join("skills", "demo-plugin", "SKILL.md")} {
 		if _, err := os.Stat(filepath.Join(artifact.PluginPath, required)); err != nil {
-			t.Fatalf("stat shared Plugin entry %q: %v", required, err)
+			t.Fatalf("stat canonical Plugin entry %q: %v", required, err)
+		}
+	}
+	landingEntries := map[domain.AgentID][]string{
+		domain.AgentCodex:      {filepath.Join(".codex-plugin", "plugin.json"), filepath.Join("skills", "demo-plugin", "SKILL.md")},
+		domain.AgentClaudeCode: {filepath.Join(".claude-plugin", "plugin.json"), filepath.Join("skills", "demo-plugin", "SKILL.md")},
+		domain.AgentHermes:     {"__init__.py", "plugin.yaml", filepath.Join("skills", "demo-plugin", "SKILL.md")},
+		domain.AgentBibit:      {"plugin.yaml", filepath.Join("skills", "demo-plugin", "SKILL.md")},
+	}
+	for agent, required := range landingEntries {
+		landing, err := artifact.LandingPath(agent)
+		if err != nil {
+			t.Fatalf("LandingPath(%q) error = %v", agent, err)
+		}
+		for _, relative := range required {
+			if _, err := os.Stat(filepath.Join(landing, relative)); err != nil {
+				t.Fatalf("stat %s landing entry %q: %v", agent, relative, err)
+			}
 		}
 	}
 	assertGeneratedCodexMarketplace(t, filepath.Join(artifact.Root, ".agents", "plugins", "marketplace.json"))
@@ -308,8 +323,8 @@ func TestExistsReportsOnlyPhysicalRootPresence(t *testing.T) {
 
 type panicBuilder struct{}
 
-func (panicBuilder) Build(domain.PowerRef, string, string) error { panic("artifact builder invoked") }
-func (panicBuilder) Validate(domain.PowerRef, string) error      { panic("artifact builder invoked") }
+func (panicBuilder) Build(domain.PowerRef, string) error    { panic("artifact builder invoked") }
+func (panicBuilder) Validate(domain.PowerRef, string) error { panic("artifact builder invoked") }
 
 func assertGeneratedCodexMarketplace(t *testing.T, path string) {
 	t.Helper()
@@ -334,8 +349,8 @@ func assertGeneratedCodexMarketplace(t *testing.T, path string) {
 		t.Fatalf("Codex marketplace identity/count = %q/%d, want apm-demo-plugin/1", document.Name, len(document.Plugins))
 	}
 	plugin := document.Plugins[0]
-	if plugin.Name != "demo-plugin" || plugin.Source.Kind != "local" || plugin.Source.Path != "./plugins/demo-plugin" {
-		t.Fatalf("Codex marketplace plugin = %#v, want local demo-plugin", plugin)
+	if plugin.Name != "demo-plugin" || plugin.Source.Kind != "local" || plugin.Source.Path != "./landing/codex/plugins/demo-plugin" {
+		t.Fatalf("Codex marketplace plugin = %#v, want local ./landing/codex/plugins/demo-plugin", plugin)
 	}
 }
 
@@ -359,8 +374,8 @@ func assertGeneratedClaudeMarketplace(t *testing.T, path string) {
 		t.Fatalf("Claude marketplace identity/count = %q/%d, want apm-demo-plugin/1", document.Name, len(document.Plugins))
 	}
 	plugin := document.Plugins[0]
-	if plugin.Name != "demo-plugin" || plugin.Source != "./plugins/demo-plugin" {
-		t.Fatalf("Claude marketplace plugin = %#v, want local demo-plugin", plugin)
+	if plugin.Name != "demo-plugin" || plugin.Source != "./landing/claude-code/plugins/demo-plugin" {
+		t.Fatalf("Claude marketplace plugin = %#v, want local ./landing/claude-code/plugins/demo-plugin", plugin)
 	}
 }
 
@@ -439,7 +454,7 @@ func TestStageFilesystemReturnsCacheMissWithoutRemovingExistingStaging(t *testin
 		t.Fatal(err)
 	}
 
-	if _, err := service.StageFilesystem(testPluginRef()); !errors.Is(err, ErrMiss) {
+	if _, err := service.StageFilesystem(testStageAgent(), testPluginRef()); !errors.Is(err, ErrMiss) {
 		t.Fatalf("StageFilesystem() error = %v, want ErrMiss", err)
 	}
 	content, err := os.ReadFile(oldStaging)
@@ -472,7 +487,7 @@ func TestStageFilesystemAtomicallyRebuildsLogicalPluginLeaf(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	staging, err := service.StageFilesystem(ref)
+	staging, err := service.StageFilesystem(testStageAgent(), ref)
 	if err != nil {
 		t.Fatalf("StageFilesystem() error = %v", err)
 	}
@@ -494,6 +509,94 @@ func TestStageFilesystemAtomicallyRebuildsLogicalPluginLeaf(t *testing.T) {
 	}
 	if cacheAfter := snapshotTestTree(t, cacheRoot); cacheAfter != cacheBefore {
 		t.Fatalf("immutable cache changed during staging\nbefore:\n%s\nafter:\n%s", cacheBefore, cacheAfter)
+	}
+}
+
+func TestStageFilesystemMaterializesOnlyTargetAgentLeaf(t *testing.T) {
+	// 捕获错误变更：staging 保留其他 Agent 的派生配置或 canonical 叶子，安装目录出现无关配置。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	cacheRoot := testArtifactRoot(roots.cache, ref)
+	writeValidTestArtifact(t, cacheRoot)
+	// canonical 与每个落盘叶子各放一个独有标记，确认 staging 只复制目标叶子的内容。
+	if err := os.WriteFile(filepath.Join(cacheRoot, "plugins", "demo", "canonical-only.txt"), []byte("canonical"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range pluginartifact.PluginLandingAgents() {
+		landing, err := pluginartifact.LandingPluginPath(cacheRoot, agent, ref.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(landing, string(agent)+"-only.txt"), []byte(string(agent)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if agent == domain.AgentHermes {
+			if err := os.WriteFile(filepath.Join(landing, "__init__.py"), []byte("def register(ctx):\n    return None\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	for _, agent := range []domain.AgentID{domain.AgentBibit, domain.AgentHermes} {
+		t.Run(string(agent), func(t *testing.T) {
+			staging, err := service.StageFilesystem(agent, ref)
+			if err != nil {
+				t.Fatalf("StageFilesystem() error = %v", err)
+			}
+			files := relativeFiles(t, filepath.Join(staging, "plugins", ref.Name))
+			want := []string{string(agent) + "-only.txt", "skills/demo/payload.txt"}
+			if agent == domain.AgentHermes {
+				want = append(want, "__init__.py")
+			}
+			sort.Strings(want)
+			if !reflect.DeepEqual(files, want) {
+				t.Fatalf("staged %s files = %v, want %v", agent, files, want)
+			}
+		})
+	}
+}
+
+func TestStageFilesystemRejectsUnknownAgentWithoutTouchingStaging(t *testing.T) {
+	// 捕获错误变更：未知 Agent 仍被拼成落盘路径并复制出未定义目录。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
+
+	if _, err := service.StageFilesystem(domain.AgentID("unknown"), ref); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("StageFilesystem(unknown) error = %v, want ErrInvalidArtifact", err)
+	}
+	if _, err := os.Lstat(roots.staging); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging stat error = %v, want not exist", err)
+	}
+}
+
+func TestArtifactLandingPathResolvesEveryAgentLeaf(t *testing.T) {
+	// 捕获错误变更：Manager 暴露的落盘路径与 pluginartifact 命名约定漂移。
+	roots := newTestRoots(t)
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, &testDownloader{}, testBuilders())
+	ref := testPluginRef()
+	writeValidTestArtifact(t, testArtifactRoot(roots.cache, ref))
+	artifact, err := service.Lookup(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range pluginartifact.PluginLandingAgents() {
+		got, err := artifact.LandingPath(agent)
+		if err != nil {
+			t.Fatalf("LandingPath(%q) error = %v", agent, err)
+		}
+		want, err := pluginartifact.LandingPluginPath(artifact.Root, agent, ref.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("LandingPath(%q) = %q, want %q", agent, got, want)
+		}
+	}
+	if _, err := artifact.LandingPath(domain.AgentID("unknown")); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("LandingPath(unknown) error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
@@ -524,7 +627,7 @@ func TestStageFilesystemPublishFailureRestoresOldCompleteStaging(t *testing.T) {
 		return os.Rename(source, destination)
 	}
 
-	if _, err := service.StageFilesystem(ref); !errors.Is(err, publishErr) {
+	if _, err := service.StageFilesystem(testStageAgent(), ref); !errors.Is(err, publishErr) {
 		t.Fatalf("StageFilesystem() error = %v, want publish error", err)
 	}
 	content, err := os.ReadFile(old)
@@ -571,7 +674,7 @@ func TestStageFilesystemJoinsPublishAndRestoreErrorsAndPreservesBackup(t *testin
 		}
 	}
 
-	_, err := service.StageFilesystem(ref)
+	_, err := service.StageFilesystem(testStageAgent(), ref)
 	if !errors.Is(err, publishErr) || !errors.Is(err, restoreErr) {
 		t.Fatalf("StageFilesystem() error = %v, want publish and restore errors", err)
 	}
@@ -614,7 +717,7 @@ func TestStageFilesystemBackupCleanupFailureReturnsErrorAndPreservesBackup(t *te
 		return os.RemoveAll(path)
 	}
 
-	staging, err := service.StageFilesystem(ref)
+	staging, err := service.StageFilesystem(testStageAgent(), ref)
 	if staging != "" || !errors.Is(err, cleanupErr) {
 		t.Fatalf("StageFilesystem() = %q, %v, want empty result and cleanup error", staging, err)
 	}
@@ -648,7 +751,7 @@ func TestStageFilesystemRejectsDirectCacheOverlapBeforeRecursiveCleanup(t *testi
 		return os.RemoveAll(path)
 	}
 
-	if _, err := service.StageFilesystem(ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.StageFilesystem(testStageAgent(), ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("StageFilesystem() error = %v, want ErrInvalidArtifact", err)
 	}
 	if cleanupCalls != 0 {
@@ -685,7 +788,7 @@ func TestStageFilesystemRejectsSymlinkAliasCacheOverlapBeforeRecursiveCleanup(t 
 		return os.RemoveAll(path)
 	}
 
-	if _, err := service.StageFilesystem(ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.StageFilesystem(testStageAgent(), ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("StageFilesystem() error = %v, want ErrInvalidArtifact", err)
 	}
 	if cleanupCalls != 0 {
@@ -722,7 +825,7 @@ func TestStageFilesystemRejectsDirectStagingRootAndTempOverlapBeforeRecursiveCle
 		return os.RemoveAll(path)
 	}
 
-	if _, err := service.StageFilesystem(ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.StageFilesystem(testStageAgent(), ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("StageFilesystem() error = %v, want ErrInvalidArtifact", err)
 	}
 	if cleanupCalls != 0 {
@@ -764,7 +867,7 @@ func TestStageFilesystemRejectsSymlinkAliasBetweenStagingRootAndTempBeforeRecurs
 		return os.RemoveAll(path)
 	}
 
-	if _, err := service.StageFilesystem(ref); !errors.Is(err, ErrInvalidArtifact) {
+	if _, err := service.StageFilesystem(testStageAgent(), ref); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("StageFilesystem() error = %v, want ErrInvalidArtifact", err)
 	}
 	if cleanupCalls != 0 {
@@ -892,12 +995,12 @@ func TestStageFilesystemSerializesSameStagingPath(t *testing.T) {
 	service.files.copyDir = copier.copy
 	results := make(chan error, 2)
 	go func() {
-		_, err := service.StageFilesystem(ref)
+		_, err := service.StageFilesystem(testStageAgent(), ref)
 		results <- err
 	}()
 	<-copier.firstStarted
 	go func() {
-		_, err := service.StageFilesystem(ref)
+		_, err := service.StageFilesystem(testStageAgent(), ref)
 		results <- err
 	}()
 	runtime.Gosched()
@@ -941,7 +1044,7 @@ func TestStageFilesystemCopyFailureKeepsCompleteStagingAndCleansUniqueTemporary(
 		return copyErr
 	}
 
-	if _, err := service.StageFilesystem(ref); !errors.Is(err, copyErr) {
+	if _, err := service.StageFilesystem(testStageAgent(), ref); !errors.Is(err, copyErr) {
 		t.Fatalf("StageFilesystem() error = %v, want injected copy error", err)
 	}
 	content, err := os.ReadFile(old)
@@ -1026,7 +1129,7 @@ func TestStageFilesystemJoinsCopyAndUniqueTemporaryCleanupErrors(t *testing.T) {
 		return os.RemoveAll(path)
 	}
 
-	_, err := service.StageFilesystem(testPluginRef())
+	_, err := service.StageFilesystem(testStageAgent(), testPluginRef())
 	if !errors.Is(err, copyErr) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("StageFilesystem() error = %v, want copy and cleanup errors", err)
 	}
@@ -1076,7 +1179,7 @@ func (downloader *testDownloader) DownloadPlugin(_ context.Context, entry domain
 	downloader.calls++
 	downloader.entries = append(downloader.entries, entry.Clone())
 	ref := entry.Ref
-	if err := writeSharedTestPluginManifests(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
+	if err := writeSharedTestPluginPackage(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(destination, "skills", ref.Name, "payload.txt"), []byte("payload"), 0o600)
@@ -1084,8 +1187,11 @@ func (downloader *testDownloader) DownloadPlugin(_ context.Context, entry domain
 
 type testBuilder struct{}
 
-func (testBuilder) Build(_ domain.PowerRef, root, pluginPath string) error {
-	return os.WriteFile(filepath.Join(root, "builder.txt"), []byte(pluginPath), 0o600)
+func (testBuilder) Build(_ domain.PowerRef, root string) error {
+	if err := writeTestLandingLeaves(root); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, "builder.txt"), []byte(root), 0o600)
 }
 
 func (testBuilder) Validate(_ domain.PowerRef, root string) error {
@@ -1095,7 +1201,39 @@ func (testBuilder) Validate(_ domain.PowerRef, root string) error {
 	if _, err := os.Stat(filepath.Join(root, "builder.txt")); err != nil {
 		return errors.Join(ErrInvalidArtifact, err)
 	}
+	for _, agent := range pluginartifact.PluginLandingAgents() {
+		landing, err := pluginartifact.LandingPluginPath(root, agent, "demo")
+		if err != nil {
+			return errors.Join(ErrInvalidArtifact, err)
+		}
+		if _, err := os.Stat(filepath.Join(landing, "skills", "demo", "payload.txt")); err != nil {
+			return errors.Join(ErrInvalidArtifact, err)
+		}
+	}
 	return nil
+}
+
+// writeTestLandingLeaves 为全部落盘 Agent 生成测试用 plugin 叶子，模拟 builder 的按目标派生结果。
+func writeTestLandingLeaves(root string) error {
+	for _, agent := range pluginartifact.PluginLandingAgents() {
+		landing, err := pluginartifact.LandingPluginPath(root, agent, "demo")
+		if err != nil {
+			return err
+		}
+		skillRoot := filepath.Join(landing, "skills", "demo")
+		if err := os.MkdirAll(skillRoot, 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(skillRoot, "payload.txt"), []byte("payload"), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// testStageAgent 是 filesystem staging 测试使用的目标 Agent；只物化该 Agent 的落盘叶子。
+func testStageAgent() domain.AgentID {
+	return domain.AgentBibit
 }
 
 func testBuilders() artifactBuilder {
@@ -1122,7 +1260,7 @@ func (downloader *blockingDownloader) DownloadPlugin(_ context.Context, entry do
 		close(downloader.firstStarted)
 	}
 	<-downloader.release
-	if err := writeSharedTestPluginManifests(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
+	if err := writeSharedTestPluginPackage(destination, fmt.Sprintf(`{"name":%q,"version":%q,"description":"Demo"}`, ref.Name, strings.TrimPrefix(ref.Version, "v"))); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(destination, "skills", ref.Name, "payload.txt"), []byte("payload"), 0o600)
@@ -1154,7 +1292,7 @@ func (*typedNilDownloader) DownloadPlugin(context.Context, domain.CatalogEntry, 
 
 type typedNilBuilder struct{}
 
-func (*typedNilBuilder) Build(domain.PowerRef, string, string) error {
+func (*typedNilBuilder) Build(domain.PowerRef, string) error {
 	panic("typed nil builder must not be called")
 }
 

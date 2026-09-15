@@ -214,8 +214,9 @@ func TestPluginIntegrationHermesVersionLifecycleIsIsolated(t *testing.T) {
 			t.Fatalf("Hermes target %q is not a directory: %v", actualName, err)
 		}
 		manifest, err := os.ReadFile(filepath.Join(hermesHome, "plugins", actualName, "plugin.yaml"))
-		if err != nil || !strings.Contains(string(manifest), "version: "+strings.TrimPrefix(target.version, "v")) {
-			t.Fatalf("Hermes logical target version = %q, %v; want %s", manifest, err, target.version)
+		if err != nil || !strings.Contains(string(manifest), "schema_version: 1\n") ||
+			!strings.Contains(string(manifest), "version: "+strings.TrimPrefix(target.version, "v")) {
+			t.Fatalf("Hermes logical target manifest = %q, %v; want schema_version 1 and %s", manifest, err, target.version)
 		}
 		if _, err := os.Lstat(filepath.Join(root, "apm-home", ".apm", "staging")); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("Hermes staging remains after %s: %v", target.version, err)
@@ -542,8 +543,9 @@ func (h *isolatedPluginHarness) assertManagedPlugin(agent domain.AgentID, releas
 		h.t.Fatalf("filesystem target for %q = %v, %v", agent, info, statErr)
 	}
 	manifest, err := os.ReadFile(filepath.Join(target, "plugin.yaml"))
-	if err != nil || !strings.Contains(string(manifest), "version: "+strings.TrimPrefix(release, "v")) {
-		h.t.Fatalf("filesystem target for %q version = %q, %v; want %s", agent, manifest, err, release)
+	if err != nil || !strings.Contains(string(manifest), "schema_version: 1\n") ||
+		!strings.Contains(string(manifest), "version: "+strings.TrimPrefix(release, "v")) {
+		h.t.Fatalf("filesystem target for %q manifest = %q, %v; want schema_version 1 and %s", agent, manifest, err, release)
 	}
 }
 
@@ -692,11 +694,11 @@ func TestPluginAcceptanceSharedArtifact(t *testing.T) {
 			t.Fatalf("shared marketplace %q missing: %v", marketplace, err)
 		}
 	}
-	assertCompleteAcceptancePluginTree(t, artifact.PluginPath)
+	assertCompleteAcceptanceCanonicalPluginTree(t, artifact.PluginPath)
 	for _, agent := range []domain.AgentID{domain.AgentHermes, domain.AgentBibit} {
 		target := h.pluginTarget(agent)
-		assertCompleteAcceptancePluginTree(t, target)
-		assertTreesEqual(t, artifact.PluginPath, target)
+		assertCompleteAcceptanceFilesystemLeaf(t, agent, target)
+		assertAcceptanceSkillsEqual(t, artifact.PluginPath, target)
 	}
 	for _, agent := range []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode} {
 		source, err := os.ReadFile(h.marketplaceState(agent))
@@ -707,54 +709,167 @@ func TestPluginAcceptanceSharedArtifact(t *testing.T) {
 	h.assertOnlyFakeExecutables()
 }
 
-func assertCompleteAcceptancePluginTree(t *testing.T, root string) {
+func TestPluginAcceptanceFilesystemAgentsReuseSharedArtifact(t *testing.T) {
+	// 捕获错误变更：第二个 filesystem Agent 安装时重新下载或重新派生共享 artifact
+	//（后者会在派生文件已存在时报冲突），而不是复用不可变缓存。
+	for _, order := range [][2]domain.AgentID{
+		{domain.AgentHermes, domain.AgentBibit},
+		{domain.AgentBibit, domain.AgentHermes},
+	} {
+		t.Run(string(order[0])+"-then-"+string(order[1]), func(t *testing.T) {
+			h := newIsolatedPluginHarness(t, order[0], order[1])
+			if result, err := h.installPlugin(order[0], "v0.1.0"); err != nil ||
+				len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+				t.Fatalf("Install(%s) = %+v, %v", order[0], result, err)
+			}
+			ref := domain.PowerRef{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.1.0"}
+			artifact, err := h.plugins.Lookup(ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := snapshotPluginTreeIdentity(t, artifact.PluginPath)
+
+			if result, err := h.installPlugin(order[1], "v0.1.0"); err != nil ||
+				len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
+				t.Fatalf("Install(%s) = %+v, %v", order[1], result, err)
+			}
+			if h.downloader.calls != 1 {
+				t.Fatalf("Cloud Plugin downloads = %d, want 1 shared download", h.downloader.calls)
+			}
+			after := snapshotPluginTreeIdentity(t, artifact.PluginPath)
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("second filesystem Agent install rewrote the shared artifact: before=%v after=%v", before, after)
+			}
+			for _, agent := range order {
+				assertCompleteAcceptanceFilesystemLeaf(t, agent, h.pluginTarget(agent))
+				assertAcceptanceSkillsEqual(t, artifact.PluginPath, h.pluginTarget(agent))
+			}
+			h.assertOnlyFakeExecutables()
+		})
+	}
+}
+
+// snapshotPluginTreeIdentity 记录叶子树的相对路径、内容、权限与 mtime，用于证明第二次安装未重写派生文件。
+func snapshotPluginTreeIdentity(t *testing.T, root string) map[string]string {
+	t.Helper()
+	result := make(map[string]string)
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		result[relative] = fmt.Sprintf("%s|%o|%d", contents, info.Mode().Perm(), info.ModTime().UnixNano())
+		return nil
+	}); err != nil {
+		t.Fatalf("snapshot Plugin tree identity %q: %v", root, err)
+	}
+	return result
+}
+
+// assertCompleteAcceptanceCanonicalPluginTree 断言共享 artifact 的 canonical 叶子只含 apc-plugin.json 与声明 Skill。
+func assertCompleteAcceptanceCanonicalPluginTree(t *testing.T, root string) {
 	t.Helper()
 	for _, relative := range []string{
 		"apc-plugin.json",
-		filepath.Join(".codex-plugin", "plugin.json"),
-		filepath.Join(".claude-plugin", "plugin.json"),
-		filepath.Join("plugin.yaml"),
-		filepath.Join("__init__.py"),
 		filepath.Join("skills", "demo-plugin", "SKILL.md"),
 		filepath.Join("skills", "demo-plugin", "skill-card.md"),
 	} {
 		if info, err := os.Stat(filepath.Join(root, relative)); err != nil || !info.Mode().IsRegular() {
-			t.Fatalf("complete Plugin tree %q missing %q: %v", root, relative, err)
+			t.Fatalf("canonical Plugin tree %q missing %q: %v", root, relative, err)
+		}
+	}
+	for _, relative := range []string{
+		".codex-plugin",
+		".claude-plugin",
+		"plugin.yaml",
+		"__init__.py",
+	} {
+		if _, err := os.Lstat(filepath.Join(root, relative)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("canonical Plugin tree %q must not contain %q: %v", root, relative, err)
 		}
 	}
 }
 
-func assertTreesEqual(t *testing.T, wantRoot, gotRoot string) {
+// assertCompleteAcceptanceFilesystemLeaf 断言安装目录只含目标 Agent 的落盘配置与 Skill。
+func assertCompleteAcceptanceFilesystemLeaf(t *testing.T, agent domain.AgentID, root string) {
 	t.Helper()
-	snapshot := func(root string) map[string]string {
-		result := make(map[string]string)
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			relative, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			contents, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			result[relative] = string(contents)
-			return nil
-		}); err != nil {
-			t.Fatalf("snapshot Plugin tree %q: %v", root, err)
+	required := []string{
+		"plugin.yaml",
+		filepath.Join("skills", "demo-plugin", "SKILL.md"),
+		filepath.Join("skills", "demo-plugin", "skill-card.md"),
+	}
+	forbidden := []string{
+		"apc-plugin.json",
+		".codex-plugin",
+		".claude-plugin",
+	}
+	switch agent {
+	case domain.AgentHermes:
+		required = append(required, "__init__.py")
+	case domain.AgentBibit:
+		// Bibit 的 package 契约不允许 __init__.py 与 apc-plugin.json。
+		forbidden = append(forbidden, "__init__.py")
+	}
+	for _, relative := range required {
+		if info, err := os.Stat(filepath.Join(root, relative)); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("%s install tree %q missing %q: %v", agent, root, relative, err)
 		}
-		return result
 	}
-	want := snapshot(wantRoot)
-	got := snapshot(gotRoot)
+	for _, relative := range forbidden {
+		if _, err := os.Lstat(filepath.Join(root, relative)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s install tree %q must not contain %q: %v", agent, root, relative, err)
+		}
+	}
+}
+
+// assertAcceptanceSkillsEqual 断言落盘叶子的 Skill 子树与 canonical 逐字节一致。
+func assertAcceptanceSkillsEqual(t *testing.T, canonicalRoot, leafRoot string) {
+	t.Helper()
+	want := snapshotAcceptanceSubtree(t, filepath.Join(canonicalRoot, "skills"))
+	got := snapshotAcceptanceSubtree(t, filepath.Join(leafRoot, "skills"))
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("published Plugin tree %q differs from shared Artifact %q: got=%v want=%v", gotRoot, wantRoot, got, want)
+		t.Fatalf("install tree skills %q differ from canonical %q: got=%v want=%v", leafRoot, canonicalRoot, got, want)
 	}
+}
+
+func snapshotAcceptanceSubtree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	result := make(map[string]string)
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		result[relative] = string(contents)
+		return nil
+	}); err != nil {
+		t.Fatalf("snapshot subtree %q: %v", root, err)
+	}
+	return result
 }
 
 func TestPluginIntegrationRejectsUnmanagedTargetAndMarketplaceConflict(t *testing.T) {

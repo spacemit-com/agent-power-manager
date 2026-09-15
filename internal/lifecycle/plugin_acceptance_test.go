@@ -829,8 +829,9 @@ func assertAcceptanceMarketplaceDocument(t *testing.T, agent domain.AgentID, art
 			} `json:"plugins"`
 		}
 		decodeAcceptanceJSON(t, path, &document)
-		if len(document.Plugins) != 1 || document.Plugins[0].Name != actualName || document.Plugins[0].Source.Path != "./plugins/"+actualName {
-			t.Fatalf("Codex marketplace entries = %+v", document.Plugins)
+		if wantSource := "./landing/codex/plugins/" + actualName; len(document.Plugins) != 1 ||
+			document.Plugins[0].Name != actualName || document.Plugins[0].Source.Path != wantSource {
+			t.Fatalf("Codex marketplace entries = %+v, want source %q", document.Plugins, wantSource)
 		}
 		return
 	}
@@ -842,8 +843,9 @@ func assertAcceptanceMarketplaceDocument(t *testing.T, agent domain.AgentID, art
 		} `json:"plugins"`
 	}
 	decodeAcceptanceJSON(t, path, &document)
-	if len(document.Plugins) != 1 || document.Plugins[0].Name != actualName || document.Plugins[0].Source != "./plugins/"+actualName {
-		t.Fatalf("Claude marketplace entries = %+v", document.Plugins)
+	if wantSource := "./landing/claude-code/plugins/" + actualName; len(document.Plugins) != 1 ||
+		document.Plugins[0].Name != actualName || document.Plugins[0].Source != wantSource {
+		t.Fatalf("Claude marketplace entries = %+v, want source %q", document.Plugins, wantSource)
 	}
 }
 

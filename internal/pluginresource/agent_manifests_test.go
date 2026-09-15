@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 
 	"apm/internal/domain"
@@ -14,84 +15,113 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-func TestAgentManifestGenerationIsDeterministicAndUsesExactSchemas(t *testing.T) {
+func TestAgentLandingGenerationIsDeterministicAndUsesExactSchemas(t *testing.T) {
 	// 捕获错误变更：同一 canonical index 生成不同字节、错误版本格式或 Agent schema 字段漂移。
-	manifest := pluginartifact.APCPluginManifest{
-		SchemaVersion: 1,
-		Name:          "demo",
-		Version:       "v1.2.3",
-		Description:   "Quoted \"description\"\nvalue: true",
-		Skills:        []string{"skills/demo"},
-	}
-	first := filepath.Join(t.TempDir(), "plugin")
-	second := filepath.Join(t.TempDir(), "plugin")
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}
+	description := "Quoted \"description\"\nvalue: true"
+	first := filepath.Join(t.TempDir(), "plugins", ref.Name)
+	second := filepath.Join(t.TempDir(), "plugins", ref.Name)
 	for _, root := range []string{first, second} {
-		if err := os.MkdirAll(root, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := writeAgentManifests(root, manifest); err != nil {
-			t.Fatalf("writeAgentManifests() error = %v", err)
-		}
-	}
-
-	paths := []string{
-		codexManifestPath,
-		claudeManifestPath,
-		hermesManifestPath,
-		hermesInitPath,
-	}
-	for _, relative := range paths {
-		firstBytes, err := os.ReadFile(filepath.Join(first, relative))
+		writeCanonicalPluginPackage(t, root, ref, description)
+		manifest, err := pluginartifact.LoadAPCPluginManifest(ref, root)
 		if err != nil {
 			t.Fatal(err)
 		}
-		secondBytes, err := os.ReadFile(filepath.Join(second, relative))
+		if err := writeAgentLandings(filepath.Dir(filepath.Dir(root)), root, manifest); err != nil {
+			t.Fatalf("writeAgentLandings() error = %v", err)
+		}
+	}
+
+	landings := map[domain.AgentID]string{
+		domain.AgentCodex:      codexManifestPath,
+		domain.AgentClaudeCode: claudeManifestPath,
+		domain.AgentHermes:     pluginManifestPath,
+		domain.AgentBibit:      pluginManifestPath,
+	}
+	for agent, relative := range landings {
+		firstPath := landingFilePath(t, filepath.Dir(filepath.Dir(first)), agent, ref.Name, relative)
+		secondPath := landingFilePath(t, filepath.Dir(filepath.Dir(second)), agent, ref.Name, relative)
+		firstBytes, err := os.ReadFile(firstPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		secondBytes, err := os.ReadFile(secondPath)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(firstBytes, secondBytes) {
-			t.Fatalf("generated %q differs across roots\nfirst: %q\nsecond: %q", relative, firstBytes, secondBytes)
+			t.Fatalf("generated %s %q differs across roots\nfirst: %q\nsecond: %q", agent, relative, firstBytes, secondBytes)
 		}
-		info, err := os.Stat(filepath.Join(first, relative))
+		info, err := os.Stat(firstPath)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if info.Mode().Perm() != 0o600 {
-			t.Fatalf("generated %q mode = %o, want 0600", relative, info.Mode().Perm())
+			t.Fatalf("generated %s %q mode = %o, want 0600", agent, relative, info.Mode().Perm())
 		}
 	}
 
-	assertGeneratedJSONSchema(t, filepath.Join(first, codexManifestPath), map[string]any{
+	assertGeneratedJSONSchema(t, landingFilePath(t, filepath.Dir(filepath.Dir(first)), domain.AgentCodex, ref.Name, codexManifestPath), map[string]any{
 		"name":        "demo",
 		"version":     "1.2.3",
-		"description": "Quoted \"description\"\nvalue: true",
+		"description": description,
 		"skills":      "./skills/",
 	})
-	assertGeneratedJSONSchema(t, filepath.Join(first, claudeManifestPath), map[string]any{
+	assertGeneratedJSONSchema(t, landingFilePath(t, filepath.Dir(filepath.Dir(first)), domain.AgentClaudeCode, ref.Name, claudeManifestPath), map[string]any{
 		"name":        "demo",
 		"version":     "1.2.3",
-		"description": "Quoted \"description\"\nvalue: true",
+		"description": description,
 		"skills":      []any{"./skills/"},
 	})
 
-	hermesBytes, err := os.ReadFile(filepath.Join(first, hermesManifestPath))
+	// plugin.yaml 必须逐字节稳定：schema_version 首字段、schema 精确、无 author，且 Hermes 与 Bibit 共用同一内容。
+	wantPluginYAML := "schema_version: 1\nname: demo\nversion: 1.2.3\ndescription: |-\n  Quoted \"description\"\n  value: true\n"
+	for _, agent := range []domain.AgentID{domain.AgentHermes, domain.AgentBibit} {
+		pluginYAMLBytes, err := os.ReadFile(landingFilePath(t, filepath.Dir(filepath.Dir(first)), agent, ref.Name, pluginManifestPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(pluginYAMLBytes); got != wantPluginYAML {
+			t.Fatalf("%s plugin.yaml = %q, want %q", agent, got, wantPluginYAML)
+		}
+		var pluginYAML map[string]any
+		if err := yaml.Unmarshal(pluginYAMLBytes, &pluginYAML); err != nil {
+			t.Fatal(err)
+		}
+		wantParsed := map[string]any{
+			"schema_version": 1,
+			"name":           "demo",
+			"version":        "1.2.3",
+			"description":    description,
+		}
+		if !reflect.DeepEqual(pluginYAML, wantParsed) {
+			t.Fatalf("%s filesystem Plugin manifest = %#v, want %#v", agent, pluginYAML, wantParsed)
+		}
+	}
+
+	// 单行描述保持四行可读形态，确认 author 等额外键绝不出现。
+	plainRoot := t.TempDir()
+	plainPlugin := filepath.Join(plainRoot, "plugins", ref.Name)
+	writeCanonicalPluginPackage(t, plainPlugin, ref, "Demo tools")
+	plainManifest, err := pluginartifact.LoadAPCPluginManifest(ref, plainPlugin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var hermes map[string]any
-	if err := yaml.Unmarshal(hermesBytes, &hermes); err != nil {
-		t.Fatal(err)
+	if err := writeAgentLandings(plainRoot, plainPlugin, plainManifest); err != nil {
+		t.Fatalf("writeAgentLandings() error = %v", err)
 	}
-	wantHermes := map[string]any{
-		"name":        "demo",
-		"version":     "1.2.3",
-		"description": "Quoted \"description\"\nvalue: true",
-		"author":      "APM",
+	for _, agent := range []domain.AgentID{domain.AgentHermes, domain.AgentBibit} {
+		pluginYAMLBytes, err := os.ReadFile(landingFilePath(t, plainRoot, agent, ref.Name, pluginManifestPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantPlain := "schema_version: 1\nname: demo\nversion: 1.2.3\ndescription: Demo tools\n"
+		if got := string(pluginYAMLBytes); got != wantPlain {
+			t.Fatalf("%s plugin.yaml = %q, want %q", agent, got, wantPlain)
+		}
 	}
-	if !reflect.DeepEqual(hermes, wantHermes) {
-		t.Fatalf("Hermes manifest = %#v, want %#v", hermes, wantHermes)
-	}
-	initBytes, err := os.ReadFile(filepath.Join(first, hermesInitPath))
+
+	initBytes, err := os.ReadFile(landingFilePath(t, filepath.Dir(filepath.Dir(first)), domain.AgentHermes, ref.Name, pluginInitPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,21 +130,74 @@ func TestAgentManifestGenerationIsDeterministicAndUsesExactSchemas(t *testing.T)
 	}
 }
 
-func TestAgentManifestGenerationDoesNotOverwriteExistingDerivedFile(t *testing.T) {
+func TestAgentLandingGenerationKeepsEachAgentOwnFilesOnly(t *testing.T) {
+	// 捕获错误变更：某 Agent 的落盘叶子混入其他 Agent 的配置文件，安装目录将出现无关配置。
+	root := t.TempDir()
+	ref := pluginartifactTestRef()
+	pluginPath := filepath.Join(root, "plugins", ref.Name)
+	writeCanonicalPluginPackage(t, pluginPath, ref, "Demo")
+	manifest, err := pluginartifact.LoadAPCPluginManifest(ref, pluginPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAgentLandings(root, pluginPath, manifest); err != nil {
+		t.Fatalf("writeAgentLandings() error = %v", err)
+	}
+
+	for _, agent := range pluginartifact.PluginLandingAgents() {
+		landing, err := pluginartifact.LandingPluginPath(root, agent, ref.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"skills/demo/SKILL.md", "skills/demo/skill-card.md"}
+		switch agent {
+		case domain.AgentCodex:
+			want = append(want, ".codex-plugin/plugin.json")
+		case domain.AgentClaudeCode:
+			want = append(want, ".claude-plugin/plugin.json")
+		case domain.AgentHermes:
+			want = append(want, "__init__.py", "plugin.yaml")
+		case domain.AgentBibit:
+			want = append(want, "plugin.yaml")
+		}
+		sort.Strings(want)
+		if got := relativeFiles(t, landing); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s landing files = %v, want %v", agent, got, want)
+		}
+	}
+
+	// canonical 包保持原样：派生内容绝不回写到 canonical 叶子。
+	canonicalFiles := relativeFiles(t, pluginPath)
+	wantCanonical := []string{"apc-plugin.json", "skills/demo/SKILL.md", "skills/demo/skill-card.md"}
+	sort.Strings(wantCanonical)
+	if !reflect.DeepEqual(canonicalFiles, wantCanonical) {
+		t.Fatalf("canonical package files = %v, want %v", canonicalFiles, wantCanonical)
+	}
+}
+
+func TestAgentLandingGenerationDoesNotOverwriteExistingDerivedFile(t *testing.T) {
 	// 捕获错误变更：生成器覆盖已存在节点，使 raw 校验与不可变临时树边界失去意义。
 	root := t.TempDir()
-	target := filepath.Join(root, codexManifestPath)
+	ref := pluginartifactTestRef()
+	pluginPath := filepath.Join(root, "plugins", ref.Name)
+	writeCanonicalPluginPackage(t, pluginPath, ref, "Demo")
+	manifest, err := pluginartifact.LoadAPCPluginManifest(ref, pluginPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := pluginartifact.LandingPluginPath(root, domain.AgentCodex, ref.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target = filepath.Join(target, codexManifestPath)
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(target, []byte("existing"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manifest := pluginartifact.APCPluginManifest{
-		SchemaVersion: 1, Name: "demo", Version: "v1.2.3", Description: "Demo", Skills: []string{"skills/demo"},
-	}
-	if err := writeAgentManifests(root, manifest); !errors.Is(err, ErrInvalidArtifact) {
-		t.Fatalf("writeAgentManifests() error = %v, want ErrInvalidArtifact", err)
+	if err := writeAgentLandings(root, pluginPath, manifest); !errors.Is(err, ErrInvalidArtifact) {
+		t.Fatalf("writeAgentLandings() error = %v, want ErrInvalidArtifact", err)
 	}
 	contents, err := os.ReadFile(target)
 	if err != nil {
@@ -125,36 +208,43 @@ func TestAgentManifestGenerationDoesNotOverwriteExistingDerivedFile(t *testing.T
 	}
 }
 
-func TestAgentManifestPartialGenerationCannotValidateSharedArtifact(t *testing.T) {
-	// 捕获错误变更：前几个文件落地后，后续写失败仍被共享 validator 当作可发布完整 artifact。
+func TestAgentLandingPartialGenerationCannotValidateSharedArtifact(t *testing.T) {
+	// 捕获错误变更：部分 Agent 落盘后，后续写失败仍被共享 validator 当作可发布完整 artifact。
 	root := t.TempDir()
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.2.3"}
+	ref := pluginartifactTestRef()
 	pluginPath := filepath.Join(root, "plugins", ref.Name)
 	writeCanonicalPluginPackage(t, pluginPath, ref, "Demo")
-	if err := os.WriteFile(filepath.Join(pluginPath, hermesManifestPath), []byte("block directory"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	manifest, err := pluginartifact.LoadAPCPluginManifest(ref, pluginPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAgentManifests(pluginPath, manifest); err == nil {
-		t.Fatal("writeAgentManifests() error = nil, want blocked Hermes generation")
+	blocked, err := pluginartifact.LandingPluginPath(root, domain.AgentHermes, ref.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(blocked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, pluginManifestPath), []byte("block"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAgentLandings(root, pluginPath, manifest); err == nil {
+		t.Fatal("writeAgentLandings() error = nil, want blocked Hermes generation")
 	}
 	if err := pluginartifact.ValidateShared(ref, root); !errors.Is(err, pluginartifact.ErrInvalid) {
 		t.Fatalf("ValidateShared() error = %v, want ErrInvalid", err)
 	}
 }
 
-func TestAgentManifestPartialGenerationCannotPublishArtifact(t *testing.T) {
-	// 捕获错误变更：Service 在 builder 已写入部分 Agent 文件后仍 rename 发布临时 artifact。
+func TestAgentLandingPartialGenerationCannotPublishArtifact(t *testing.T) {
+	// 捕获错误变更：Service 在 builder 已写入部分 Agent 落盘内容后仍 rename 发布临时 artifact。
 	roots := newTestRoots(t)
 	ref := testPluginRef()
 	download := pluginDownloadFunc(func(_ context.Context, _ domain.PowerRef, destination string) error {
 		writeCanonicalPluginPackage(t, destination, ref, "Demo")
 		return nil
 	})
-	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, partialAgentManifestBuilder{})
+	service := newService(roots.cache, roots.cacheTemp, roots.staging, roots.stagingTemp, download, partialAgentLandingBuilder{})
 	if _, err := service.Ensure(context.Background(), testCatalogPluginEntry(ref)); !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("Ensure() error = %v, want ErrInvalidArtifact", err)
 	}
@@ -163,20 +253,32 @@ func TestAgentManifestPartialGenerationCannotPublishArtifact(t *testing.T) {
 	}
 }
 
-type partialAgentManifestBuilder struct{}
+type partialAgentLandingBuilder struct{}
 
-func (partialAgentManifestBuilder) Build(ref domain.PowerRef, _ string, pluginPath string) error {
+func (partialAgentLandingBuilder) Build(ref domain.PowerRef, root string) error {
+	logicalName, err := domain.PluginRuntimeName(ref)
+	if err != nil {
+		return err
+	}
+	pluginPath := filepath.Join(root, "plugins", logicalName)
 	canonical, err := pluginartifact.LoadAPCPluginManifest(ref, pluginPath)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(pluginPath, hermesManifestPath), []byte("block directory"), 0o600); err != nil {
+	blocked, err := pluginartifact.LandingPluginPath(root, domain.AgentHermes, logicalName)
+	if err != nil {
 		return err
 	}
-	return writeAgentManifests(pluginPath, canonical)
+	if err := os.MkdirAll(blocked, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(blocked, pluginManifestPath), []byte("block"), 0o600); err != nil {
+		return err
+	}
+	return writeAgentLandings(root, pluginPath, canonical)
 }
 
-func (partialAgentManifestBuilder) Validate(domain.PowerRef, string) error {
+func (partialAgentLandingBuilder) Validate(domain.PowerRef, string) error {
 	return nil
 }
 
@@ -193,6 +295,45 @@ func assertGeneratedJSONSchema(t *testing.T, path string, want map[string]any) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("generated JSON %q = %#v, want %#v", path, got, want)
 	}
+}
+
+// landingFilePath 返回指定 Agent 落盘插件叶子内相对文件的绝对路径。
+func landingFilePath(t *testing.T, root string, agent domain.AgentID, logicalName, relative string) string {
+	t.Helper()
+	landing, err := pluginartifact.LandingPluginPath(root, agent, logicalName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(landing, filepath.FromSlash(relative))
+}
+
+// relativeFiles 返回 root 下全部文件的斜杠分隔相对路径，按字典序排序。
+func relativeFiles(t *testing.T, root string) []string {
+	t.Helper()
+	files := make([]string, 0)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, filepath.ToSlash(relative))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(files)
+	return files
+}
+
+func pluginartifactTestRef() domain.PowerRef {
+	return domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 }
 
 func writeCanonicalPluginPackage(t *testing.T, root string, ref domain.PowerRef, description string) {

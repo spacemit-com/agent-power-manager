@@ -431,7 +431,7 @@ func TestInstallFilesystemPluginAbsentFactValidatesPhysicalManagedTargetBeforeMu
 			if statErr != nil || after.Mode() != before.Mode() {
 				t.Fatalf("managed target changed: before=%v after=%v err=%v", before.Mode(), after, statErr)
 			}
-			for _, forbidden := range []string{"config:remove:hermes-agent:plugin:demo", "resource:ensure:v2.0.0", "resource:stage-filesystem:v2.0.0", "transaction:install-plugin:hermes-agent"} {
+			for _, forbidden := range []string{"config:remove:hermes-agent:plugin:demo", "resource:ensure:v2.0.0", "resource:stage-filesystem:hermes-agent:v2.0.0", "transaction:install-plugin:hermes-agent"} {
 				if containsEvent(calls, forbidden) {
 					t.Fatalf("calls = %v, want no mutation %q", calls, forbidden)
 				}
@@ -461,7 +461,7 @@ func TestInstallFilesystemPluginAbsentFactAndPhysicalTargetMissingRepairsThenIns
 	want := []string{
 		"config:find:hermes-agent", "resolve-plugin:hermes-agent", "plugin:inspect:hermes-agent:demo",
 		"plugin:target-path:hermes-agent:demo", "transaction:uninstall-plugin:hermes-agent",
-		"resource:ensure:v2.0.0", "resource:stage-filesystem:v2.0.0",
+		"resource:ensure:v2.0.0", "resource:stage-filesystem:hermes-agent:v2.0.0",
 		"transaction:install-plugin:hermes-agent",
 	}
 	if !reflect.DeepEqual(calls, want) {

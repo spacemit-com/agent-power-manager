@@ -81,6 +81,7 @@ type fakePluginResources struct {
 	stageRoot     string
 	stageErr      error
 	stageCalls    int
+	stageAgents   []domain.AgentID
 	ensureCalls   int
 	lookupCalls   int
 	locateCalls   int
@@ -166,10 +167,11 @@ func (resources *fakePluginResources) Exists(ref domain.PowerRef) (bool, error) 
 	return true, nil
 }
 
-func (resources *fakePluginResources) StageFilesystem(ref domain.PowerRef) (string, error) {
+func (resources *fakePluginResources) StageFilesystem(agent domain.AgentID, ref domain.PowerRef) (string, error) {
 	resources.stageCalls++
+	resources.stageAgents = append(resources.stageAgents, agent)
 	if resources.calls != nil {
-		*resources.calls = append(*resources.calls, "resource:stage-filesystem:"+ref.Version)
+		*resources.calls = append(*resources.calls, "resource:stage-filesystem:"+string(agent)+":"+ref.Version)
 	}
 	if resources.stageErr != nil {
 		return "", resources.stageErr

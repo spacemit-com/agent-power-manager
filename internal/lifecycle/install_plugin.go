@@ -294,8 +294,9 @@ func (s *InstallService) installFilesystemPluginPublish(
 	if err := validateLifecyclePluginArtifact(targetArtifact, ref); err != nil {
 		return cli.InstallItem{}, err
 	}
-	// 通用 filesystem staging 仅在所有事实校验完成、即将进入发布事务时调用。
-	staging, err := s.plugins.StageFilesystem(ref)
+	// 通用 filesystem staging 仅在所有事实校验完成、即将进入发布事务时调用；
+	// 只物化目标 Agent 的落盘插件叶子，安装目录不会出现其他 Agent 的配置。
+	staging, err := s.plugins.StageFilesystem(agent, ref)
 	if err != nil {
 		return cli.InstallItem{}, fmt.Errorf("stage filesystem Plugin artifact %+v: %w", ref, err)
 	}

@@ -21,15 +21,93 @@ import (
 const (
 	codexManifestPath     = ".codex-plugin/plugin.json"
 	claudeManifestPath    = ".claude-plugin/plugin.json"
-	hermesManifestPath    = "plugin.yaml"
-	hermesInitPath        = "__init__.py"
+	pluginManifestPath    = "plugin.yaml"
+	pluginInitPath        = "__init__.py"
 	codexMarketplacePath  = ".agents/plugins/marketplace.json"
 	claudeMarketplacePath = ".claude-plugin/marketplace.json"
-	localPluginPrefix     = "./plugins/"
 	codexSkillsPath       = "./skills/"
-	hermesAuthor          = "APM"
-	hermesInitContents    = "def register(ctx):\n    return None\n"
+	apmAuthor             = "APM"
+	pluginInitContents    = "def register(ctx):\n    return None\n"
+
+	// LandingRootDir 是共享 artifact 内各 Agent 落盘子树的公共父目录。
+	// 每个目标 Agent 只发布自己的落盘插件叶子，因此安装目录不会出现其他 Agent 的配置。
+	LandingRootDir = "landing"
+
+	// PluginManifestSchemaVersion 是 Hermes 与 Bibit 共用 plugin.yaml 的固定契约版本；
+	// 生成（pluginresource）与复验（本包）共用该常量，避免两侧漂移。
+	PluginManifestSchemaVersion = 1
 )
+
+// landingAgents 固定落盘 Agent 的顺序，保证派生输出与复验遍历确定。
+var landingAgents = []domain.AgentID{domain.AgentCodex, domain.AgentClaudeCode, domain.AgentHermes, domain.AgentBibit}
+
+// PluginLandingAgents 返回共享 artifact 内必须存在落盘子树的 Agent；返回值不可被调用方修改顺序。
+// 未列入的 Agent 没有落盘语义，marketplace 型与文件系统型 Plugin 均按此集合派生与复验。
+func PluginLandingAgents() []domain.AgentID {
+	return append([]domain.AgentID(nil), landingAgents...)
+}
+
+// LandingRelativeDir 返回 Agent 落盘子树相对 artifact 根的路径 `landing/<agent-id>`；
+// 不支持的 Agent 返回 ErrInvalid。目录名直接使用 domain.AgentID，与 CLI `--agent` 取值同源。
+func LandingRelativeDir(agent domain.AgentID) (string, error) {
+	for _, candidate := range landingAgents {
+		if candidate == agent {
+			return path.Join(LandingRootDir, string(agent)), nil
+		}
+	}
+	return "", fmt.Errorf("Plugin landing agent %q: %w", agent, ErrInvalid)
+}
+
+// LandingPluginRelativePath 返回落盘插件叶子相对 artifact 根的路径 `landing/<agent-id>/plugins/<name>`。
+func LandingPluginRelativePath(agent domain.AgentID, logicalName string) (string, error) {
+	landingDir, err := LandingRelativeDir(agent)
+	if err != nil {
+		return "", err
+	}
+	if err := validateLogicalPluginName(logicalName); err != nil {
+		return "", err
+	}
+	return path.Join(landingDir, "plugins", logicalName), nil
+}
+
+// LandingPluginPath 返回落盘插件叶子的绝对路径，供派生与目标 Agent 发布共用。
+func LandingPluginPath(root string, agent domain.AgentID, logicalName string) (string, error) {
+	relative, err := LandingPluginRelativePath(agent, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, filepath.FromSlash(relative)), nil
+}
+
+// LandingMarketplaceSource 返回 marketplace 文档内指向落盘插件叶子的相对 source；
+// Codex/Claude CLI 只复制该 source 子树，因此指向落盘叶子即实现按目标过滤。
+func LandingMarketplaceSource(agent domain.AgentID, logicalName string) (string, error) {
+	relative, err := LandingPluginRelativePath(agent, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return "./" + relative, nil
+}
+
+func landingManifestRelativePath(agent domain.AgentID) (string, error) {
+	switch agent {
+	case domain.AgentCodex:
+		return codexManifestPath, nil
+	case domain.AgentClaudeCode:
+		return claudeManifestPath, nil
+	case domain.AgentHermes, domain.AgentBibit:
+		return pluginManifestPath, nil
+	default:
+		return "", fmt.Errorf("Plugin landing agent %q: %w", agent, ErrInvalid)
+	}
+}
+
+func validateLogicalPluginName(name string) error {
+	if name == "" || name == "." || name == ".." || path.IsAbs(name) || strings.ContainsAny(name, `/\`) || path.Base(name) != name {
+		return fmt.Errorf("Plugin logical name %q is not a single canonical path element: %w", name, ErrInvalid)
+	}
+	return nil
+}
 
 // ErrInvalid 表示持久 Plugin artifact 的物理树或 Agent 语义不完整。
 var ErrInvalid = errors.New("invalid plugin artifact contents")
@@ -50,12 +128,15 @@ type ClaudePluginManifest struct {
 	Skills      []string `json:"skills"`
 }
 
-// HermesPluginManifest 定义 APM 派生并严格复验的 Hermes 原生 manifest 完整 schema。
-type HermesPluginManifest struct {
-	Name        string `yaml:"name"`
-	Version     string `yaml:"version"`
-	Description string `yaml:"description"`
-	Author      string `yaml:"author"`
+// FilesystemPluginManifest 定义 APM 派生并严格复验的 filesystem Agent manifest 完整 schema。
+// 该 schema 对应落盘插件叶子根下的 plugin.yaml，由 Hermes 与 Bibit 共用；schema_version 固定为 1，
+// 与 apc-plugin.json 等 canonical 资源清单保持同一版本约定。字段顺序即 YAML 输出顺序；
+// 两侧消费方都不消费作者信息，因此不接受 author（严格解码会拒绝该未知键）。
+type FilesystemPluginManifest struct {
+	SchemaVersion int    `yaml:"schema_version"`
+	Name          string `yaml:"name"`
+	Version       string `yaml:"version"`
+	Description   string `yaml:"description"`
 }
 
 type codexMarketplaceDocument struct {
@@ -255,7 +336,7 @@ func ValidateRawPackageEntries(manifest APCPluginManifest, entries []RawPackageE
 	return nil
 }
 
-// ValidateShared 复验 canonical 子树、四份 Agent 派生文件及双 marketplace 的精确路径与完整语义。
+// ValidateShared 复验 canonical 子树、四个 Agent 的落盘插件叶子及双 marketplace 的精确路径与完整语义。
 func ValidateShared(ref domain.PowerRef, root string) error {
 	if err := ValidatePhysicalTree(root); err != nil {
 		return err
@@ -266,6 +347,10 @@ func ValidateShared(ref domain.PowerRef, root string) error {
 	}
 	if _, err := requireExactPhysicalDirectory(root, "plugins"); err != nil {
 		return err
+	}
+	// 旧布局制品没有按 Agent 落盘，无法在复验时补全；保持 fail closed 并给出可操作提示，不自动清理 cache。
+	if _, err := requireExactPhysicalDirectory(root, LandingRootDir); err != nil {
+		return fmt.Errorf("Plugin artifact %q has no %q directory, its layout predates per-Agent landing; remove this artifact root to re-derive: %w", root, LandingRootDir, err)
 	}
 	pluginRelative := filepath.ToSlash(filepath.Join("plugins", logicalName))
 	pluginPath, err := requireExactPhysicalDirectory(root, pluginRelative)
@@ -279,13 +364,18 @@ func ValidateShared(ref domain.PowerRef, root string) error {
 	if err := validateSharedClosedWorld(root, logicalName, manifest); err != nil {
 		return err
 	}
-	if err := validateCodex(ref, root, pluginPath, manifest); err != nil {
+	if err := validateCodexLanding(ref, root, manifest); err != nil {
 		return err
 	}
-	if err := validateClaude(ref, root, pluginPath, manifest); err != nil {
+	if err := validateClaudeLanding(ref, root, manifest); err != nil {
 		return err
 	}
-	return validateHermes(pluginPath, manifest)
+	for _, agent := range []domain.AgentID{domain.AgentHermes, domain.AgentBibit} {
+		if err := validateFilesystemLanding(agent, root, manifest); err != nil {
+			return err
+		}
+	}
+	return validateLandingSkillPayloads(root, manifest)
 }
 
 // ValidateMarketplace 先复验完整共享 artifact，再复验目标 Agent 的 marketplace 语义。
@@ -304,15 +394,19 @@ func ValidateMarketplace(agent domain.AgentID, ref domain.PowerRef, root string)
 	}
 	switch agent {
 	case domain.AgentCodex:
-		return validateCodex(ref, root, pluginPath, manifest)
+		return validateCodexLanding(ref, root, manifest)
 	case domain.AgentClaudeCode:
-		return validateClaude(ref, root, pluginPath, manifest)
+		return validateClaudeLanding(ref, root, manifest)
 	default:
 		return fmt.Errorf("validate Plugin artifact agent %q: %w", agent, ErrInvalid)
 	}
 }
 
-func validateCodex(ref domain.PowerRef, root, pluginPath string, canonical APCPluginManifest) error {
+func validateCodexLanding(ref domain.PowerRef, root string, canonical APCPluginManifest) error {
+	pluginPath, err := LandingPluginPath(root, domain.AgentCodex, canonical.Name)
+	if err != nil {
+		return err
+	}
 	var gotManifest CodexPluginManifest
 	if err := decodeExactRequiredJSON(pluginPath, codexManifestPath, &gotManifest); err != nil {
 		return fmt.Errorf("decode Codex Plugin manifest: %w", err)
@@ -335,7 +429,11 @@ func validateCodex(ref domain.PowerRef, root, pluginPath string, canonical APCPl
 	return nil
 }
 
-func validateClaude(ref domain.PowerRef, root, pluginPath string, canonical APCPluginManifest) error {
+func validateClaudeLanding(ref domain.PowerRef, root string, canonical APCPluginManifest) error {
+	pluginPath, err := LandingPluginPath(root, domain.AgentClaudeCode, canonical.Name)
+	if err != nil {
+		return err
+	}
 	var gotManifest ClaudePluginManifest
 	if err := decodeExactRequiredJSON(pluginPath, claudeManifestPath, &gotManifest); err != nil {
 		return fmt.Errorf("decode Claude Plugin manifest: %w", err)
@@ -358,22 +456,101 @@ func validateClaude(ref domain.PowerRef, root, pluginPath string, canonical APCP
 	return nil
 }
 
-func validateHermes(pluginPath string, canonical APCPluginManifest) error {
-	var got HermesPluginManifest
-	if err := decodeExactRequiredYAML(pluginPath, hermesManifestPath, &got); err != nil {
-		return fmt.Errorf("decode Hermes Plugin manifest: %w", err)
+// validateFilesystemLanding 复验单个 filesystem Agent 落盘插件叶子内的 plugin.yaml；
+// Hermes 额外要求规范注册器，Bibit 的闭集由 validateSharedClosedWorld 保证没有该文件。
+func validateFilesystemLanding(agent domain.AgentID, root string, canonical APCPluginManifest) error {
+	pluginPath, err := LandingPluginPath(root, agent, canonical.Name)
+	if err != nil {
+		return err
 	}
-	if want := expectedHermesManifest(canonical); !reflect.DeepEqual(got, want) {
-		return fmt.Errorf("Hermes Plugin manifest does not match canonical index: %w", ErrInvalid)
+	var got FilesystemPluginManifest
+	if err := decodeExactRequiredYAML(pluginPath, pluginManifestPath, &got); err != nil {
+		return fmt.Errorf("decode %s filesystem Plugin manifest: %w", agent, err)
 	}
-	initContents, err := readExactRequiredFile(pluginPath, hermesInitPath)
+	if want := expectedFilesystemPluginManifest(canonical); !reflect.DeepEqual(got, want) {
+		return fmt.Errorf("%s filesystem Plugin manifest does not match canonical index: %w", agent, ErrInvalid)
+	}
+	if agent != domain.AgentHermes {
+		return nil
+	}
+	initContents, err := readExactRequiredFile(pluginPath, pluginInitPath)
 	if err != nil {
 		return fmt.Errorf("read Hermes Plugin initializer: %w", err)
 	}
-	if string(initContents) != hermesInitContents {
+	if string(initContents) != pluginInitContents {
 		return fmt.Errorf("Hermes Plugin initializer is not the canonical no-op register function: %w", ErrInvalid)
 	}
 	return nil
+}
+
+// validateLandingSkillPayloads 逐文件比较四个落盘插件叶子的声明 Skill 子树与 canonical 子树。
+// 闭集规则只保证路径完整，本函数额外保证落盘内容确实是 canonical 内容的完整副本。
+func validateLandingSkillPayloads(root string, canonical APCPluginManifest) error {
+	canonicalPlugin := filepath.Join(root, "plugins", canonical.Name)
+	for _, agent := range PluginLandingAgents() {
+		landingPlugin, err := LandingPluginPath(root, agent, canonical.Name)
+		if err != nil {
+			return err
+		}
+		for _, skillPath := range canonical.Skills {
+			want := filepath.Join(canonicalPlugin, filepath.FromSlash(skillPath))
+			got := filepath.Join(landingPlugin, filepath.FromSlash(skillPath))
+			if err := compareSkillSubtree(want, got); err != nil {
+				return fmt.Errorf("%s landing skill %q differs from canonical package: %w", agent, skillPath, errors.Join(ErrInvalid, err))
+			}
+		}
+	}
+	return nil
+}
+
+func compareSkillSubtree(wantRoot, gotRoot string) error {
+	want, err := readSubtreeFiles(wantRoot)
+	if err != nil {
+		return fmt.Errorf("read canonical skill subtree %q: %w", wantRoot, err)
+	}
+	got, err := readSubtreeFiles(gotRoot)
+	if err != nil {
+		return fmt.Errorf("read landing skill subtree %q: %w", gotRoot, err)
+	}
+	if len(want) != len(got) {
+		return fmt.Errorf("landing skill subtree %q has %d files, canonical has %d", gotRoot, len(got), len(want))
+	}
+	for relative, wantContents := range want {
+		gotContents, ok := got[relative]
+		if !ok {
+			return fmt.Errorf("landing skill subtree %q is missing %q", gotRoot, relative)
+		}
+		if !bytes.Equal(wantContents, gotContents) {
+			return fmt.Errorf("landing skill file %q differs from canonical package", filepath.Join(gotRoot, filepath.FromSlash(relative)))
+		}
+	}
+	return nil
+}
+
+func readSubtreeFiles(root string) (map[string][]byte, error) {
+	files := make(map[string][]byte)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(relative)] = contents
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 func expectedCodexManifest(canonical APCPluginManifest) CodexPluginManifest {
@@ -388,9 +565,13 @@ func expectedClaudeManifest(canonical APCPluginManifest) ClaudePluginManifest {
 	}
 }
 
-func expectedHermesManifest(canonical APCPluginManifest) HermesPluginManifest {
-	return HermesPluginManifest{
-		Name: canonical.Name, Version: strings.TrimPrefix(canonical.Version, "v"), Description: canonical.Description, Author: hermesAuthor,
+// expectedFilesystemPluginManifest 是 Hermes 与 Bibit 共用 plugin.yaml 的唯一期望值。
+func expectedFilesystemPluginManifest(canonical APCPluginManifest) FilesystemPluginManifest {
+	return FilesystemPluginManifest{
+		SchemaVersion: PluginManifestSchemaVersion,
+		Name:          canonical.Name,
+		Version:       strings.TrimPrefix(canonical.Version, "v"),
+		Description:   canonical.Description,
 	}
 }
 
@@ -430,26 +611,55 @@ func rawPackageEntryAllowed(manifest APCPluginManifest, relative string, directo
 	return false
 }
 
+// validateSharedClosedWorld 定义共享 artifact 的唯一合法物理树：
+// canonical 包只保留 `apc-plugin.json` 与声明 Skill 子树，派生内容全部位于各 Agent 的落盘插件叶子。
 func validateSharedClosedWorld(root, logicalName string, manifest APCPluginManifest) error {
-	pluginPrefix := "plugins/" + logicalName
+	pluginPrefix := path.Join("plugins", logicalName)
 	allowedDirectories := map[string]struct{}{
 		".agents": {}, ".agents/plugins": {}, ".claude-plugin": {}, "plugins": {}, pluginPrefix: {},
-		pluginPrefix + "/skills": {}, pluginPrefix + "/.codex-plugin": {},
-		pluginPrefix + "/.claude-plugin": {},
+		pluginPrefix + "/skills": {},
 	}
 	allowedFiles := map[string]struct{}{
-		filepath.ToSlash(codexMarketplacePath):                    {},
-		filepath.ToSlash(claudeMarketplacePath):                   {},
-		pluginPrefix + "/" + apcPluginManifestPath:                {},
-		pluginPrefix + "/" + filepath.ToSlash(codexManifestPath):  {},
-		pluginPrefix + "/" + filepath.ToSlash(claudeManifestPath): {},
-		pluginPrefix + "/" + filepath.ToSlash(hermesManifestPath): {},
-		pluginPrefix + "/" + filepath.ToSlash(hermesInitPath):     {},
+		filepath.ToSlash(codexMarketplacePath):     {},
+		filepath.ToSlash(claudeMarketplacePath):    {},
+		pluginPrefix + "/" + apcPluginManifestPath: {},
 	}
-	declaredSkillPrefixes := make([]string, len(manifest.Skills))
-	for index, skillPath := range manifest.Skills {
-		declaredSkillPrefixes[index] = pluginPrefix + "/" + skillPath
-		allowedDirectories[declaredSkillPrefixes[index]] = struct{}{}
+	declaredSkillPrefixes := make([]string, 0, len(manifest.Skills)*(len(landingAgents)+1))
+	for _, skillPath := range manifest.Skills {
+		prefix := pluginPrefix + "/" + skillPath
+		declaredSkillPrefixes = append(declaredSkillPrefixes, prefix)
+		allowedDirectories[prefix] = struct{}{}
+	}
+	for _, agent := range landingAgents {
+		landingDir, err := LandingRelativeDir(agent)
+		if err != nil {
+			return err
+		}
+		landingPlugin, err := LandingPluginRelativePath(agent, logicalName)
+		if err != nil {
+			return err
+		}
+		manifestRelative, err := landingManifestRelativePath(agent)
+		if err != nil {
+			return err
+		}
+		allowedDirectories[LandingRootDir] = struct{}{}
+		allowedDirectories[landingDir] = struct{}{}
+		allowedDirectories[path.Join(landingDir, "plugins")] = struct{}{}
+		allowedDirectories[landingPlugin] = struct{}{}
+		allowedDirectories[landingPlugin+"/skills"] = struct{}{}
+		if directory := path.Dir(manifestRelative); directory != "." {
+			allowedDirectories[path.Join(landingPlugin, directory)] = struct{}{}
+		}
+		allowedFiles[path.Join(landingPlugin, manifestRelative)] = struct{}{}
+		if agent == domain.AgentHermes {
+			allowedFiles[path.Join(landingPlugin, pluginInitPath)] = struct{}{}
+		}
+		for _, skillPath := range manifest.Skills {
+			prefix := landingPlugin + "/" + skillPath
+			declaredSkillPrefixes = append(declaredSkillPrefixes, prefix)
+			allowedDirectories[prefix] = struct{}{}
+		}
 	}
 	return validateRelativeClosedWorld(root, func(relative string, entry fs.DirEntry) bool {
 		if entry.IsDir() {
@@ -608,11 +818,15 @@ func expectedCodexMarketplace(ref domain.PowerRef, manifest CodexPluginManifest)
 	if err != nil {
 		return codexMarketplaceDocument{}, errors.Join(ErrInvalid, err)
 	}
+	source, err := LandingMarketplaceSource(domain.AgentCodex, manifest.Name)
+	if err != nil {
+		return codexMarketplaceDocument{}, err
+	}
 	document := codexMarketplaceDocument{Name: name}
 	document.Interface.DisplayName = manifest.Name
 	plugin := codexMarketplacePlugin{Name: manifest.Name, Category: "Coding"}
 	plugin.Source.Source = "local"
-	plugin.Source.Path = localPluginPrefix + manifest.Name
+	plugin.Source.Path = source
 	plugin.Policy.Installation = "AVAILABLE"
 	plugin.Policy.Authentication = "ON_INSTALL"
 	document.Plugins = []codexMarketplacePlugin{plugin}
@@ -624,12 +838,16 @@ func expectedClaudeMarketplace(ref domain.PowerRef, manifest ClaudePluginManifes
 	if err != nil {
 		return claudeMarketplaceDocument{}, errors.Join(ErrInvalid, err)
 	}
+	source, err := LandingMarketplaceSource(domain.AgentClaudeCode, manifest.Name)
+	if err != nil {
+		return claudeMarketplaceDocument{}, err
+	}
 	document := claudeMarketplaceDocument{Name: name}
-	document.Owner.Name = hermesAuthor
+	document.Owner.Name = apmAuthor
 	document.Metadata.Description = manifest.Description
 	document.Metadata.Version = manifest.Version
 	document.Plugins = []claudeMarketplacePlugin{{
-		Name: manifest.Name, Source: localPluginPrefix + manifest.Name, Description: manifest.Description,
+		Name: manifest.Name, Source: source, Description: manifest.Description,
 	}}
 	return document, nil
 }
