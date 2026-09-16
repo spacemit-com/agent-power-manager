@@ -2,65 +2,62 @@ package adapter
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 )
 
 func TestBibitMCPAdapterCommands(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
 		{result: agentCLIResult{Stdout: `{"id":"mcp.demo"}`}},
-		{}, {},
+		successfulMCPResponse(`{"id":"mcp.demo"}`),
+		successfulMCPResponse(`{"deleted":true}`),
 	}}
 	subject := newBibitMCPAdapter(runner)
-	_, _ = subject.Inspect(context.Background(), "demo")
-	_, _ = subject.Add(context.Background(), mcpRef("demo"), stdioServer("npx", "-y", "pkg"))
-	_, _ = subject.Remove(context.Background(), mcpRef("demo"))
+	if _, err := subject.Inspect(context.Background(), "demo"); err != nil {
+		t.Fatalf("Inspect() error = %v", err)
+	}
+	if result, err := subject.Add(context.Background(), mcpRef("demo"), stdioServer("npx", "-y", "pkg")); err != nil || result.State != MCPMutationApplied {
+		t.Fatalf("Add(stdio) = %+v, %v; want applied", result, err)
+	}
+	if result, err := subject.Remove(context.Background(), mcpRef("demo")); err != nil || result.State != MCPMutationApplied {
+		t.Fatalf("Remove() = %+v, %v; want applied", result, err)
+	}
 	assertMCPCommands(t, runner, "bianbu-agent", [][]string{
 		{"mcp", "get", "demo"},
-		{"mcp", "add", "demo", "--", "npx", "-y", "pkg"},
+		{"mcp", "add", "demo", "--command", "npx", "--args", "-y", "pkg"},
 		{"mcp", "remove", "demo"},
 	})
 }
 
-func TestBibitMCPAdapterAddHTTPInstallsPackage(t *testing.T) {
+func TestBibitMCPAdapterAddHTTPUsesAddURL(t *testing.T) {
 	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
 		successfulMCPResponse(`{"content_digest":"fake","id":"mcp.demo"}`),
 	}}
-	var created []string
-	var files []string
 	subject := newBibitMCPAdapter(runner)
-	subject.mkdtemp = func(_, _ string) (string, error) { return "/tmp/apm-bibit-mcp-http", nil }
-	subject.mkdirAll = func(path string, _ os.FileMode) error { created = append(created, path); return nil }
-	subject.writeFile = func(_ string, data []byte, _ os.FileMode) error { files = append(files, string(data)); return nil }
-	subject.removeAll = func(_ string) error { return nil }
 
 	result, err := subject.Add(context.Background(), mcpRef("demo"), httpServer("https://example.com/mcp"))
 	if err != nil || result.State != MCPMutationApplied {
 		t.Fatalf("Add(http) = %+v, %v; want applied", result, err)
 	}
+	// HTTP 直接经 mcp add --url 登记，不再写临时目录包或调用 mcp install。
 	assertMCPCommands(t, runner, "bianbu-agent", [][]string{
-		{"mcp", "install", "/tmp/apm-bibit-mcp-http/mcp.demo"},
+		{"mcp", "add", "demo", "--url", "https://example.com/mcp", "--auth", "none"},
 	})
-	if len(created) != 1 || created[0] != "/tmp/apm-bibit-mcp-http/mcp.demo" {
-		t.Fatalf("created dirs = %#v, want single package directory", created)
+}
+
+func TestBibitMCPAdapterAddStdioOmitsEmptyArgs(t *testing.T) {
+	runner := &recordingMCPRunner{responses: []queuedMCPResponse{
+		successfulMCPResponse(`{"id":"mcp.demo"}`),
+	}}
+	subject := newBibitMCPAdapter(runner)
+
+	result, err := subject.Add(context.Background(), mcpRef("demo"), stdioServer("node"))
+	if err != nil || result.State != MCPMutationApplied {
+		t.Fatalf("Add(stdio) = %+v, %v; want applied", result, err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("written files = %d, want 1", len(files))
-	}
-	var document struct {
-		DisplayName string  `json:"display_name"`
-		Transport   string  `json:"transport"`
-		URL         string  `json:"url"`
-		Timeout     float64 `json:"timeout_seconds"`
-	}
-	if err := json.Unmarshal([]byte(files[0]), &document); err != nil {
-		t.Fatalf("mcp.json is invalid: %v", err)
-	}
-	if document.DisplayName != "demo" || document.Transport != "streamable-http" || document.URL != "https://example.com/mcp" || document.Timeout != 30.0 {
-		t.Fatalf("mcp.json = %#v", document)
-	}
+	assertMCPCommands(t, runner, "bianbu-agent", [][]string{
+		{"mcp", "add", "demo", "--command", "node"},
+	})
 }
 
 func TestBibitMCPInspectAcceptsOnlyUnambiguousResults(t *testing.T) {
@@ -93,6 +90,33 @@ func TestBibitMCPInspectAcceptsOnlyUnambiguousResults(t *testing.T) {
 	}
 }
 
+func TestBibitMCPAddAcceptsOnlyConfirmedRegistration(t *testing.T) {
+	tests := []struct {
+		name      string
+		response  queuedMCPResponse
+		wantState MCPMutationState
+		wantErr   error
+	}{
+		{name: "applied when id matches", response: successfulMCPResponse(`{"id":"mcp.demo"}`), wantState: MCPMutationApplied},
+		{name: "unknown on mismatched id", response: successfulMCPResponse(`{"id":"mcp.other"}`), wantState: MCPMutationUnknown, wantErr: ErrMCPMutationUnknown},
+		{name: "unknown on missing id", response: successfulMCPResponse(`{"deleted":true}`), wantState: MCPMutationUnknown, wantErr: ErrMCPMutationUnknown},
+		{name: "unknown on plain text output", response: successfulMCPResponse("configured"), wantState: MCPMutationUnknown, wantErr: ErrMCPMutationUnknown},
+		{name: "unknown on second JSON value", response: successfulMCPResponse(`{"id":"mcp.demo"} {}`), wantState: MCPMutationUnknown, wantErr: ErrMCPMutationUnknown},
+		{name: "unknown on truncated stdout", response: truncatedMCPResponse(`{"id":"mcp.demo"}`), wantState: MCPMutationUnknown, wantErr: ErrMCPMutationUnknown},
+		{name: "unknown after process starts", response: failedMCPResponse("MCP server already exists: mcp.demo"), wantState: MCPMutationUnknown, wantErr: ErrMCPMutationUnknown},
+		{name: "not applied when CLI unavailable", response: queuedMCPResponse{err: ErrAgentCLIUnavailable}, wantState: MCPMutationNotApplied, wantErr: ErrAgentCLIUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &recordingMCPRunner{responses: []queuedMCPResponse{tt.response}}
+			result, err := newBibitMCPAdapter(runner).Add(context.Background(), mcpRef("demo"), httpServer("https://example.com/mcp"))
+			if result.State != tt.wantState || (tt.wantErr != nil && !errors.Is(err, tt.wantErr)) || (tt.wantErr == nil && err != nil) {
+				t.Fatalf("Add() = %+v, %v; want %q, %v", result, err, tt.wantState, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestBibitMCPMutationMapsProcessOutcomes(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -100,7 +124,7 @@ func TestBibitMCPMutationMapsProcessOutcomes(t *testing.T) {
 		wantState MCPMutationState
 		wantErr   error
 	}{
-		{name: "applied", response: successfulMCPResponse("configured"), wantState: MCPMutationApplied},
+		{name: "applied", response: successfulMCPResponse(`{"deleted":true}`), wantState: MCPMutationApplied},
 		{name: "unknown after process starts", response: failedMCPResponse("write failed"), wantState: MCPMutationUnknown, wantErr: ErrMCPMutationUnknown},
 		{name: "not applied when CLI unavailable", response: queuedMCPResponse{err: ErrAgentCLIUnavailable}, wantState: MCPMutationNotApplied, wantErr: ErrAgentCLIUnavailable},
 	}

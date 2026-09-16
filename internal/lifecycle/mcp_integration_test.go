@@ -39,9 +39,13 @@ case "$agent:$1:$2" in
     if [ -f "$state" ]; then printf '{"id":"mcp.%s","content_digest":"fake","root":"/fake/%s"}\n' "$name" "$name"; exit 0; fi
     printf 'null\n'; exit 0 ;;
   bianbu-agent:mcp:add)
-    name=$3; : > "$FAKE_MCP_STATE/$agent-$name" ;;
-  bianbu-agent:mcp:install)
-    source=$3; base=${source##*/}; name=${base#mcp.}; : > "$FAKE_MCP_STATE/$agent-$name" ;;
+    name=$3
+    case " $*" in
+      *" --command "*|*" --url "*) ;;
+      *) echo "bianbu-agent mcp add: error: one of the arguments --command --url is required" >&2; exit 2 ;;
+    esac
+    : > "$FAKE_MCP_STATE/$agent-$name"
+    printf '{"id":"mcp.%s","content_digest":"fake","root":"/fake/%s"}\n' "$name" "$name" ;;
   bianbu-agent:mcp:remove)
     name=$3; /bin/rm -f "$FAKE_MCP_STATE/$agent-$name" ;;
   codex:mcp:get)
