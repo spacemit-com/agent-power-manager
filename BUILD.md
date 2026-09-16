@@ -317,7 +317,7 @@ Skill、Agent、MCP 与 Plugin 共用唯一活动 journal。唯一正式 schema 
 
 仓库单元测试、集成测试及默认 CI 绝不能调用真实 Agent CLI。MCP/Plugin 测试应只把临时 fake-bin 置于 `PATH`，将 `APM_HOME`、`XDG_CACHE_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME`、`BIANBU_AGENT_HOME` 全部指向 `t.TempDir()` 下的隔离路径，并断言每次执行路径都位于 fake-bin。仓库集成测试已按此约束覆盖四个 Agent 的 Plugin 首装、幂等、升级、降级、卸载和中断恢复；这些测试不得调用真实 `bianbu-agent` 或其他 Agent CLI。
 
-用户显式要求 agent 执行实际安装/卸载功能测试时，使用独立的 [测试指引](docs/testing/install-uninstall.md) 和 [报告模板](docs/testing/install-uninstall-report-template.md)。该流程使用固定云端资源及真实 CLI，文件型资源隔离到临时目录，MCP 使用真实 agent 环境；不纳入 `go test ./...` 或默认 CI。
+用户显式要求 agent 执行 APM CLI 功能测试（含实际安装/卸载）时，使用独立的 [测试指引](docs/testing/apm-cli-functional-test.md) 和 [报告模板](docs/testing/apm-cli-functional-test-report-template.md)。该流程覆盖全部 CLI 命令面，安装/卸载按每个 agent 与每种 Power 展开，使用固定云端资源及真实 CLI，文件型资源隔离到临时目录，MCP 使用真实 agent 环境；不纳入 `go test ./...` 或默认 CI。
 
 ## 清理本地构建产物
 

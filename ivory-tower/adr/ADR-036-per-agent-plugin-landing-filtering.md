@@ -57,7 +57,7 @@ ADR-035 假设 Hermes 与 Bibit 可以消费同一份插件目录内容（`plugi
 - 代价与风险：artifact 内 `skills/` 被物理复制多份（canonical + 四个叶子），cache 体积约增大数倍；物理树校验禁止 symlink/hardlink，因此接受该体积代价。当前 `demo-plugin` 级别 Skills 体积可忽略。
 - 代价与风险：落盘叶子与 canonical 必须保持同步，否则复验失败；这由同一 `writeAgentLandings` 单点生成 + `validateLandingSkillPayloads` 的逐字节比较兜住。
 - 代价与风险：本变更前的 cache 需要人工清理 `cache/plugins/<name>/<version>`，否则安装直接失败并给出提示。
-- 后续动作：ADR-035 标记为被本文取代（其中 `schema_version` 决策仍有效）；`ivory-tower/project-overview.md`、Feature 018/020 spec/plan、`docs/power-template/plugin.md`、`docs/testing/install-uninstall.md`、Changelog 与 BUILD/README 引用本文。
+- 后续动作：ADR-035 标记为被本文取代（其中 `schema_version` 决策仍有效）；`ivory-tower/project-overview.md`、Feature 018/020 spec/plan、`docs/power-template/plugin.md`、`docs/testing/apm-cli-functional-test.md`（原 `install-uninstall.md`）、Changelog 与 BUILD/README 引用本文。
 
 ## Alternatives Considered
 

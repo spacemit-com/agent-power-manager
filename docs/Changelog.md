@@ -2,6 +2,35 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-15（后续：测试指引合入 CLI 自测用例并改名为 CLI 功能测试）
+
+分类：功能变更
+
+用户需求：把已写入知识库《Bianbu 5.0 自测用例》子表 `5 AgentStore` 的 CLI 自测用例合入 `docs/testing`，
+重命名为一个完整的功能测试指引；报告不再要求逐项证据，只有测试失败时才记录用例项情况。
+
+解决方案或完成结果：`docs/testing/install-uninstall.md` 改名为
+[docs/testing/apm-cli-functional-test.md](testing/apm-cli-functional-test.md)，`install-uninstall-report-template.md`
+改名为 [docs/testing/apm-cli-functional-test-report-template.md](testing/apm-cli-functional-test-report-template.md)。
+指引新增第 5 节「用例清单」，把子表 `5 AgentStore` 的 14 条用例（CLI-01、SRH-01、LST-01/02、SHW-01、
+INS-01~04、UNS-01/02、FIX-01、VAL-01、SUB-01）连同优先级、前置条件、测试步骤与预期结果一并纳入，覆盖范围
+从「安装/卸载」扩展为 APM CLI 全部命令面；原第 5 节操作顺序、原第 6 节实际状态验证分别改为第 6、7 节，
+并补入命令级用例的最小隔离环境、`--agent all` 批量的全隔离要求与 SUB-01 的提交授权前提。条目中的契约
+措辞按代码核对修正：`search --json` 的 `description` 为 `omitempty` 输出且不含 `tags`；`list --json`
+的 `description`/`tags` 恒定存在，`list --installed` 的未安装/空清单 agent 以 `{agent,state}` 状态记录出现；
+`validate --json` 字段为 `type`/`name`/`version`/`description`/`file_count`/`content_size`/`warnings`；
+`submission list/get` 用 `--output` 而非 `--json`，`--status` 只接受活动状态。
+
+边界：报告模板删除「逐项证据」一节，改为只在失败或阻塞时填写「失败与阻塞记录」，成功用例仅保留矩阵中的
+结果状态；判定标准（`PASS`/`FAIL`/`BLOCKED`/`N/A`/`NOT_SELECTED`/`NOT_RUN`）与「未执行不得记为通过」
+不变。清理流程、固定云端 Power、目录隔离与环境分组沿用原指引，未改变任何 CLI 行为或隔离决策。运行产物
+目录 `artifacts/install-uninstall/` 沿用既有名称。
+
+相关提交：随承载本条目的文档提交落地（测试指引与报告模板更名、`AGENTS.md`/`BUILD.md`/ADR-036 的引用同步），按记录约定不列出自身哈希。
+
+验证结果或限制：本次仅修改测试文档与引用，未执行真实安装/卸载。运行 `gofmt -l`、`go build ./...` 与
+`go vet ./...` 确认文档改动未影响构建；引用同步更新于 `AGENTS.md`、`BUILD.md`、ADR-036 与本文。
+
 ## 2026-09-15（后续：共享 artifact 内按目标 Agent 落盘，plugin.yaml 去掉 author）
 
 分类：缺陷修复
@@ -61,7 +90,7 @@ landing 布局，新增 `author` 注入、落盘叶子多余文件、Skill 漂�
 `TestStageFilesystemMaterializesOnlyTargetAgentLeaf` 断言 staging 只含目标叶子；
 `internal/lifecycle` 的 `TestPluginAcceptanceFilesystemAgentsReuseSharedArtifact` 以两种顺序断言第二次
 安装下载次数仍为 1 且 artifact 不变，并按 Agent 断言安装目录内容。限制：板端
-（`bianbu@10.0.91.51`，Bibit 0.1.61）真实安装/卸载复测需按 `docs/testing/install-uninstall.md`
+（`bianbu@10.0.91.51`，Bibit 0.1.61）真实安装/卸载复测需按 `docs/testing/apm-cli-functional-test.md`
 在板端执行，本轮尚未完成；Hermes↔Bibit 交叉复用无板端 `hermes` CLI，由上述本地集成用例覆盖。
 
 ## 2026-09-15（后续：派生 plugin.yaml 由 Hermes 与 Bibit 共用并新增 schema_version）
@@ -128,7 +157,7 @@ mtime 快照完全不变（证明未重新派生），并复用 `assertTreesEqua
 一致。限制：本机无 bibit CLI，Bibit 侧「`plugin.yaml` 携带 `schema_version` 且容忍同目录
 `__init__.py`」依据 `bianbu-agent-cli-guide.md` 与板端验收记录
 `artifacts/install-uninstall/2026-09-10-k3/report.md` 的 bibit `plugin/superpowers@v6.3.0` PASS 用例，
-真实安装/卸载复测需按 `docs/testing/install-uninstall.md` 在板端执行。
+真实安装/卸载复测需按 `docs/testing/apm-cli-functional-test.md` 在板端执行。
 
 ## 2026-09-11（后续：validate 对 agent.id 与 agent.name 不一致输出 warning）
 
@@ -286,7 +315,7 @@ catalog 报 `catalog directory mode 0777 permits untrusted entry mutation`），
 `unexecuted`，全程无活动事务残留，真实 `~/.codex` 未产生变化。限制：残留风险为同组账号仍可改名
 或删除受检目录链上的目录项（造成产物落入不可达目录或 DoS），APM 不承诺隔离同组 Byzantine 写者；
 告警只按目录路径去重，不解析组成员，用户只能 `chmod g-w` 消除。本次设备验证只覆盖 `apm list` 与
-Codex Skill 一类，未按 [安装/卸载功能测试指引](testing/install-uninstall.md) 跑全 agent/全类型矩阵。
+Codex Skill 一类，未按 [APM CLI 功能测试指引](testing/apm-cli-functional-test.md) 跑全 agent/全类型矩阵。
 
 ## 2026-09-10
 
