@@ -101,18 +101,22 @@ CLI 安装不请求 securityd 签名审批，包括不执行 `BIANBU_SECURITY_CO
 
 ```bash
 bianbu-agent mcp list
-bianbu-agent mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem /tmp
+bianbu-agent mcp add filesystem --command npx --args -y @modelcontextprotocol/server-filesystem /tmp
+bianbu-agent mcp add weather --url https://mcp.example.com/mcp
 bianbu-agent mcp get filesystem
 bianbu-agent mcp remove filesystem
-
-bianbu-agent mcp install /路径/example.mcp
-bianbu-agent mcp show example.mcp
-bianbu-agent mcp verify example.mcp
+bianbu-agent mcp login weather
 ```
 
-`add` 只把 `--` 后的命令和参数写入 MCP 配置文件，不运行命令、不下载依赖。
+`add` 只把服务器定义写入 MCP 配置，不运行命令、不下载依赖；`--command` 与 `--url` 互斥且必须给出其一，
+`--args`、`--env` 只适用于 stdio，`--auth {none,header,oauth}` 只适用于 URL（默认 `none`；`header`/`oauth`
+会交互式读取 token 并写入本机凭据，非交互场景必须显式传 `--auth none`）。
 因此上述 `npx` 示例在配置时不需要 Node.js 或网络；实际连接 MCP 时才需要相应环境。
-`get/remove` 接受短名称或完整 ID；目录包的 `show/verify` 使用完整 ID。
+`get/remove` 接受短名称或完整 ID；短名归一化为公开 ID `mcp.<name>`。
+
+本节按板端 `bianbu-agent 0.1.69` 核对：更早版本以 `mcp add <name> -- <command> [args...]` 表示 stdio，
+并以 `mcp install <目录包>` 安装 HTTP 服务器，当前版本已改为上面的 `--command`/`--url` 形式，
+`mcp install` 子命令不再存在。
 
 ### Model
 

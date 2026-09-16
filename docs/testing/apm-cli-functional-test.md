@@ -41,7 +41,7 @@ Bibit 的真实 CLI `bianbu-agent` 由板端 Bianbu 系统包 `bianbu-agent-runt
 ## 3. 全局预检：在首次安装前完成
 
 1. 记录时间、主机、操作系统、架构、用户、工作目录、所选 agents、仓库 commit（若有）。解析 APM 和目标 CLI 的绝对路径，记录版本；APM 当前没有 `--version`，可用 `sha256sum` 标识被测二进制，不能将缺失 `--version` 视为不可用。
-2. 实际运行 APM 的 `--help`、`install --help`、`uninstall --help`、`show --help`、`list --help`、`fix --help`。运行每个所选 agent CLI 的版本或帮助命令，并检查 MCP 所需的 `get/list`、`add`、`remove` 子命令。Codex/Claude 还需 Plugin 与 marketplace 查询、添加、移除能力；Hermes 需 `plugins list/enable/disable`。Bibit 不要求 Plugin CLI。Bibit 的真实 CLI `bianbu-agent` 由板端系统包 `bianbu-agent-runtime` 提供，先确认该包已安装（如 `dpkg -l bianbu-agent-runtime`），再记录其绝对路径；不能把 `bibit`/`bibit-gui` 等包装命令或宿主上残留的其他同名可执行文件当作 `bianbu-agent`。
+2. 实际运行 APM 的 `--help`、`install --help`、`uninstall --help`、`show --help`、`list --help`、`fix --help`。运行每个所选 agent CLI 的版本或帮助命令，并检查 MCP 所需的 `get/list`、`add`、`remove` 子命令。Codex/Claude 还需 Plugin 与 marketplace 查询、添加、移除能力；Hermes 需 `plugins list/enable/disable`。Bibit 不要求 Plugin CLI，但其 `mcp add` 必须支持 `--url`（HTTP 传输）与 `--command`（stdio）：缺少 `--url` 时 HTTP MCP 无法安装，按本节第 3 条处理，不得改用 stdio 形态或直接写 CLI 配置文件。Bibit 的真实 CLI `bianbu-agent` 由板端系统包 `bianbu-agent-runtime` 提供，先确认该包已安装（如 `dpkg -l bianbu-agent-runtime`），再记录其绝对路径；不能把 `bibit`/`bibit-gui` 等包装命令或宿主上残留的其他同名可执行文件当作 `bianbu-agent`。
 3. 目录隔离前，记录各 agent 的真实目录变量值及解析后的绝对路径，只记录有关变量，不输出整份环境或凭据。CLI 找不到、不能启动、子命令不兼容或所选平台不支持时，整个执行批次在首次安装前阻塞；提供缺失项（Bibit 情形明确到 `bianbu-agent-runtime` 系统包），不自动安装或升级软件，也不悄悄减少目标范围。
 4. 在项目或用户指定的可写物理目录中，以 `mktemp -d` 创建本次专用根目录，限制权限为 `0700`。记录路径，日志与报告放在将来删除的测试工作目录之外。不重用旧测试状态，不把真实配置目录链接进临时目录。
 5. 用专用临时 `APM_HOME` 和 `XDG_CACHE_HOME` 查询精确云端版本。以下命令分别执行并保存 stdout、stderr、退出码；四项都应成功且返回对应类型、名称、版本：
@@ -192,7 +192,7 @@ SUB-01 会向 APC 产生真实提交，执行前必须取得用户同意；无�
 
 安装后确认 `nws` 存在，并核对 CLI 可展示的传输类型、URL 或启动命令与本次云端 MCP 定义一致；APM 的清单还必须记录 `v1.0.0`。若 CLI 不展示完整定义，报告可验证字段及限制，不猜测；不得打印 token 或敏感环境变量值。
 
-Bibit 的公开 ID 为 `mcp.<name>`；`mcp get` 不存在时输出字面量 `null`（exit 0），存在时输出含 `id` 的对象，两者都不报错，因此不能以非零退出码判断不存在。`mcp get` 不展示 transport/url，核对 HTTP 定义时可只读检查 `<agent根>/mcps/mcp.<name>/mcp.json`。
+Bibit 的公开 ID 为 `mcp.<name>`；`mcp get` 不存在时输出字面量 `null`（exit 0），存在时输出含 `id` 的对象，两者都不报错，因此不能以非零退出码判断不存在。`mcp get` 不展示 transport/url，核对 HTTP 定义时可只读检查 `<agent根>/mcps/mcp.<name>/mcp.json`。该目录包由 `bianbu-agent` 写入它自己的 `data_dir`（配置解析顺序 `--config` > `$PWD/runtime.yaml` > `BIANBU_AGENT_CONFIG` > `~/.bianbu-agent/config.yaml`），与 `BIANBU_AGENT_HOME` 无关：按第 4.2 节使用真实 agent 环境时两者指向同一目录；若要在隔离环境内验证，必须同时在 APM 进程中导出 `BIANBU_AGENT_CONFIG` 指向本次用例的配置，否则 CLI 会写入真实 `data_dir`。
 
 卸载后确认 `nws` 不存在，并比较基线中的其他 MCP 配置未发生变化。`list` 可能连接服务，耗时或连接失败应记录；本项不以天气工具调用成功为通过条件，但查询结果不明确时不能宣称完成验证。
 

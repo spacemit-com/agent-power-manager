@@ -2,6 +2,49 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-16（后续：Bibit MCP 安装改用 mcp add 对齐 Hermes）
+
+分类：缺陷修复
+
+用户需求：开发板 `bianbu-agent-runtime` 升级后 `mcp add` 已支持 `--url`，要求把 Bibit 的 MCP 安装对齐
+Hermes，改用 `add`。
+
+解决方案或完成结果：`internal/adapter/bibit_mcp.go` 的 `Add` 改为统一经 `mcp add` 登记：HTTP 使用
+`mcp add <name> --url <url> --auth none`，stdio 使用 `mcp add <name> --command <command> [--args ...]`，
+与 Hermes 适配器的命令形状一致。删除只服务于旧入口的临时目录包机制（`addHTTP`、`mkdtemp`/`mkdirAll`/
+`writeFile`/`removeAll` 注入字段与 `bibitHTTPTransport`、`bibitHTTPMCPDocument`）；成功判据从「退出码为 0」
+收紧为「退出码为 0 且输出中的 `id` 等于 `mcp.<name>`」，抽出 `bibitMCPDocumentID` 供 `Inspect` 与 `Add`
+共用，退出码为 0 但输出无法确认时按 `unknown` 保留 journal。`Inspect`（`mcp get`）与 `Remove` 语义不变。
+契约版本对齐板端 `bianbu-agent 0.1.69`：该版本已移除 `mcp install` 子命令，且 stdio 的旧写法
+`mcp add <name> -- <command>` 会以退出码 2 报 `one of the arguments --command --url is required`，因此
+HTTP 与 stdio 两条路径都必须改。测试同步为真实契约：`bibit_mcp_test.go` 断言新 argv 并新增「只在输出
+确认目标 `id` 时记 applied」的表驱动用例；`internal/lifecycle/mcp_integration_test.go` 的假 CLI 要求
+`mcp add` 携带 `--command`/`--url` 否则按真实 CLI 报错退出，并删去已不存在的 `mcp install` 分支，使回退到
+旧写法直接失败。文档同步：`bianbu-agent-cli-guide.md` 的 MCP 段与
+[features/018-bibit-agent/spec.md](../ivory-tower/features/018-bibit-agent/spec.md) 的 MCP 契约块改为 0.1.69，
+[testing/apm-cli-functional-test.md](testing/apm-cli-functional-test.md) 第 3 节预检新增「Bibit 的 `mcp add`
+必须支持 `--url`」，第 7 节补入 `data_dir` 解析顺序与 `BIANBU_AGENT_CONFIG` 隔离说明。
+
+边界：只改 Bibit MCP 适配器的命令拼装与成功判定，不改 CLI 命令面、清单格式、journal schema、`Inspect`/
+`Remove` 语义与云端资源。最低 CLI 版本提高到 `0.1.69`，不做版本探测或双契约回退：0.1.65 上 `--url` 与
+`--command` 都不存在，HTTP 本来即失败，回退只会引入「失败后按另一契约重试写入」的双写风险。`Remove` 仍以
+退出码 0 为成功，因为 CLI 对不存在的名字返回 `{"deleted": false}` 且 exit 0，收紧会把幂等卸载变成
+`unknown` 并留下 journal。
+
+相关提交：`efa4168`（代码与测试；承载本条目的文档提交不列入自身）。
+
+验证结果或限制：`gofmt -l .` 无输出，`go build ./...`、`go vet ./...`、`go test ./...` 全绿。板端全隔离验证
+（`bianbu@10.0.91.51`，`bianbu-agent 0.1.69`，交叉编译 riscv64 APM sha256 `ee91bbed68c8d04f…`，临时
+`APM_HOME`/缓存 + 临时 `BIANBU_AGENT_HOME` + `BIANBU_AGENT_CONFIG` 指向临时 `data_dir`）：安装得到
+`bibit/mcp/nws@v1.0.0 installed` 且退出码 0，`<data_dir>/mcps/mcp.nws/mcp.json` 为 `streamable-http`
+与 `https://nws.caseyjhand.com/mcp`，`mcp get nws` 返回 `id: mcp.nws`，`list --installed` 记录 `v1.0.0`；
+同版本重装 `unchanged`，卸载 `completed`，卸载后 `mcp get` 回到 `null`、清单为空、`mcps` 目录为空、
+`active.json` 不存在，重复卸载 `unexecuted` 且退出码 0。按指引第 4.2 节的真实 agent 环境复测（真实
+`~/.bianbu-agent`）同样安装成功、真实 `mcps/mcp.nws/mcp.json` 内容一致、卸载后回到 `null`；真实环境只新增
+CLI 自建的空目录 `~/.bianbu-agent/mcps`（安装前不存在），无其他残留。未覆盖：无云端 stdio 固定资源，
+stdio 形态只有单测与板端 CLI 手测（`mcp add <name> --command npx --args -y pkg` 可登记）覆盖；`10.0.91.158`
+仍为 `bianbu-agent 0.1.65`，该板的 Bibit MCP 需先升级运行时才会通过。
+
 ## 2026-09-15（后续：测试指引合入 CLI 自测用例并改名为 CLI 功能测试）
 
 分类：功能变更
