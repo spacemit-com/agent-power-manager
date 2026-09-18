@@ -531,18 +531,28 @@ func validateFixtureSkillCard(path string) error {
 			return fmt.Errorf("section %q is missing or empty", required)
 		}
 	}
-	for _, field := range []string{"Owner", "Support"} {
-		prefix := "- " + field + ":"
-		value := ""
-		for _, line := range sections["Maintainer"] {
-			if strings.HasPrefix(line, prefix) {
-				value = strings.TrimSpace(strings.TrimPrefix(line, prefix))
-				break
-			}
+	// 校验口径必须与 internal/submission.validateMaintainer 一致：Maintainer 章内
+	// 以裸 `Owner:` / `Contact:`(或 `Support:`) 行给出非空值。写成 `- Owner:` 列表项时
+	// 冒号左侧是 "- Owner"，不属于 owner 字段，生产校验会判为「no non-empty Owner」。
+	hasOwner := false
+	hasContact := false
+	for _, line := range sections["Maintainer"] {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
 		}
-		if value == "" {
-			return fmt.Errorf("Maintainer %s is missing or empty", field)
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "owner":
+			hasOwner = strings.TrimSpace(value) != ""
+		case "contact", "support":
+			hasContact = strings.TrimSpace(value) != ""
 		}
+	}
+	if !hasOwner {
+		return fmt.Errorf("Maintainer Owner is missing or empty")
+	}
+	if !hasContact {
+		return fmt.Errorf("Maintainer Contact or support path is missing or empty")
 	}
 	return nil
 }

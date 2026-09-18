@@ -31,7 +31,6 @@ description: 一句话说明这个 Skill 做什么。
 ---
 schema_version: 1
 ---
-
 # Skill Card: My Skill
 
 ## Capability
@@ -58,10 +57,11 @@ schema_version: 1
 
 ## Maintainer
 
-- Owner: your-team
-- Support: your-team@example.com
+Owner: your-team
+Support: your-team@example.com
 ```
 
 - `schema_version` 必须为整数 `1`。
-- 标题为 `# Skill Card: <显示名>`，六个章节均须非空。
-- Maintainer 需有非空 `Owner` 与 `Support`（或 `Contact`），不要使用 `REPLACE_OWNER` / `REPLACE_CONTACT` 占位符。
+- 标题为 `# Skill Card: <显示名>`，必须紧跟在 frontmatter 结束的 `---` 之后成为正文首行；中间留空行会被判为「must start with `# Skill Card: <display name>`」。
+- 六个章节均须非空。
+- Maintainer 需有非空 `Owner` 与 `Support`（或 `Contact`），且写成裸 `Owner:` / `Support:` 行；写成 `- Owner:` 列表项会被判为「no non-empty Owner」。不要使用 `REPLACE_OWNER` / `REPLACE_CONTACT` 占位符。

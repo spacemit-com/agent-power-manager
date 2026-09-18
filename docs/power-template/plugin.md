@@ -45,7 +45,6 @@ description: 内嵌 Skill 的一句话说明。
 ---
 schema_version: 1
 ---
-
 # Skill Card: My Plugin
 
 ## Capability
@@ -71,9 +70,9 @@ schema_version: 1
 
 ## Maintainer
 
-- Owner: your-team
-- Support: your-team@example.com
+Owner: your-team
+Support: your-team@example.com
 ```
 
-- 内嵌 Skill 遵循与独立 Skill 相同的 `SKILL.md`/`skill-card.md` 规则（含 `schema_version: 1`）。
+- 内嵌 Skill 遵循与独立 Skill 相同的 `SKILL.md`/`skill-card.md` 规则（含 `schema_version: 1`）：`# Skill Card:` 必须紧跟在 frontmatter 结束的 `---` 之后成为正文首行，Maintainer 同样写成裸 `Owner:` / `Support:` 行。
 - 目录内只允许 `apc-plugin.json`、`skills/` 与已声明 Skill 子树，不要放入额外文件或 Agent 原生 manifest；`plugin.yaml` 由 APM 在安装时从 `apc-plugin.json` 派生（含 `schema_version: 1`，只含 `schema_version`/`name`/`version`/`description` 四个字段，不含 `author`），且按目标 Agent 落入独立落盘叶子，不得随包提交（见 [ADR-036](../ivory-tower/adr/ADR-036-per-agent-plugin-landing-filtering.md)）。

@@ -26,5 +26,5 @@ Reports that the second shared APM-managed demo Plugin is available.
 
 ## Maintainer
 
-- Owner: APM maintainers
-- Support: Report issues through the APM project issue tracker.
+Owner: APM maintainers
+Support: Report issues through the APM project issue tracker.

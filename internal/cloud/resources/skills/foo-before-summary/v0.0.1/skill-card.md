@@ -28,5 +28,5 @@ Prefixes every user-facing summary with `foo!`.
 
 ## Maintainer
 
-- Owner: `REPLACE_OWNER`
-- Contact or support path: `REPLACE_CONTACT`
+Owner: lff
+Contact: xxx@example.com
