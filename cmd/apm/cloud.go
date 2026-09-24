@@ -17,11 +17,13 @@ import (
 
 const (
 	defaultCloudProvider = cloud.ProviderRemote
-	defaultAPCBaseURL    = "https://developer.bianbu.xyz"
-	cloudProviderEnv     = "APM_CLOUD_PROVIDER"
-	apcBaseURLEnv        = "APC_BASE_URL"
-	apcAPIKeyEnv         = "APC_API_KEY"
-	localRootEnv         = "APM_CLOUD_LOCAL_ROOT"
+	// defaultAPCBaseURL 是 APM 默认使用的 APC 根地址（生产环境，规范 www 主机）。
+	// 只接受 host-only 根地址，网关前缀 /api-server/apc 由 remote.Client.endpoint 统一拼接。
+	defaultAPCBaseURL = "https://www.spacemit.com"
+	cloudProviderEnv  = "APM_CLOUD_PROVIDER"
+	apcBaseURLEnv     = "APC_BASE_URL"
+	apcAPIKeyEnv      = "APC_API_KEY"
+	localRootEnv      = "APM_CLOUD_LOCAL_ROOT"
 )
 
 // newCloudClient 为单次命令创建独立 Provider Registry，并且只打开显式选中的提供方。

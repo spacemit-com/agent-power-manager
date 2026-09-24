@@ -70,15 +70,15 @@ func TestNewSubmitLifecycleWithAPIKey(t *testing.T) {
 }
 
 func TestNewCloudClientConfigurationContract(t *testing.T) {
-	if defaultCloudProvider != cloud.ProviderRemote || defaultAPCBaseURL != "https://developer.bianbu.xyz" {
-		t.Fatalf("defaults = (%q, %q), want Remote and test-environment APC", defaultCloudProvider, defaultAPCBaseURL)
+	if defaultCloudProvider != cloud.ProviderRemote || defaultAPCBaseURL != "https://www.spacemit.com" {
+		t.Fatalf("defaults = (%q, %q), want Remote and production APC", defaultCloudProvider, defaultAPCBaseURL)
 	}
 	if cloudProviderEnv != "APM_CLOUD_PROVIDER" || apcBaseURLEnv != "APC_BASE_URL" || localRootEnv != "APM_CLOUD_LOCAL_ROOT" {
 		t.Fatalf("environment names = (%q, %q, %q), want documented Cloud variables", cloudProviderEnv, apcBaseURLEnv, localRootEnv)
 	}
 }
 
-func TestRemoteDefaultBaseURLRequestsTestEnvironment(t *testing.T) {
+func TestRemoteDefaultBaseURLRequestsProductionEnvironment(t *testing.T) {
 	clearCloudEnvironment(t)
 
 	var recordedURL string
@@ -99,8 +99,8 @@ func TestRemoteDefaultBaseURLRequestsTestEnvironment(t *testing.T) {
 	if _, err := client.CatalogVersion(context.Background()); err != nil {
 		t.Fatalf("CatalogVersion() error = %v", err)
 	}
-	if !strings.HasPrefix(recordedURL, "https://developer.bianbu.xyz/") {
-		t.Fatalf("CatalogVersion() URL = %q, want prefix https://developer.bianbu.xyz/", recordedURL)
+	if !strings.HasPrefix(recordedURL, "https://www.spacemit.com/") {
+		t.Fatalf("CatalogVersion() URL = %q, want prefix https://www.spacemit.com/", recordedURL)
 	}
 }
 
