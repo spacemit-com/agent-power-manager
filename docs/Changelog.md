@@ -2,6 +2,42 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-24（默认 APC 根地址切换到生产环境）
+
+分类：行为变更
+
+用户需求：把 APM 默认连接的 APC 从测试环境切到生产环境，并规范使用带 `www` 的主机名；随后按
+`docs/testing/apm-cli-functional-test.md` 完整回归。
+
+解决方案或完成结果：`cmd/apm/cloud.go` 的 `defaultAPCBaseURL` 由 `https://developer.bianbu.xyz` 改为
+`https://www.spacemit.com`，并加中文注释说明这是生产环境根地址、只接受 host-only、网关前缀由
+`remote.Client.endpoint` 拼接。`APC_BASE_URL` 的语义与校验完全不变（绝对、无凭据/query/fragment、
+根路径、非 loopback 只允许 HTTPS），测试环境改为显式配置
+`APC_BASE_URL=https://developer.bianbu.xyz`。契约测试同步
+（`cmd/apm/cloud_test.go` 的默认值断言与 URL 前缀断言、`TestRemoteDefaultBaseURLRequestsProductionEnvironment`
+改名）。文档同步：`BUILD.md` 的 Cloud Provider 段与变量表、`ivory-tower/project-overview.md` 的运行方式条目、
+`APC-API.md` 升到 v1.3（生产入口主机名由 `developer.spacemit.com` 更正为 `www.spacemit.com`，补充
+"客户端基址只填主机"约束，场景示例改用生产地址）。决策记录见
+[ADR-037](../ivory-tower/adr/ADR-037-default-apc-root-to-production.md)，该 ADR 局部取代 ADR-026 中默认地址一条，
+其余适配决策不变。
+
+边界：只改默认根地址与其文档/测试断言，不改 wire 路径、认证方式、目录解码、缓存与事务语义，不新增 CLI 参数
+或环境变量，不引入按环境切换的内置分支。选择 `www` 而非裸域是取站点规范形式（两者同 IP、证书 SAN 同时覆盖）。
+
+相关提交：本条目随默认值切换一并提交。
+
+验证结果或限制：`go build ./...`、`go vet ./...`、`go test ./...` 全绿。2026-09-24 用源码 HEAD 构建的二进制对
+生产环境（`APC_BASE_URL=https://www.spacemit.com`）执行完整功能测试：13 PASS / 1 FAIL / 2 BLOCKED / 1 NOT_RUN。
+命令级（CLI-01 参数校验、SRH-01 检索、LST-01 默认与 `--all`、LST-02 已安装清单、SHW-01 详情、VAL-01 四类型校验）
+与三个 agent（codex/claude-code/hermes-agent）的 skill+plugin 安装→重装 `unchanged`→落地校验→卸载 `completed`→
+重复卸载 `unexecuted`、codex/claude-code 的 mcp、`--agent all` 批量、FIX-01 中断事务恢复全部通过。唯一 FAIL 是
+hermes-agent 的 MCP 首轮超时（`hermes mcp add` 的交互确认未在 30s 内结束，APM 判 indeterminate 并自动回滚；
+单独重试 3 次全部成功，裸命令耗时 4.4–9.1s），定性为不稳定而非必现。bibit 三项因开发机无 `bianbu-agent` 记
+BLOCKED，SUB-01 因未取得生产提交授权记 NOT_RUN。真实 agent 配置与 `~/.apm/manifests` 时间戳未变化，无残留。
+限制：生产与测试环境的目录内容当前一致（同一 `catalog_sha256`，CDN 指向同一文件），默认切换本身不能证明两边
+后端独立，发布后需在生产侧单独发布资源再检索验证；`apm submission list` 无过滤仍因服务端返回终态条目而整体失败
+（`contains terminal status "validation_failed"`，测试环境同样存在）。
+
 ## 2026-09-16（后续：Bibit MCP 安装改用 mcp add 对齐 Hermes）
 
 分类：缺陷修复

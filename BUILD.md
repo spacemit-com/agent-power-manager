@@ -46,10 +46,13 @@ sudo apt-get install ../agent-power-manager_0.0.1_riscv64.deb
 
 ## Cloud Provider 配置
 
-APM 把 Local 与 Remote provider 静态链接到同一个二进制，并由 `cmd/apm` 的 `newCloudClient` 在每次 lifecycle 构造时创建独立 `ProviderRegistry`、注册 factory 后只打开被选中的 provider（[ADR-016](ivory-tower/adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）。默认 provider 是 `remote`，默认 APC 测试环境根地址为 `https://developer.bianbu.xyz`（[ADR-026](ivory-tower/adr/ADR-026-adapt-apc-client-to-test-environment-behavior.md)）：
+APM 把 Local 与 Remote provider 静态链接到同一个二进制，并由 `cmd/apm` 的 `newCloudClient` 在每次 lifecycle 构造时创建独立 `ProviderRegistry`、注册 factory 后只打开被选中的 provider（[ADR-016](ivory-tower/adr/ADR-016-select-cloud-clients-with-explicit-providers.md)）。默认 provider 是 `remote`，默认 APC 根地址为生产环境 `https://www.spacemit.com`（[ADR-037](ivory-tower/adr/ADR-037-default-apc-root-to-production.md)）：
 
 ```bash
-# 默认 Remote（默认 APC 测试环境根地址，可用 APC_BASE_URL 覆盖）
+# 默认 Remote（默认生产环境根地址，可用 APC_BASE_URL 覆盖）
+./apm list
+
+# 显式指向测试环境（host-only 根地址）
 APC_BASE_URL=https://developer.bianbu.xyz ./apm list
 
 # 显式 Local canonical fixture
@@ -58,10 +61,12 @@ APM_CLOUD_LOCAL_ROOT="$(pwd)/internal/cloud/resources" \
 ./apm list
 ```
 
+`APC_BASE_URL` 只接受 host-only 根地址；网关前缀 `/api-server/apc` 由客户端 `remote.Client.endpoint` 统一拼接，带路径的值会被 base URL 校验拒绝。
+
 | 环境变量 | 默认值与约束 |
 | --- | --- |
 | `APM_CLOUD_PROVIDER` | 默认 `remote`；只接受 `remote` 或 `local`。 |
-| `APC_BASE_URL` | 默认 `https://developer.bianbu.xyz`；必须是无凭据、query、fragment 和非根路径的绝对 URL。非 loopback 地址只允许 HTTPS，HTTP 仅允许 loopback。 |
+| `APC_BASE_URL` | 默认 `https://www.spacemit.com`（生产环境）；必须是无凭据、query、fragment 和非根路径的绝对 URL。非 loopback 地址只允许 HTTPS，HTTP 仅允许 loopback。 |
 | `APM_CLOUD_LOCAL_ROOT` | 选择 `local` 时必填，必须是 clean absolute path，且从文件系统根到 fixture 根不能经过 symlink/reparse point。 |
 
 provider 配置、Remote 网络/协议或内容错误都不会自动回退另一 provider。composition root 为 Remote 构造具有两分钟整体 timeout 和同源 redirect 策略的 `http.Client`；调用方更短的 context deadline 优先。Search 与默认 Cloud List 只在首次目录快照请求时惰性构造所选 provider；installed List 不触发该构造。Install 为内容获取构造 provider，但四类 Power 显式精确 manifest 全命中时不调用 catalog（[Feature 025](ivory-tower/features/025-unified-lifecycle-state-semantics/spec.md)、[ADR-022](ivory-tower/adr/ADR-022-unify-lifecycle-entry-state-semantics.md)）；Uninstall 与 Fix 都不创建 Cloud Client。

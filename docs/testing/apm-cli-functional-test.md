@@ -36,7 +36,7 @@ Bibit 的真实 CLI `bianbu-agent` 由板端 Bianbu 系统包 `bianbu-agent-runt
 | `plugin` | `plugin/superpowers@v6.3.0` | `superpowers=v6.3.0 --type plugin --agent <ID>` | `superpowers --type plugin --agent <ID>` |
 | `skill` | `skill/foo-before-summary@v0.0.1` | `foo-before-summary=v0.0.1 --type skill --agent <ID>` | `foo-before-summary --type skill --agent <ID>` |
 
-强制使用 `APM_CLOUD_PROVIDER=remote`。保留用户指定的 `APC_BASE_URL`；未指定时采用 APM 默认地址，并记录实际地址。不得回退 Local provider、假 CLI、不同版本或替代 Power。APM 安装使用 `name=version`，卸载只传名称，不能直接把表中的云端标识当作命令参数。
+强制使用 `APM_CLOUD_PROVIDER=remote`。保留用户指定的 `APC_BASE_URL`；未指定时采用 APM 默认地址，并记录实际地址。APM 默认地址自 2026-09-24 起是生产环境 `https://www.spacemit.com`（[ADR-037](../../ivory-tower/adr/ADR-037-default-apc-root-to-production.md)），因此未指定时必须显式记录"本次打到生产"；要在测试环境执行，显式设置 `APC_BASE_URL=https://developer.bianbu.xyz`。`APC_BASE_URL` 只接受 host-only 根地址，带 `/api-server/apc` 路径的值会被 base URL 校验拒绝。不得回退 Local provider、假 CLI、不同版本或替代 Power。APM 安装使用 `name=version`，卸载只传名称，不能直接把表中的云端标识当作命令参数。
 
 ## 3. 全局预检：在首次安装前完成
 

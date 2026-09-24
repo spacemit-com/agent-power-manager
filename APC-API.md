@@ -7,23 +7,32 @@ APC 是 SpacemiT 的资源分发平台，支持开发者提交和分发 skill、
 **Base URL**：
 
 - 测试环境：`https://developer.bianbu.xyz/api-server/apc/api/v1`
-- 生产环境：`https://developer.spacemit.com/api-server/apc/api/v1`
+- 生产环境：`https://www.spacemit.com/api-server/apc/api/v1`
 
 > **网关前缀**：以上地址中的 `/api-server/apc` 是网关前缀，请求**必须完整携带**。不带前缀直接访问
 > `/api/v1/...` 会被网关以 `401 {"code":50008,"message":"Full authentication is required to
 > access this resource"}` 拦截；前缀拼错（如 `/api-server/aapc/`）返回 `50021 Access Token is
 > missing or invalid`（2026-09-04 实测）。下文"接口"中的路径均为相对上述 base URL 的相对路径。
+>
+> **客户端基址只填主机**：APM 的 `APC_BASE_URL` 只接受 host-only 根地址（如
+> `https://www.spacemit.com`），网关前缀由客户端固定拼接；把上面整串 Base URL 直接配给
+> `APC_BASE_URL` 会被 base URL 校验以"路径必须为根"拒绝（2026-09-24 实测）。
 
-### 验证状态（2026-09-03/04 只读探测）
+### 验证状态（2026-09-24 修订）
 
-本文件 v1.2 依据对测试环境 `developer.bianbu.xyz` 的只读探测结果修订（探测记录见
-`ivory-tower/features/028-apc-api-adaptation/live-probe.md`；客户端适配决策见 ADR-026，口径为
-"服务端实际行为优先"）：
+本文件 v1.3 依据对测试环境与生产环境的实测修订（测试环境探测记录见
+`ivory-tower/features/028-apc-api-adaptation/live-probe.md`；客户端适配决策见 ADR-026 与
+ADR-037，口径为"服务端实际行为优先"）：
 
-- §1 资源查询接口（目录版本、目录、内容下载）：已对测试环境实测，文档按实测修订。
-- §2 资源提交接口：仅认证层实测（服务端当前要求 `Authorization: Bearer`，`X-API-Key` 未生效，
-  见 §2 认证说明）；成功响应体与业务错误码分支未实测（无真实凭据），保留服务端实现文档口径并逐处标注。
-- 生产环境 `developer.spacemit.com` 未探测，行为可能不同，以其自身实测为准。
+- §1 资源查询接口（目录版本、目录、内容下载）：测试环境与生产环境均已实测，文档按实测修订。
+- §2 资源提交接口：仅认证层实测（服务端要求 `Authorization: Bearer`，`X-API-Key` 未生效，
+  见 §2 认证说明）；成功响应体与业务错误码分支未实测（无生产提交凭据），保留服务端实现文档
+  口径并逐处标注。
+- 生产环境入口是 `spacemit.com` / `www.spacemit.com`（2026-09-24 实测 200）；文档早期版本记载的
+  `developer.spacemit.com` 不是本环境 APC 入口，其任意路径均 `301` 跳转到
+  `https://www.spacemit.com/community/`。
+- 生产环境证书为公开可信证书（`*.spacemit.com`，Xcc Trust DV SSL CA），客户端无需额外 CA；
+  测试环境使用自签 CA，需预先装入系统信任库。
 
 ---
 
@@ -153,7 +162,7 @@ APC 是 SpacemiT 的资源分发平台，支持开发者提交和分发 skill、
 ```
 GET /resources/skill/code-review-helper/versions/v1.0.0/content
 ```
-（完整 URL 为 base URL + 上述相对路径，如 `https://developer.bianbu.xyz/api-server/apc/api/v1/resources/skill/code-review-helper/versions/v1.0.0/content`）
+（完整 URL 为 base URL + 上述相对路径，如 `https://www.spacemit.com/api-server/apc/api/v1/resources/skill/code-review-helper/versions/v1.0.0/content`）
 
 **响应**：
 - 成功：`302 Found`，`Location` 头指向 CDN 文件下载地址（实测重定向到跨源 HTTPS CDN `cdn-resource.spacemit.com`）
@@ -476,11 +485,14 @@ Authorization: Bearer your-api-key-here
 
 ## 三、常见场景示例
 
+> 以下示例使用生产环境地址；改用测试环境时把主机换成 `developer.bianbu.xyz` 即可。示例中的
+> ID 与响应体取自测试环境实测记录，仅作格式示例。
+
 ### 场景 1：提交新资源
 
 ```bash
 # 提交 metadata + 文件
-curl -X POST https://developer.bianbu.xyz/api-server/apc/api/v1/submissions \
+curl -X POST https://www.spacemit.com/api-server/apc/api/v1/submissions \
   -H "Authorization: Bearer your-api-key" \
   -F 'metadata={"type":"skill","name":"code-review-helper","version":"v1.0.0","description":"代码审查助手","message":"首次发布","schema_version":1,"content_md5":"0274020ce87b4b9c067786d8fdf342ef"}' \
   -F "content=@code-review-helper-v1.0.0.tar.gz"
@@ -496,7 +508,7 @@ curl -X POST https://developer.bianbu.xyz/api-server/apc/api/v1/submissions \
 ### 场景 2：轮询提交状态
 
 ```bash
-curl https://developer.bianbu.xyz/api-server/apc/api/v1/submissions/sub_01M1DS53ZE4H059CWQ9J \
+curl https://www.spacemit.com/api-server/apc/api/v1/submissions/sub_01M1DS53ZE4H059CWQ9J \
   -H "Authorization: Bearer your-api-key"
 ```
 
@@ -504,13 +516,13 @@ curl https://developer.bianbu.xyz/api-server/apc/api/v1/submissions/sub_01M1DS53
 
 ```bash
 # 1. 获取版本摘要
-curl https://developer.bianbu.xyz/api-server/apc/api/v1/resources/version
+curl https://www.spacemit.com/api-server/apc/api/v1/resources/version
 
 # 2. 若 catalog_sha256 与本地不同，下载最新目录（跟随重定向）
-curl -L https://developer.bianbu.xyz/api-server/apc/api/v1/resources -o catalog.json
+curl -L https://www.spacemit.com/api-server/apc/api/v1/resources -o catalog.json
 
 # 3. 按目录下载具体资源（跟随重定向）
-curl -L "https://developer.bianbu.xyz/api-server/apc/api/v1/resources/skill/code-review-helper/versions/v1.0.0/content" \
+curl -L "https://www.spacemit.com/api-server/apc/api/v1/resources/skill/code-review-helper/versions/v1.0.0/content" \
   -o code-review-helper-v1.0.0.tar.gz
 ```
 
@@ -550,9 +562,14 @@ curl -L "https://developer.bianbu.xyz/api-server/apc/api/v1/resources/skill/code
 
 ---
 
-**文档版本**：v1.2  
-**最后更新**：2026-09-04  
-**来源**：`ResourceController.java`、`SubmissionController.java`、`ivory-tower/features/028-apc-api-adaptation/live-probe.md`（2026-09-03/04 测试环境只读探测）、ADR-026
+**文档版本**：v1.3  
+**最后更新**：2026-09-24  
+**来源**：`ResourceController.java`、`SubmissionController.java`、`ivory-tower/features/028-apc-api-adaptation/live-probe.md`（2026-09-03/04 测试环境只读探测）、2026-09-24 生产环境与测试环境实测、ADR-026、ADR-037
+
+**v1.3 修订说明**：生产环境入口由早期记载的 `developer.spacemit.com` 更正为
+`www.spacemit.com`（该主机 2026-09-24 实测 200，`developer.spacemit.com` 全路径 301 跳社区页），
+补充"客户端基址只填主机、网关前缀由客户端拼接"的约束，并把常见场景示例改为生产地址。
+§1 查询接口在两个环境均已实测；§2 成功响应与业务错误码分支仍未实测，保持"按实现文档"标注。
 
 **v1.2 修订说明**：依据 2026-09-03/04 对测试环境 `developer.bianbu.xyz` 的只读探测，将认证方式
 （`Authorization: Bearer`）、目录/内容媒体类型（MCP=`application/json`、Skill 下载实际响应
