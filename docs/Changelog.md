@@ -2,6 +2,44 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-28（Power 资源格式升级到 V2，新增本地化展示字段）
+
+分类：契约变更（破坏性：v1 提交被拒绝）
+
+用户需求：四类 Power 的资源格式加入仅用于 APC 前端展示的 `name_zh`、`name_en` 与 `description_zh`，`name` 继续
+作为唯一调用名；`agent.yaml` 的 `zh_name` 更正为 `name_zh`；提交拒绝 v1、全面升级到 v2；展示名带长度约束——
+`name_zh` 为 2–16 个字符、`name_en` ≤ 32 个字符；不改 APC 目录契约，也不改 `list`/`show`/`list --all` 的现有输出；
+`apm list --all` 仍只展示全版本，`list --json`/`show` 行为不变；`search` 不匹配展示名。
+
+解决方案或完成结果：新增 `internal/domain/display.go`，定义 `PowerSchemaVersionV1/V2` 与展示字段校验
+（`name_zh` 2–16 个 Unicode 字符、`name_en` ≤ 32 个可打印 ASCII 字符且至少含一个字母、`description_zh`
+≤ 1024 字节，均 trim 后非空并拒绝控制字符），并提供提交侧 `ValidateSubmitSchemaVersion` 与安装侧
+`ValidateInstallSchemaVersion` 两个门禁。四类权威文件升级到 `schema_version: 2`：`SKILL.md` 新增整数
+`schema_version` 与三个展示字段，`skill-card.md` 的 `schema_version` 由 1 升到 2，
+`apc-plugin.json`/`MCP.json`/`agent.yaml` 同步新增字段；
+`MCPResource`/`AgentConfig`/`APCPluginManifest` 各自保留宽松 `Validate`（安装侧接受 v1 与 v2）并新增
+严格提交入口 `ValidateSubmit`/`ValidateSubmitAPCPluginManifest`。`agent.zh_name` 更名后旧键被显式拒绝并提示新键名。
+决策记录见 [ADR-039](../ivory-tower/adr/ADR-039-add-name-en-and-display-name-length-limits.md)（新增 `name_en`
+与展示名长度约束，局部取代 ADR-038 的「不引入 `name_en`」与「`name_zh` ≤ 128 字节」两条决定）。
+派生 Agent 原生清单与 marketplace 继续只含 `name`/`version`/`description`/`skills`，不携带展示字段。
+内置资源 fixture（15 份 Skill、2 份 Plugin、3 份 MCP、1 份 Agent）全部升到 v2；`docs/power-template/*`
+模板与规则文档同步，`../using-apm` 的模板与手册另在该仓库更新（含上传前必须取得用户同意的流程）。
+决策记录见 [ADR-038](../ivory-tower/adr/ADR-038-power-format-v2-localized-display-fields.md) 与
+[Feature 031](../ivory-tower/features/031-power-format-v2/spec.md)。
+
+边界：只改资源文件格式、提交侧校验与文档，不改 wire 协议、APC 目录 item 字段、`APC_BASE_URL`/认证语义、
+本地 manifest 与 journal 结构、CLI 渲染与 `search` 匹配逻辑，也不新增 CLI 参数或环境变量。
+
+相关提交：本条目随 V2 格式变更一并提交。
+
+验证结果或限制：`go build ./...`、`go vet ./...`、`go test ./...` 全绿；新增
+`TestSubmitRejectsV1Resources`、`TestSubmitRequiresLocalizedDisplayFields`、
+`TestSubmitAcceptsV2ResourcesWithDisplayFields`、`TestInstallPathAcceptsV1Resources`、
+`TestDerivedAgentManifestsCarryNoLocalizedFields`、`TestDerivedAgentManifestsStillDeriveForV1Artifact`
+锁定提交门禁、安装兼容与派生边界；领域层另有 `TestDisplayNameZHLengthBounds`、`TestDisplayNameENLengthAndCharset`、
+`TestDisplayMetadataRequiredFields` 锁定 2–16 字与 ≤ 32 字符边界。远端 v2 提交验收依赖 APC 侧从 content 解析
+新字段，未就绪前记为 BLOCKED。
+
 ## 2026-09-24（默认 APC 根地址切换到生产环境）
 
 分类：行为变更
