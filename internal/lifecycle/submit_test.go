@@ -89,7 +89,7 @@ func TestSubmitMCPCarriesDefinition(t *testing.T) {
 func writeVersionedLifecycleMCP(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "mcp.json")
-	contents := `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo mcp","definition":{"transport":"http","url":"https://mcp.example.com/mcp"}}`
+	contents := `{"schema_version":2,"name":"demo","name_zh":"演示","name_en":"Demo","version":"v1.0.0","description":"demo mcp","description_zh":"演示 MCP","definition":{"transport":"http","url":"https://mcp.example.com/mcp"}}`
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestSubmitRejectsMissingMessageBeforeUpload(t *testing.T) {
 func writeVersionedLifecycleSkill(t *testing.T, dir string) {
 	t.Helper()
 	writeLifecycleSkill(t, dir)
-	contents := "---\nname: demo\nversion: \"v1.0.0\"\ndescription: does things\n---\n# Demo Skill\n\nDetails here.\n"
+	contents := "---\nschema_version: 2\nname: demo\nname_zh: 演示\nname_en: Demo\ndescription: does things\ndescription_zh: 演示描述\nversion: \"v1.0.0\"\n---\n# Demo Skill\n\nDetails here.\n"
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
 	}

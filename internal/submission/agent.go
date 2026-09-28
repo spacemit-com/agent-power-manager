@@ -39,6 +39,11 @@ func (agentSourceLoader) Load(ctx context.Context, path string) (source, error) 
 	if err != nil {
 		return source{}, fmt.Errorf("validate agent artifact: %w", errors.Join(ErrInvalid, err))
 	}
+	// 提交侧只接受 schema_version 2 且本地化展示字段必填；安装、缓存与事务恢复路径
+	// 继续使用 agentartifact.Validate 的 v1+v2 宽松语义（ADR-038）。
+	if err := validated.Config.ValidateSubmit(); err != nil {
+		return source{}, fmt.Errorf("validate agent artifact: %w", errors.Join(ErrInvalid, err))
+	}
 	return source{
 		validation: Validation{
 			Type: domain.PowerTypeAgent, Name: validated.Config.Agent.Name, Version: validated.Config.Agent.Version,

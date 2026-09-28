@@ -1,11 +1,18 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "filesystem",
+  "name_zh": "文件系统",
+  "name_en": "Filesystem MCP",
   "version": "v0.1.0",
   "description": "Filesystem MCP server with a workspace root",
+  "description_zh": "带工作区根目录的文件系统 MCP 服务。",
   "definition": {
     "transport": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "/workspace"
+    ]
   }
 }

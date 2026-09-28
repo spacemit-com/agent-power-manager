@@ -381,10 +381,13 @@ func writeAcceptancePluginPackage(t *testing.T, root, logical, release string) {
 		t.Fatal(err)
 	}
 	manifest, err := json.Marshal(map[string]any{
-		"schema_version": 1,
+		"schema_version": 2,
 		"name":           logical,
+		"name_zh":        "验收夹具",
+		"name_en":        "Acceptance Fixture",
 		"version":        release,
 		"description":    "acceptance fixture",
+		"description_zh": "验收夹具描述",
 		"skills":         []string{"skills/" + logical},
 	})
 	if err != nil {

@@ -20,12 +20,15 @@ import (
 	"apm/internal/domain"
 )
 
-// agentYAMLWithAvatar 是带 metadata.avatar 的 V0.5 agent.yaml 文本；name 是外部身份。
-const agentYAMLWithAvatar = "schema_version: 1\nagent:\n" +
+// agentYAMLWithAvatar 是带 metadata.avatar 的 v2 agent.yaml 文本；name 是外部身份。
+const agentYAMLWithAvatar = "schema_version: 2\nagent:\n" +
 	"  id: demo-agent\n" +
 	"  name: demo-agent\n" +
 	"  version: v1.0.0\n" +
+	"  name_zh: 演示助手\n" +
+	"  name_en: Demo Agent\n" +
 	"  description: demo\n" +
+	"  description_zh: 演示\n" +
 	"  soul: help safely\n" +
 	"  metadata:\n" +
 	"    avatar: assets/avatar.png\n"
@@ -144,11 +147,14 @@ func TestValidateAgentReturnsDirectoryMetadata(t *testing.T) {
 // 找不到，但 APM 不比较二者，因此仍必须通过校验（ADR-033）。
 func TestValidateAgentWarnsWhenIDDiffersFromName(t *testing.T) {
 	dir := t.TempDir()
-	writeAgentYAMLOnlyDir(t, dir, "schema_version: 1\nagent:\n"+
+	writeAgentYAMLOnlyDir(t, dir, "schema_version: 2\nagent:\n"+
 		"  id: demo-agent-internal\n"+
 		"  name: demo-agent\n"+
 		"  version: v1.0.0\n"+
+		"  name_zh: 演示助手\n"+
+		"  name_en: Demo Agent\n"+
 		"  description: demo\n"+
+		"  description_zh: 演示\n"+
 		"  soul: help safely\n")
 	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
 	if err != nil {
@@ -184,11 +190,14 @@ func TestValidateAgentDoesNotWarnWhenIDEqualsName(t *testing.T) {
 // id 与 name 不同取值只影响 validate 的 warning，Prepare 仍必须成功。
 func TestPrepareAgentAcceptsIDNameMismatch(t *testing.T) {
 	root := t.TempDir()
-	writeAgentYAMLOnlyDir(t, root, "schema_version: 1\nagent:\n"+
+	writeAgentYAMLOnlyDir(t, root, "schema_version: 2\nagent:\n"+
 		"  id: demo-agent-internal\n"+
 		"  name: demo-agent\n"+
 		"  version: v1.0.0\n"+
+		"  name_zh: 演示助手\n"+
+		"  name_en: Demo Agent\n"+
 		"  description: demo\n"+
+		"  description_zh: 演示\n"+
 		"  soul: help safely\n")
 	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: root, Message: "first"})
 	if err != nil {

@@ -88,7 +88,8 @@ func TestAPCPluginManifestRejectsInvalidSchemaIdentityAndSkills(t *testing.T) {
 		manifest string
 	}{
 		{name: "schema zero", manifest: `{"schema_version":0,"name":"demo","version":"v1.2.3","description":"Demo","skills":["skills/demo"]}`},
-		{name: "schema two", manifest: `{"schema_version":2,"name":"demo","version":"v1.2.3","description":"Demo","skills":["skills/demo"]}`},
+		{name: "schema three", manifest: `{"schema_version":3,"name":"demo","version":"v1.2.3","description":"Demo","skills":["skills/demo"]}`},
+		{name: "blank name_zh", manifest: `{"schema_version":2,"name":"demo","version":"v1.2.3","description":"Demo","name_zh":"  ","skills":["skills/demo"]}`},
 		{name: "wrong name", manifest: `{"schema_version":1,"name":"other","version":"v1.2.3","description":"Demo","skills":["skills/demo"]}`},
 		{name: "wrong version", manifest: `{"schema_version":1,"name":"demo","version":"v1.2.4","description":"Demo","skills":["skills/demo"]}`},
 		{name: "native version", manifest: `{"schema_version":1,"name":"demo","version":"1.2.3","description":"Demo","skills":["skills/demo"]}`},

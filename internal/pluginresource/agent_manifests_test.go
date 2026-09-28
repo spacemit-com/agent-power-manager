@@ -338,11 +338,25 @@ func pluginartifactTestRef() domain.PowerRef {
 
 func writeCanonicalPluginPackage(t *testing.T, root string, ref domain.PowerRef, description string) {
 	t.Helper()
+	writeCanonicalPluginPackageManifest(t, root, ref, pluginartifact.APCPluginManifest{
+		SchemaVersion: 1, Name: ref.Name, Version: ref.Version, Description: description, Skills: []string{"skills/" + ref.Name},
+	})
+}
+
+// writeCanonicalPluginPackageV2 写入带本地化展示字段的 v2 canonical 包，
+// 用于断言这些字段不会进入派生清单。
+func writeCanonicalPluginPackageV2(t *testing.T, root string, ref domain.PowerRef) {
+	t.Helper()
+	writeCanonicalPluginPackageManifest(t, root, ref, pluginartifact.APCPluginManifest{
+		SchemaVersion: 2, Name: ref.Name, NameZH: "演示插件", NameEN: "Demo Plugin", Version: ref.Version,
+		Description: "Canonical demo", DescriptionZH: "规范演示插件", Skills: []string{"skills/" + ref.Name},
+	})
+}
+
+func writeCanonicalPluginPackageManifest(t *testing.T, root string, ref domain.PowerRef, manifest pluginartifact.APCPluginManifest) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "skills", ref.Name), 0o700); err != nil {
 		t.Fatal(err)
-	}
-	manifest := pluginartifact.APCPluginManifest{
-		SchemaVersion: 1, Name: ref.Name, Version: ref.Version, Description: description, Skills: []string{"skills/" + ref.Name},
 	}
 	data, err := json.Marshal(manifest)
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 func TestSkillSourceBuildUsesLoadedSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	writeValidSkill(t, dir)
-	originalSkill := []byte("---\nname: demo\nversion: \"v1.0.0\"\ndescription: does things\n---\n# Demo Skill\n")
+	originalSkill := []byte("---\nschema_version: 2\nname: demo\nname_zh: 演示\nname_en: Demo\ndescription: does things\ndescription_zh: 演示描述\nversion: \"v1.0.0\"\n---\n# Demo Skill\n")
 	originalCard := []byte(validSkillCardMarkdown)
 
 	loaded, err := (skillSourceLoader{}).Load(context.Background(), dir)

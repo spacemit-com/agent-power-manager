@@ -10,7 +10,10 @@ import (
 	"apm/internal/domain"
 )
 
-const validMCPResource = `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo mcp","definition":{"transport":"stdio","command":"npx","args":["-y","@foo/mcp"]}}`
+const validMCPResource = `{"schema_version":2,"name":"demo","name_zh":"演示","name_en":"Demo","version":"v1.0.0","description":"demo mcp","description_zh":"演示 MCP","definition":{"transport":"stdio","command":"npx","args":["-y","@foo/mcp"]}}`
+
+// validMCPResourceV1 是历史安装侧 v1 MCP 资源；提交侧必须拒绝，用于锁定版本门禁。
+const validMCPResourceV1 = `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"demo mcp","definition":{"transport":"stdio","command":"npx","args":["-y","@foo/mcp"]}}`
 
 func TestValidateMCP(t *testing.T) {
 	dir := t.TempDir()
@@ -34,7 +37,7 @@ func TestValidateMCP(t *testing.T) {
 func TestValidateMCPRejectsSecretField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":{"transport":"stdio","command":"npx","env":{"TOKEN":"secret"}}}`)
+	writeTestFile(t, path, `{"schema_version":2,"name":"demo","name_zh":"演示","name_en":"Demo","version":"v1.0.0","description":"d","description_zh":"演示","definition":{"transport":"stdio","command":"npx","env":{"TOKEN":"secret"}}}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -44,7 +47,7 @@ func TestValidateMCPRejectsSecretField(t *testing.T) {
 func TestValidateMCPRejectsMissingDefinition(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d"}`)
+	writeTestFile(t, path, `{"schema_version":2,"name":"demo","name_zh":"演示","name_en":"Demo","version":"v1.0.0","description":"d","description_zh":"演示"}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -54,7 +57,7 @@ func TestValidateMCPRejectsMissingDefinition(t *testing.T) {
 func TestValidateMCPRejectsUnknownOuterField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"d","definition":{"transport":"stdio","command":"npx"},"extra":1}`)
+	writeTestFile(t, path, `{"schema_version":2,"name":"demo","name_zh":"演示","name_en":"Demo","version":"v1.0.0","description":"d","description_zh":"演示","definition":{"transport":"stdio","command":"npx"},"extra":1}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
@@ -64,7 +67,7 @@ func TestValidateMCPRejectsUnknownOuterField(t *testing.T) {
 func TestValidateMCPRejectsNonCanonicalVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	writeTestFile(t, path, `{"schema_version":1,"name":"demo","version":"1.0.0","description":"d","definition":{"transport":"stdio","command":"npx"}}`)
+	writeTestFile(t, path, `{"schema_version":2,"name":"demo","name_zh":"演示","name_en":"Demo","version":"1.0.0","description":"d","description_zh":"演示","definition":{"transport":"stdio","command":"npx"}}`)
 	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)

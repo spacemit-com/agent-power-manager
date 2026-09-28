@@ -9,7 +9,10 @@ import (
 	"apm/internal/domain"
 )
 
-const validPluginManifest = `{"schema_version":1,"name":"code-review","version":"v1.0.0","description":"code review helpers","skills":["skills/reviewer"]}`
+const validPluginManifest = `{"schema_version":2,"name":"code-review","name_zh":"代码评审","name_en":"Code Review","version":"v1.0.0","description":"code review helpers","description_zh":"代码评审辅助","skills":["skills/reviewer"]}`
+
+// validPluginManifestV1 是历史安装侧 v1 apc-plugin.json；提交侧必须拒绝，用于锁定版本门禁。
+const validPluginManifestV1 = `{"schema_version":1,"name":"code-review","version":"v1.0.0","description":"code review helpers","skills":["skills/reviewer"]}`
 
 func writeValidPlugin(t *testing.T, dir string) {
 	t.Helper()
@@ -90,7 +93,7 @@ func TestValidatePluginRejectsPathsOutsideRawSchema(t *testing.T) {
 
 func TestValidatePluginRejectsDuplicateEmbeddedSkillNames(t *testing.T) {
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "apc-plugin.json"), `{"schema_version":1,"name":"code-review","version":"v1.0.0","description":"code review helpers","skills":["skills/reviewer","skills/writer"]}`)
+	writeTestFile(t, filepath.Join(dir, "apc-plugin.json"), `{"schema_version":2,"name":"code-review","name_zh":"代码评审","name_en":"Code Review","version":"v1.0.0","description":"code review helpers","description_zh":"代码评审辅助","skills":["skills/reviewer","skills/writer"]}`)
 	for _, relative := range []string{"skills/reviewer", "skills/writer"} {
 		writeTestFile(t, filepath.Join(dir, relative, "SKILL.md"), validSkillMarkdown)
 		writeTestFile(t, filepath.Join(dir, relative, "skill-card.md"), validSkillCardMarkdown)

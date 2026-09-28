@@ -1,10 +1,13 @@
-schema_version: 1
+schema_version: 2
 agent:
   # 必须与 name 相同：Bibit 按 agent.id 定位已安装的 agents/<agent.name> 目录（ADR-033）。
   id: bianbu-agent-default
   name: bianbu-agent-default
+  name_zh: Bianbu 默认助手
+  name_en: Bianbu Default Agent
   version: v1.0.0
   description: Project-local Bianbu agent
+  description_zh: 项目本地的 Bianbu 智能体。
   soul: Help the user complete practical work safely, using installed Tools and Skills only when relevant.
   instructions: Help the user complete practical work safely. Use installed Tools
     and Skills only when they are relevant.

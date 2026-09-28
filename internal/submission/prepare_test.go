@@ -94,7 +94,7 @@ func TestPrepareMCPProducesCanonicalJSON(t *testing.T) {
 		t.Fatalf("MCP bytes not JSON object: %q", got.Bytes)
 	}
 	verifyMD5(t, got.Bytes, got.MD5)
-	const want = `{"definition":{"args":["-y","@foo/mcp"],"command":"npx","transport":"stdio"},"description":"demo mcp","name":"demo","schema_version":1,"version":"v1.0.0"}`
+	const want = `{"definition":{"args":["-y","@foo/mcp"],"command":"npx","transport":"stdio"},"description":"demo mcp","description_zh":"演示 MCP","name":"demo","name_en":"Demo","name_zh":"演示","schema_version":2,"version":"v1.0.0"}`
 	if string(got.Bytes) != want {
 		t.Fatalf("Bytes = %s, want full canonical resource %s", got.Bytes, want)
 	}
@@ -133,7 +133,7 @@ func TestPrepareAgentRequiresMessage(t *testing.T) {
 
 func TestPrepareAgentWhitespaceChangesMD5(t *testing.T) {
 	dir := t.TempDir()
-	raw1 := "schema_version: 1\nagent:\n  id: demo\n  name: demo-agent\n  version: v1.0.0\n  description: demo\n  soul: help safely\n"
+	raw1 := "schema_version: 2\nagent:\n  id: demo\n  name: demo-agent\n  version: v1.0.0\n  name_zh: 演示名称\n  name_en: Demo Agent\n  description: demo\n  description_zh: 演示\n  soul: help safely\n"
 	raw2 := raw1 + "\n"
 	firstRoot := filepath.Join(dir, "a")
 	secondRoot := filepath.Join(dir, "b")

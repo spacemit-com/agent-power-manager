@@ -32,12 +32,16 @@ type MCPServer struct {
 	URL       string       `json:"url,omitempty"`
 }
 
-// MCPResource 表示 MCP 资源文件的完整 v1 内容；身份字段必须与引用完全一致。
+// MCPResource 表示 MCP 资源文件的完整内容；身份字段必须与引用完全一致。
+// v2 起新增仅用于展示的 name_zh/description_zh，name 仍是唯一调用名。
 type MCPResource struct {
 	SchemaVersion int       `json:"schema_version"`
 	Name          string    `json:"name"`
 	Version       string    `json:"version"`
 	Description   string    `json:"description"`
+	NameZH        string    `json:"name_zh,omitempty"`
+	NameEN        string    `json:"name_en,omitempty"`
+	DescriptionZH string    `json:"description_zh,omitempty"`
 	Definition    MCPServer `json:"definition"`
 }
 
@@ -46,6 +50,9 @@ type mcpResourceWire struct {
 	Name          string          `json:"name"`
 	Version       string          `json:"version"`
 	Description   string          `json:"description"`
+	NameZH        string          `json:"name_zh"`
+	NameEN        string          `json:"name_en"`
+	DescriptionZH string          `json:"description_zh"`
 	Definition    json.RawMessage `json:"definition"`
 	// 测试环境资源文件额外返回的字段，容忍但不校验。
 	Type       json.RawMessage `json:"type"`
@@ -103,7 +110,8 @@ func DecodeMCPServerJSON(contents []byte) (MCPServer, error) {
 	return server, nil
 }
 
-// DecodeMCPResourceJSON 严格解码闭合的 MCP v1 资源，并递归校验其启动定义。
+// DecodeMCPResourceJSON 严格解码闭合的 MCP 资源（v1 或 v2），并递归校验其启动定义。
+// 该入口服务安装、下载与目录解码等所有内容边界，因此保持 v1 兼容。
 func DecodeMCPResourceJSON(contents []byte) (MCPResource, error) {
 	var wire mcpResourceWire
 	if err := jsonstrict.Decode(contents, &wire, true); err != nil {
@@ -121,6 +129,9 @@ func DecodeMCPResourceJSON(contents []byte) (MCPResource, error) {
 		Name:          wire.Name,
 		Version:       wire.Version,
 		Description:   wire.Description,
+		NameZH:        wire.NameZH,
+		NameEN:        wire.NameEN,
+		DescriptionZH: wire.DescriptionZH,
 		Definition:    definition,
 	}
 	if err := resource.Validate(); err != nil {
@@ -150,10 +161,11 @@ func (server MCPServer) Validate() error {
 	return nil
 }
 
-// Validate 校验 MCP v1 资源的身份、描述与启动定义，不补全或改写文件字段。
+// Validate 校验 MCP 资源的身份、描述与启动定义，不补全或改写文件字段。
+// 安装侧兼容 v1 与 v2；若提供本地化展示字段则校验其形状，缺失不报错（ADR-038）。
 func (resource MCPResource) Validate() error {
-	if resource.SchemaVersion != 1 {
-		return fmt.Errorf("MCP resource schema version %d is unsupported", resource.SchemaVersion)
+	if err := ValidateInstallSchemaVersion(resource.SchemaVersion); err != nil {
+		return fmt.Errorf("MCP resource %w", err)
 	}
 	if !IsCanonicalPowerName(resource.Name) {
 		return fmt.Errorf("MCP resource name %q is not canonical", resource.Name)
@@ -164,8 +176,25 @@ func (resource MCPResource) Validate() error {
 	if strings.TrimSpace(resource.Description) == "" {
 		return errors.New("MCP resource description must not be blank")
 	}
+	if err := ValidateOptionalDisplayMetadata(resource.NameZH, resource.NameEN, resource.DescriptionZH); err != nil {
+		return fmt.Errorf("MCP resource %w", err)
+	}
 	if err := resource.Definition.Validate(); err != nil {
 		return fmt.Errorf("MCP resource definition: %w", err)
+	}
+	return nil
+}
+
+// ValidateSubmit 校验提交侧 MCP 资源：只接受 schema_version 2，且本地化展示字段必填。
+func (resource MCPResource) ValidateSubmit() error {
+	if err := ValidateSubmitSchemaVersion(resource.SchemaVersion); err != nil {
+		return fmt.Errorf("MCP resource %w", err)
+	}
+	if err := resource.Validate(); err != nil {
+		return err
+	}
+	if err := ValidateRequiredDisplayMetadata(resource.NameZH, resource.NameEN, resource.DescriptionZH); err != nil {
+		return fmt.Errorf("MCP.json %w", err)
 	}
 	return nil
 }

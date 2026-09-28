@@ -138,7 +138,8 @@ func TestMCPResourceValidateRejectsInvalidIdentityAndDefinition(t *testing.T) {
 		name string
 		raw  string
 	}{
-		{name: "unsupported schema version", raw: `{"schema_version":2,"name":"demo","version":"v1.0.0","description":"d","definition":` + validDefinition + `}`},
+		{name: "unsupported schema version", raw: `{"schema_version":3,"name":"demo","version":"v1.0.0","description":"d","definition":` + validDefinition + `}`},
+		{name: "blank name_zh", raw: `{"schema_version":2,"name":"demo","version":"v1.0.0","description":"d","name_zh":"  ","definition":` + validDefinition + `}`},
 		{name: "noncanonical name", raw: `{"schema_version":1,"name":"Demo","version":"v1.0.0","description":"d","definition":` + validDefinition + `}`},
 		{name: "noncanonical version", raw: `{"schema_version":1,"name":"demo","version":"1.0.0","description":"d","definition":` + validDefinition + `}`},
 		{name: "blank description", raw: `{"schema_version":1,"name":"demo","version":"v1.0.0","description":"  ","definition":` + validDefinition + `}`},

@@ -1,8 +1,11 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "demo-plugin",
+  "name_zh": "演示插件",
+  "name_en": "Demo Plugin",
   "version": "v0.1.0",
   "description": "Second shared Plugin fixture managed by APC",
+  "description_zh": "由 APC 管理的第二个共享插件夹具。",
   "skills": [
     "skills/demo-plugin"
   ]

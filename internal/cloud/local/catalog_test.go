@@ -20,7 +20,7 @@ import (
 )
 
 const localCatalogSkillCard = `---
-schema_version: 1
+schema_version: 2
 ---
 # Skill Card: Catalog fixture
 
@@ -412,7 +412,7 @@ func assertLocalCatalogMCPUsesCompleteJCS(t *testing.T, snapshot catalog.Snapsho
 	if err != nil {
 		t.Fatal(err)
 	}
-	const wantJCS = `{"definition":{"args":["--version","v2.0.0"],"command":"catalog-mcp","transport":"stdio"},"description":"mcp description v2.0.0","name":"catalog-mcp","schema_version":1,"version":"v2.0.0"}`
+	const wantJCS = `{"definition":{"args":["--version","v2.0.0"],"command":"catalog-mcp","transport":"stdio"},"description":"mcp description v2.0.0","description_zh":"目录夹具描述","name":"catalog-mcp","name_en":"Catalog Fixture","name_zh":"目录夹具","schema_version":2,"version":"v2.0.0"}`
 	digest := md5.Sum([]byte(wantJCS))
 	if entry.ContentSize != int64(len(wantJCS)) || entry.ContentMD5 != hex.EncodeToString(digest[:]) {
 		t.Fatalf("MCP metadata = size %d MD5 %q, want complete JCS size %d MD5 %x", entry.ContentSize, entry.ContentMD5, len(wantJCS), digest)
@@ -476,21 +476,21 @@ func writeLocalCatalogPower(t *testing.T, root string, powerType domain.PowerTyp
 	switch powerType {
 	case domain.PowerTypeSkill:
 		sourcePath = filepath.Join(root, "skills", name, version)
-		writeLocalCatalogFile(t, filepath.Join(sourcePath, "SKILL.md"), []byte("---\nname: "+name+"\nversion: \""+version+"\"\ndescription: "+description+"\n---\n# Catalog Skill\n"))
+		writeLocalCatalogFile(t, filepath.Join(sourcePath, "SKILL.md"), []byte("---\nschema_version: 2\nname: "+name+"\nname_zh: 目录夹具\nname_en: Catalog Fixture\ndescription: "+description+"\ndescription_zh: 目录夹具描述\nversion: \""+version+"\"\n---\n# Catalog Skill\n"))
 		writeLocalCatalogFile(t, filepath.Join(sourcePath, "skill-card.md"), []byte(localCatalogSkillCard))
 	case domain.PowerTypePlugin:
 		sourcePath = filepath.Join(root, "plugins", name, version)
-		manifest := []byte(`{"schema_version":1,"name":"` + name + `","version":"` + version + `","description":"` + description + `","skills":["skills/helper"]}`)
+		manifest := []byte(`{"schema_version":2,"name":"` + name + `","name_zh":"目录夹具","name_en":"Catalog Fixture","version":"` + version + `","description":"` + description + `","description_zh":"目录夹具描述","skills":["skills/helper"]}`)
 		writeLocalCatalogFile(t, filepath.Join(sourcePath, "apc-plugin.json"), manifest)
-		writeLocalCatalogFile(t, filepath.Join(sourcePath, "skills", "helper", "SKILL.md"), []byte("---\nname: embedded-helper\nversion: \""+version+"\"\ndescription: embedded description must not win\n---\n# Embedded Skill\n"))
+		writeLocalCatalogFile(t, filepath.Join(sourcePath, "skills", "helper", "SKILL.md"), []byte("---\nschema_version: 2\nname: embedded-helper\nname_zh: 内嵌助手\nname_en: Embedded Helper\ndescription: embedded description must not win\ndescription_zh: 内嵌描述\nversion: \""+version+"\"\n---\n# Embedded Skill\n"))
 		writeLocalCatalogFile(t, filepath.Join(sourcePath, "skills", "helper", "skill-card.md"), []byte(localCatalogSkillCard))
 	case domain.PowerTypeMCP:
 		sourcePath = filepath.Join(root, "mcps", name, version, "MCP.json")
-		raw = []byte("{\n  \"version\": \"" + version + "\",\n  \"name\": \"" + name + "\",\n  \"schema_version\": 1,\n  \"definition\": {\"transport\": \"stdio\", \"args\": [\"--version\", \"" + version + "\"], \"command\": \"catalog-mcp\"},\n  \"description\": \"" + description + "\"\n}\n")
+		raw = []byte("{\n  \"version\": \"" + version + "\",\n  \"name\": \"" + name + "\",\n  \"name_zh\": \"目录夹具\",\n  \"name_en\": \"Catalog Fixture\",\n  \"schema_version\": 2,\n  \"definition\": {\"transport\": \"stdio\", \"args\": [\"--version\", \"" + version + "\"], \"command\": \"catalog-mcp\"},\n  \"description\": \"" + description + "\",\n  \"description_zh\": \"目录夹具描述\"\n}\n")
 		writeLocalCatalogFile(t, sourcePath, raw)
 	case domain.PowerTypeAgent:
 		sourcePath = filepath.Join(root, "agents", name, version)
-		raw = []byte("# preserved raw YAML\nschema_version: 1\nagent:\n  id: bibit-catalog\n  name: " + name + "\n  version: " + version + "\n  description: " + description + "\n  soul: help safely\n")
+		raw = []byte("# preserved raw YAML\nschema_version: 2\nagent:\n  id: bibit-catalog\n  name: " + name + "\n  name_zh: 目录夹具\n  name_en: Catalog Fixture\n  version: " + version + "\n  description: " + description + "\n  description_zh: 目录夹具描述\n  soul: help safely\n")
 		writeLocalCatalogFile(t, filepath.Join(sourcePath, "agent.yaml"), raw)
 	default:
 		t.Fatalf("unsupported fixture type %q", powerType)

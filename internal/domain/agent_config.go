@@ -25,13 +25,17 @@ type AgentConfig struct {
 // 必须使用 name+version；资源作者还须让 id 与 name 取相同值，因为 Bibit 按 agent.id 定位
 // 已安装的 agents/<agent.name> 目录，取值不同会导致「能列出、按 ID 查不到」。APM 只校验
 // id trim 后非空，不比较二者（ADR-033）；description 与 soul 只要求 trim 后非空。
+// v2 起新增仅用于展示的 NameZH/DescriptionZH；name 仍是唯一调用名，默认即英文名。
 type AgentInfo struct {
-	ID          string        `yaml:"id"`
-	Name        string        `yaml:"name"`
-	Version     string        `yaml:"version"`
-	Description string        `yaml:"description"`
-	Soul        string        `yaml:"soul"`
-	Metadata    AgentMetadata `yaml:"metadata"`
+	ID            string        `yaml:"id"`
+	Name          string        `yaml:"name"`
+	Version       string        `yaml:"version"`
+	Description   string        `yaml:"description"`
+	NameZH        string        `yaml:"name_zh"`
+	NameEN        string        `yaml:"name_en"`
+	DescriptionZH string        `yaml:"description_zh"`
+	Soul          string        `yaml:"soul"`
+	Metadata      AgentMetadata `yaml:"metadata"`
 }
 
 // AgentMetadata 表示 agent 区块的可选元数据。avatar 为 assets/ 下 PNG 的包内相对路径（可选）。
@@ -40,9 +44,10 @@ type AgentMetadata struct {
 }
 
 // Validate 校验 Agent 配置的最小边界，不清洗或改写原始值。
+// 安装侧兼容 v1 与 v2；v2 若提供本地化展示字段则校验形状，缺失不报错（ADR-038）。
 func (config AgentConfig) Validate() error {
-	if config.SchemaVersion != 1 {
-		return fmt.Errorf("agent schema version %d must be 1: %w", config.SchemaVersion, ErrInvalidAgent)
+	if err := ValidateInstallSchemaVersion(config.SchemaVersion); err != nil {
+		return fmt.Errorf("agent %w", errors.Join(ErrInvalidAgent, err))
 	}
 	if strings.TrimSpace(config.Agent.ID) == "" {
 		return fmt.Errorf("agent id must be non-empty: %w", ErrInvalidAgent)
@@ -58,6 +63,23 @@ func (config AgentConfig) Validate() error {
 	}
 	if strings.TrimSpace(config.Agent.Soul) == "" {
 		return fmt.Errorf("agent soul must be non-empty: %w", ErrInvalidAgent)
+	}
+	if err := ValidateOptionalDisplayMetadata(config.Agent.NameZH, config.Agent.NameEN, config.Agent.DescriptionZH); err != nil {
+		return fmt.Errorf("agent.yaml %w", errors.Join(ErrInvalidAgent, err))
+	}
+	return nil
+}
+
+// ValidateSubmit 校验提交侧 Agent 配置：只接受 schema_version 2，且本地化展示字段必填。
+func (config AgentConfig) ValidateSubmit() error {
+	if err := ValidateSubmitSchemaVersion(config.SchemaVersion); err != nil {
+		return fmt.Errorf("agent.yaml %w", errors.Join(ErrInvalidAgent, err))
+	}
+	if err := config.Validate(); err != nil {
+		return err
+	}
+	if err := ValidateRequiredDisplayMetadata(config.Agent.NameZH, config.Agent.NameEN, config.Agent.DescriptionZH); err != nil {
+		return fmt.Errorf("agent.yaml %w", errors.Join(ErrInvalidAgent, err))
 	}
 	return nil
 }
@@ -169,6 +191,7 @@ func decodeAgentConfigNode(document *yaml.Node) (AgentConfig, error) {
 
 	var info AgentInfo
 	var idNode, nameNode, versionNode, descriptionNode, soulNode, metadataNode *yaml.Node
+	var nameZHNode, nameENNode, descriptionZHNode, legacyNameZHNode *yaml.Node
 	for i := 0; i+1 < len(agentNode.Content); i += 2 {
 		switch agentNode.Content[i].Value {
 		case "id":
@@ -179,6 +202,14 @@ func decodeAgentConfigNode(document *yaml.Node) (AgentConfig, error) {
 			versionNode = agentNode.Content[i+1]
 		case "description":
 			descriptionNode = agentNode.Content[i+1]
+		case "name_zh":
+			nameZHNode = agentNode.Content[i+1]
+		case "name_en":
+			nameENNode = agentNode.Content[i+1]
+		case "description_zh":
+			descriptionZHNode = agentNode.Content[i+1]
+		case "zh_name":
+			legacyNameZHNode = agentNode.Content[i+1]
 		case "soul":
 			soulNode = agentNode.Content[i+1]
 		case "metadata":
@@ -200,6 +231,27 @@ func decodeAgentConfigNode(document *yaml.Node) (AgentConfig, error) {
 			return AgentConfig{}, fmt.Errorf("agent YAML agent.%s must be a string: %w", field.name, ErrInvalidAgent)
 		}
 		*field.target = field.node.Value
+	}
+	for _, field := range []struct {
+		name   string
+		node   *yaml.Node
+		target *string
+	}{
+		{"name_zh", nameZHNode, &info.NameZH},
+		{"name_en", nameENNode, &info.NameEN},
+		{"description_zh", descriptionZHNode, &info.DescriptionZH},
+	} {
+		if field.node == nil {
+			continue
+		}
+		if field.node.Kind != yaml.ScalarNode || field.node.Tag != "!!str" {
+			return AgentConfig{}, fmt.Errorf("agent YAML agent.%s must be a string: %w", field.name, ErrInvalidAgent)
+		}
+		*field.target = field.node.Value
+	}
+	// 旧键 zh_name 已更名为 name_zh；显式拒绝而不是静默忽略，避免作者以为字段生效却丢失展示名。
+	if legacyNameZHNode != nil {
+		return AgentConfig{}, fmt.Errorf("agent YAML agent.zh_name was renamed to agent.name_zh: %w", ErrInvalidAgent)
 	}
 	if metadataNode != nil {
 		if metadataNode.Kind != yaml.MappingNode {

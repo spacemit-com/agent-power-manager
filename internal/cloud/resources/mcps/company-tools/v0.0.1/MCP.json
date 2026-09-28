@@ -1,8 +1,11 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "company-tools",
+  "name_zh": "公司工具",
+  "name_en": "Company Tools MCP",
   "version": "v0.0.1",
   "description": "Company tools MCP server",
+  "description_zh": "公司内部工具 MCP 服务。",
   "definition": {
     "transport": "http",
     "url": "https://mcp.example.com/mcp"

@@ -834,11 +834,11 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 	}
 	sourceRoot := t.TempDir()
 	skillRoot := filepath.Join(sourceRoot, "contract-skill")
-	writeContractSourceFile(t, filepath.Join(skillRoot, "SKILL.md"), "---\nname: contract-skill\nversion: \"v1.2.3\"\ndescription: Cross-layer Skill\n---\n# Contract Skill\n")
+	writeContractSourceFile(t, filepath.Join(skillRoot, "SKILL.md"), "---\nschema_version: 2\nname: contract-skill\nname_zh: 契约技能\nname_en: Contract Skill\ndescription: Cross-layer Skill\ndescription_zh: 跨层契约技能\nversion: \"v1.2.3\"\n---\n# Contract Skill\n")
 	writeContractSourceFile(t, filepath.Join(skillRoot, "skill-card.md"), contractSkillCard)
 	pluginRoot := filepath.Join(sourceRoot, "contract-plugin")
-	writeContractSourceFile(t, filepath.Join(pluginRoot, "apc-plugin.json"), `{"schema_version":1,"name":"contract-plugin","version":"v2.0.0","description":"Cross-layer Plugin","skills":["skills/helper"]}`)
-	writeContractSourceFile(t, filepath.Join(pluginRoot, "skills", "helper", "SKILL.md"), "---\nname: helper\nversion: \"v1.0.0\"\ndescription: Embedded helper\n---\n# Helper\n")
+	writeContractSourceFile(t, filepath.Join(pluginRoot, "apc-plugin.json"), `{"schema_version":2,"name":"contract-plugin","name_zh":"契约插件","name_en":"Contract Plugin","version":"v2.0.0","description":"Cross-layer Plugin","description_zh":"跨层契约插件","skills":["skills/helper"]}`)
+	writeContractSourceFile(t, filepath.Join(pluginRoot, "skills", "helper", "SKILL.md"), "---\nschema_version: 2\nname: helper\nname_zh: 助手技能\nname_en: Helper Skill\ndescription: Embedded helper\ndescription_zh: 内嵌助手\nversion: \"v1.0.0\"\n---\n# Helper\n")
 	writeContractSourceFile(t, filepath.Join(pluginRoot, "skills", "helper", "skill-card.md"), contractSkillCard)
 	server := newCanonicalRemoteServer(t, root)
 	client, err := remote.NewWithAPIKey(server.server.URL, &http.Client{Timeout: 5 * time.Second}, canonicalSubmissionAPIKey)
@@ -977,7 +977,7 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 }
 
 const contractSkillCard = `---
-schema_version: 1
+schema_version: 2
 ---
 # Skill Card: Contract Fixture
 

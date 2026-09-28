@@ -32,7 +32,9 @@ func (mcpSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	}, nil
 }
 
-// readMCPResource 读取并严格解析单个完整 MCP v1 资源；拒绝未知字段、重复键与尾随值。
+// readMCPResource 读取并严格解析单个完整 MCP 资源；拒绝未知字段、重复键与尾随值。
+// 提交路径额外要求 v2 与必填本地化展示字段（ValidateSubmit），安装与目录解码路径
+// 继续使用 DecodeMCPResourceJSON 的 v1+v2 宽松语义（ADR-038）。
 func readMCPResource(ctx context.Context, path string) (domain.MCPResource, []byte, error) {
 	raw, _, err := readPhysicalRegularFile(ctx, path, maxSingleFileSize)
 	if err != nil {
@@ -40,6 +42,9 @@ func readMCPResource(ctx context.Context, path string) (domain.MCPResource, []by
 	}
 	resource, err := domain.DecodeMCPResourceJSON(raw)
 	if err != nil {
+		return domain.MCPResource{}, nil, fmt.Errorf("decode MCP resource: %w", errors.Join(ErrInvalid, err))
+	}
+	if err := resource.ValidateSubmit(); err != nil {
 		return domain.MCPResource{}, nil, fmt.Errorf("decode MCP resource: %w", errors.Join(ErrInvalid, err))
 	}
 	return resource, append([]byte(nil), raw...), nil

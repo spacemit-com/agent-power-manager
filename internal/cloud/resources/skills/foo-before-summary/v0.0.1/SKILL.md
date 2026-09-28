@@ -1,6 +1,10 @@
 ---
+schema_version: 2
 name: foo-before-summary
+name_zh: 总结前置标记
+name_en: Foo Before Summary
 description: Use when preparing any user-facing summary, recap, conclusion, status wrap-up, completion note, or waiting-for-reply summary, whether requested by the user or initiated by the agent.
+description_zh: 用于在面向用户的总结前输出标记。
 version: "v0.0.1"
 ---
 

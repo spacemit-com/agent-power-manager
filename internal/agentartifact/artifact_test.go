@@ -484,11 +484,12 @@ func TestValidatePowerRef(t *testing.T) {
 // TestValidateRejectsInvalidAgentYAML 验证 agent.yaml 语义失败统一包裹 ErrInvalidAgent。
 func TestValidateRejectsInvalidAgentYAML(t *testing.T) {
 	for name, raw := range map[string]string{
-		"wrong schema":   "schema_version: 2\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",
-		"missing name":   "schema_version: 1\nagent: {id: bibit, version: v1.0.0, description: demo, soul: help safely}\n",
-		"multiple docs":  "schema_version: 1\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n---\n{}\n",
-		"not agent yaml": "not: valid\n",
-		"empty":          "",
+		"unsupported schema": "schema_version: 3\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",
+		"legacy zh_name":     "schema_version: 2\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, name_zh: 演示, description_zh: 演示, zh_name: 旧键, soul: help safely}\n",
+		"missing name":       "schema_version: 1\nagent: {id: bibit, version: v1.0.0, description: demo, soul: help safely}\n",
+		"multiple docs":      "schema_version: 1\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n---\n{}\n",
+		"not agent yaml":     "not: valid\n",
+		"empty":              "",
 	} {
 		t.Run(name, func(t *testing.T) {
 			entries := []agentartifact.Entry{fileEntry("agent.yaml", []byte(raw))}

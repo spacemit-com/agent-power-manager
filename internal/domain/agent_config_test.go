@@ -11,13 +11,25 @@ func TestPowerTypeAgentIsStable(t *testing.T) {
 	}
 }
 
-// validAgentYAML 生成满足 V0.5 最小必填字段的 agent.yaml 文本。
+// validAgentYAML 生成满足最小必填字段的 agent.yaml 文本（安装侧 v1，不含本地化展示字段）。
 func validAgentYAML(id, name, version string) string {
 	return "schema_version: 1\nagent:\n" +
 		"  id: " + id + "\n" +
 		"  name: " + name + "\n" +
 		"  version: " + version + "\n" +
 		"  description: demo\n" +
+		"  soul: help safely\n"
+}
+
+// validSubmitAgentYAML 生成满足提交侧 v2 的 agent.yaml 文本，含必填本地化展示字段。
+func validSubmitAgentYAML(id, name, version string) string {
+	return "schema_version: 2\nagent:\n" +
+		"  id: " + id + "\n" +
+		"  name: " + name + "\n" +
+		"  version: " + version + "\n" +
+		"  description: demo\n" +
+		"  description_zh: 演示\n" +
+		"  name_zh: 演示助手\n" +
 		"  soul: help safely\n"
 }
 
@@ -41,7 +53,8 @@ func TestAgentConfigValidate(t *testing.T) {
 	}
 
 	tests := map[string]func(*AgentConfig){
-		"wrong schema":        func(c *AgentConfig) { c.SchemaVersion = 2 },
+		"unsupported schema":  func(c *AgentConfig) { c.SchemaVersion = 3 },
+		"zero schema":         func(c *AgentConfig) { c.SchemaVersion = 0 },
 		"empty id":            func(c *AgentConfig) { c.Agent.ID = "" },
 		"blank id":            func(c *AgentConfig) { c.Agent.ID = "  \t\n" },
 		"empty name":          func(c *AgentConfig) { c.Agent.Name = "" },
@@ -173,7 +186,10 @@ func TestDecodeAgentConfigYAMLRejectsInvalidYAML(t *testing.T) {
 		"missing agent":         "schema_version: 1\n",
 		"missing schema":        "agent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",
 		"schema string":         "schema_version: \"1\"\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",
-		"schema version two":    "schema_version: 2\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",
+		"schema version three":  "schema_version: 3\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",
+		"legacy zh_name key":    "schema_version: 2\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, name_zh: 演示, description_zh: 演示, zh_name: 旧键, soul: help safely}\n",
+		"nonstring name_zh":     "schema_version: 2\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, name_zh: 123, soul: help safely}\n",
+		"blank name_zh":         "schema_version: 2\nagent: {id: bibit, name: demo-agent, version: v1.0.0, description: demo, name_zh: \"  \", soul: help safely}\n",
 		"missing id":            "schema_version: 1\nagent: {name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",
 		"empty id":              "schema_version: 1\nagent: {id: \"\", name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",
 		"blank id":              "schema_version: 1\nagent: {id: \"  \", name: demo-agent, version: v1.0.0, description: demo, soul: help safely}\n",

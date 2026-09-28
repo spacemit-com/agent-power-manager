@@ -31,6 +31,11 @@ func (pluginSourceLoader) Load(ctx context.Context, path string) (source, error)
 		return source{}, err
 	}
 	ref := domain.PowerRef{Type: domain.PowerTypePlugin, Name: snapshotManifest.Name, Version: snapshotManifest.Version}
+	// 提交侧只接受 schema_version 2 且本地化展示字段必填；安装与恢复路径继续使用
+	// ValidateAPCPluginManifest 的 v1+v2 宽松语义（ADR-038）。
+	if err := pluginartifact.ValidateSubmitAPCPluginManifest(ref, snapshotManifest); err != nil {
+		return source{}, fmt.Errorf("apc-plugin.json %w", errors.Join(ErrInvalid, err))
+	}
 	if err := pluginartifact.ValidateRawPackage(ref, path); err != nil {
 		return source{}, fmt.Errorf("validate raw plugin package: %w", errors.Join(ErrInvalid, err))
 	}
@@ -52,14 +57,14 @@ func (pluginSourceLoader) Load(ctx context.Context, path string) (source, error)
 	}
 	embeddedNames := make(map[string]string, len(manifest.Skills))
 	for _, skillPath := range manifest.Skills {
-		skillName, _, _, err := validateSkillContent(snapshot, skillPath)
+		embedded, err := validateSkillContent(snapshot, skillPath)
 		if err != nil {
 			return source{}, fmt.Errorf("validate plugin skill %q: %w", skillPath, err)
 		}
-		if previousPath, duplicate := embeddedNames[skillName]; duplicate {
-			return source{}, fmt.Errorf("plugin skills %q and %q share frontmatter name %q: %w", previousPath, skillPath, skillName, ErrInvalid)
+		if previousPath, duplicate := embeddedNames[embedded.Name]; duplicate {
+			return source{}, fmt.Errorf("plugin skills %q and %q share frontmatter name %q: %w", previousPath, skillPath, embedded.Name, ErrInvalid)
 		}
-		embeddedNames[skillName] = skillPath
+		embeddedNames[embedded.Name] = skillPath
 	}
 	return source{
 		validation: Validation{

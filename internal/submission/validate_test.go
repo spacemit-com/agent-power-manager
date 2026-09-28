@@ -100,8 +100,11 @@ func TestValidateSourceTreeAcceptsTextTree(t *testing.T) {
 	}
 }
 
-// validAgentYAML 是满足 V0.5 最小必填字段的 agent.yaml 文本；id 与 name 同值（ADR-033）。
-const validAgentYAML = "schema_version: 1\nagent:\n  id: demo-agent\n  name: demo-agent\n  version: v1.0.0\n  description: demo\n  soul: help safely\n"
+// validAgentYAML 是满足提交侧 v2 必填字段的 agent.yaml 文本；id 与 name 同值（ADR-033）。
+const validAgentYAML = "schema_version: 2\nagent:\n  id: demo-agent\n  name: demo-agent\n  version: v1.0.0\n  name_zh: 演示\n  name_en: Demo Agent\n  description: demo\n  description_zh: 演示\n  soul: help safely\n"
+
+// validAgentYAMLV1 是历史安装侧 v1 agent.yaml；提交侧必须拒绝，用于锁定版本门禁。
+const validAgentYAMLV1 = "schema_version: 1\nagent:\n  id: demo-agent\n  name: demo-agent\n  version: v1.0.0\n  description: demo\n  soul: help safely\n"
 
 func TestValidateAgentRejectsEmptyAgentYAML(t *testing.T) {
 	dir := t.TempDir()
