@@ -38,7 +38,9 @@ ADR-038 把四类 Power 升到 v2，新增 `name_zh` 与 `description_zh`，并�
    允许中文、空格与标点，仍拒绝控制字符。这取代 ADR-038 的「≤ 128 字节」。
 3. **`name_en` 形状**：trim 后非空，长度 ≤ 32 个字符，逐字符必须是可打印 ASCII（`0x20`–`0x7e`），
    且至少包含一个 ASCII 字母。允许空格、大小写与常规标点；拒绝中文、纯数字、纯标点等无字母取值。
-4. **`description_zh` 不变**：trim 后非空、≤ 1024 字节、允许换行。
+4. ~~**`description_zh` 不变**：trim 后非空、≤ 1024 字节、允许换行。~~ 本条已被
+   [ADR-042](ADR-042-cap-description-length-to-apc-server-limit.md) 取代：提交侧改为 ≤ 500 个 UTF-16 码元，
+   并与 `description` 共用同一上限。
 5. **提交侧**：`apm validate` 与 `apm submit` 要求 `name_zh`、`name_en`、`description_zh` 三个全部提供并
    通过形状校验；缺失或越界时错误信息点名具体字段。
 6. **安装侧**：目录解码、内容下载、缓存复验、派生与事务恢复继续接受 v1 与 v2；v2 若提供展示字段则校验

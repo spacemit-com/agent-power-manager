@@ -292,14 +292,16 @@ func TestEncodeOmitsEmptyDisplayFields(t *testing.T) {
 // 因为它们是唯一的展示文本真相源（ADR-040 的已知代价）。
 func TestDecodeRejectsInvalidDisplayFields(t *testing.T) {
 	cases := map[string]string{
-		"blank name_zh":           `"name_zh":"  "`,
-		"too short name_zh":       `"name_zh":"演"`,
-		"too long name_zh":        `"name_zh":"一二三四五六七八九十一二三四五六七"`,
-		"non-ascii name_en":       `"name_en":"演示"`,
-		"name_en without letter":  `"name_en":"1234"`,
-		"too long name_en":        `"name_en":"` + strings.Repeat("a", 33) + `"`,
-		"blank description_zh":    `"description_zh":"   "`,
-		"description_zh too long": `"description_zh":"` + strings.Repeat("描", 342) + `"`,
+		"blank name_zh":          `"name_zh":"  "`,
+		"too short name_zh":      `"name_zh":"演"`,
+		"too long name_zh":       `"name_zh":"一二三四五六七八九十一二三四五六七"`,
+		"non-ascii name_en":      `"name_en":"演示"`,
+		"name_en without letter": `"name_en":"1234"`,
+		"too long name_en":       `"name_en":"` + strings.Repeat("a", 33) + `"`,
+		"blank description_zh":   `"description_zh":"   "`,
+		// 342 个汉字 = 1026 字节，旧契约按字节判断；新契约统一为 500 个 UTF-16 码元（ADR-042），
+		// 因此改用 501 个汉字触发。
+		"description_zh too long": `"description_zh":"` + strings.Repeat("描", 501) + `"`,
 	}
 	for name, field := range cases {
 		t.Run(name, func(t *testing.T) {

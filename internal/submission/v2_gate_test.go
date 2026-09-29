@@ -177,3 +177,70 @@ func TestSubmitAcceptsV2ResourcesWithDisplayFields(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateRejectsOverlongDescription 锁定四类资源提交侧的 description/description_zh
+// 长度门禁（ADR-042）：上限 500 个 UTF-16 码元，与 APC 服务端一致。离线校验必须提前拦截，
+// 否则提交时只会得到不带字段定位的 `400 VALIDATION_FAILED`。
+func TestValidateRejectsOverlongDescription(t *testing.T) {
+	long := strings.Repeat("描", 501)  // 501 码元 / 1503 字节
+	emoji := strings.Repeat("😀", 251) // 251 码元字符、502 码元
+	ok := strings.Repeat("描", 500)    // 500 码元 / 1500 字节：按字节判断会误拒
+
+	t.Run("skill description over limit", func(t *testing.T) {
+		dir := t.TempDir()
+		writeSkillFixture(t, dir, "demo", "v1.0.0", long)
+		_, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir})
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "description") {
+			t.Fatalf("Validate() error = %v, want ErrInvalid naming description", err)
+		}
+	})
+
+	t.Run("skill accepts 500 CJK units", func(t *testing.T) {
+		dir := t.TempDir()
+		writeSkillFixture(t, dir, "demo", "v1.0.0", ok)
+		if _, err := Validate(context.Background(), Request{Type: domain.PowerTypeSkill, Path: dir}); err != nil {
+			t.Fatalf("Validate(500 CJK units) error = %v, want nil", err)
+		}
+	})
+
+	t.Run("mcp description over limit", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "mcp.json")
+		writeTestFile(t, path, `{"schema_version":2,"name":"demo","name_zh":"演示","name_en":"Demo","version":"v1.0.0","description":"`+long+`","description_zh":"演示 MCP","definition":{"transport":"stdio","command":"npx"}}`)
+		_, err := Validate(context.Background(), Request{Type: domain.PowerTypeMCP, Path: path})
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "description") {
+			t.Fatalf("Validate() error = %v, want ErrInvalid naming description", err)
+		}
+	})
+
+	t.Run("plugin description over limit", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestFile(t, filepath.Join(dir, "apc-plugin.json"), `{"schema_version":2,"name":"code-review","name_zh":"代码评审","name_en":"Code Review","version":"v1.0.0","description":"`+long+`","description_zh":"代码评审辅助","skills":["skills/reviewer"]}`)
+		writeTestFile(t, filepath.Join(dir, "skills", "reviewer", "SKILL.md"), validSkillMarkdown)
+		writeTestFile(t, filepath.Join(dir, "skills", "reviewer", "skill-card.md"), validSkillCardMarkdown)
+		_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir})
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "description") {
+			t.Fatalf("Validate() error = %v, want ErrInvalid naming description", err)
+		}
+	})
+
+	t.Run("agent description over limit", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestFile(t, filepath.Join(dir, "agent.yaml"),
+			"schema_version: 2\nagent:\n  id: demo-agent\n  name: demo-agent\n  version: v1.0.0\n  name_zh: 演示\n  name_en: Demo Agent\n  description: \""+long+"\"\n  description_zh: 演示\n  soul: help safely\n")
+		_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "description") {
+			t.Fatalf("Validate() error = %v, want ErrInvalid naming description", err)
+		}
+	})
+
+	t.Run("plugin description_zh over limit", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestFile(t, filepath.Join(dir, "apc-plugin.json"), `{"schema_version":2,"name":"code-review","name_zh":"代码评审","name_en":"Code Review","version":"v1.0.0","description":"code review helpers","description_zh":"`+emoji+`","skills":["skills/reviewer"]}`)
+		writeTestFile(t, filepath.Join(dir, "skills", "reviewer", "SKILL.md"), validSkillMarkdown)
+		writeTestFile(t, filepath.Join(dir, "skills", "reviewer", "skill-card.md"), validSkillCardMarkdown)
+		_, err := Validate(context.Background(), Request{Type: domain.PowerTypePlugin, Path: dir})
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "description_zh") {
+			t.Fatalf("Validate() error = %v, want ErrInvalid naming description_zh", err)
+		}
+	})
+}

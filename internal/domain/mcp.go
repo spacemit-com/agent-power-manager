@@ -196,6 +196,9 @@ func (resource MCPResource) ValidateSubmit() error {
 	if err := ValidateRequiredDisplayMetadata(resource.NameZH, resource.NameEN, resource.DescriptionZH); err != nil {
 		return fmt.Errorf("MCP.json %w", err)
 	}
+	if err := ValidateDescription(resource.Description); err != nil {
+		return fmt.Errorf("MCP.json %w", err)
+	}
 	return nil
 }
 

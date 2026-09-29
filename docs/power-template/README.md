@@ -18,7 +18,8 @@
 | 描述 | trim 后非空 |
 | 展示字段 | `name_zh`、`name_en` 与 `description_zh` 提交时必填，仅用于 APC 前端展示，不参与身份、排序、缓存键与 `search` 匹配（[ADR-039](../ivory-tower/adr/ADR-039-add-name-en-and-display-name-length-limits.md)） |
 | 展示名字长 | `name_zh` 为 2–16 个 Unicode 字符（按字符计，不按字节）；`name_en` ≤ 32 个字符，逐字符必须是可打印 ASCII 且至少含一个 ASCII 字母；两者均不含控制字符 |
-| 中文描述 | `description_zh` 为 trim 后非空、≤ 1024 字节、允许换行 |
+| 中文描述 | `description_zh` 为 trim 后非空、≤ 500 个 UTF-16 码元、允许换行（[ADR-042](../ivory-tower/adr/ADR-042-cap-description-length-to-apc-server-limit.md)） |
+| 资源描述 | `description` 为 trim 后非空、≤ 500 个 UTF-16 码元（与 `description_zh` 同一上限） |
 | 物理安全 | 拒绝符号链接、硬链接（link count ≠ 1）、设备/FIFO/socket 等非普通文件；读取前后校验 inode 与大小一致 |
 | 内容安全 | 拒绝可执行二进制、嵌套压缩包、非 UTF-8、NUL 与控制字符（Agent 的 `assets/` 允许二进制普通文件，仅 `agent.yaml` 走文本内容策略） |
 | 上传上限 | 打包后 ≤ 20 MiB；gzip 类型另校验解压倍率 ≤ 100× |

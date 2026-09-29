@@ -30,7 +30,7 @@ description_zh: 一句话中文说明这个 Skill 做什么。
 - `version` 为 `vMAJOR.MINOR.PATCH`。
 - `description` 非空，用于 Agent 发现（写清触发场景）。
 - `name_zh` 与 `name_en` 提交时必填，仅用于 APC 前端展示：`name_zh` 为 2–16 个字符（按 Unicode 字符计），`name_en` ≤ 32 个字符且必须是可打印 ASCII、至少含一个字母（[ADR-039](../ivory-tower/adr/ADR-039-add-name-en-and-display-name-length-limits.md)）。
-- `description_zh` 提交时必填，≤ 1024 字节。
+- `description_zh` 提交时必填，≤ 500 个 UTF-16 码元（与 `description` 共用同一上限；单位是 UTF-16 码元，不是字节，见 [ADR-042](../ivory-tower/adr/ADR-042-cap-description-length-to-apc-server-limit.md)）。
 
 ## skill-card.md
 

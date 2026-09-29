@@ -46,6 +46,8 @@
    （原决定为「`name` 默认即英文名，不引入 `name_en`」，已由 ADR-039 取代。）
 2. **字段规则**：`name_zh` 为自由展示文本（允许空格、中文与标点，**不**套用 canonical name 规则），
    trim 后非空、不含控制字符；`description_zh` trim 后非空、≤ 1024 字节、允许换行。
+   （`description_zh` 的 1024 字节上限已被 [ADR-042](ADR-042-cap-description-length-to-apc-server-limit.md)
+   取代为「≤ 500 个 UTF-16 码元」，并与 `description` 共用同一上限。）
    （原决定为 `name_zh` ≤ 128 字节，已由 ADR-039 收紧为 2–16 个字符。）
 3. **提交侧门禁**：`apm validate` 与 `apm submit` 只接受 `schema_version: 2`，并要求展示字段必填
    （ADR-039 起为 `name_zh`/`name_en`/`description_zh` 三个）；

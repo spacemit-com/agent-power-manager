@@ -2,6 +2,55 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-29（按 APC 服务端契约限定 description/description_zh 长度）
+
+分类：契约变更（`description` 新增长度上限；`description_zh` 由 ≤ 1024 字节改为 ≤ 500 码元）
+
+用户需求：升级 `../using-apm` 拉取的一批资源时，`k3-media-pipeline` 的英文译文（532 单元）通过了
+`apm validate`，却在提交时被 APC 拒绝为 `400 VALIDATION_FAILED`，响应体不带字段名、CLI 只透出 trace_id，
+定位成本高。用户要求在 `apm validate` 中补上 `description` 的长度上限，使离线校验与服务端一致。
+
+解决方案或完成结果：对测试环境做了端到端阶梯探测（metadata 与 content 两侧字段一致、资源名合法、
+内容体积恒定）后确定真实契约，并按实测口径实现：
+
+- **上限是 500，不是 1024**：`description` 与 `description_zh` 共用同一个 500 上限；服务端字段级错误为
+  `submit.request.description` / `submit.request.descriptionZh` 的「不能超过500个字符」，
+  `1024` 从未生效。
+- **单位是 UTF-16 码元，不是字节**：500 个汉字（1500 字节）被接受，501 个汉字被拒；
+  250 个 emoji（500 码元）被接受，251 个 emoji（502 码元、1004 字节）被拒。客户端若按字节判断，
+  两个方向都会出错。
+- **两个字段此前都无有效上限**：`description` 只检查非空；`description_zh` 检查的 1024 字节
+  永远不会先触发。因此超限资源能通过离线校验、到提交才失败。
+
+实现：`maxDisplayDescriptionBytes = 1024` 替换为 `maxDescriptionUnits = 500`；新增
+`domain.descriptionUnits`（`>0xFFFF` 计 2）与 `domain.ValidateDescription`；
+`ValidateDisplayDescriptionZH` 改按码元判断；四类资源的提交侧入口
+（`skill.parseSkillFrontmatter`、`pluginartifact.ValidateSubmitAPCPluginManifest`、
+`MCPResource.ValidateSubmit`、`AgentConfig.ValidateSubmit`）接入 `ValidateDescription`。
+错误信息点名字段、实际码元数与上限。
+
+关键决策（见 [ADR-042](../ivory-tower/adr/ADR-042-cap-description-length-to-apc-server-limit.md)，
+局部取代 ADR-039 第 4 条与 ADR-038 中同一处「`description_zh` ≤ 1024 字节」表述）：
+
+- **客户端上限照抄服务端实测口径**：不按字面实现「500 字节 / 1024 字节」，否则会误拒服务端接受的
+  500 汉字描述（1500 字节），同时放过服务端拒绝的 251 emoji（1004 字节）。
+- **计数用 UTF-16 码元**：与 JVM/JS `String.length()` 一致；不使用 `utf8.RuneCountInString`，
+  否则 emoji 会被计为 1 而漏放。
+- **沿用 ADR-038 第 6 条的「提供时校验形状（含长度）」分层**：安装/下载/缓存/目录解码仍只在字段存在时校验、
+  缺失不报错，提供的值继续走形状与长度校验；本轮只是把 `description_zh` 的长度从永不触发的 1024 字节换成
+  真实的 500 码元。存量资源不受影响（目录实测 `description_zh` 最大 190 码元、`description` 最大 483 码元）。
+- **失败信息可操作**：错误里带字段名与码元数，避免重现「只有 400 + trace_id」的定位成本。
+
+测试：`TestDescriptionLengthLimit`（单位与两个字段的边界，含 emoji/é 反例）与
+`TestValidateRejectsOverlongDescription`（四类资源的提交侧门禁）；`TestDecodeRejectsInvalidDisplayFields`
+的 `description_zh too long` 用例由 342 个汉字（1026 字节）改为 501 个汉字（501 码元）。
+全量 `go test ./...` 通过；用 532 单元的原始失败样本复跑，`apm validate` 现在报
+`description is 532 UTF-16 code units, exceeds 500`。
+
+边界：不改 `description_zh` 之外展示字段的上限（`name_zh` 2–16、`name_en` ≤ 32）、不改安装侧兼容语义、
+不改 APC 目录契约与 `list`/`show`/`search` 输出、不改服务端实现。`500` 是服务端实现细节，
+两侧存在耦合：服务端若调整上限，APM 需同步发版。
+
 ## 2026-09-29（提交 metadata 与资源 content 字段对齐）
 
 分类：契约变更（提交 metadata 新增三个展示字段；metadata `schema_version` 由协议常量 `1` 改为资源格式版本 `2`）
@@ -93,7 +142,7 @@ provider、config、transaction、lifecycle、cli、pluginresource 均有新增�
 
 解决方案或完成结果：新增 `internal/domain/display.go`，定义 `PowerSchemaVersionV1/V2` 与展示字段校验
 （`name_zh` 2–16 个 Unicode 字符、`name_en` ≤ 32 个可打印 ASCII 字符且至少含一个字母、`description_zh`
-≤ 1024 字节，均 trim 后非空并拒绝控制字符），并提供提交侧 `ValidateSubmitSchemaVersion` 与安装侧
+≤ 1024 字节（该 `description_zh` 上限后来由 [ADR-042](../ivory-tower/adr/ADR-042-cap-description-length-to-apc-server-limit.md) 取代为 ≤ 500 个 UTF-16 码元），均 trim 后非空并拒绝控制字符），并提供提交侧 `ValidateSubmitSchemaVersion` 与安装侧
 `ValidateInstallSchemaVersion` 两个门禁。四类权威文件升级到 `schema_version: 2`：`SKILL.md` 新增整数
 `schema_version` 与三个展示字段，`skill-card.md` 的 `schema_version` 由 1 升到 2，
 `apc-plugin.json`/`MCP.json`/`agent.yaml` 同步新增字段；

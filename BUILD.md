@@ -182,7 +182,7 @@ apm submission get <submission-id> [--output text|json]
 
 `validate` 与 `submit` 覆盖 Skill、Plugin、MCP、Agent 四类 Power，通过统一 Source Loader 复用同一套离线校验规则；当前契约由 [ADR-020](ivory-tower/adr/ADR-020-source-owned-submission-metadata.md)、[ADR-038](ivory-tower/adr/ADR-038-power-format-v2-localized-display-fields.md) 与 [Feature 023](ivory-tower/features/023-submission-resource-metadata-query/spec.md) / [Feature 031](ivory-tower/features/031-power-format-v2/spec.md) 定义：
 
-四类资源使用 Power 格式 **v2**：各权威文件的 `schema_version` 必须为整数 `2`，且 `name_zh`、`name_en`、`description_zh`（仅用于 APC 前端展示）提交时必填。`name` 仍是唯一调用名与排序键。展示名带长度约束：`name_zh` 为 2–16 个 Unicode 字符，`name_en` ≤ 32 个可打印 ASCII 字符且至少含一个字母（[ADR-039](ivory-tower/adr/ADR-039-add-name-en-and-display-name-length-limits.md)）。提交侧只接受 v2（v1 报 `upgrade to 2`），而安装、下载、缓存与目录解码路径继续接受 v1 与 v2，因此已发布的 v1 资源仍可安装。
+四类资源使用 Power 格式 **v2**：各权威文件的 `schema_version` 必须为整数 `2`，且 `name_zh`、`name_en`、`description_zh`（仅用于 APC 前端展示）提交时必填。`name` 仍是唯一调用名与排序键。展示名带长度约束：`name_zh` 为 2–16 个 Unicode 字符，`name_en` ≤ 32 个可打印 ASCII 字符且至少含一个字母（[ADR-039](ivory-tower/adr/ADR-039-add-name-en-and-display-name-length-limits.md)）。提交侧只接受 v2（v1 报 `upgrade to 2`），而安装、下载、缓存与目录解码路径继续接受 v1 与 v2，`description` 与 `description_zh` 提交时均不超过 **500 个 UTF-16 码元**（计数单位与 APC 服务端一致，不是 UTF-8 字节数，见 [ADR-042](ivory-tower/adr/ADR-042-cap-description-length-to-apc-server-limit.md)）。因此已发布的 v1 资源仍可安装。
 
 - Skill：原始目录，身份和描述来自 `SKILL.md` frontmatter（`schema_version: 2` + `name_zh`/`name_en`/`description_zh`；`skill-card.md` 的 `schema_version` 同步为 2），content 是确定性 tar.gz。
 - Plugin：原始目录，身份和描述来自 `apc-plugin.json`（`schema_version: 2` + `name_zh`/`name_en`/`description_zh`；内嵌 Skill 同样为 v2），content 是确定性 tar.gz。

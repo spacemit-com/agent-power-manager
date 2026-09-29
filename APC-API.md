@@ -230,10 +230,10 @@ Authorization: Bearer your-api-key-here
 | `type` | 是 | string | 资源类型：`skill`、`plugin`、`mcp`、`agent` |
 | `name` | 是 | string | 资源名称，kebab-case 格式（小写字母、数字、连字符） |
 | `version` | 是 | string | 版本号，格式 `vMAJOR.MINOR.PATCH`（如 `v1.0.0`） |
-| `description` | 否 | string | 资源描述 |
+| `description` | 否 | string | 资源描述，与 `content` 中资源文件的 `description` 一致（≤ 500 个 UTF-16 码元） |
 | `name_zh` | 是 | string | 中文展示名，与 `content` 中资源文件的 `name_zh` 一致（2–16 字符） |
 | `name_en` | 是 | string | 英文展示名，与 `content` 中资源文件的 `name_en` 一致（≤ 32 个可打印 ASCII 字符且至少含一个字母） |
-| `description_zh` | 是 | string | 中文描述，与 `content` 中资源文件的 `description_zh` 一致（≤ 1024 字节） |
+| `description_zh` | 是 | string | 中文描述，与 `content` 中资源文件的 `description_zh` 一致（≤ 500 个 UTF-16 码元） |
 | `message` | 否 | string | 本次发布说明 |
 | `schema_version` | 是 | int | 资源格式版本，与 `content` 中资源文件的 `schema_version` 一致；当前固定为 `2` |
 | `content_md5` | mcp 可选，其余必需 | string | 文件 MD5 校验值（客户端预计算，服务端校验） |

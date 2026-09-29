@@ -152,6 +152,9 @@ func parseSkillFrontmatter(contents []byte) (skillMetadata, error) {
 	if err := domain.ValidateRequiredDisplayMetadata(nameZHNode.Value, nameENNode.Value, descriptionZHNode.Value); err != nil {
 		return skillMetadata{}, fmt.Errorf("SKILL.md frontmatter %w", errors.Join(ErrInvalid, err))
 	}
+	if err := domain.ValidateDescription(descriptionNode.Value); err != nil {
+		return skillMetadata{}, fmt.Errorf("SKILL.md frontmatter %w", errors.Join(ErrInvalid, err))
+	}
 	return skillMetadata{
 		SchemaVersion: schemaVersion,
 		Name:          nameNode.Value,

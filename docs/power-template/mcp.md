@@ -42,6 +42,7 @@ MCP 提交对象是**单个完整 JSON 文件**（如 `my-mcp.json`），包含 
 约束：
 
 - `schema_version` 必须为 `2`；`name_zh`/`name_en`/`description_zh` 提交时必填，仅用于 APC 前端展示（`name_zh` 2–16 字符，`name_en` ≤ 32 个可打印 ASCII 字符且至少含一个字母）。
+- `description` 与 `description_zh` 均不超过 500 个 UTF-16 码元（与 APC 服务端一致，见 [ADR-042](../ivory-tower/adr/ADR-042-cap-description-length-to-apc-server-limit.md)）。
 - `transport` 只能是 `stdio` 或 `http`，且两种模式字段互斥：
   - stdio 要求非空 `command`，禁止 `url`；`args` 可选。
   - http 要求绝对 HTTPS `url`（无 userinfo），禁止 `command`/`args`。

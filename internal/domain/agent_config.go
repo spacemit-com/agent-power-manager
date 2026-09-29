@@ -81,6 +81,9 @@ func (config AgentConfig) ValidateSubmit() error {
 	if err := ValidateRequiredDisplayMetadata(config.Agent.NameZH, config.Agent.NameEN, config.Agent.DescriptionZH); err != nil {
 		return fmt.Errorf("agent.yaml %w", errors.Join(ErrInvalidAgent, err))
 	}
+	if err := ValidateDescription(config.Agent.Description); err != nil {
+		return fmt.Errorf("agent.yaml %w", errors.Join(ErrInvalidAgent, err))
+	}
 	return nil
 }
 

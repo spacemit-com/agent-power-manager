@@ -24,8 +24,12 @@ const (
 	maxDisplayNameZHChars = 16
 	// maxDisplayNameENChars 限定英文展示名的字符数（英文为可打印 ASCII，字符数等于字节数）。
 	maxDisplayNameENChars = 32
-	// maxDisplayDescriptionBytes 是 description_zh 允许的最大 UTF-8 字节数。
-	maxDisplayDescriptionBytes = 1024
+	// maxDescriptionUnits 限定 description 与 description_zh 的长度，单位是 **UTF-16 码元**：
+	// APC 服务端按 Java 口径计数，BMP 字符计 1、代理对（如 emoji）计 2，与 UTF-8 字节数无关。
+	// 端到端实测（测试环境，metadata 与 content 两侧一致）：两个字段都是 500 码元通过、
+	// 501 码元返回 400 VALIDATION_FAILED（`不能超过500个字符`）；500 个汉字（1500 字节）通过，
+	// 251 个 emoji（502 码元、1004 字节）被拒。见 ADR-042。
+	maxDescriptionUnits = 500
 	// asciiPrintableMin/asciiPrintableMax 定义英文展示名允许的可打印 ASCII 区间（0x20 空格到 0x7e 波浪号）。
 	asciiPrintableMin = 0x20
 	asciiPrintableMax = 0x7e
@@ -73,17 +77,45 @@ func ValidateDisplayNameEN(value string) error {
 	return nil
 }
 
-// ValidateDisplayDescriptionZH 校验中文描述：trim 后非空、不超过 1024 字节、不含 NUL 与控制字符
-// （允许换行与制表符，与 description 的自由文本语义一致）。
+// ValidateDisplayDescriptionZH 校验中文描述：trim 后非空、不超过 500 个 UTF-16 码元、
+// 不含 NUL 与控制字符（允许换行与制表符，与 description 的自由文本语义一致）。
+// 提交、目录解码与安装三条路径共用；实测已发布目录中该字段最大 190 码元、description 最大
+// 483 码元，均低于上限，因此收紧不会拒绝任何存量资源（ADR-042）。
 func ValidateDisplayDescriptionZH(value string) error {
 	if err := validateDisplayText("description_zh", value, true); err != nil {
 		return err
 	}
-	if len(value) > maxDisplayDescriptionBytes {
-		return fmt.Errorf("display field description_zh is %d bytes, exceeds %d bytes: %w",
-			len(value), maxDisplayDescriptionBytes, ErrInvalidDisplayMetadata)
+	if units := descriptionUnits(value); units > maxDescriptionUnits {
+		return fmt.Errorf("display field description_zh is %d UTF-16 code units, exceeds %d: %w",
+			units, maxDescriptionUnits, ErrInvalidDisplayMetadata)
 	}
 	return nil
+}
+
+// ValidateDescription 校验资源正文的 description 长度。该字段本身只要求 trim 后非空
+// （由各资源的元数据校验负责），此处只补上 APC 服务端的长度上限：与 description_zh 相同，
+// 均为 500 个 UTF-16 码元。上限来自服务端实测，客户端提前拦截可避免提交时才收到
+// `400 VALIDATION_FAILED description 不能超过500个字符`（该响应不指出发生在哪一类资源上）。
+func ValidateDescription(value string) error {
+	if units := descriptionUnits(value); units > maxDescriptionUnits {
+		return fmt.Errorf("description is %d UTF-16 code units, exceeds %d: %w",
+			units, maxDescriptionUnits, ErrInvalidDisplayMetadata)
+	}
+	return nil
+}
+
+// descriptionUnits 返回文本在 UTF-16 口径下的长度，与 APC 服务端（JVM/JS）一致：
+// BMP 内码点计 1，星光平面码点（emoji 等）以代理对计 2。UTF-8 字节数不参与该上限。
+func descriptionUnits(value string) int {
+	units := 0
+	for _, character := range value {
+		if character > 0xFFFF {
+			units += 2
+			continue
+		}
+		units++
+	}
+	return units
 }
 
 // ValidateOptionalDisplayMetadata 校验可选的展示字段：空值与空字符串视为未提供，

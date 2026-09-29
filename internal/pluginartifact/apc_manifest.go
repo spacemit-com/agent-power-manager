@@ -78,6 +78,9 @@ func ValidateSubmitAPCPluginManifest(ref domain.PowerRef, manifest APCPluginMani
 	if err := domain.ValidateRequiredDisplayMetadata(manifest.NameZH, manifest.NameEN, manifest.DescriptionZH); err != nil {
 		return fmt.Errorf("apc-plugin.json %w", errors.Join(ErrInvalid, err))
 	}
+	if err := domain.ValidateDescription(manifest.Description); err != nil {
+		return fmt.Errorf("apc-plugin.json %w", errors.Join(ErrInvalid, err))
+	}
 	return nil
 }
 

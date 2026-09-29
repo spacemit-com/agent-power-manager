@@ -61,8 +61,13 @@
 | `schema_version` | 各权威文件 | 必须为整数 2 | 必须为 1 或 2 |
 | `name_zh` | 各权威文件（Agent 为 `agent.name_zh`） | 必填，2–16 个 Unicode 字符，无控制字符 | 可选；提供时校验形状 |
 | `name_en` | 各权威文件（Agent 为 `agent.name_en`） | 必填，≤ 32 字符，全为可打印 ASCII 且至少一个字母 | 可选；提供时校验形状 |
-| `description_zh` | 各权威文件 | 必填，≤ 1024 字节，允许换行 | 可选；提供时校验形状 |
+| `description_zh` | 各权威文件 | 必填，≤ 500 个 UTF-16 码元，允许换行 | 可选；提供时校验形状 |
+| `description` | 各权威文件 | 必填且非空，≤ 500 个 UTF-16 码元 | 只要求非空 |
 | `name` | 不变 | canonical kebab（1–64 字节）；唯一调用名与排序键，不套用展示名长度规则 | 同左 |
+
+> `description` 与 `description_zh` 的 500 码元上限来自 APC 服务端实测（metadata 侧的
+> `submit.request.description` / `submit.request.descriptionZh`），计数单位为 UTF-16 码元而非字节；
+> 见 [ADR-042](../../adr/ADR-042-cap-description-length-to-apc-server-limit.md)。
 
 ### 3.3 派生边界
 

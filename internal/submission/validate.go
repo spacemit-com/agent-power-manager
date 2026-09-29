@@ -35,7 +35,9 @@ func Validate(ctx context.Context, request Request) (Validation, error) {
 	return loaded.validation, nil
 }
 
-// validateCommonMetadata 校验三类共用的元数据规则。
+// validateCommonMetadata 校验 Skill/Plugin 共用的元数据规则。
+// description 的长度上限不在这里：它属于 APC 服务端契约，与各类型的提交侧校验
+// （`ValidateSubmit*`）放在一起，避免同一规则被写在两处（ADR-042）。
 func validateCommonMetadata(name, version, description string) error {
 	if !domain.IsCanonicalPowerName(name) {
 		return fmt.Errorf("name %q is not canonical 1-64 lowercase kebab: %w", name, ErrInvalid)

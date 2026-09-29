@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -172,5 +173,42 @@ func TestOptionalDisplayMetadataSkipsEmptyFields(t *testing.T) {
 	}
 	if err := ValidateOptionalDisplayMetadata("演示", "演示", ""); err == nil {
 		t.Fatal("ValidateOptionalDisplayMetadata(non-ASCII name_en) error = nil, want rejection")
+	}
+}
+
+// TestDescriptionLengthLimit 锁定 description 与 description_zh 的 500 码元上限（ADR-042）。
+// 上限来自 APC 服务端实测：两个字段各 500 码元通过、501 码元返回 400 VALIDATION_FAILED；
+// 计数单位是 UTF-16 码元，因此 500 个汉字（1500 字节）通过，而 251 个 emoji（502 码元、
+// 1004 字节）被拒——按字节判断会得出相反的结论。
+func TestDescriptionLengthLimit(t *testing.T) {
+	atLimit := strings.Repeat("描", 500)
+	overLimit := strings.Repeat("描", 501)
+	// 500 个汉字 = 1500 字节；按字节判断会被误拒，必须放行。
+	if err := ValidateDisplayDescriptionZH(atLimit); err != nil {
+		t.Fatalf("ValidateDisplayDescriptionZH(500 CJK) error = %v, want nil", err)
+	}
+	if err := ValidateDescription(atLimit); err != nil {
+		t.Fatalf("ValidateDescription(500 CJK) error = %v, want nil", err)
+	}
+	// 501 个汉字 = 501 码元，超限。
+	if err := ValidateDisplayDescriptionZH(overLimit); err == nil {
+		t.Fatal("ValidateDisplayDescriptionZH(501 CJK) error = nil, want rejection")
+	}
+	if err := ValidateDescription(overLimit); err == nil {
+		t.Fatal("ValidateDescription(501 CJK) error = nil, want rejection")
+	}
+	// 代理对按 2 个码元计：250 个 emoji 正好 500 码元通过，251 个即 502 码元被拒。
+	if err := ValidateDescription(strings.Repeat("😀", 250)); err != nil {
+		t.Fatalf("ValidateDescription(250 emoji = 500 units) error = %v, want nil", err)
+	}
+	if err := ValidateDescription(strings.Repeat("😀", 251)); err == nil {
+		t.Fatal("ValidateDescription(251 emoji = 502 units) error = nil, want rejection")
+	}
+	// BMP 之外的补码字符只占 1 个 Unicode 码点但占 2 个码元，防止实现退回 RuneCountInString。
+	if err := ValidateDescription(strings.Repeat("é", 500)); err != nil {
+		t.Fatalf("ValidateDescription(500 é) error = %v, want nil", err)
+	}
+	if err := ValidateDescription(strings.Repeat("é", 501)); err == nil {
+		t.Fatal("ValidateDescription(501 é) error = nil, want rejection")
 	}
 }
