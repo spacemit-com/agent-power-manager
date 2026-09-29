@@ -65,7 +65,7 @@
 | MCP | 完整文件 JCS 规范化字节 | RFC 8785：键按 UTF-16 码元升序、字符串最小转义、数字按 ECMAScript 最短表示 |
 | Agent | 确定性 `tar.gz` | 根含 `agent.yaml` 与可选 `assets/`；MD5 针对归档原始字节 |
 
-`submit` 对四类统一计算打包/规范化后的字节 MD5，并在任何网络请求前拦截本地错误；`message` 属于一次 Submission，不写入资源文件、不参与 MD5。`name_zh`/`name_en`/`description_zh` 只存在于资源内容中，不上报为提交 metadata 字段。
+`submit` 对四类统一计算打包/规范化后的字节 MD5，并在任何网络请求前拦截本地错误；`message` 属于一次 Submission，不写入资源文件、不参与 MD5。提交 metadata 与 `content` 的资源元数据字段对齐：`name_zh`/`name_en`/`description_zh` 与资源格式版本 `schema_version` 一并上报，取值与资源文件完全一致（MCP 的 `definition` 同样两侧一致）；`type`/`message`/`content_md5` 是传输与校验字段，只出现在 metadata（[ADR-041](../ivory-tower/adr/ADR-041-align-submission-metadata-with-resource-content.md)）。
 
 ## 版本与兼容性
 

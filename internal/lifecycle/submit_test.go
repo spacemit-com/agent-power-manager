@@ -49,6 +49,11 @@ func TestSubmitPreparesAndUploads(t *testing.T) {
 	if request.Type != domain.PowerTypeSkill || request.Name != "demo" || request.Version != "v1.0.0" || request.Message != "first release" {
 		t.Fatalf("SubmissionRequest = %#v", request)
 	}
+	// metadata 的 schema_version 与展示字段必须来自资源文件，与 content 对齐（ADR-041）。
+	if request.SchemaVersion != domain.PowerSchemaVersionV2 ||
+		request.NameZH != "演示" || request.NameEN != "Demo" || request.DescriptionZH != "演示描述" {
+		t.Fatalf("SubmissionRequest metadata alignment = %#v, want v2 plus SKILL.md display fields", request)
+	}
 	if request.ContentType == "" || request.ContentMD5 == "" || request.IdempotencyKey == "" || len(request.Content) == 0 {
 		t.Fatalf("SubmissionRequest missing content fields: %#v", request)
 	}
@@ -83,6 +88,10 @@ func TestSubmitMCPCarriesDefinition(t *testing.T) {
 	}
 	if request.Definition == nil || request.Definition.Transport != domain.MCPTransportHTTP || request.Definition.URL != "https://mcp.example.com/mcp" {
 		t.Fatalf("SubmissionRequest definition = %#v, want http definition", request.Definition)
+	}
+	if request.SchemaVersion != domain.PowerSchemaVersionV2 ||
+		request.NameZH != "演示" || request.NameEN != "Demo" || request.DescriptionZH != "演示 MCP" {
+		t.Fatalf("MCP SubmissionRequest metadata alignment = %#v, want v2 plus MCP.json display fields", request)
 	}
 }
 

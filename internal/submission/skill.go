@@ -44,7 +44,9 @@ func (skillSourceLoader) Load(ctx context.Context, path string) (source, error) 
 	}
 	return source{
 		validation: Validation{
-			Type: domain.PowerTypeSkill, Name: metadata.Name, Version: metadata.Version, Description: metadata.Description,
+			Type: domain.PowerTypeSkill, SchemaVersion: metadata.SchemaVersion,
+			Name: metadata.Name, Version: metadata.Version, Description: metadata.Description,
+			NameZH: metadata.NameZH, NameEN: metadata.NameEN, DescriptionZH: metadata.DescriptionZH,
 			FileCount: snapshot.stats.fileCount, ContentSize: snapshot.stats.totalSize,
 		},
 		contentType: "application/gzip",

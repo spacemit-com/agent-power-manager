@@ -43,9 +43,13 @@ func (s *SubmitService) Submit(ctx context.Context, flags cli.Flags, args []stri
 	}
 	result, err := s.cloud.Submit(ctx, domain.SubmissionRequest{
 		Type:           content.Type,
+		SchemaVersion:  content.SchemaVersion,
 		Name:           content.Name,
 		Version:        content.Version,
 		Description:    content.Description,
+		NameZH:         content.NameZH,
+		NameEN:         content.NameEN,
+		DescriptionZH:  content.DescriptionZH,
 		Message:        content.Message,
 		Definition:     content.Definition,
 		ContentType:    content.ContentType,

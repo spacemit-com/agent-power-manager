@@ -38,6 +38,8 @@
 - 不修改 APC 目录契约、`../apc` 仓库文档与交付。
 - 不修改 `list` / `show` / `search` 的任何输出或匹配行为。
 - 不把展示字段写入本地 manifest、journal 或提交 metadata。
+  （**提交 metadata 一句已由 [ADR-041](../../adr/ADR-041-align-submission-metadata-with-resource-content.md) 取代**：
+  metadata 现与资源内容对齐，携带三个展示字段与资源格式版本；本地 manifest/journal 的结论不变。）
 - 不收紧 canonical `name`（仍为 1–64 字节小写 kebab），也不把中英文长度规则套用到它。
 - 不修改 APM CLI 的交互能力（不加提示、`--dry-run`、`--yes`）。
 - 不修改 `agents/<name>` 目录命名、安装落点与 Runtime 兼容逻辑。
@@ -111,6 +113,8 @@ ADR-038 只定义了资源文件里的字段，没有定义它们如何到达前
 - `search` 的输出与匹配语义一律不变（仍只匹配 `name`、仍不输出 `tags` 与展示字段）。
 - `list`、`list --all`、`show` 的**文本**输出逐字节不变。
 - 提交 metadata（multipart）不新增字段。
+  （**已由 [ADR-041](../../adr/ADR-041-align-submission-metadata-with-resource-content.md) 取代**：metadata 现新增
+  `name_zh`/`name_en`/`description_zh`，`schema_version` 改为资源格式版本。）
 - 派生 Agent 原生清单不新增字段；本地 manifest 与 journal 的 schema version 不变。
 
 ## 5. 验收

@@ -25,11 +25,20 @@ const (
 )
 
 // SubmissionRequest 表示一次提交上传请求；Content 是确定性打包或规范化后的字节。
+//
+// SchemaVersion 是资源格式版本，与 metadata 的 schema_version 同源：提交只接受 v2，
+// 因此 metadata 必须上报 2，而不是历史上与传输协议混用的常量 1。NameZH/NameEN/
+// DescriptionZH 是资源文件里的展示字段；metadata 与 content 必须携带同一组值，使 APC
+// 从任一侧都能重建同一份资源元数据（ADR-041）。
 type SubmissionRequest struct {
 	Type           PowerType
+	SchemaVersion  int
 	Name           string
 	Version        string
 	Description    string
+	NameZH         string
+	NameEN         string
+	DescriptionZH  string
 	Message        string
 	Definition     *MCPServer // 仅 MCP 提交携带；其余类型为 nil，不进入 metadata
 	ContentType    string     // "application/gzip" 或 "application/json"

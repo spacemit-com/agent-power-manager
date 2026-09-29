@@ -21,8 +21,10 @@ func (mcpSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	definition := resource.Definition.Clone()
 	return source{
 		validation: Validation{
-			Type: domain.PowerTypeMCP, Name: resource.Name, Version: resource.Version,
-			Description: resource.Description, FileCount: 1, ContentSize: int64(len(raw)),
+			Type: domain.PowerTypeMCP, SchemaVersion: resource.SchemaVersion,
+			Name: resource.Name, Version: resource.Version, Description: resource.Description,
+			NameZH: resource.NameZH, NameEN: resource.NameEN, DescriptionZH: resource.DescriptionZH,
+			FileCount: 1, ContentSize: int64(len(raw)),
 		},
 		contentType: "application/json",
 		definition:  &definition,

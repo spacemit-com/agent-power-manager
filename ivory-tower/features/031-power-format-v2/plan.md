@@ -16,6 +16,8 @@
 - 派生 Agent 原生清单不携带展示字段，`reflect.DeepEqual` 复验必须继续通过。
 - 不改 APC 目录 item 契约以外的 `../apc` 仓库内容；`search` 输出与匹配语义、文本渲染与提交 metadata 不变
   （ADR-040 局部取代「APC 目录契约与 `list`/`show` JSON 输出不变」两处决定）。
+  「提交 metadata 不变」一句已由
+  [ADR-041](../../adr/ADR-041-align-submission-metadata-with-resource-content.md) 取代：metadata 现与资源内容字段对齐。
 - 新增/修改接口代码添加简短规范中文注释。
 
 ## Task 1：领域层展示字段与版本常量

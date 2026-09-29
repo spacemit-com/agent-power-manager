@@ -17,25 +17,34 @@ type Request struct {
 }
 
 // Validation 描述 validate 的输出（身份、统计与警告，不含打包字节）。
+// SchemaVersion 与三个展示字段与资源文件同源，供上游拼装与 content 对齐的 metadata。
 type Validation struct {
-	Type        domain.PowerType
-	Name        string
-	Version     string
-	Description string
-	FileCount   int
-	ContentSize int64
-	Warnings    []string
+	Type          domain.PowerType
+	SchemaVersion int
+	Name          string
+	Version       string
+	Description   string
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
+	FileCount     int
+	ContentSize   int64
+	Warnings      []string
 }
 
 // Content 描述 submit 确定性打包或规范化后的内容与身份。
 type Content struct {
-	Type        domain.PowerType
-	Name        string
-	Version     string
-	Description string
-	Message     string
-	Definition  *domain.MCPServer // 仅 MCP 提交携带
-	ContentType string
-	Bytes       []byte
-	MD5         string
+	Type          domain.PowerType
+	SchemaVersion int
+	Name          string
+	Version       string
+	Description   string
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
+	Message       string
+	Definition    *domain.MCPServer // 仅 MCP 提交携带
+	ContentType   string
+	Bytes         []byte
+	MD5           string
 }

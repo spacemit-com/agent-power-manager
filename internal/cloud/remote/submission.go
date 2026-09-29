@@ -25,12 +25,21 @@ var _ cloud.Submission = (*Client)(nil)
 const maxActiveSubmissions = 20
 
 // submissionMetadataDTO 是 multipart 中 metadata part 的传输类型。
+//
+// 字段与 content part 里的资源元数据对齐：身份、描述与本地化展示字段同名同义，
+// schema_version 取资源格式版本（提交侧恒为 2，不再是与传输协议混用的常量 1），
+// 使 APC 从 metadata 或 content 任一侧都能重建同一份资源元数据（ADR-041）。
+// type 是路由信息、message 是本次提交说明、content_md5 是传输完整性校验，
+// 三者不属于资源元数据，仅存在于 metadata。
 type submissionMetadataDTO struct {
 	SchemaVersion int               `json:"schema_version"`
 	Type          domain.PowerType  `json:"type"`
 	Name          string            `json:"name"`
 	Version       string            `json:"version"`
 	Description   string            `json:"description"`
+	NameZH        string            `json:"name_zh"`
+	NameEN        string            `json:"name_en"`
+	DescriptionZH string            `json:"description_zh"`
 	Message       string            `json:"message"`
 	Definition    *domain.MCPServer `json:"definition,omitempty"`
 	ContentMD5    string            `json:"content_md5"`
@@ -101,12 +110,20 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 	if request.Type == domain.PowerTypeMCP && request.Definition == nil {
 		return domain.SubmissionResult{}, errors.New("submit remote MCP resource requires definition")
 	}
+	// metadata 的 schema_version 与资源格式版本同源；提交侧只产出 v2，缺失或其它取值
+	// 说明调用方没有把资源版本传下来，必须 fail closed（ADR-041）。
+	if request.SchemaVersion != domain.PowerSchemaVersionV2 {
+		return domain.SubmissionResult{}, fmt.Errorf("submit remote resource requires resource schema version %d, got %d", domain.PowerSchemaVersionV2, request.SchemaVersion)
+	}
 	metadata, err := json.Marshal(submissionMetadataDTO{
-		SchemaVersion: 1,
+		SchemaVersion: request.SchemaVersion,
 		Type:          request.Type,
 		Name:          request.Name,
 		Version:       request.Version,
 		Description:   request.Description,
+		NameZH:        request.NameZH,
+		NameEN:        request.NameEN,
+		DescriptionZH: request.DescriptionZH,
 		Message:       message,
 		Definition:    request.Definition,
 		ContentMD5:    request.ContentMD5,

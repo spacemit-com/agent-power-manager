@@ -68,8 +68,12 @@ func (pluginSourceLoader) Load(ctx context.Context, path string) (source, error)
 	}
 	return source{
 		validation: Validation{
-			Type: domain.PowerTypePlugin, Name: snapshotManifest.Name, Version: snapshotManifest.Version,
-			Description: snapshotManifest.Description, FileCount: snapshot.stats.fileCount, ContentSize: snapshot.stats.totalSize,
+			Type: domain.PowerTypePlugin, SchemaVersion: snapshotManifest.SchemaVersion,
+			Name: snapshotManifest.Name, Version: snapshotManifest.Version,
+			Description: snapshotManifest.Description,
+			NameZH:      snapshotManifest.NameZH, NameEN: snapshotManifest.NameEN,
+			DescriptionZH: snapshotManifest.DescriptionZH,
+			FileCount:     snapshot.stats.fileCount, ContentSize: snapshot.stats.totalSize,
 		},
 		contentType: "application/gzip",
 		build:       snapshot.build,

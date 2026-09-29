@@ -903,36 +903,43 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 	}
 
 	submissions := []struct {
-		powerType   domain.PowerType
-		path        string
-		name        string
-		version     string
-		description string
-		contentType string
+		powerType     domain.PowerType
+		path          string
+		name          string
+		version       string
+		description   string
+		contentType   string
+		nameZH        string
+		nameEN        string
+		descriptionZH string
 	}{
 		{
 			powerType: domain.PowerTypeSkill,
 			path:      skillRoot,
 			name:      "contract-skill", version: "v1.2.3",
 			description: "Cross-layer Skill", contentType: "application/gzip",
+			nameZH: "契约技能", nameEN: "Contract Skill", descriptionZH: "跨层契约技能",
 		},
 		{
 			powerType: domain.PowerTypePlugin,
 			path:      pluginRoot,
 			name:      "contract-plugin", version: "v2.0.0",
 			description: "Cross-layer Plugin", contentType: "application/gzip",
+			nameZH: "契约插件", nameEN: "Contract Plugin", descriptionZH: "跨层契约插件",
 		},
 		{
 			powerType: domain.PowerTypeMCP,
 			path:      filepath.Join(root, "mcps", "filesystem", "v0.1.0", "MCP.json"),
 			name:      "filesystem", version: "v0.1.0",
 			description: "Filesystem MCP server with a workspace root", contentType: "application/json",
+			nameZH: "文件系统", nameEN: "Filesystem MCP", descriptionZH: "带工作区根目录的文件系统 MCP 服务。",
 		},
 		{
 			powerType: domain.PowerTypeAgent,
 			path:      filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0"),
 			name:      "bianbu-agent-default", version: "v1.0.0",
 			description: "Project-local Bianbu agent", contentType: "application/gzip",
+			nameZH: "Bianbu 默认助手", nameEN: "Bianbu Default Agent", descriptionZH: "项目本地的 Bianbu 智能体。",
 		},
 	}
 	for _, test := range submissions {
@@ -947,7 +954,8 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 			if result.Outcome != string(domain.SubmissionAccepted) || result.SubmissionID != "sub_"+string(test.powerType) || result.Status != string(domain.SubmissionReceived) {
 				t.Fatalf("Submit() = %#v, want accepted/received", result)
 			}
-			server.assertReceivedSubmission(t, test.powerType, test.name, test.version, test.description, message, test.contentType)
+			server.assertReceivedSubmission(t, test.powerType, test.name, test.version, test.description, message, test.contentType,
+				test.nameZH, test.nameEN, test.descriptionZH)
 			if test.powerType == domain.PowerTypeMCP {
 				server.assertReceivedMCPDefinition(t, domain.MCPServer{
 					Transport: domain.MCPTransportStdio,

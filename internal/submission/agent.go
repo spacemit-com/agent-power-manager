@@ -46,8 +46,12 @@ func (agentSourceLoader) Load(ctx context.Context, path string) (source, error) 
 	}
 	return source{
 		validation: Validation{
-			Type: domain.PowerTypeAgent, Name: validated.Config.Agent.Name, Version: validated.Config.Agent.Version,
-			Description: validated.Config.Agent.Description, FileCount: validated.FileCount, ContentSize: validated.ContentSize,
+			Type: domain.PowerTypeAgent, SchemaVersion: validated.Config.SchemaVersion,
+			Name: validated.Config.Agent.Name, Version: validated.Config.Agent.Version,
+			Description: validated.Config.Agent.Description,
+			NameZH:      validated.Config.Agent.NameZH, NameEN: validated.Config.Agent.NameEN,
+			DescriptionZH: validated.Config.Agent.DescriptionZH,
+			FileCount:     validated.FileCount, ContentSize: validated.ContentSize,
 			Warnings: agentIdentityWarnings(validated.Config.Agent),
 		},
 		contentType: "application/gzip",

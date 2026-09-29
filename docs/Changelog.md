@@ -2,6 +2,35 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-29（提交 metadata 与资源 content 字段对齐）
+
+分类：契约变更（提交 metadata 新增三个展示字段；metadata `schema_version` 由协议常量 `1` 改为资源格式版本 `2`）
+
+用户需求：端到端探测发现 APC 发布 MCP 时并用的是 metadata 而不是上传的 content，导致 v2 展示字段
+「提交能过审、发布即丢」，且发布件回退成 v1 骨架、无法原样再提交。用户确认 APC 会改成从 content 重建，
+并要求 metadata 与 content 的字段对齐：补齐新字段，且 metadata 的 `schema_version` 与资源版本一致，
+四类资源都改。
+
+解决方案或完成结果：`submissionMetadataDTO` 新增 `name_zh`/`name_en`/`description_zh`，取值与资源文件
+完全一致；`schema_version` 改为取 `SubmissionRequest.SchemaVersion`，即资源格式版本（提交侧只接受 v2，
+实际恒为 2），非 v2 或缺失时在发请求前 fail closed。`type`/`message`/`content_md5`（及 MCP 的
+`definition`）作为传输专有字段保留。版本来源仍是资源文件：`submission.Validation`/`submission.Content`
+新增 `SchemaVersion`，四个 loader 分别从 `SKILL.md` frontmatter、`apc-plugin.json`、`MCP.json`、
+`agent.yaml` 取值，lifecycle 只做透传。
+
+关键决策（见 [ADR-041](../ivory-tower/adr/ADR-041-align-submission-metadata-with-resource-content.md)，
+局部取代 ADR-038 第 7 条与 ADR-040 Context 中「提交 metadata 不上报展示字段」两处决定）：
+
+- **metadata 与 content 同源**：资源元数据字段（`name`/`version`/`description`/`name_zh`/`name_en`/
+  `description_zh`/`schema_version` 及 MCP 的 `definition`）在两侧逐字段相等；对齐由
+  `TestSubmitMetadataMirrorsResourceContent` 固定。
+- **`schema_version` 只表达资源格式版本**：不再与传输协议常量混用同一键名；缺失或非 2 在上传前拒绝。
+- **四类一致**：不做按类型分支，避免前端与 APC 需要区分 MCP 与其余三类。
+
+边界：不改 `../apc` 仓库与 `APC-API.md` 之外的 APC 实现（重建逻辑由 APC 侧交付）、不改目录 item 契约与
+`list`/`show`/`search` 输出、不改安装侧 v1 兼容语义、不改 content 的打包与 JCS 规范化、不追溯重发历史 MCP。
+发布顺序：APC 先改成从 content 重建，APM 与之同步；已发布的 MCP 条目内容不会追溯变化。
+
 ## 2026-09-28（目录与 CLI JSON 携带 v2 展示字段，打通到前端）
 
 分类：契约变更（APC 目录 item 新增可选字段；`list --json`/`show --json` 输出新增字段）

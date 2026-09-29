@@ -231,10 +231,17 @@ Authorization: Bearer your-api-key-here
 | `name` | 是 | string | 资源名称，kebab-case 格式（小写字母、数字、连字符） |
 | `version` | 是 | string | 版本号，格式 `vMAJOR.MINOR.PATCH`（如 `v1.0.0`） |
 | `description` | 否 | string | 资源描述 |
+| `name_zh` | 是 | string | 中文展示名，与 `content` 中资源文件的 `name_zh` 一致（2–16 字符） |
+| `name_en` | 是 | string | 英文展示名，与 `content` 中资源文件的 `name_en` 一致（≤ 32 个可打印 ASCII 字符且至少含一个字母） |
+| `description_zh` | 是 | string | 中文描述，与 `content` 中资源文件的 `description_zh` 一致（≤ 1024 字节） |
 | `message` | 否 | string | 本次发布说明 |
-| `schema_version` | 是 | int | Schema 版本，目前固定为 1 |
+| `schema_version` | 是 | int | 资源格式版本，与 `content` 中资源文件的 `schema_version` 一致；当前固定为 `2` |
 | `content_md5` | mcp 可选，其余必需 | string | 文件 MD5 校验值（客户端预计算，服务端校验） |
 | `definition` | mcp 必需，其余不携带 | object | MCP 启动定义（`transport` + `url` 或 `command`/`args`），与资源文件内 `definition` 完全一致 |
+
+> 对齐要求：`name`/`version`/`description`/`name_zh`/`name_en`/`description_zh`/`schema_version`
+> （MCP 另含 `definition`）是资源元数据，必须在 metadata 与 content 两侧逐字段相等，使服务端从任一侧都能
+> 重建同一份资源数据。`type`/`message`/`content_md5` 是传输专有字段，只出现在 metadata，不写入内容文件。
 
 **metadata 示例**：
 ```json
@@ -243,8 +250,11 @@ Authorization: Bearer your-api-key-here
   "name": "code-review-helper",
   "version": "v1.0.0",
   "description": "代码审查助手",
+  "name_zh": "代码审查助手",
+  "name_en": "Code Review Helper",
+  "description_zh": "对提交的代码做结构化审查并给出可执行修改建议。",
   "message": "首次发布",
-  "schema_version": 1,
+  "schema_version": 2,
   "content_md5": "0274020ce87b4b9c067786d8fdf342ef"
 }
 ```
@@ -256,8 +266,11 @@ Authorization: Bearer your-api-key-here
   "name": "nws",
   "version": "v1.0.0",
   "description": "通过 HTTPS 连接 nws 远程 MCP 服务",
+  "name_zh": "NWS 天气",
+  "name_en": "NWS Weather",
+  "description_zh": "通过 HTTPS 连接 nws 远程服务，查询天气预报数据。",
   "message": "提交 nws v1.0.0",
-  "schema_version": 1,
+  "schema_version": 2,
   "content_md5": "d9f294be184422726e05eb6bae66fa8c",
   "definition": {
     "transport": "http",
@@ -267,7 +280,8 @@ Authorization: Bearer your-api-key-here
 ```
 
 > 说明：`definition` 仅 MCP 提交携带，且必须与 `content` part 中资源文件内的 `definition` 一致；
-> 服务端据此在发布阶段还原资源文件。skill/plugin/agent 的 metadata 不携带该字段。
+> skill/plugin/agent 的 metadata 不携带该字段。发布阶段的数据以 `content` part 中的资源文件为权威来源；
+> metadata 是同一次提交的传输副本，字段已与之对齐（[ADR-041](ivory-tower/adr/ADR-041-align-submission-metadata-with-resource-content.md)）。
 
 **content 文件格式**：
 | 资源类型 | 文件格式 |
@@ -494,7 +508,7 @@ Authorization: Bearer your-api-key-here
 # 提交 metadata + 文件
 curl -X POST https://www.spacemit.com/api-server/apc/api/v1/submissions \
   -H "Authorization: Bearer your-api-key" \
-  -F 'metadata={"type":"skill","name":"code-review-helper","version":"v1.0.0","description":"代码审查助手","message":"首次发布","schema_version":1,"content_md5":"0274020ce87b4b9c067786d8fdf342ef"}' \
+  -F 'metadata={"type":"skill","name":"code-review-helper","version":"v1.0.0","description":"代码审查助手","name_zh":"代码审查助手","name_en":"Code Review Helper","description_zh":"对提交的代码做结构化审查并给出可执行修改建议。","message":"首次发布","schema_version":2,"content_md5":"0274020ce87b4b9c067786d8fdf342ef"}' \
   -F "content=@code-review-helper-v1.0.0.tar.gz"
 
 # 响应 202 Accepted
@@ -562,9 +576,15 @@ curl -L "https://www.spacemit.com/api-server/apc/api/v1/resources/skill/code-rev
 
 ---
 
-**文档版本**：v1.3  
-**最后更新**：2026-09-24  
-**来源**：`ResourceController.java`、`SubmissionController.java`、`ivory-tower/features/028-apc-api-adaptation/live-probe.md`（2026-09-03/04 测试环境只读探测）、2026-09-24 生产环境与测试环境实测、ADR-026、ADR-037
+**文档版本**：v1.4  
+**最后更新**：2026-09-29  
+**来源**：`ResourceController.java`、`SubmissionController.java`、`ivory-tower/features/028-apc-api-adaptation/live-probe.md`（2026-09-03/04 测试环境只读探测）、2026-09-24 生产环境与测试环境实测、2026-09-29 MCP 发布行为实测、ADR-026、ADR-037、ADR-041
+
+**v1.4 修订说明**：2026-09-29 实测发现 MCP 发布阶段并用 metadata 而非上传的 `content`（发布件字段集等于
+metadata、`schema_version` 为 1、v2 展示字段丢失），据此把 metadata 与 `content` 的字段对齐要求写进
+§2.1：metadata 补齐 `name_zh`/`name_en`/`description_zh`，`schema_version` 改为资源格式版本（当前固定为 2），
+并明确 `type`/`message`/`content_md5` 是传输专有字段。APC 侧将改为从 `content` 重建，两侧字段集保持一致后
+任一侧都能重建同一份资源数据。决策见 [ADR-041](ivory-tower/adr/ADR-041-align-submission-metadata-with-resource-content.md)。
 
 **v1.3 修订说明**：生产环境入口由早期记载的 `developer.spacemit.com` 更正为
 `www.spacemit.com`（该主机 2026-09-24 实测 200，`developer.spacemit.com` 全路径 301 跳社区页），

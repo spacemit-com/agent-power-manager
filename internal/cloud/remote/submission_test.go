@@ -70,12 +70,88 @@ func readSubmissionParts(t *testing.T, r *http.Request) (map[string]any, string,
 	return metadata, contentType, filename, content
 }
 
+// TestSubmitMetadataMirrorsResourceContent 固定 metadata 与 content 的对齐契约：
+// schema_version 取资源格式版本（v2），展示字段与资源内容同源；缺失方案版本必须 fail closed，
+// 使 APC 从 metadata 或 content 任一侧重建出同一份资源元数据（ADR-041）。
+func TestSubmitMetadataMirrorsResourceContent(t *testing.T) {
+	t.Run("v2 with display fields", func(t *testing.T) {
+		var rawMetadata []byte
+		var rawContent []byte
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			metadata, _, _, content := readSubmissionParts(t, r)
+			encoded, err := json.Marshal(metadata)
+			if err != nil {
+				t.Fatalf("marshal metadata: %v", err)
+			}
+			rawMetadata, rawContent = encoded, content
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/s"}`))
+		}))
+		defer server.Close()
+		client := newTestSubmissionClient(t, server)
+		resource := []byte(`{"schema_version":2,"name":"demo","name_zh":"演示","name_en":"Demo","version":"v1.0.0","description":"demo mcp","description_zh":"演示 MCP","definition":{"transport":"stdio","command":"demo-mcp"}}`)
+		_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+			Type: domain.PowerTypeMCP, SchemaVersion: domain.PowerSchemaVersionV2,
+			Name: "demo", Version: "v1.0.0", Description: "demo mcp",
+			NameZH: "演示", NameEN: "Demo", DescriptionZH: "演示 MCP",
+			Message: "first", Definition: &domain.MCPServer{Transport: domain.MCPTransportStdio, Command: "demo-mcp"},
+			ContentType: "application/json", Content: resource, ContentMD5: md5Hex(resource), IdempotencyKey: "k",
+		})
+		if err != nil {
+			t.Fatalf("Submit() error = %v", err)
+		}
+		var metadata map[string]any
+		if err := json.Unmarshal(rawMetadata, &metadata); err != nil {
+			t.Fatalf("decode metadata: %v", err)
+		}
+		var contentMap map[string]any
+		if err := json.Unmarshal(rawContent, &contentMap); err != nil {
+			t.Fatalf("decode content: %v", err)
+		}
+		// 资源元数据字段必须在两侧逐字段相等；schema_version 同为资源格式版本。
+		for _, key := range []string{"name", "version", "description", "name_zh", "name_en", "description_zh", "schema_version"} {
+			if !reflect.DeepEqual(metadata[key], contentMap[key]) {
+				t.Fatalf("metadata[%q] = %#v, content[%q] = %#v; want identical", key, metadata[key], key, contentMap[key])
+			}
+		}
+		// definition 是资源内容的一部分，metadata 也必须携带同一份。
+		if !reflect.DeepEqual(metadata["definition"], contentMap["definition"]) {
+			t.Fatalf("metadata definition = %#v, content definition = %#v", metadata["definition"], contentMap["definition"])
+		}
+		// type 与 content_md5 是 metadata 专有的传输字段，不属于资源内容。
+		if _, present := contentMap["type"]; present {
+			t.Fatalf("content must not carry the transport-only field type: %#v", contentMap)
+		}
+		if metadata["type"] != "mcp" || metadata["content_md5"] != md5Hex(rawContent) {
+			t.Fatalf("transport fields = %#v", metadata)
+		}
+	})
+
+	t.Run("missing schema version fails closed", func(t *testing.T) {
+		requests := 0
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+		defer server.Close()
+		client := newTestSubmissionClient(t, server)
+		_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+			Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "schema version") {
+			t.Fatalf("Submit() error = %v, want schema-version error", err)
+		}
+		if requests != 0 {
+			t.Fatalf("server requests = %d, want 0", requests)
+		}
+	})
+}
+
 func TestSubmitAgentUsesGzipPart(t *testing.T) {
 	raw := []byte("schema_version: 1\nagent: {id: demo, name: demo, version: v1.0.0, description: demo, soul: help}\n")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metadata, contentType, filename, content := readSubmissionParts(t, r)
-		if metadata["schema_version"] != float64(1) || metadata["type"] != "agent" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
-			metadata["description"] != "demo" || metadata["message"] != "first" || metadata["content_md5"] != md5Hex(raw) {
+		if metadata["schema_version"] != float64(2) || metadata["type"] != "agent" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
+			metadata["description"] != "demo" || metadata["message"] != "first" || metadata["content_md5"] != md5Hex(raw) ||
+			metadata["name_zh"] != "演示代理" || metadata["name_en"] != "Demo Agent" || metadata["description_zh"] != "演示用 Agent" {
 			t.Fatalf("metadata = %#v", metadata)
 		}
 		if _, legacy := metadata["change_summary"]; legacy {
@@ -94,7 +170,9 @@ func TestSubmitAgentUsesGzipPart(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0", Description: "demo",
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0", Description: "demo",
+		NameZH: "演示代理", NameEN: "Demo Agent", DescriptionZH: "演示用 Agent",
 		Message: "first", ContentType: "application/gzip", Content: raw,
 		ContentMD5: md5Hex(raw), IdempotencyKey: "7d7e6d70-13ec-4cd5-9ad6-37e49e861ac2",
 	})
@@ -115,8 +193,9 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 		gotAPIKeyValues = r.Header.Values("X-API-Key")
 		gotIdem = r.Header.Get("Idempotency-Key")
 		metadata, contentType, _, content := readSubmissionParts(t, r)
-		if metadata["schema_version"] != float64(1) || metadata["type"] != "skill" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
-			metadata["description"] != "does things" || metadata["message"] != "first" || metadata["content_md5"] != "md5" {
+		if metadata["schema_version"] != float64(2) || metadata["type"] != "skill" || metadata["name"] != "demo" || metadata["version"] != "v1.0.0" ||
+			metadata["description"] != "does things" || metadata["message"] != "first" || metadata["content_md5"] != "md5" ||
+			metadata["name_zh"] != "演示技能" || metadata["name_en"] != "Demo Skill" || metadata["description_zh"] != "演示用技能" {
 			t.Fatalf("metadata = %#v", metadata)
 		}
 		if _, legacy := metadata["change_summary"]; legacy {
@@ -136,8 +215,10 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 
 	client := newTestSubmissionClientWithKey(t, server, "official-key")
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0",
-		Description: "does things", Message: "  first  ",
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0",
+		Description: "does things", NameZH: "演示技能", NameEN: "Demo Skill", DescriptionZH: "演示用技能",
+		Message:     "  first  ",
 		ContentType: "application/gzip", Content: []byte("bytes"), ContentMD5: "md5", IdempotencyKey: "k",
 	})
 	if err != nil {
@@ -185,7 +266,8 @@ func TestSubmitMCPIncludesDefinitionInMetadata(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0", Description: "demo mcp",
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0", Description: "demo mcp",
 		Message: "first", Definition: &domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://mcp.example.com/mcp"},
 		ContentType: "application/json", Content: content, ContentMD5: md5Hex(content), IdempotencyKey: "k",
 	})
@@ -202,7 +284,8 @@ func TestSubmitRejectsMCPWithoutDefinitionBeforeRequest(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeMCP, Message: "fixture", ContentType: "application/json", Content: []byte("x"),
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeMCP, Message: "fixture", ContentType: "application/json", Content: []byte("x"),
 	})
 	if err == nil || !strings.Contains(err.Error(), "requires definition") {
 		t.Fatalf("Submit() error = %v, want requires-definition error", err)
@@ -222,7 +305,8 @@ func TestSubmitRejectsMissingOrBlankMessageBeforeRequest(t *testing.T) {
 
 	for _, message := range []string{"", " \t\n"} {
 		_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-			Type: domain.PowerTypeSkill, Message: message, ContentType: "application/gzip", Content: []byte("x"),
+			SchemaVersion: 2,
+			Type:          domain.PowerTypeSkill, Message: message, ContentType: "application/gzip", Content: []byte("x"),
 		})
 		if err == nil || !strings.Contains(err.Error(), "message is required") {
 			t.Fatalf("Submit(message=%q) error = %v, want required-message error", message, err)
@@ -242,7 +326,8 @@ func TestSubmitReturnsSameContentReplayedResult(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
 		Message: "first release", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if err != nil {
@@ -264,7 +349,8 @@ func TestSubmitAcceptsUnknownResponseFields(t *testing.T) {
 		defer server.Close()
 		client := newTestSubmissionClient(t, server)
 		got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-			Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+			SchemaVersion: 2,
+			Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 		})
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
@@ -283,7 +369,8 @@ func TestSubmitAcceptsUnknownResponseFields(t *testing.T) {
 		defer server.Close()
 		client := newTestSubmissionClient(t, server)
 		got, err := client.Submit(context.Background(), domain.SubmissionRequest{
-			Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
+			SchemaVersion: 2,
+			Type:          domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
 			Message: "first release", ContentType: "application/gzip", Content: []byte("x"),
 		})
 		if err != nil {
@@ -306,7 +393,8 @@ func TestSubmitRejectsOther2xxStatus(t *testing.T) {
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
 			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-				Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+				SchemaVersion: 2,
+				Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 			})
 			if !errors.Is(err, cloud.ErrInvalidResponse) {
 				t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
@@ -327,7 +415,8 @@ func TestSubmitRejectsShapeMismatch(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrInvalidResponse) {
 		t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
@@ -357,7 +446,8 @@ func TestSubmitRejectsMalformedAcceptedResponse(t *testing.T) {
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
 			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-				Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+				SchemaVersion: 2,
+				Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 			})
 			if !errors.Is(err, cloud.ErrInvalidResponse) {
 				t.Fatalf("Submit() error = %v, want ErrInvalidResponse", err)
@@ -377,11 +467,16 @@ func TestSubmitRejectsContentTypeMismatchBeforeRequest(t *testing.T) {
 		name    string
 		request domain.SubmissionRequest
 	}{
-		{name: "unknown type", request: domain.SubmissionRequest{Type: domain.PowerType("workflow"), Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
-		{name: "skill with yaml", request: domain.SubmissionRequest{Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
-		{name: "plugin with json", request: domain.SubmissionRequest{Type: domain.PowerTypePlugin, Message: "fixture", ContentType: "application/json", Content: []byte("x")}},
-		{name: "mcp with gzip", request: domain.SubmissionRequest{Type: domain.PowerTypeMCP, Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
-		{name: "agent with yaml", request: domain.SubmissionRequest{Type: domain.PowerTypeAgent, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
+		{name: "unknown type", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerType("workflow"), Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
+		{name: "skill with yaml", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
+		{name: "plugin with json", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerTypePlugin, Message: "fixture", ContentType: "application/json", Content: []byte("x")}},
+		{name: "mcp with gzip", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerTypeMCP, Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
+		{name: "agent with yaml", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerTypeAgent, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -412,8 +507,8 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				metadata, contentType, _, _ := readSubmissionParts(t, r)
 				gotContentType = contentType
-				if metadata["schema_version"] != float64(1) {
-					t.Fatalf("metadata schema_version = %#v, want 1", metadata["schema_version"])
+				if metadata["schema_version"] != float64(2) {
+					t.Fatalf("metadata schema_version = %#v, want 2", metadata["schema_version"])
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusAccepted)
@@ -422,7 +517,8 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
 			request := domain.SubmissionRequest{
-				Type: tt.requestType, Message: "fixture", ContentType: tt.contentType, Content: []byte("x"),
+				SchemaVersion: 2,
+				Type:          tt.requestType, Message: "fixture", ContentType: tt.contentType, Content: []byte("x"),
 				ContentMD5: "x", IdempotencyKey: "k",
 			}
 			if tt.requestType == domain.PowerTypeMCP {
@@ -445,11 +541,16 @@ func TestSubmissionFilename(t *testing.T) {
 		request domain.SubmissionRequest
 		want    string
 	}{
-		{name: "skill", request: domain.SubmissionRequest{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.tar.gz"},
-		{name: "plugin", request: domain.SubmissionRequest{Type: domain.PowerTypePlugin, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.tar.gz"},
-		{name: "agent", request: domain.SubmissionRequest{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.2.3"}, want: "demo-agent-v1.2.3.tar.gz"},
-		{name: "mcp", request: domain.SubmissionRequest{Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.json"},
-		{name: "unknown type", request: domain.SubmissionRequest{Type: domain.PowerType("workflow"), Name: "demo", Version: "v1.0.0"}, want: ""},
+		{name: "skill", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.tar.gz"},
+		{name: "plugin", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerTypePlugin, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.tar.gz"},
+		{name: "agent", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.2.3"}, want: "demo-agent-v1.2.3.tar.gz"},
+		{name: "mcp", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.json"},
+		{name: "unknown type", request: domain.SubmissionRequest{
+			SchemaVersion: 2, Type: domain.PowerType("workflow"), Name: "demo", Version: "v1.0.0"}, want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -485,7 +586,8 @@ func TestSubmitWritesMultipartContentFilenames(t *testing.T) {
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
 			request := domain.SubmissionRequest{
-				Type: tt.requestType, Name: "demo", Version: "v1.0.0", Message: "fixture",
+				SchemaVersion: 2,
+				Type:          tt.requestType, Name: "demo", Version: "v1.0.0", Message: "fixture",
 				ContentType: tt.contentType, Content: []byte("x"), ContentMD5: "x", IdempotencyKey: "k",
 			}
 			if tt.requestType == domain.PowerTypeMCP {
@@ -515,7 +617,8 @@ func TestSubmitMultipartFilenameEscaping(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Name: weirdName, Version: "v1.0.0", Message: "fixture",
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Name: weirdName, Version: "v1.0.0", Message: "fixture",
 		ContentType: "application/gzip", Content: []byte("x"), ContentMD5: "x", IdempotencyKey: "k",
 	})
 	if err != nil {
@@ -533,7 +636,8 @@ func TestSubmitRequiresAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	if _, err := client.Submit(context.Background(), domain.SubmissionRequest{Content: []byte("x"), ContentType: "application/gzip"}); !errors.Is(err, cloud.ErrAuth) {
+	if _, err := client.Submit(context.Background(), domain.SubmissionRequest{
+		SchemaVersion: 2, Content: []byte("x"), ContentType: "application/gzip"}); !errors.Is(err, cloud.ErrAuth) {
 		t.Fatalf("Submit() error = %v, want ErrAuth", err)
 	}
 }
@@ -547,7 +651,8 @@ func TestSubmitMaps401(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrAuth) {
 		t.Fatalf("Submit() error = %v, want ErrAuth", err)
@@ -566,7 +671,8 @@ func TestSubmitMaps409(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrSubmissionConflict) {
 		t.Fatalf("Submit() error = %v, want ErrSubmissionConflict", err)
@@ -585,7 +691,8 @@ func TestSubmitMaps409AlreadyPublished(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrAlreadyPublished) || !errors.Is(err, cloud.ErrSubmissionConflict) {
 		t.Fatalf("Submit() error = %v, want both ErrAlreadyPublished and ErrSubmissionConflict", err)
@@ -604,7 +711,8 @@ func TestSubmitMaps409TooManyActiveSubmissions(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrTooManyActiveSubmissions) || !errors.Is(err, cloud.ErrSubmissionConflict) {
 		t.Fatalf("Submit() error = %v, want both ErrTooManyActiveSubmissions and ErrSubmissionConflict", err)
@@ -626,7 +734,8 @@ func TestSubmitMaps503(t *testing.T) {
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
 	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-		Type: domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
+		SchemaVersion: 2,
+		Type:          domain.PowerTypeSkill, Message: "fixture", ContentType: "application/gzip", Content: []byte("x"),
 	})
 	if !errors.Is(err, cloud.ErrUnavailable) {
 		t.Fatalf("Submit() error = %v, want ErrUnavailable", err)
@@ -663,7 +772,8 @@ func TestSubmitRejectsInvalidReplayDetail(t *testing.T) {
 			defer server.Close()
 			client := newTestSubmissionClient(t, server)
 			_, err := client.Submit(context.Background(), domain.SubmissionRequest{
-				Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
+				SchemaVersion: 2,
+				Type:          domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0", Description: "does things",
 				Message: "first release", ContentType: "application/gzip", Content: []byte("x"),
 			})
 			if !errors.Is(err, cloud.ErrInvalidResponse) {

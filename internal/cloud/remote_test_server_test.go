@@ -502,7 +502,7 @@ func readCanonicalSubmissionParts(request *http.Request) (map[string]any, string
 	return metadata, contentType, content, nil
 }
 
-func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, want domain.PowerType, name, version, description, message, contentType string) {
+func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, want domain.PowerType, name, version, description, message, contentType, nameZH, nameEN, descriptionZH string) {
 	t.Helper()
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
@@ -513,13 +513,20 @@ func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, wan
 	if got.parseErr != nil {
 		t.Fatalf("submission parse error: %v", got.parseErr)
 	}
-	if got.metadata["schema_version"] != float64(1) {
-		t.Fatalf("metadata schema_version = %#v, want 1", got.metadata["schema_version"])
+	if got.metadata["schema_version"] != float64(2) {
+		t.Fatalf("metadata schema_version = %#v, want 2 (resource format version)", got.metadata["schema_version"])
 	}
 	if got.metadata["type"] != string(want) || got.metadata["name"] != name ||
 		got.metadata["version"] != version || got.metadata["description"] != description ||
 		got.metadata["message"] != message {
 		t.Fatalf("metadata = %#v, want %s/%s@%s description=%q message=%q", got.metadata, want, name, version, description, message)
+	}
+	// metadata 必须与资源内容携带同一组展示字段，APC 才可能从任一侧重建（ADR-041）。
+	if got.metadata["name_zh"] != nameZH || got.metadata["name_en"] != nameEN ||
+		got.metadata["description_zh"] != descriptionZH {
+		t.Fatalf("metadata display fields = %v/%v/%v, want %q/%q/%q",
+			got.metadata["name_zh"], got.metadata["name_en"], got.metadata["description_zh"],
+			nameZH, nameEN, descriptionZH)
 	}
 	if got.contentType != contentType || len(got.content) == 0 {
 		t.Fatalf("content = type %q size %d, want %q and non-empty", got.contentType, len(got.content), contentType)

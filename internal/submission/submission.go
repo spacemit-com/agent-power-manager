@@ -39,15 +39,19 @@ func Prepare(ctx context.Context, request Request) (Content, error) {
 	}
 	sum := md5.Sum(data)
 	return Content{
-		Type:        loaded.validation.Type,
-		Name:        loaded.validation.Name,
-		Version:     loaded.validation.Version,
-		Description: loaded.validation.Description,
-		Message:     message,
-		Definition:  loaded.definition,
-		ContentType: loaded.contentType,
-		Bytes:       append([]byte(nil), data...),
-		MD5:         hex.EncodeToString(sum[:]),
+		Type:          loaded.validation.Type,
+		SchemaVersion: loaded.validation.SchemaVersion,
+		Name:          loaded.validation.Name,
+		Version:       loaded.validation.Version,
+		Description:   loaded.validation.Description,
+		NameZH:        loaded.validation.NameZH,
+		NameEN:        loaded.validation.NameEN,
+		DescriptionZH: loaded.validation.DescriptionZH,
+		Message:       message,
+		Definition:    loaded.definition,
+		ContentType:   loaded.contentType,
+		Bytes:         append([]byte(nil), data...),
+		MD5:           hex.EncodeToString(sum[:]),
 	}, nil
 }
 
