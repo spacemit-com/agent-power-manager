@@ -57,12 +57,9 @@ func TestSubmitPreparesAndUploads(t *testing.T) {
 	if request.ContentType == "" || request.ContentMD5 == "" || request.IdempotencyKey == "" || len(request.Content) == 0 {
 		t.Fatalf("SubmissionRequest missing content fields: %#v", request)
 	}
-	if request.Definition != nil {
-		t.Fatalf("skill SubmissionRequest definition = %#v, want nil", request.Definition)
-	}
 }
 
-func TestSubmitMCPCarriesDefinition(t *testing.T) {
+func TestSubmitMCPKeepsDefinitionInContent(t *testing.T) {
 	client := &recordingSubmissionClient{
 		receipt: domain.SubmissionResult{SubmissionID: "sub_1", Status: domain.SubmissionReceived},
 	}
@@ -86,8 +83,10 @@ func TestSubmitMCPCarriesDefinition(t *testing.T) {
 	if request.Type != domain.PowerTypeMCP || request.ContentType != "application/json" || len(request.Content) == 0 {
 		t.Fatalf("SubmissionRequest = %#v", request)
 	}
-	if request.Definition == nil || request.Definition.Transport != domain.MCPTransportHTTP || request.Definition.URL != "https://mcp.example.com/mcp" {
-		t.Fatalf("SubmissionRequest definition = %#v, want http definition", request.Definition)
+	// 定义只在 content 里；请求结构不再有 Definition 字段，服务端从 content 读取（ADR-043）。
+	wantContent := `{"definition":{"transport":"http","url":"https://mcp.example.com/mcp"}`
+	if !bytes.Contains(request.Content, []byte(wantContent)) {
+		t.Fatalf("SubmissionRequest content = %s, want it to carry the MCP definition", request.Content)
 	}
 	if request.SchemaVersion != domain.PowerSchemaVersionV2 ||
 		request.NameZH != "演示" || request.NameEN != "Demo" || request.DescriptionZH != "演示 MCP" {

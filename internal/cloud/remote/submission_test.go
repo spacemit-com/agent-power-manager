@@ -95,7 +95,7 @@ func TestSubmitMetadataMirrorsResourceContent(t *testing.T) {
 			Type: domain.PowerTypeMCP, SchemaVersion: domain.PowerSchemaVersionV2,
 			Name: "demo", Version: "v1.0.0", Description: "demo mcp",
 			NameZH: "演示", NameEN: "Demo", DescriptionZH: "演示 MCP",
-			Message: "first", Definition: &domain.MCPServer{Transport: domain.MCPTransportStdio, Command: "demo-mcp"},
+			Message: "first",
 			ContentType: "application/json", Content: resource, ContentMD5: md5Hex(resource), IdempotencyKey: "k",
 		})
 		if err != nil {
@@ -115,9 +115,12 @@ func TestSubmitMetadataMirrorsResourceContent(t *testing.T) {
 				t.Fatalf("metadata[%q] = %#v, content[%q] = %#v; want identical", key, metadata[key], key, contentMap[key])
 			}
 		}
-		// definition 是资源内容的一部分，metadata 也必须携带同一份。
-		if !reflect.DeepEqual(metadata["definition"], contentMap["definition"]) {
-			t.Fatalf("metadata definition = %#v, content definition = %#v", metadata["definition"], contentMap["definition"])
+		// definition 是 MCP 的资源实体，不属于 catalog metadata：只在 content 里，metadata 不携带（ADR-043）。
+		if _, present := metadata["definition"]; present {
+			t.Fatalf("metadata must not carry definition: %#v", metadata)
+		}
+		if _, present := contentMap["definition"]; !present {
+			t.Fatalf("content must carry definition: %#v", contentMap)
 		}
 		// type 与 content_md5 是 metadata 专有的传输字段，不属于资源内容。
 		if _, present := contentMap["type"]; present {
@@ -239,22 +242,27 @@ func TestSubmitReturnsAcceptedResult(t *testing.T) {
 	}
 }
 
-func TestSubmitMCPIncludesDefinitionInMetadata(t *testing.T) {
-	content := []byte(`{"definition":{"transport":"http","url":"https://mcp.example.com/mcp"},"description":"demo mcp","name":"demo","schema_version":1,"version":"v1.0.0"}`)
+func TestSubmitMCPKeepsDefinitionOutOfMetadata(t *testing.T) {
+	content := []byte(`{"definition":{"transport":"http","url":"https://mcp.example.com/mcp"},"description":"demo mcp","description_zh":"演示 MCP","name":"demo","name_en":"Demo","name_zh":"演示","schema_version":2,"version":"v1.0.0"}`)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metadata, contentType, filename, body := readSubmissionParts(t, r)
-		definition, ok := metadata["definition"].(map[string]any)
-		if !ok {
-			t.Fatalf("metadata definition = %#v, want object", metadata["definition"])
-		}
-		if definition["transport"] != "http" || definition["url"] != "https://mcp.example.com/mcp" {
-			t.Fatalf("metadata definition = %#v", definition)
-		}
-		if _, present := definition["command"]; present {
-			t.Fatalf("metadata definition contains forbidden command field: %#v", definition)
+		// metadata 只保存 catalog 信息；MCP 定义由服务端从 content 读取（ADR-043）。
+		if _, present := metadata["definition"]; present {
+			t.Fatalf("metadata must not carry definition: %#v", metadata)
 		}
 		if contentType != "application/json" || filename != "demo-v1.0.0.json" || !bytes.Equal(body, content) {
 			t.Fatalf("content type/filename/bytes = %q/%q/%q", contentType, filename, body)
+		}
+		var contentMap map[string]any
+		if err := json.Unmarshal(body, &contentMap); err != nil {
+			t.Fatalf("decode content: %v", err)
+		}
+		definition, ok := contentMap["definition"].(map[string]any)
+		if !ok {
+			t.Fatalf("content definition = %#v, want object", contentMap["definition"])
+		}
+		if definition["transport"] != "http" || definition["url"] != "https://mcp.example.com/mcp" {
+			t.Fatalf("content definition = %#v", definition)
 		}
 		if metadata["content_md5"] != md5Hex(content) {
 			t.Fatalf("metadata content_md5 = %v, want %q", metadata["content_md5"], md5Hex(content))
@@ -268,7 +276,8 @@ func TestSubmitMCPIncludesDefinitionInMetadata(t *testing.T) {
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
 		SchemaVersion: 2,
 		Type:          domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0", Description: "demo mcp",
-		Message: "first", Definition: &domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://mcp.example.com/mcp"},
+		NameZH: "演示", NameEN: "Demo", DescriptionZH: "演示 MCP",
+		Message: "first",
 		ContentType: "application/json", Content: content, ContentMD5: md5Hex(content), IdempotencyKey: "k",
 	})
 	if err != nil || got.Outcome != domain.SubmissionAccepted {
@@ -276,22 +285,38 @@ func TestSubmitMCPIncludesDefinitionInMetadata(t *testing.T) {
 	}
 }
 
-func TestSubmitRejectsMCPWithoutDefinitionBeforeRequest(t *testing.T) {
+func TestSubmitMCPDoesNotRequireDefinitionField(t *testing.T) {
+	// definition 只从 content 读取，因此请求结构不再有该字段，也不再有「必须先提供 definition」的
+	// 前置检查；MCP 提交只要 content 是合法的规范化资源即可（ADR-043）。
+	content := []byte(`{"definition":{"transport":"stdio","command":"demo-mcp"},"description":"demo mcp","description_zh":"演示 MCP","name":"demo","name_en":"Demo","name_zh":"演示","schema_version":2,"version":"v1.0.0"}`)
 	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
+		metadata, _, _, body := readSubmissionParts(t, r)
+		if _, present := metadata["definition"]; present {
+			t.Fatalf("metadata must not carry definition: %#v", metadata)
+		}
+		if !bytes.Equal(body, content) {
+			t.Fatalf("content = %s, want the uploaded resource bytes", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"submission_id":"sub_1","status":"received","status_url":"/s"}`))
 	}))
 	defer server.Close()
 	client := newTestSubmissionClient(t, server)
-	_, err := client.Submit(context.Background(), domain.SubmissionRequest{
+	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
 		SchemaVersion: 2,
-		Type:          domain.PowerTypeMCP, Message: "fixture", ContentType: "application/json", Content: []byte("x"),
+		Type:          domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0", Description: "demo mcp",
+		NameZH: "演示", NameEN: "Demo", DescriptionZH: "演示 MCP",
+		Message: "first", ContentType: "application/json", Content: content,
+		ContentMD5: md5Hex(content), IdempotencyKey: "k",
 	})
-	if err == nil || !strings.Contains(err.Error(), "requires definition") {
-		t.Fatalf("Submit() error = %v, want requires-definition error", err)
+	if err != nil || got.Outcome != domain.SubmissionAccepted {
+		t.Fatalf("Submit() = %+v, %v", got, err)
 	}
-	if requests != 0 {
-		t.Fatalf("server requests = %d, want 0", requests)
+	if requests != 1 {
+		t.Fatalf("server requests = %d, want 1", requests)
 	}
 }
 
@@ -521,9 +546,7 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 				Type:          tt.requestType, Message: "fixture", ContentType: tt.contentType, Content: []byte("x"),
 				ContentMD5: "x", IdempotencyKey: "k",
 			}
-			if tt.requestType == domain.PowerTypeMCP {
-				request.Definition = &domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://mcp.example.com/mcp"}
-			}
+			// MCP 不再需要在请求里提供 definition：它随 content 上传（ADR-043）。
 			_, err := client.Submit(context.Background(), request)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
@@ -589,9 +612,6 @@ func TestSubmitWritesMultipartContentFilenames(t *testing.T) {
 				SchemaVersion: 2,
 				Type:          tt.requestType, Name: "demo", Version: "v1.0.0", Message: "fixture",
 				ContentType: tt.contentType, Content: []byte("x"), ContentMD5: "x", IdempotencyKey: "k",
-			}
-			if tt.requestType == domain.PowerTypeMCP {
-				request.Definition = &domain.MCPServer{Transport: domain.MCPTransportHTTP, URL: "https://mcp.example.com/mcp"}
 			}
 			_, err := client.Submit(context.Background(), request)
 			if err != nil {

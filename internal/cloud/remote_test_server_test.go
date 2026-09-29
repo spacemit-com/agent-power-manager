@@ -535,14 +535,15 @@ func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, wan
 	if got.metadata["content_md5"] != hex.EncodeToString(wantMD5[:]) {
 		t.Fatalf("metadata content_md5 = %v, want %q", got.metadata["content_md5"], hex.EncodeToString(wantMD5[:]))
 	}
-	if want != domain.PowerTypeMCP {
-		if _, present := got.metadata["definition"]; present {
-			t.Fatalf("metadata contains definition for %s: %#v", want, got.metadata["definition"])
-		}
+	// definition 是 MCP 的资源实体，不属于 catalog metadata：四类资源的 metadata 都不携带它，
+	// 服务端只从 content 读取（ADR-043）。
+	if _, present := got.metadata["definition"]; present {
+		t.Fatalf("metadata contains definition for %s: %#v", want, got.metadata["definition"])
 	}
 }
 
-func (fixture *canonicalRemoteServer) assertReceivedMCPDefinition(t *testing.T, want domain.MCPServer) {
+// assertReceivedMCPDefinitionInContent 断言 MCP 的定义出现在上传的 content 里（而不是 metadata）。
+func (fixture *canonicalRemoteServer) assertReceivedMCPDefinitionInContent(t *testing.T, want domain.MCPServer) {
 	t.Helper()
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
@@ -561,8 +562,12 @@ func (fixture *canonicalRemoteServer) assertReceivedMCPDefinition(t *testing.T, 
 	if err := json.Unmarshal(raw, &wantMap); err != nil {
 		t.Fatal(err)
 	}
-	definition, ok := got.metadata["definition"].(map[string]any)
+	var contentMap map[string]any
+	if err := json.Unmarshal(got.content, &contentMap); err != nil {
+		t.Fatalf("decode content: %v", err)
+	}
+	definition, ok := contentMap["definition"].(map[string]any)
 	if !ok || !reflect.DeepEqual(definition, wantMap) {
-		t.Fatalf("metadata definition = %#v, want %#v", got.metadata["definition"], wantMap)
+		t.Fatalf("content definition = %#v, want %#v", contentMap["definition"], wantMap)
 	}
 }

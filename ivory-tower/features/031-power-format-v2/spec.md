@@ -39,7 +39,9 @@
 - 不修改 `list` / `show` / `search` 的任何输出或匹配行为。
 - 不把展示字段写入本地 manifest、journal 或提交 metadata。
   （**提交 metadata 一句已由 [ADR-041](../../adr/ADR-041-align-submission-metadata-with-resource-content.md) 取代**：
-  metadata 现与资源内容对齐，携带三个展示字段与资源格式版本；本地 manifest/journal 的结论不变。）
+  metadata 现与资源内容对齐，携带三个展示字段与资源格式版本；本地 manifest/journal 的结论不变。
+  MCP 的 `definition` 例外，由 [ADR-043](../../adr/ADR-043-mcp-definition-from-content-only.md) 决定：
+  catalog 信息用 metadata、实际定义只从 content 读取。）
 - 不收紧 canonical `name`（仍为 1–64 字节小写 kebab），也不把中英文长度规则套用到它。
 - 不修改 APM CLI 的交互能力（不加提示、`--dry-run`、`--yes`）。
 - 不修改 `agents/<name>` 目录命名、安装落点与 Runtime 兼容逻辑。

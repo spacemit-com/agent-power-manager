@@ -28,21 +28,24 @@ const maxActiveSubmissions = 20
 //
 // 字段与 content part 里的资源元数据对齐：身份、描述与本地化展示字段同名同义，
 // schema_version 取资源格式版本（提交侧恒为 2，不再是与传输协议混用的常量 1），
-// 使 APC 从 metadata 或 content 任一侧都能重建同一份资源元数据（ADR-041）。
+// 使 APC 从 metadata 得到完整的 catalog 信息（ADR-041）。
 // type 是路由信息、message 是本次提交说明、content_md5 是传输完整性校验，
 // 三者不属于资源元数据，仅存在于 metadata。
+//
+// MCP 的 definition 不在 metadata 中：APC 的 MCP catalog 信息从 metadata 保存，
+// 实际定义只从 content 读取（ADR-043）。definition 是资源实体而不是 catalog 元数据，
+// 因此它不是「对齐字段」，也不随 metadata 上传。
 type submissionMetadataDTO struct {
-	SchemaVersion int               `json:"schema_version"`
-	Type          domain.PowerType  `json:"type"`
-	Name          string            `json:"name"`
-	Version       string            `json:"version"`
-	Description   string            `json:"description"`
-	NameZH        string            `json:"name_zh"`
-	NameEN        string            `json:"name_en"`
-	DescriptionZH string            `json:"description_zh"`
-	Message       string            `json:"message"`
-	Definition    *domain.MCPServer `json:"definition,omitempty"`
-	ContentMD5    string            `json:"content_md5"`
+	SchemaVersion int              `json:"schema_version"`
+	Type          domain.PowerType `json:"type"`
+	Name          string           `json:"name"`
+	Version       string           `json:"version"`
+	Description   string           `json:"description"`
+	NameZH        string           `json:"name_zh"`
+	NameEN        string           `json:"name_en"`
+	DescriptionZH string           `json:"description_zh"`
+	Message       string           `json:"message"`
+	ContentMD5    string           `json:"content_md5"`
 }
 
 type submissionReceiptDTO struct {
@@ -107,9 +110,6 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 	if message == "" {
 		return domain.SubmissionResult{}, errors.New("submit remote resource message is required")
 	}
-	if request.Type == domain.PowerTypeMCP && request.Definition == nil {
-		return domain.SubmissionResult{}, errors.New("submit remote MCP resource requires definition")
-	}
 	// metadata 的 schema_version 与资源格式版本同源；提交侧只产出 v2，缺失或其它取值
 	// 说明调用方没有把资源版本传下来，必须 fail closed（ADR-041）。
 	if request.SchemaVersion != domain.PowerSchemaVersionV2 {
@@ -125,7 +125,6 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 		NameEN:        request.NameEN,
 		DescriptionZH: request.DescriptionZH,
 		Message:       message,
-		Definition:    request.Definition,
 		ContentMD5:    request.ContentMD5,
 	})
 	if err != nil {

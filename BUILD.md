@@ -180,7 +180,7 @@ apm submission get <submission-id> [--output text|json]
 
 ### Validate、Submit 与 Submission
 
-`validate` 与 `submit` 覆盖 Skill、Plugin、MCP、Agent 四类 Power，通过统一 Source Loader 复用同一套离线校验规则；当前契约由 [ADR-020](ivory-tower/adr/ADR-020-source-owned-submission-metadata.md)、[ADR-038](ivory-tower/adr/ADR-038-power-format-v2-localized-display-fields.md) 与 [Feature 023](ivory-tower/features/023-submission-resource-metadata-query/spec.md) / [Feature 031](ivory-tower/features/031-power-format-v2/spec.md) 定义：
+`validate` 与 `submit` 覆盖 Skill、Plugin、MCP、Agent 四类 Power，通过统一 Source Loader 复用同一套离线校验规则；当前契约由 [ADR-020](ivory-tower/adr/ADR-020-source-owned-submission-metadata.md)、[ADR-038](ivory-tower/adr/ADR-038-power-format-v2-localized-display-fields.md)、[ADR-041](ivory-tower/adr/ADR-041-align-submission-metadata-with-resource-content.md) 与 [ADR-043](ivory-tower/adr/ADR-043-mcp-definition-from-content-only.md) 及 [Feature 023](ivory-tower/features/023-submission-resource-metadata-query/spec.md) / [Feature 031](ivory-tower/features/031-power-format-v2/spec.md) 定义：
 
 四类资源使用 Power 格式 **v2**：各权威文件的 `schema_version` 必须为整数 `2`，且 `name_zh`、`name_en`、`description_zh`（仅用于 APC 前端展示）提交时必填。`name` 仍是唯一调用名与排序键。展示名带长度约束：`name_zh` 为 2–16 个 Unicode 字符，`name_en` ≤ 32 个可打印 ASCII 字符且至少含一个字母（[ADR-039](ivory-tower/adr/ADR-039-add-name-en-and-display-name-length-limits.md)）。提交侧只接受 v2（v1 报 `upgrade to 2`），而安装、下载、缓存与目录解码路径继续接受 v1 与 v2，`description` 与 `description_zh` 提交时均不超过 **500 个 UTF-16 码元**（计数单位与 APC 服务端一致，不是 UTF-8 字节数，见 [ADR-042](ivory-tower/adr/ADR-042-cap-description-length-to-apc-server-limit.md)）。因此已发布的 v1 资源仍可安装。
 
@@ -189,7 +189,7 @@ apm submission get <submission-id> [--output text|json]
 - MCP：单个完整 `MCP.json`，包含 `schema_version/name/name_zh/name_en/version/description/description_zh/definition`，完整资源经 RFC 8785 JCS 规范化。
 - Agent：资源根目录，身份和描述分别来自 `agent.name`/`agent.version`/`agent.description`，展示字段为 `agent.name_zh`/`agent.name_en`/`agent.description_zh`（旧键 `agent.zh_name` 被显式拒绝），content 是确定性 tar.gz（根含 `agent.yaml` 与可选 `assets/`）。
 
-`validate` 完全离线，只接收 path、type 与可选 JSON 输出，也不读取 API Key、访问网络。`submit` 对四类 Power 统一要求 trim 后非空的 `--message`；校验通过后构造 content、计算原始字节 MD5 并经 `POST /api/v1/submissions` 上传，每次逻辑提交生成 UUID 幂等键。message 属于 Submission，不写入 Power content，也不参与 MD5。身份校验沿 domain parser → cache → adapter `ValidateArtifact` → recovery 四层加固。
+`validate` 完全离线，只接收 path、type 与可选 JSON 输出，也不读取 API Key、访问网络。`submit` 对四类 Power 统一要求 trim 后非空的 `--message`；校验通过后构造 content、计算原始字节 MD5 并经 `POST /api/v1/submissions` 上传，每次逻辑提交生成 UUID 幂等键。提交 metadata 携带 `schema_version/type/name/version/description/name_zh/name_en/description_zh/message/content_md5`：前七项与 content 中的资源元数据逐字段一致，`type`/`message`/`content_md5` 是传输专有字段。**MCP 的 `definition` 不在 metadata 中**——MCP catalog 信息从 metadata 保存，实际定义只从 content 读取（[ADR-043](ivory-tower/adr/ADR-043-mcp-definition-from-content-only.md)）。message 属于 Submission，不写入 Power content，也不参与 MD5。身份校验沿 domain parser → cache → adapter `ValidateArtifact` → recovery 四层加固。
 
 `submit` 按 APC 响应输出统一 outcome：
 

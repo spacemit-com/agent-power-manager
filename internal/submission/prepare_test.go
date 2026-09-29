@@ -1,13 +1,13 @@
 package submission
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
 	"math"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -98,9 +98,9 @@ func TestPrepareMCPProducesCanonicalJSON(t *testing.T) {
 	if string(got.Bytes) != want {
 		t.Fatalf("Bytes = %s, want full canonical resource %s", got.Bytes, want)
 	}
-	wantDef := domain.MCPServer{Transport: domain.MCPTransportStdio, Command: "npx", Args: []string{"-y", "@foo/mcp"}}
-	if got.Definition == nil || !reflect.DeepEqual(*got.Definition, wantDef) {
-		t.Fatalf("Definition = %#v, want %#v", got.Definition, wantDef)
+	// definition 属于资源实体，只随 content 字节上传；Prepare 不再单独透传字段（ADR-043）。
+	if !bytes.Contains(got.Bytes, []byte(`"definition"`)) {
+		t.Fatalf("MCP content must carry definition: %s", got.Bytes)
 	}
 }
 
@@ -184,11 +184,12 @@ func TestPrepareAllTypesUseRequestMessageOnly(t *testing.T) {
 				t.Fatalf("Message = %q", got.Message)
 			}
 			if test.powerType == domain.PowerTypeMCP {
-				if got.Definition == nil {
-					t.Fatalf("MCP Definition = nil, want non-nil")
+				// MCP 定义只在 content 里，Prepare 不额外产出 definition 字段（ADR-043）。
+				if !bytes.Contains(got.Bytes, []byte(`"definition"`)) {
+					t.Fatalf("MCP content must carry definition: %s", got.Bytes)
 				}
-			} else if got.Definition != nil {
-				t.Fatalf("%s Definition = %#v, want nil", test.powerType, got.Definition)
+			} else if bytes.Contains(got.Bytes, []byte(`"definition"`)) {
+				t.Fatalf("%s content carries definition: %q", test.powerType, got.Bytes)
 			}
 		})
 	}

@@ -2,6 +2,53 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-29（MCP 定义改由 content 提供，提交 metadata 不再携带 definition）
+
+分类：契约变更（MCP 提交 metadata 删除 `definition`；`SubmissionRequest` 删除 `Definition` 字段）
+
+用户需求：APC 的 MCP catalog 信息改为从 metadata 保存（含 `name`、描述等，但不包含定义），实际定义
+从 content 读取；要求 APM 的提交按此修订同步。
+
+背景：ADR-041 让 metadata 与 content 的资源元数据逐字段对齐，其中包含 MCP 的 `definition`。验证该组合
+能否真正提交时发现两端都不接受：测试环境只要 metadata 含 `definition` 就 500（`schema_version` 1/2、
+有无展示字段都一样），生产环境相反——含 `definition` 才接受、带了展示字段才 500。因此
+「v2 + 展示字段 + definition」两个环境都是 500。用 CLI 原始 JCS 字节与手工 multipart 各复现一次，
+结果一致，确认与客户端无关。单独验证还发现测试环境在 metadata 不带 `definition` 时收下提交，
+但生成的提交详情里没有 definition，即当时并未从 content 重建。
+
+解决方案或完成结果：`submissionMetadataDTO` 删除 `Definition` 字段（连带 `json:"definition,omitempty"`），
+metadata 固定为 `schema_version`/`type`/`name`/`version`/`description`/`name_zh`/`name_en`/
+`description_zh`/`message`/`content_md5`，四类资源一致；MCP 的启动定义只随 content 的 JCS 字节上传，
+服务端从 content 读取。`remote.Client.Submit` 删除「`submit remote MCP resource requires definition`」
+前置检查——它原本是「metadata 必须有 definition」的前提，定义已在 content 里，保留只会误拒正确调用。
+`SubmissionRequest.Definition`、`submission.Content.Definition`、`source.definition` 与
+`mcpSourceLoader` 中克隆并透传 `resource.Definition` 的代码一并删除，避免留下无消费者的死字段。
+
+关键决策（见 [ADR-043](../ivory-tower/adr/ADR-043-mcp-definition-from-content-only.md)，
+局部取代 ADR-041 中把 `definition` 列入两侧对齐字段的条款）：
+
+- **区分 catalog 元数据与资源实体**：metadata 只承载 catalog 需要的信息（身份、描述、展示字段、格式版本），
+  资源实体（MCP 定义）只从 content 读取。`definition` 由此不再是「对齐字段」。
+- **本地校验不放宽**：`MCPResource.ValidateSubmit` 继续要求 `definition` 存在且形状合法。定义是 MCP 的
+  实质内容，缺失即资源不完整，仍由 `apm validate` 拦下；本轮只改传输层，不改资源格式。
+- **删除而非保留死字段**：`SubmissionRequest.Definition` 即使不再序列化也一并删除，否则后续维护者会误判
+  它仍参与上传。
+- **只改 MCP**：skill/plugin/agent 的 metadata 已被实测接受且没有 definition 语义，不改其字段集。
+- **发布顺序仍为 APC 先、APM 紧跟**：若 APC 仍要求 metadata 携带 `definition`，新 APM 的 MCP 提交会被拒。
+
+测试：`TestSubmitMetadataMirrorsResourceContent` 改为同时断言 metadata **不含** `definition`、content
+**含** `definition`；`TestSubmitMCPIncludesDefinitionInMetadata` 改为
+`TestSubmitMCPKeepsDefinitionOutOfMetadata`；`TestSubmitRejectsMCPWithoutDefinitionBeforeRequest` 改为
+`TestSubmitMCPDoesNotRequireDefinitionField`（不再有该前置检查，正常提交返回 202）；
+fixture server 的 `assertReceivedMCPDefinition` 改为 `assertReceivedMCPDefinitionInContent`，
+并统一断言四类资源的 metadata 都不带 `definition`；`prepare_test`/`lifecycle`/`domain` 的
+Definition 断言改为断言 content 字节里带定义。`go build ./...`、`go vet ./...` 与全量 `go test ./...` 通过。
+
+边界：不改资源格式（MCP 文件仍必须有 `definition`）、不改安装/下载/缓存/目录解码读取
+`MCPResource.Definition` 的路径、不改 skill/plugin/agent 的 metadata 字段集、
+不改 APC 目录契约与 `list`/`show`/`search` 输出。`APC-API.md` 的 metadata 字段表、MCP 示例与说明，
+以及 `docs/power-template/README.md` 同步更新。
+
 ## 2026-09-29（按 APC 服务端契约限定 description/description_zh 长度）
 
 分类：契约变更（`description` 新增长度上限；`description_zh` 由 ≤ 1024 字节改为 ≤ 500 码元）

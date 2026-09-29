@@ -48,7 +48,6 @@ func Prepare(ctx context.Context, request Request) (Content, error) {
 		NameEN:        loaded.validation.NameEN,
 		DescriptionZH: loaded.validation.DescriptionZH,
 		Message:       message,
-		Definition:    loaded.definition,
 		ContentType:   loaded.contentType,
 		Bytes:         append([]byte(nil), data...),
 		MD5:           hex.EncodeToString(sum[:]),

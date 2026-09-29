@@ -18,7 +18,8 @@ func (mcpSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	if err != nil {
 		return source{}, err
 	}
-	definition := resource.Definition.Clone()
+	// definition 不在这里单独提取：它随 content 的 JCS 字节一起上传，服务端从 content
+	// 读取 MCP 定义（ADR-043）。本地校验仍由 readMCPResource 要求它存在。
 	return source{
 		validation: Validation{
 			Type: domain.PowerTypeMCP, SchemaVersion: resource.SchemaVersion,
@@ -27,7 +28,6 @@ func (mcpSourceLoader) Load(ctx context.Context, path string) (source, error) {
 			FileCount: 1, ContentSize: int64(len(raw)),
 		},
 		contentType: "application/json",
-		definition:  &definition,
 		build: func() ([]byte, error) {
 			return CanonicalizeJSON(raw)
 		},

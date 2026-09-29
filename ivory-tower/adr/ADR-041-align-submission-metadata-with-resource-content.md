@@ -11,6 +11,11 @@
 - 局部取代说明：本 ADR 取代 ADR-038 第 7 条中「提交 metadata 不上报这两个字段」与 ADR-040 Context 中
   「提交 metadata 不上报它们」两处决定。ADR-038 的 v2 版本门禁、提交侧与安装侧校验分层、
   `zh_name` → `name_zh` 更名、`search` 只匹配 `name`、派生清单不携带展示字段等其余决定继续有效。
+- 局部被取代（2026-09-29 追加）：第 1 条的字段集中「MCP 另加 `definition`」、第 5 条把 `definition`
+  列入两侧逐字段比较、第 6 条把「metadata 携带 definition」当作发布正确的表述，均被
+  [ADR-043](ADR-043-mcp-definition-from-content-only.md) 取代。MCP 的 catalog 信息从 metadata 保存，
+  实际定义只从 content 读取；本 ADR 的其余条款（展示字段对齐、`schema_version` 用资源格式版本、
+  四类一致、传输专有字段保留）继续有效。
 
 ## Context
 

@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestSubmissionStatusConstantsAreStable(t *testing.T) {
 	want := map[SubmissionStatus]string{
@@ -29,22 +32,26 @@ func TestSubmissionOutcomeConstantsAreStable(t *testing.T) {
 
 func TestSubmissionRequestPreservesFields(t *testing.T) {
 	request := SubmissionRequest{
-		Type:           PowerTypeSkill,
+		Type:           PowerTypeMCP,
+		SchemaVersion:  PowerSchemaVersionV2,
 		Name:           "demo",
 		Version:        "v1.0.0",
 		Description:    "demo resource",
+		NameZH:         "演示",
+		NameEN:         "Demo",
+		DescriptionZH:  "演示资源",
 		Message:        "initial submission",
-		Definition:     &MCPServer{Transport: MCPTransportHTTP, URL: "https://mcp.example.com/mcp"},
-		ContentType:    "application/gzip",
-		Content:        []byte("bytes"),
+		ContentType:    "application/json",
+		Content:        []byte(`{"definition":{"transport":"http","url":"https://mcp.example.com/mcp"}}`),
 		ContentMD5:     "8c7dd922ad47494fc02c388e12c00eac",
 		IdempotencyKey: "key",
 	}
-	if request.Type != PowerTypeSkill || request.Name != "demo" || request.Message != "initial submission" || len(request.Content) == 0 || request.ContentMD5 == "" {
+	if request.Type != PowerTypeMCP || request.Name != "demo" || request.Message != "initial submission" || len(request.Content) == 0 || request.ContentMD5 == "" {
 		t.Fatal("SubmissionRequest fields must be preserved")
 	}
-	if request.Definition == nil || request.Definition.Transport != MCPTransportHTTP || request.Definition.URL != "https://mcp.example.com/mcp" {
-		t.Fatal("SubmissionRequest definition must be preserved")
+	// MCP 定义属于资源实体，只随 Content 上传；请求结构里不再有 definition 字段（ADR-043）。
+	if request.SchemaVersion != PowerSchemaVersionV2 || request.NameZH != "演示" || !bytes.Contains(request.Content, []byte(`"definition"`)) {
+		t.Fatal("SubmissionRequest metadata alignment and content definition must be preserved")
 	}
 }
 

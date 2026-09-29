@@ -13,10 +13,11 @@ type sourceLoader interface {
 }
 
 // source 保存已校验身份以及延迟构建内容的闭包，供 Validate 与 Prepare 共用加载流程。
+// 资源实体（如 MCP 的 definition）不在这里单独承载：它随 content 字节一起上传，
+// 服务端从 content 读取（ADR-043）。
 type source struct {
 	validation  Validation
 	contentType string
-	definition  *domain.MCPServer // 仅 MCP 提交携带；其余类型为 nil
 	build       func() ([]byte, error)
 }
 

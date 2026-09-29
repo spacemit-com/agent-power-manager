@@ -237,11 +237,14 @@ Authorization: Bearer your-api-key-here
 | `message` | 否 | string | 本次发布说明 |
 | `schema_version` | 是 | int | 资源格式版本，与 `content` 中资源文件的 `schema_version` 一致；当前固定为 `2` |
 | `content_md5` | mcp 可选，其余必需 | string | 文件 MD5 校验值（客户端预计算，服务端校验） |
-| `definition` | mcp 必需，其余不携带 | object | MCP 启动定义（`transport` + `url` 或 `command`/`args`），与资源文件内 `definition` 完全一致 |
 
 > 对齐要求：`name`/`version`/`description`/`name_zh`/`name_en`/`description_zh`/`schema_version`
-> （MCP 另含 `definition`）是资源元数据，必须在 metadata 与 content 两侧逐字段相等，使服务端从任一侧都能
-> 重建同一份资源数据。`type`/`message`/`content_md5` 是传输专有字段，只出现在 metadata，不写入内容文件。
+> 是 catalog 元数据，必须在 metadata 与 content 两侧逐字段相等，使服务端从任一侧都能得到同一份
+> catalog 信息。`type`/`message`/`content_md5` 是传输专有字段，只出现在 metadata，不写入内容文件。
+>
+> **MCP 的 `definition` 不在 metadata 中**：MCP 的 catalog 信息从 metadata 保存（含 `name`、描述等），
+> 实际定义只从 `content` 读取。`definition` 是资源实体而不是 catalog 元数据，因此它不属于对齐字段，
+> 也不随 metadata 上传（[ADR-043](ivory-tower/adr/ADR-043-mcp-definition-from-content-only.md)）。
 
 **metadata 示例**：
 ```json
@@ -265,23 +268,20 @@ Authorization: Bearer your-api-key-here
   "type": "mcp",
   "name": "nws",
   "version": "v1.0.0",
-  "description": "通过 HTTPS 连接 nws 远程 MCP 服务",
+  "description": "Connects over HTTPS to the nws remote MCP service for weather data.",
   "name_zh": "NWS 天气",
   "name_en": "NWS Weather",
   "description_zh": "通过 HTTPS 连接 nws 远程服务，查询天气预报数据。",
   "message": "提交 nws v1.0.0",
   "schema_version": 2,
-  "content_md5": "d9f294be184422726e05eb6bae66fa8c",
-  "definition": {
-    "transport": "http",
-    "url": "https://nws.caseyjhand.com/mcp"
-  }
+  "content_md5": "d9f294be184422726e05eb6bae66fa8c"
 }
 ```
 
-> 说明：`definition` 仅 MCP 提交携带，且必须与 `content` part 中资源文件内的 `definition` 一致；
-> skill/plugin/agent 的 metadata 不携带该字段。发布阶段的数据以 `content` part 中的资源文件为权威来源；
-> metadata 是同一次提交的传输副本，字段已与之对齐（[ADR-041](ivory-tower/adr/ADR-041-align-submission-metadata-with-resource-content.md)）。
+> 说明：MCP 的启动定义只出现在 `content` part 的资源文件里（该示例对应文件中的
+> `"definition":{"transport":"http","url":"https://nws.caseyjhand.com/mcp"}`）。四类资源的 metadata
+> 都不携带 `definition`；服务端保存 catalog 信息用 metadata、读取实际定义用 content
+> （[ADR-043](ivory-tower/adr/ADR-043-mcp-definition-from-content-only.md)）。
 
 **content 文件格式**：
 | 资源类型 | 文件格式 |

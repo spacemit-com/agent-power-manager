@@ -33,6 +33,7 @@ type Validation struct {
 }
 
 // Content 描述 submit 确定性打包或规范化后的内容与身份。
+// 资源实体（MCP 的 definition）不单列字段：它就在 Bytes 里，服务端从 content 读取（ADR-043）。
 type Content struct {
 	Type          domain.PowerType
 	SchemaVersion int
@@ -43,7 +44,6 @@ type Content struct {
 	NameEN        string
 	DescriptionZH string
 	Message       string
-	Definition    *domain.MCPServer // 仅 MCP 提交携带
 	ContentType   string
 	Bytes         []byte
 	MD5           string

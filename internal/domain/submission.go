@@ -29,7 +29,8 @@ const (
 // SchemaVersion 是资源格式版本，与 metadata 的 schema_version 同源：提交只接受 v2，
 // 因此 metadata 必须上报 2，而不是历史上与传输协议混用的常量 1。NameZH/NameEN/
 // DescriptionZH 是资源文件里的展示字段；metadata 与 content 必须携带同一组值，使 APC
-// 从任一侧都能重建同一份资源元数据（ADR-041）。
+// 得到完整的 catalog 信息（ADR-041）。资源实体不从 metadata 上传：MCP 的 definition
+// 只存在于 Content 中，由服务端从 content 读取（ADR-043）。
 type SubmissionRequest struct {
 	Type           PowerType
 	SchemaVersion  int
@@ -40,8 +41,7 @@ type SubmissionRequest struct {
 	NameEN         string
 	DescriptionZH  string
 	Message        string
-	Definition     *MCPServer // 仅 MCP 提交携带；其余类型为 nil，不进入 metadata
-	ContentType    string     // "application/gzip" 或 "application/json"
+	ContentType    string // "application/gzip" 或 "application/json"
 	Content        []byte
 	ContentMD5     string
 	IdempotencyKey string

@@ -17,7 +17,9 @@
 - 不改 APC 目录 item 契约以外的 `../apc` 仓库内容；`search` 输出与匹配语义、文本渲染与提交 metadata 不变
   （ADR-040 局部取代「APC 目录契约与 `list`/`show` JSON 输出不变」两处决定）。
   「提交 metadata 不变」一句已由
-  [ADR-041](../../adr/ADR-041-align-submission-metadata-with-resource-content.md) 取代：metadata 现与资源内容字段对齐。
+  [ADR-041](../../adr/ADR-041-align-submission-metadata-with-resource-content.md) 取代：metadata 现与资源内容字段对齐；
+  MCP 的 `definition` 不在 metadata 中，改由
+  [ADR-043](../../adr/ADR-043-mcp-definition-from-content-only.md) 决定「catalog 信息用 metadata、实际定义从 content 读」。
 - 新增/修改接口代码添加简短规范中文注释。
 
 ## Task 1：领域层展示字段与版本常量
