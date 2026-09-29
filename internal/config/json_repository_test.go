@@ -942,3 +942,94 @@ func equalTags(left, right []string) bool {
 	}
 	return true
 }
+
+// TestJSONRepositoryManifestRoundTripsDisplayFields 锁定本地清单持久化 v2 展示字段：
+// 安装时捕获的展示元数据必须离线可读，且读取时不重新校验形状（ADR-040）。
+func TestJSONRepositoryManifestRoundTripsDisplayFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+
+	repository := config.NewJSONRepository()
+	power := domain.InstalledPower{
+		Ref:           domain.PowerRef{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
+		Description:   "Use when writing a concise progress status update.",
+		Tags:          []string{"official"},
+		NameZH:        "简报状态",
+		NameEN:        "Brief Status",
+		DescriptionZH: "用于撰写简洁的进度状态更新。",
+	}
+	if err := repository.Set("codex", power); err != nil {
+		t.Fatal(err)
+	}
+
+	raw := readManifest(t, manifestPath(t, "codex"))
+	for _, field := range []string{`"name_zh": "简报状态"`, `"name_en": "Brief Status"`, `"description_zh": "用于撰写简洁的进度状态更新。"`} {
+		if !strings.Contains(raw, field) {
+			t.Fatalf("manifest = %q, want field %s", raw, field)
+		}
+	}
+
+	groups, err := repository.List("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups[domain.PowerTypeSkill]) != 1 {
+		t.Fatalf("skill group = %#v, want one entry", groups[domain.PowerTypeSkill])
+	}
+	if got := groups[domain.PowerTypeSkill][0]; got.NameZH != power.NameZH || got.NameEN != power.NameEN || got.DescriptionZH != power.DescriptionZH {
+		t.Fatalf("round-tripped display fields = %q/%q/%q, want %q/%q/%q",
+			got.NameZH, got.NameEN, got.DescriptionZH, power.NameZH, power.NameEN, power.DescriptionZH)
+	}
+}
+
+// TestJSONRepositorySetRewritesWhenOnlyDisplayFieldsChange 锁定幂等比较覆盖展示字段：
+// 同名同版本但展示元数据变化时必须重写清单，否则重装无法刷新标题与描述。
+func TestJSONRepositorySetRewritesWhenOnlyDisplayFieldsChange(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+
+	repository := config.NewJSONRepository()
+	ref := domain.PowerRef{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"}
+	if err := repository.Set("codex", domain.InstalledPower{Ref: ref, Description: "d"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Set("codex", domain.InstalledPower{Ref: ref, Description: "d", NameZH: "简报状态"}); err != nil {
+		t.Fatal(err)
+	}
+	if raw := readManifest(t, manifestPath(t, "codex")); !strings.Contains(raw, `"name_zh": "简报状态"`) {
+		t.Fatalf("manifest = %q, want the display-field-only change persisted", raw)
+	}
+}
+
+// TestJSONRepositoryReadsLegacyManifestWithoutDisplayFields 锁定向后兼容：
+// 改动前写出的清单（无展示字段）必须仍可读取，并归一化为空串。
+func TestJSONRepositoryReadsLegacyManifestWithoutDisplayFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("APM_HOME", home)
+	writeManifest(t, "codex", `{
+  "agent": "codex",
+  "skills": [
+    {
+      "name": "brief-status",
+      "version": "v0.0.1",
+      "description": "legacy"
+    }
+  ],
+  "agents": [],
+  "plugins": [],
+  "mcps": []
+}
+`)
+
+	groups, err := config.NewJSONRepository().List("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups[domain.PowerTypeSkill]) != 1 {
+		t.Fatalf("skill group = %#v, want one entry", groups[domain.PowerTypeSkill])
+	}
+	power := groups[domain.PowerTypeSkill][0]
+	if power.NameZH != "" || power.NameEN != "" || power.DescriptionZH != "" {
+		t.Fatalf("legacy display fields = %q/%q/%q, want all empty", power.NameZH, power.NameEN, power.DescriptionZH)
+	}
+}

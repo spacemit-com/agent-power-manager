@@ -6,7 +6,7 @@
 安装侧继续兼容 v1，并同步 APM 文档与 `../using-apm` 手册/模板。
 
 **Spec:** `ivory-tower/features/031-power-format-v2/spec.md`
-**ADR:** `ivory-tower/adr/ADR-038-power-format-v2-localized-display-fields.md`、`ivory-tower/adr/ADR-039-add-name-en-and-display-name-length-limits.md`
+**ADR:** `ivory-tower/adr/ADR-038-power-format-v2-localized-display-fields.md`、`ivory-tower/adr/ADR-039-add-name-en-and-display-name-length-limits.md`、`ivory-tower/adr/ADR-040-catalog-and-cli-json-carry-display-fields.md`
 
 ## Global Constraints
 
@@ -14,7 +14,8 @@
 - 展示名长度：`name_zh` 为 2–16 个 Unicode 字符，`name_en` ≤ 32 个可打印 ASCII 字符且至少含一个字母。
 - 提交侧只接受 `schema_version: 2`；安装、下载、缓存、目录解码与事务恢复接受 1 或 2。
 - 派生 Agent 原生清单不携带展示字段，`reflect.DeepEqual` 复验必须继续通过。
-- 不修改 APC 目录契约、`../apc` 仓库、`list`/`show`/`search` 输出与提交 metadata。
+- 不改 APC 目录 item 契约以外的 `../apc` 仓库内容；`search` 输出与匹配语义、文本渲染与提交 metadata 不变
+  （ADR-040 局部取代「APC 目录契约与 `list`/`show` JSON 输出不变」两处决定）。
 - 新增/修改接口代码添加简短规范中文注释。
 
 ## Task 1：领域层展示字段与版本常量
@@ -73,6 +74,24 @@
 ## Task 8：验证
 
 - [x] `gofmt -l`、`go vet ./...`、`go test ./...`。
-- [x] 本地 provider 端到端：`list --all`/`list --json`/`show` 输出与改动前一致；四类资源可安装。
+- [x] 本地 provider 端到端：四类资源可安装，`list`/`show` 文本输出与改动前一致。
 - [x] `../using-apm` 四类模板通过 `apm validate`。
 - [ ] 远端 v2 提交验收（依赖 APC，未就绪时记 BLOCKED）。
+
+## Task 9：展示字段对外通道（ADR-040，续作）
+
+- [x] 目录层：`domain.CatalogEntry`、`catalog.itemDTO`、item 字段白名单支持三字段；
+      `CatalogEntry.Validate` 校验提供的展示字段形状；`equalCatalogEntry` 同步比较。
+- [x] Local provider：`parseLocalSkillMetadata` 与四类 loader 从各自权威文件解析三字段
+      （Skill frontmatter、`apc-plugin.json`、`MCP.json`、`agent.yaml`），内嵌 Skill 不覆盖插件 manifest。
+- [x] 持久化：`domain.InstalledPower`、`config.powerEntry`、`transaction.Journal` 与四个 request 携带三字段；
+      `installedPowerEqual` 覆盖；installMetadata/applyToJournal/installedPower 收敛字段复制。
+- [x] 装配与渲染：`cli.ListedPower` 携带三字段；`listPowerJSON` 与 `show` 的 JSON 记录恒带三字段；
+      `catalogPowers` 显式丢弃以保持 `search` 不变。
+- [x] 派生清单守卫改为逐文件区分「派生清单」与「复制的 canonical 内容」，fixture 换成真实 v2 Skill。
+- [x] 新增锁定测试（目录 codec、领域、Local provider、config、transaction、lifecycle、cli）并全绿。
+- [x] 文档：`ADR-040`、Feature 031 spec/verification、`docs/Changelog.md`、`docs/testing/apm-cli-functional-test.md`。
+- [x] 板端构建与安装：`agent-power-manager_0.1.6_riscv64.deb` 覆盖 0.1.5；Local provider 下四类资源的
+      展示字段解析、安装持久化与 `list --installed --json` 输出均已核实（见 verification §4.5）。
+- [ ] APC 公共目录 item 补齐字段（`../apc` 独立交付；**APM 必须先发布**）。
+- [ ] GUI 语言切换验证：需先重装已安装 Power 回填展示字段（见 spec §4.5），market 范围还依赖 APC 发布。

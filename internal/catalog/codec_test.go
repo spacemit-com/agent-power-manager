@@ -204,3 +204,109 @@ func validCatalogJSONWithSize(t *testing.T, size int64) []byte {
 	copy(data[len(data)-len(suffix):], suffix)
 	return data
 }
+
+// TestDecodeCatalogWithDisplayFields 锁定目录条目携带 v2 展示字段：APC 在 item 上追加
+// name_zh/name_en/description_zh 时，APM 必须解码而不是把整份目录判为非法（ADR-040）。
+func TestDecodeCatalogWithDisplayFields(t *testing.T) {
+	raw := replaceJSON(t, validCatalogJSON(), `"tags":["alpha","catalog"]`,
+		`"tags":["alpha","catalog"],"name_zh":"演示技能","name_en":"Demo Skill","description_zh":"用于演示的 Skill。"`)
+	snapshot, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("Decode(catalog with display fields) error = %v", err)
+	}
+	entry, err := snapshot.Resolve(domain.PowerRef{Type: domain.PowerTypeSkill, Name: "alpha", Version: "v2.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.NameZH != "演示技能" || entry.NameEN != "Demo Skill" || entry.DescriptionZH != "用于演示的 Skill。" {
+		t.Fatalf("entry display fields = %q/%q/%q, want the decoded localized values", entry.NameZH, entry.NameEN, entry.DescriptionZH)
+	}
+	// 未提供展示字段的条目解码为空串，代表历史 v1 条目。
+	other, err := snapshot.Resolve(domain.PowerRef{Type: domain.PowerTypeSkill, Name: "bravo", Version: "v1.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.NameZH != "" || other.NameEN != "" || other.DescriptionZH != "" {
+		t.Fatalf("v1 entry display fields = %q/%q/%q, want all empty", other.NameZH, other.NameEN, other.DescriptionZH)
+	}
+}
+
+// TestDecodeCatalogItemSchemaVersionIsNotValidated 锁定条目级 schema_version 始终不参与校验：
+// 它是资源格式版本，不是目录契约版本；若未来误加门禁，旧客户端会在 APC 升版本时冻结目录。
+func TestDecodeCatalogItemSchemaVersionIsNotValidated(t *testing.T) {
+	// committed fixture 只写了一个条目级 schema_version，这里额外覆盖其它取值同样被容忍。
+	for name, raw := range map[string][]byte{
+		"as-committed": validCatalogJSON(),
+		"v2": replaceJSON(t, validCatalogJSON(), `{"name":"alpha","version":"v2.0.0"`,
+			`{"schema_version":2,"name":"alpha","version":"v2.0.0"`),
+		"v99": replaceJSON(t, validCatalogJSON(), `{"name":"alpha","version":"v2.0.0"`,
+			`{"schema_version":99,"name":"alpha","version":"v2.0.0"`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Decode(raw); err != nil {
+				t.Fatalf("Decode() error = %v, want item schema_version to be tolerated", err)
+			}
+		})
+	}
+}
+
+// TestEncodeOmitsEmptyDisplayFields 锁定编码侧对称性：空展示字段不写出字节（旧客户端读到
+// 的目录与改动前逐字节一致的场景），有值时按字段名输出。
+func TestEncodeOmitsEmptyDisplayFields(t *testing.T) {
+	entries := []domain.CatalogEntry{{
+		Ref:         domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+		Description: "demo", Message: "message", ContentType: "application/gzip", ContentSize: 1,
+		ContentMD5: "0123456789abcdef0123456789abcdef", PublishedAt: "2026-08-25T12:34:56Z", Tags: []string{},
+	}}
+	raw, err := Encode(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"name_zh", "name_en", "description_zh"} {
+		if strings.Contains(string(raw), field) {
+			t.Fatalf("Encode(empty display fields) = %s, want %q omitted", raw, field)
+		}
+	}
+
+	entries[0].NameZH = "演示"
+	entries[0].NameEN = "Demo"
+	entries[0].DescriptionZH = "演示描述"
+	raw, err = Encode(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTripped, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := roundTripped.Resolve(entries[0].Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.NameZH != "演示" || entry.NameEN != "Demo" || entry.DescriptionZH != "演示描述" {
+		t.Fatalf("Encode/Decode round trip display fields = %q/%q/%q", entry.NameZH, entry.NameEN, entry.DescriptionZH)
+	}
+}
+
+// TestDecodeRejectsInvalidDisplayFields 锁定目录解码路径仍会拒绝形状非法的展示字段，
+// 因为它们是唯一的展示文本真相源（ADR-040 的已知代价）。
+func TestDecodeRejectsInvalidDisplayFields(t *testing.T) {
+	cases := map[string]string{
+		"blank name_zh":           `"name_zh":"  "`,
+		"too short name_zh":       `"name_zh":"演"`,
+		"too long name_zh":        `"name_zh":"一二三四五六七八九十一二三四五六七"`,
+		"non-ascii name_en":       `"name_en":"演示"`,
+		"name_en without letter":  `"name_en":"1234"`,
+		"too long name_en":        `"name_en":"` + strings.Repeat("a", 33) + `"`,
+		"blank description_zh":    `"description_zh":"   "`,
+		"description_zh too long": `"description_zh":"` + strings.Repeat("描", 342) + `"`,
+	}
+	for name, field := range cases {
+		t.Run(name, func(t *testing.T) {
+			raw := replaceJSON(t, validCatalogJSON(), `"tags":["alpha","catalog"]`, `"tags":["alpha","catalog"],`+field)
+			if _, err := Decode(raw); err == nil {
+				t.Fatalf("Decode(%s) error = nil, want display metadata rejection", field)
+			}
+		})
+	}
+}

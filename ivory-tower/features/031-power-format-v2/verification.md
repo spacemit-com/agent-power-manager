@@ -12,13 +12,51 @@
 - `TestDerivedAgentManifestsCarryNoLocalizedFields` / `TestDerivedAgentManifestsStillDeriveForV1Artifact`：
   派生清单不携带展示字段，且 v1 canonical 包仍可派生。
 
+## 1.1 展示字段对外通道（ADR-040，2026-09-28 续作）
+
+本轮补齐「资源文件 → 目录 item → 本地清单/journal → CLI JSON」的通道。新增/扩展的锁定测试：
+
+| 层 | 测试 | 锁定内容 |
+| --- | --- | --- |
+| 目录解码 | `TestDecodeCatalogWithDisplayFields` | item 带三字段可解码；未提供的条目解码为空串 |
+| 目录解码 | `TestEncodeOmitsEmptyDisplayFields` | 空值不写出字节，有值可往返 |
+| 目录解码 | `TestDecodeRejectsInvalidDisplayFields` | 形状非法（空/越界/非 ASCII）时 fail closed |
+| 目录解码 | `TestDecodeCatalogItemSchemaVersionIsNotValidated` | item 级 `schema_version` 任意取值都被容忍 |
+| 领域 | `TestCatalogEntryValidateDisplayMetadata` | 缺失合法、提供时必须满足 ADR-039 |
+| Local provider | `TestLocalCatalogParsesDisplayFieldsFromEachAuthoritativeFile` | 四类来源分别取自 frontmatter / apc-plugin.json / MCP.json / agent.yaml |
+| Local provider | `TestLocalCatalogOmitsDisplayFieldsForV1Resources` | v1 资源三字段为空串 |
+| 本地清单 | `TestJSONRepositoryManifestRoundTripsDisplayFields` | 展示字段持久化并离线可读 |
+| 本地清单 | `TestJSONRepositorySetRewritesWhenOnlyDisplayFieldsChange` | 仅展示字段变化也会重写 |
+| 本地清单 | `TestJSONRepositoryReadsLegacyManifestWithoutDisplayFields` | 旧清单读为空串 |
+| journal | `TestJournalPersistsDisplayMetadata` | 展示字段随 journal 落地；旧 journal 无损读取 |
+| 结果装配 | `TestListAndShowCarryDisplayMetadata` | market/installed/show 三条路径逐字段复制 |
+| 结果装配 | `TestSearchResultCarriesNoDisplayMetadata` | search 记录故意丢弃展示字段 |
+| CLI | `TestRenderListJSONCarriesDisplayFields` / `TestShowJSONCarriesDisplayFields` | 三字段恒存在（空为 `""`） |
+| CLI | `TestSearchOutputCarriesNoDisplayFields` | search 文本与 JSON 逐字节不变 |
+| 端到端 | `TestInstalledManifestCarriesDisplayFieldsEndToEnd` | 真实 Local provider 安装四类 v2 后清单带三字段 |
+
+手工端到端（`APM_CLOUD_PROVIDER=local APM_CLOUD_LOCAL_ROOT=<repo>/internal/cloud/resources`）：
+
+```text
+apm list --type skill --json            → 每条记录含 name_zh/name_en/description_zh
+apm list brief-status --all --json       → 同上（per-version 通道）
+apm show brief-status=v0.0.1 --type skill --json → 同上
+apm install brief-status --agent bibit --type skill
+apm list --installed --agent bibit --json → 三字段非空，来自 ~/.apm/manifests/bibit.json
+apm search summary --json                → 仍只有 type/name/version/description（无 tags、无展示字段）
+```
+
+目录与存储版本号均保持 `1`：`/resources/version`、envelope、分组、item 与 manifest/journal 的
+schema version 全部未变；新字段以可选追加字段形式存在。
+
 ## 2. 本地 provider 端到端
 
 以 `APM_CLOUD_PROVIDER=local` 指向 `internal/cloud/resources`：
 
 - 四类 v2 fixture 安装成功（skill→codex、plugin→bibit、mcp→codex、agent→bibit）。
 - 手写 v1 skill 仍可安装，但 `validate` 被拒并提示 `upgrade to 2`（双版本证据）。
-- `list --all`、`list --json`、`show` 输出与改动前一致；`search 简报` 返回 `[]`，展示名不参与匹配。
+- `list`/`show` 的**文本**输出与改动前一致；`search 简报` 返回 `[]`，展示名不参与匹配。
+- `list --json`/`show --json` 按 ADR-040 新增三字段；`search --json` 不变。
 
 ## 3. 模板验证
 
@@ -66,6 +104,32 @@ content 逐字节保留（已用 4 个线上制品比对 MD5 确认），不受�
 探测产生一条真实提交 `sub_01M3KVFAAPGR4GX39S7Z`（`mcp`/`apm-v2-probe-mcp`/`v1.0.0`），
 当前处于 `review_pending`，占用 1 个 active 名额。APC MVP 不提供开发者撤销，需由内网
 review 拒绝。
+
+## 4.5 板端展示字段验证（apm 0.1.6，2026-09-28 续作）
+
+源码 `rsync` 到 `/home/bianbu/Workspace/build/apm-v2-display`，`debian/changelog` 取本地验证版本
+`0.1.6`，板端 `dpkg-buildpackage -us -uc -b` 退出 0，产物
+`agent-power-manager_0.1.6_riscv64.deb`（3174268 字节，
+SHA-256 `31d15ff4555b38fc46108a433e24d6d4656b1612c51ee7672a617305a5925af9`），
+`dpkg --force-confold -i` 覆盖 0.1.5 后 `dpkg -l` 显示 `0.1.6 install ok installed`。
+
+另单独执行 `go test ./...`（`-b` 路径不跑测试，见 §5.3）：22 个包全部 `ok`，`FAIL` 计数 0。
+
+板端功能验证（隔离 `APM_HOME`/`BIANBU_AGENT_HOME` + `APM_CLOUD_PROVIDER=local`）：
+
+| 检查 | 结果 |
+| --- | --- |
+| `apm list --type skill --json` | 记录含 `name_zh`/`name_en`/`description_zh`，值来自各资源权威文件 |
+| `apm install brief-status=v0.0.1 --agent bibit --type skill` | `installed`；`~/.apm/manifests/bibit.json` 持久化三字段 |
+| `apm list --installed --agent bibit --json` | 三字段非空，与清单一致 |
+| 生产目录（APC 尚未发布字段） | `apm list --json` 16 条记录全部 `name_zh: ""`，命令仍成功（不回退失败） |
+| 真实用户清单（0.1.5 时代安装） | `grep -c name_zh ~/.apm/manifests/bibit.json` = 0，全部走回退 |
+| `apm search filesystem --json` | `[]`，输出字段集未变 |
+| `/usr/libexec/bibit/bibit-agenthub --self-test` | 退出 0 |
+
+**已知限制（实测确认）**：已安装记录不会自动回填展示字段。手写一份不带展示字段的清单后执行同版本
+`apm install`，结果为 `unchanged` 且清单未变（命中 `manifestSameVersion` 短路）；`uninstall` 后重装才写入
+三字段。因此升级 APM 后需要重装相关 Power，已安装范围才能切换语言。
 
 ## 5. 开发板构建与验证（2026-09-28）
 
@@ -135,6 +199,9 @@ agent-power-manager-dbgsym_0.1.5_riscv64.deb   3513800 字节
 
 - 远端真实 v2 提交并发布：依赖 APC 支持展示字段（skill/plugin/agent 已具备条件，
   MCP 需 APC 扩展 metadata 与重建逻辑），记为 BLOCKED。
+- APC 公共目录 item 补齐 `name_zh`/`name_en`/`description_zh`：属 `../apc` 独立交付。
+  **发布顺序为硬约束：APM 必须先发**，否则旧 APM 会因目录字段白名单拒绝整份新目录并静默冻结在陈旧快照。
+- 板端 GUI 语言切换验证：依赖 APC 已发布字段（installed 范围可先行验证），当前未执行。
 - Bibit Runtime 的 `name_zh`/`name_en` 映射：跨仓库依赖，不在本仓库范围。
 - `debian/rules` 在 `-b` 路径下跳过测试：属打包配置缺陷，需单独修复（本次未改
   `debian/`，避免与板端既有构建流程冲突）。

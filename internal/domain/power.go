@@ -21,12 +21,16 @@ type PowerRef struct {
 	Version string
 }
 
-// InstalledPower 表示清单中一条已安装 Power：安装时捕获的精确身份与发布元数据（description、tags）。
-// Ref 仍是唯一身份；Description 与 Tags 不参与身份比较、缓存键或排序。
+// InstalledPower 表示清单中一条已安装 Power：安装时捕获的精确身份与发布元数据
+// （description、tags，以及 v2 起的展示字段 name_zh/name_en/description_zh）。
+// Ref 仍是唯一身份；其余字段不参与身份比较、缓存键或排序（ADR-024、ADR-040）。
 type InstalledPower struct {
-	Ref         PowerRef
-	Description string
-	Tags        []string
+	Ref           PowerRef
+	Description   string
+	Tags          []string
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
 }
 
 // Clone 返回不共享 Tags 底层数组的清单条目副本，供清单快照向调用方暴露数据。

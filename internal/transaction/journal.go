@@ -110,15 +110,20 @@ type PluginJournalPayload struct {
 
 // Journal 表示恢复唯一活动事务所需的持久化状态。
 type Journal struct {
-	SchemaVersion int                       `json:"schema_version"`
-	TransactionID string                    `json:"transaction_id"`
-	Driver        Driver                    `json:"driver"`
-	Operation     Operation                 `json:"operation"`
-	Phase         Phase                     `json:"phase"`
-	Agent         domain.AgentID            `json:"agent"`
-	Power         domain.PowerRef           `json:"power"`
-	Description   string                    `json:"description,omitempty"`
-	Tags          []string                  `json:"tags,omitempty"`
+	SchemaVersion int             `json:"schema_version"`
+	TransactionID string          `json:"transaction_id"`
+	Driver        Driver          `json:"driver"`
+	Operation     Operation       `json:"operation"`
+	Phase         Phase           `json:"phase"`
+	Agent         domain.AgentID  `json:"agent"`
+	Power         domain.PowerRef `json:"power"`
+	Description   string          `json:"description,omitempty"`
+	Tags          []string        `json:"tags,omitempty"`
+	// v2 展示字段作为可选追加字段落入 journal，使离线 recovery 重放写回清单时与安装提交
+	// 写入的内容一致；不升 schema version，旧 journal 解码为空串（ADR-024 先例、ADR-040）。
+	NameZH        string                    `json:"name_zh,omitempty"`
+	NameEN        string                    `json:"name_en,omitempty"`
+	DescriptionZH string                    `json:"description_zh,omitempty"`
 	Previous      *domain.PowerRef          `json:"previous,omitempty"`
 	Filesystem    *FilesystemJournalPayload `json:"filesystem,omitempty"`
 	AgentCLI      *AgentCLIJournalPayload   `json:"agent_cli,omitempty"`
@@ -129,9 +134,12 @@ type Journal struct {
 // 供安装提交与恢复重放写入清单时复用同一份数据。
 func (journal Journal) installedPower() domain.InstalledPower {
 	return domain.InstalledPower{
-		Ref:         journal.Power,
-		Description: journal.Description,
-		Tags:        journal.Tags,
+		Ref:           journal.Power,
+		Description:   journal.Description,
+		Tags:          journal.Tags,
+		NameZH:        journal.NameZH,
+		NameEN:        journal.NameEN,
+		DescriptionZH: journal.DescriptionZH,
 	}
 }
 

@@ -344,13 +344,19 @@ func writeCanonicalPluginPackage(t *testing.T, root string, ref domain.PowerRef,
 }
 
 // writeCanonicalPluginPackageV2 写入带本地化展示字段的 v2 canonical 包，
-// 用于断言这些字段不会进入派生清单。
+// 用于断言这些字段不会进入派生清单、但会随复制的 canonical Skill 内容保留。
 func writeCanonicalPluginPackageV2(t *testing.T, root string, ref domain.PowerRef) {
 	t.Helper()
 	writeCanonicalPluginPackageManifest(t, root, ref, pluginartifact.APCPluginManifest{
 		SchemaVersion: 2, Name: ref.Name, NameZH: "演示插件", NameEN: "Demo Plugin", Version: ref.Version,
 		Description: "Canonical demo", DescriptionZH: "规范演示插件", Skills: []string{"skills/" + ref.Name},
 	})
+	// 真实的 v2 Skill 内容同样带展示字段；canonical Skill 子树是原样复制的内容，必须保留它们。
+	skill := "---\nschema_version: 2\nname: " + ref.Name + "\nname_zh: 演示插件\nname_en: Demo Plugin\n" +
+		"description: Canonical demo\ndescription_zh: 规范演示插件\nversion: \"" + ref.Version + "\"\n---\n# Demo\n"
+	if err := os.WriteFile(filepath.Join(root, "skills", ref.Name, "SKILL.md"), []byte(skill), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeCanonicalPluginPackageManifest(t *testing.T, root string, ref domain.PowerRef, manifest pluginartifact.APCPluginManifest) {

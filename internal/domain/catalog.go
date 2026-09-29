@@ -23,15 +23,20 @@ func (version CatalogVersion) Validate() error {
 }
 
 // CatalogEntry 表示目录中一个已发布的精确 Power 版本及其内容元数据。
+// NameZH/NameEN/DescriptionZH 是 v2 起仅供展示的可选本地化字段：缺失即空串，
+// 不参与身份、排序、缓存键或内容 MD5；Ref 仍是唯一身份（ADR-024、ADR-040）。
 type CatalogEntry struct {
-	Ref         PowerRef
-	Description string
-	Message     string
-	ContentType string
-	ContentSize int64
-	ContentMD5  string
-	PublishedAt string
-	Tags        []string
+	Ref           PowerRef
+	Description   string
+	Message       string
+	ContentType   string
+	ContentSize   int64
+	ContentMD5    string
+	PublishedAt   string
+	Tags          []string
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
 }
 
 // Clone 返回不共享 Tags 底层数组的条目副本，供不可变快照向调用方暴露数据。
@@ -94,6 +99,11 @@ func (entry CatalogEntry) Validate() error {
 		if index > 0 && entry.Tags[index-1] >= tag {
 			return fmt.Errorf("catalog entry tags must be sorted and unique")
 		}
+	}
+	// 展示字段是 v2 起的可选追加字段：缺失（空串）合法，提供时校验形状。
+	// 因为历史 v1 目录条目没有它们，安装侧不能因此拒绝已发布资源（ADR-038/ADR-040）。
+	if err := ValidateOptionalDisplayMetadata(entry.NameZH, entry.NameEN, entry.DescriptionZH); err != nil {
+		return fmt.Errorf("catalog entry display metadata: %w", err)
 	}
 	return nil
 }

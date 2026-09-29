@@ -153,7 +153,7 @@ func (s *InstallService) installMarketplacePluginFresh(
 		return cli.InstallItem{}, fmt.Errorf("resolve target Plugin marketplace for agent %q: %w", agent, err)
 	}
 	request := transaction.PluginInstallRequest{
-		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, Adapter: pluginAdapter,
+		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, NameZH: entry.NameZH, NameEN: entry.NameEN, DescriptionZH: entry.DescriptionZH, Adapter: pluginAdapter,
 		Target: target,
 		Marketplace: &transaction.PluginMarketplaceInstallRequest{
 			Target: marketplaceTarget(targetMarketplace), Adapter: marketplaceAdapter,
@@ -210,7 +210,7 @@ func (s *InstallService) installMarketplacePluginReplace(
 	previousTarget := adapter.PluginTarget{ActualName: previousName, Selector: previousSelector}
 	previousMarketplace := marketplaceTarget(previousMarketplaceResource)
 	request := transaction.PluginInstallRequest{
-		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, Previous: powerRefPointer(previous), Adapter: pluginAdapter,
+		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, NameZH: entry.NameZH, NameEN: entry.NameEN, DescriptionZH: entry.DescriptionZH, Previous: powerRefPointer(previous), Adapter: pluginAdapter,
 		Target:         target,
 		PreviousTarget: &previousTarget,
 		Marketplace: &transaction.PluginMarketplaceInstallRequest{
@@ -301,7 +301,7 @@ func (s *InstallService) installFilesystemPluginPublish(
 		return cli.InstallItem{}, fmt.Errorf("stage filesystem Plugin artifact %+v: %w", ref, err)
 	}
 	request := transaction.PluginInstallRequest{
-		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, StagingRoot: staging, Adapter: pluginAdapter,
+		Agent: agent, Power: ref, Description: entry.Description, Tags: entry.Tags, NameZH: entry.NameZH, NameEN: entry.NameEN, DescriptionZH: entry.DescriptionZH, StagingRoot: staging, Adapter: pluginAdapter,
 		Target: target,
 	}
 	if previous != nil {

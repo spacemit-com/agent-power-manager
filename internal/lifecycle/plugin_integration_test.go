@@ -1248,11 +1248,14 @@ func (h *isolatedPluginHarness) assertOnlyFakeExecutables() {
 }
 
 type lifecycleRemoteResource struct {
-	ref         domain.PowerRef
-	contentType string
-	content     []byte
-	description string
-	tags        []string
+	ref           domain.PowerRef
+	contentType   string
+	content       []byte
+	description   string
+	tags          []string
+	nameZH        string
+	nameEN        string
+	descriptionZH string
 }
 
 type lifecycleRemoteServer struct {
@@ -1316,6 +1319,7 @@ func newLifecycleRemoteServer(t *testing.T) *lifecycleRemoteServer {
 		server.resource[ref] = lifecycleRemoteResource{
 			ref: ref, contentType: contentType, content: content,
 			description: entry.Description, tags: entry.Tags,
+			nameZH: entry.NameZH, nameEN: entry.NameEN, descriptionZH: entry.DescriptionZH,
 		}
 	}
 	server.server = httptest.NewServer(http.HandlerFunc(server.serveHTTP))
@@ -1445,6 +1449,7 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 				Ref: ref, Description: resource.description, Message: "fixture",
 				ContentType: resource.contentType, ContentSize: int64(len(resource.content)),
 				ContentMD5: fmt.Sprintf("%x", digest), PublishedAt: "2026-08-01T00:00:00Z", Tags: resource.tags,
+				NameZH: resource.nameZH, NameEN: resource.nameEN, DescriptionZH: resource.descriptionZH,
 			})
 		}
 		raw, err := catalog.Encode(entries)
@@ -1913,5 +1918,50 @@ func TestRemotePluginUninstallRemainsOfflineAfterServerClose(t *testing.T) {
 	assertMCPHarnessEnvironment(t, harness.fakeBin, filepath.Join(harness.root, "user-home"))
 	if _, err := os.Lstat(harness.calls); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("filesystem Plugin lifecycle unexpectedly invoked an Agent CLI: %v", err)
+	}
+}
+
+// TestInstalledManifestCarriesDisplayFieldsEndToEnd 端到端锁定展示字段落地：
+// 走真实 Local provider + 真实 journal/manifest 写入路径安装四类 v2 资源后，
+// 本地清单必须带三个展示字段（这是 apm list --installed --json 的数据来源）。
+func TestInstalledManifestCarriesDisplayFieldsEndToEnd(t *testing.T) {
+	configureLifecycleTrustedTemp(t)
+	resources, err := filepath.Abs(filepath.Join("..", "cloud", "resources"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := local.New(resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness, _ := installLifecycleProviderState(t, client)
+
+	groups, err := harness.repository.List(domain.AgentBibit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[domain.PowerRef]struct{ nameZH, nameEN, descriptionZH string }{
+		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"}:         {"简报状态", "Brief Status", "用于撰写简洁的进度状态更新。"},
+		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}:             {"文件系统", "Filesystem MCP", "文件系统 MCP 服务。"},
+		{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}:         {"演示插件", "Demo Plugin", "由 APC 管理的共享插件夹具。"},
+		{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}: {"Bianbu 默认助手", "Bianbu Default Agent", "项目本地的 Bianbu 智能体。"},
+	}
+	found := 0
+	for _, powers := range groups {
+		for _, power := range powers {
+			expected, ok := want[power.Ref]
+			if !ok {
+				continue
+			}
+			found++
+			if power.NameZH != expected.nameZH || power.NameEN != expected.nameEN || power.DescriptionZH != expected.descriptionZH {
+				t.Errorf("installed %+v display fields = %q/%q/%q, want %q/%q/%q",
+					power.Ref, power.NameZH, power.NameEN, power.DescriptionZH,
+					expected.nameZH, expected.nameEN, expected.descriptionZH)
+			}
+		}
+	}
+	if found != len(want) {
+		t.Fatalf("installed powers with display fields = %d, want %d", found, len(want))
 	}
 }

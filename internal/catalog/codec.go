@@ -37,8 +37,10 @@ type groupDTO struct {
 }
 
 type itemDTO struct {
-	Name          string   `json:"name"`
-	SchemaVersion int      `json:"schema_version,omitempty"` // 测试环境目录条目额外字段；容忍但不校验。
+	Name string `json:"name"`
+	// SchemaVersion 是目录条目级的资源格式版本；APC 会写出它，但 APM 一律容忍而不校验：
+	// 它的取值不改变本层解码语义，展示字段的有无才是兼容性开关（ADR-040）。
+	SchemaVersion int      `json:"schema_version,omitempty"`
 	Version       string   `json:"version"`
 	Description   string   `json:"description"`
 	Message       string   `json:"message"`
@@ -46,8 +48,13 @@ type itemDTO struct {
 	ContentSize   int64    `json:"content_size"`
 	ContentMD5    string   `json:"content_md5"`
 	PublishedAt   string   `json:"published_at"`
-	DownloadURL   string   `json:"download_url,omitempty"` // 测试环境目录条目额外字段；容忍但不使用。
+	DownloadURL   string   `json:"download_url,omitempty"` // 目录条目额外字段；容忍但不使用。
 	Tags          []string `json:"tags"`
+	// v2 起仅供展示的可选本地化字段。缺失即空串（历史 v1 条目一律如此），此时前端
+	// 回退到 name/description；空值不写出字节，也不升任何目录 schema 版本（ADR-040）。
+	NameZH        string `json:"name_zh,omitempty"`
+	NameEN        string `json:"name_en,omitempty"`
+	DescriptionZH string `json:"description_zh,omitempty"`
 }
 
 // Decode 严格解码一个 catalog JSON v1，并将其构造成不执行 I/O 的不可变快照。
@@ -139,14 +146,17 @@ func decodeGroup(powerType domain.PowerType, name string, group *groupDTO) ([]do
 			return nil, fmt.Errorf("catalog group %q item %d tags must be an array: %w", name, index, ErrInvalidCatalog)
 		}
 		entry := domain.CatalogEntry{
-			Ref:         domain.PowerRef{Type: powerType, Name: item.Name, Version: item.Version},
-			Description: item.Description,
-			Message:     item.Message,
-			ContentType: item.ContentType,
-			ContentSize: item.ContentSize,
-			ContentMD5:  item.ContentMD5,
-			PublishedAt: item.PublishedAt,
-			Tags:        cloneTags(item.Tags),
+			Ref:           domain.PowerRef{Type: powerType, Name: item.Name, Version: item.Version},
+			Description:   item.Description,
+			Message:       item.Message,
+			ContentType:   item.ContentType,
+			ContentSize:   item.ContentSize,
+			ContentMD5:    item.ContentMD5,
+			PublishedAt:   item.PublishedAt,
+			Tags:          cloneTags(item.Tags),
+			NameZH:        item.NameZH,
+			NameEN:        item.NameEN,
+			DescriptionZH: item.DescriptionZH,
 		}
 		normalizeServerCatalogEntry(&entry)
 		if err := entry.Validate(); err != nil {
@@ -176,15 +186,18 @@ func encodeGroup(entries []domain.CatalogEntry) *groupDTO {
 	items := make([]itemDTO, len(entries))
 	for index, entry := range entries {
 		items[index] = itemDTO{
-			Name:        entry.Ref.Name,
-			Version:     entry.Ref.Version,
-			Description: entry.Description,
-			Message:     entry.Message,
-			ContentType: entry.ContentType,
-			ContentSize: entry.ContentSize,
-			ContentMD5:  entry.ContentMD5,
-			PublishedAt: entry.PublishedAt,
-			Tags:        cloneTags(entry.Tags),
+			Name:          entry.Ref.Name,
+			Version:       entry.Ref.Version,
+			Description:   entry.Description,
+			Message:       entry.Message,
+			ContentType:   entry.ContentType,
+			ContentSize:   entry.ContentSize,
+			ContentMD5:    entry.ContentMD5,
+			PublishedAt:   entry.PublishedAt,
+			Tags:          cloneTags(entry.Tags),
+			NameZH:        entry.NameZH,
+			NameEN:        entry.NameEN,
+			DescriptionZH: entry.DescriptionZH,
 		}
 	}
 	return &groupDTO{SchemaVersion: catalogSchemaVersion, Items: items}
@@ -359,7 +372,9 @@ func catalogObjectAllowsKey(kind catalogObjectKind, key string) bool {
 		return key == "schema_version" || key == "items"
 	case catalogItemObject:
 		switch key {
-		case "name", "schema_version", "version", "description", "message", "content_type", "content_size", "content_md5", "published_at", "download_url", "tags":
+		case "name", "schema_version", "version", "description", "message", "content_type", "content_size", "content_md5", "published_at", "download_url", "tags",
+			// v2 展示字段是条目级可选追加字段，不改变目录 envelope/分组版本（ADR-040）。
+			"name_zh", "name_en", "description_zh":
 			return true
 		default:
 			return false

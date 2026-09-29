@@ -17,7 +17,9 @@ type searchPowerKey struct {
 	name      string
 }
 
-// catalogPowers 将不可变目录条目复制为保留 description 与 tags 的 CLI 列表记录。
+// catalogPowers 将不可变目录条目复制为仅保留 description 与 tags 的 CLI 列表记录。
+// search 不是展示字段通道（ADR-038/ADR-040 承诺 search 输出与匹配不变）：这里显式不复制
+// v2 展示字段，search 的文本与 JSON 输出因此保持逐字节不变。
 func catalogPowers(entries []domain.CatalogEntry) []cli.ListedPower {
 	powers := make([]cli.ListedPower, len(entries))
 	for index, entry := range entries {

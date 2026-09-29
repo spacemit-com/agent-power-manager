@@ -134,3 +134,27 @@ func TestShowRequiresName(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+// TestShowJSONCarriesDisplayFields 锁定 show --json 是精确版本的展示元数据通道：
+// 与 list --json 字段集一致，含 v2 展示字段（空为 ""）。
+func TestShowJSONCarriesDisplayFields(t *testing.T) {
+	result := cli.ShowResult{Power: cli.ListedPower{
+		Power:         domain.PowerRef{Type: domain.PowerTypeSkill, Name: "brief-status", Version: "v0.0.1"},
+		Description:   "Use when writing a concise progress status update.",
+		Tags:          []string{"official"},
+		NameZH:        "简报状态",
+		NameEN:        "Brief Status",
+		DescriptionZH: "用于撰写简洁的进度状态更新。",
+	}}
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingShowLifecycle{result: result}
+	entry := newShowEntry(t, &stdout, &stderr, func() (cli.ShowLifecycle, error) { return lifecycle, nil })
+
+	if err := entry.Execute([]string{"show", "brief-status", "--type=skill", "--json"}); err != nil {
+		t.Fatalf("Execute error = %v", err)
+	}
+	const want = "{\n  \"type\": \"skill\",\n  \"name\": \"brief-status\",\n  \"version\": \"v0.0.1\",\n  \"description\": \"Use when writing a concise progress status update.\",\n  \"tags\": [\n    \"official\"\n  ],\n  \"name_zh\": \"简报状态\",\n  \"name_en\": \"Brief Status\",\n  \"description_zh\": \"用于撰写简洁的进度状态更新。\"\n}\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("show --json stdout = %q, want %q", got, want)
+	}
+}

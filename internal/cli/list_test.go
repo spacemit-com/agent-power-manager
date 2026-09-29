@@ -257,7 +257,10 @@ func TestListRendersGroupedInstalledJSON(t *testing.T) {
     "description": "a demo skill",
     "tags": [
       "alpha"
-    ]
+    ],
+    "name_zh": "",
+    "name_en": "",
+    "description_zh": ""
   }
 ]
 `
@@ -513,8 +516,8 @@ func TestListAllAndJSONFlagsRendering(t *testing.T) {
 	}{
 		{name: "all text", args: []string{"list", "demo", "--all"}, want: "skill/demo@v1.0.0\n"},
 		{name: "short all", args: []string{"list", "demo", "-a"}, want: "skill/demo@v1.0.0\n"},
-		{name: "json identity", args: []string{"list", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ]\n  }\n]\n"},
-		{name: "json all", args: []string{"list", "demo", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ]\n  }\n]\n"},
+		{name: "json identity", args: []string{"list", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ],\n    \"name_zh\": \"\",\n    \"name_en\": \"\",\n    \"description_zh\": \"\"\n  }\n]\n"},
+		{name: "json all", args: []string{"list", "demo", "--json", "--all"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\"\n    ],\n    \"name_zh\": \"\",\n    \"name_en\": \"\",\n    \"description_zh\": \"\"\n  }\n]\n"},
 		{name: "installed all", args: []string{"list", "demo", "--installed", "--agent=codex", "--all"}, want: "skill/demo@v1.0.0\n"},
 	}
 	for _, tt := range tests {

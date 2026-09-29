@@ -18,15 +18,18 @@ func renderList(writer io.Writer, result ListResult, flags Flags) error {
 	return renderPowers(writer, result.Powers, powerMetadata{}, false)
 }
 
-// listPowerJSON 是 list --json 的机器记录：description 与 tags 恒定存在（空为 ""/[]），
-// 与 search 的精简记录解耦，供前端稳定读取元数据。
+// listPowerJSON 是 list --json 的机器记录：description、tags 与 v2 展示字段恒定存在
+// （空为 ""/[]），与 search 的精简记录解耦，供前端稳定读取元数据。
 type listPowerJSON struct {
-	Agent       string   `json:"agent,omitempty"`
-	Type        string   `json:"type"`
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	Description string   `json:"description"`
-	Tags        []string `json:"tags"`
+	Agent         string   `json:"agent,omitempty"`
+	Type          string   `json:"type"`
+	Name          string   `json:"name"`
+	Version       string   `json:"version"`
+	Description   string   `json:"description"`
+	Tags          []string `json:"tags"`
+	NameZH        string   `json:"name_zh"`
+	NameEN        string   `json:"name_en"`
+	DescriptionZH string   `json:"description_zh"`
 }
 
 // toListPowerJSON 将一条 Power 复制为 list JSON 记录；nil tags 归一化为空数组。
@@ -36,12 +39,15 @@ func toListPowerJSON(power ListedPower) listPowerJSON {
 		tags = []string{}
 	}
 	return listPowerJSON{
-		Agent:       string(power.Agent),
-		Type:        string(power.Power.Type),
-		Name:        power.Power.Name,
-		Version:     power.Power.Version,
-		Description: power.Description,
-		Tags:        tags,
+		Agent:         string(power.Agent),
+		Type:          string(power.Power.Type),
+		Name:          power.Power.Name,
+		Version:       power.Power.Version,
+		Description:   power.Description,
+		Tags:          tags,
+		NameZH:        power.NameZH,
+		NameEN:        power.NameEN,
+		DescriptionZH: power.DescriptionZH,
 	}
 }
 

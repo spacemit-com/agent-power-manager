@@ -14,6 +14,32 @@ type catalogPowerKey struct {
 	name      string
 }
 
+// listedPowerFromCatalogEntry 把目录条目复制为 CLI 记录；发布元数据（description、tags 与
+// v2 展示字段）逐字段复制，身份与排序仍只由 Ref 决定。
+func listedPowerFromCatalogEntry(entry domain.CatalogEntry) cli.ListedPower {
+	return cli.ListedPower{
+		Power:         entry.Ref,
+		Description:   entry.Description,
+		Tags:          entry.Tags,
+		NameZH:        entry.NameZH,
+		NameEN:        entry.NameEN,
+		DescriptionZH: entry.DescriptionZH,
+	}
+}
+
+// listedPowerFromInstalled 把清单条目复制为 CLI 记录；Agent 维度由调用方给出。
+func listedPowerFromInstalled(agent domain.AgentID, power domain.InstalledPower) cli.ListedPower {
+	return cli.ListedPower{
+		Agent:         agent,
+		Power:         power.Ref,
+		Description:   power.Description,
+		Tags:          power.Tags,
+		NameZH:        power.NameZH,
+		NameEN:        power.NameEN,
+		DescriptionZH: power.DescriptionZH,
+	}
+}
+
 // makeCatalogListResult 将目录条目复制为 CLI 列表结果；命名 --all 展开全部版本，其余情况按 type/name 保留最高 SemVer 并排序。
 func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.ListResult {
 	// --all 仅在指定名称时展开该能力的全部版本；否则沿用每个身份保留最新版本的默认行为。
@@ -26,7 +52,7 @@ func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.L
 			if entry.Ref.Name != flags.Name {
 				continue
 			}
-			powers = append(powers, cli.ListedPower{Power: entry.Ref, Description: entry.Description, Tags: entry.Tags})
+			powers = append(powers, listedPowerFromCatalogEntry(entry))
 		}
 		sortListedPowers(powers)
 		return cli.ListResult{Powers: powers}
@@ -40,7 +66,7 @@ func makeCatalogListResult(flags cli.Flags, entries []domain.CatalogEntry) cli.L
 		if flags.Name != "" && entry.Ref.Name != flags.Name {
 			continue
 		}
-		power := cli.ListedPower{Power: entry.Ref, Description: entry.Description, Tags: entry.Tags}
+		power := listedPowerFromCatalogEntry(entry)
 		key := catalogPowerKey{powerType: entry.Ref.Type, name: entry.Ref.Name}
 		current, found := latest[key]
 		if !found || semver.MustParse(power.Power.Version).GreaterThan(semver.MustParse(current.Power.Version)) {
@@ -78,7 +104,7 @@ func filterAgentPowers(agent domain.AgentID, flags cli.Flags, groups domain.Inst
 			if flags.Name != "" && power.Ref.Name != flags.Name {
 				continue
 			}
-			powers = append(powers, cli.ListedPower{Agent: agent, Power: power.Ref, Description: power.Description, Tags: power.Tags})
+			powers = append(powers, listedPowerFromInstalled(agent, power))
 		}
 	}
 	return powers

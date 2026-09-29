@@ -52,12 +52,15 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 			return cli.InstallItem{}, fmt.Errorf("prepare install power %+v: %w", ref, err)
 		}
 		request := transaction.SkillInstallRequest{
-			Agent:       agent,
-			Power:       ref,
-			Description: entry.Description,
-			Tags:        entry.Tags,
-			StagingRoot: staging,
-			Adapter:     resolvedAdapter,
+			Agent:         agent,
+			Power:         ref,
+			Description:   entry.Description,
+			Tags:          entry.Tags,
+			NameZH:        entry.NameZH,
+			NameEN:        entry.NameEN,
+			DescriptionZH: entry.DescriptionZH,
+			StagingRoot:   staging,
+			Adapter:       resolvedAdapter,
 		}
 		if err := s.transactions.InstallSkill(ctx, request); err != nil {
 			return cli.InstallItem{}, fmt.Errorf("install power %+v for agent %q: %w", ref, agent, err)
@@ -70,13 +73,16 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 		}
 		previousCopy := previous.Ref
 		request := transaction.SkillInstallRequest{
-			Agent:       agent,
-			Power:       ref,
-			Description: entry.Description,
-			Tags:        entry.Tags,
-			Previous:    &previousCopy,
-			StagingRoot: staging,
-			Adapter:     resolvedAdapter,
+			Agent:         agent,
+			Power:         ref,
+			Description:   entry.Description,
+			Tags:          entry.Tags,
+			NameZH:        entry.NameZH,
+			NameEN:        entry.NameEN,
+			DescriptionZH: entry.DescriptionZH,
+			Previous:      &previousCopy,
+			StagingRoot:   staging,
+			Adapter:       resolvedAdapter,
 		}
 		if err := s.transactions.InstallSkill(ctx, request); err != nil {
 			return cli.InstallItem{}, fmt.Errorf("install power %+v for agent %q: %w", ref, agent, err)
@@ -104,12 +110,15 @@ func (s *InstallService) installSkill(ctx context.Context, agent domain.AgentID,
 			return cli.InstallItem{}, fmt.Errorf("prepare install power %+v: %w", ref, err)
 		}
 		request := transaction.SkillInstallRequest{
-			Agent:       agent,
-			Power:       ref,
-			Description: entry.Description,
-			Tags:        entry.Tags,
-			StagingRoot: staging,
-			Adapter:     resolvedAdapter,
+			Agent:         agent,
+			Power:         ref,
+			Description:   entry.Description,
+			Tags:          entry.Tags,
+			NameZH:        entry.NameZH,
+			NameEN:        entry.NameEN,
+			DescriptionZH: entry.DescriptionZH,
+			StagingRoot:   staging,
+			Adapter:       resolvedAdapter,
 		}
 		if err := s.transactions.InstallSkill(ctx, request); err != nil {
 			return cli.InstallItem{}, fmt.Errorf("install power %+v for agent %q: %w", ref, agent, err)

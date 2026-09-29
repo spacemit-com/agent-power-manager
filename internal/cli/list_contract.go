@@ -10,11 +10,16 @@ import (
 
 // ListedPower 表示 List/Show 可渲染的一条 Power；Cloud 记录的 Agent 为空，已安装记录的 Agent 必填。
 // Description 与 Tags 由 Show 展示，List 仅携带它们供生命周期结果复用。
+// NameZH/NameEN/DescriptionZH 是 v2 起仅供展示的发布元数据：List/Show 的 JSON 通道输出它们，
+// search 与文本渲染不输出；它们不参与身份、过滤、排序与幂等（ADR-040）。
 type ListedPower struct {
-	Agent       domain.AgentID
-	Power       domain.PowerRef
-	Description string
-	Tags        []string
+	Agent         domain.AgentID
+	Power         domain.PowerRef
+	Description   string
+	Tags          []string
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
 }
 
 // ListResult 表示 CLI 可直接渲染的 List 业务结果。

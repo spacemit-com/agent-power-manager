@@ -11,13 +11,16 @@ type manifestDocument struct {
 	MCPs    []powerEntry   `json:"mcps"`
 }
 
-// powerEntry 是清单中单条 Power 的 JSON 形状；Description 与 Tags 是安装时捕获的发布元数据，
-// 不写入 Power 资源文件本身，仅作为本地清单记录；空值时省略写出以保持向后兼容。
+// powerEntry 是清单中单条 Power 的 JSON 形状；Description、Tags 与 v2 展示字段是安装时
+// 捕获的发布元数据，不写入 Power 资源文件本身，仅作为本地清单记录；空值时省略写出以保持向后兼容。
 type powerEntry struct {
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	Description string   `json:"description,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
+	Name          string   `json:"name"`
+	Version       string   `json:"version"`
+	Description   string   `json:"description,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	NameZH        string   `json:"name_zh,omitempty"`
+	NameEN        string   `json:"name_en,omitempty"`
+	DescriptionZH string   `json:"description_zh,omitempty"`
 }
 
 func emptyInstalledPowerGroups() domain.InstalledPowerGroups {
@@ -52,9 +55,12 @@ func entriesToInstalledPowers(entries []powerEntry, powerType domain.PowerType) 
 	powers := make([]domain.InstalledPower, 0, len(entries))
 	for _, entry := range entries {
 		powers = append(powers, domain.InstalledPower{
-			Ref:         domain.PowerRef{Name: entry.Name, Type: powerType, Version: entry.Version},
-			Description: entry.Description,
-			Tags:        normalizeTags(entry.Tags),
+			Ref:           domain.PowerRef{Name: entry.Name, Type: powerType, Version: entry.Version},
+			Description:   entry.Description,
+			Tags:          normalizeTags(entry.Tags),
+			NameZH:        entry.NameZH,
+			NameEN:        entry.NameEN,
+			DescriptionZH: entry.DescriptionZH,
 		})
 	}
 	return powers
@@ -64,10 +70,13 @@ func installedPowersToEntries(powers []domain.InstalledPower) []powerEntry {
 	entries := make([]powerEntry, 0, len(powers))
 	for _, power := range powers {
 		entries = append(entries, powerEntry{
-			Name:        power.Ref.Name,
-			Version:     power.Ref.Version,
-			Description: power.Description,
-			Tags:        normalizeTags(power.Tags),
+			Name:          power.Ref.Name,
+			Version:       power.Ref.Version,
+			Description:   power.Description,
+			Tags:          normalizeTags(power.Tags),
+			NameZH:        power.NameZH,
+			NameEN:        power.NameEN,
+			DescriptionZH: power.DescriptionZH,
 		})
 	}
 	return entries

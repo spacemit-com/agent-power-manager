@@ -94,7 +94,7 @@ func TestRenderListJSONIncludesDescriptionAndTags(t *testing.T) {
 	if err := renderList(&output, result, Flags{JSON: true}); err != nil {
 		t.Fatal(err)
 	}
-	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\",\n      \"beta\"\n    ]\n  }\n]\n"
+	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\",\n      \"beta\"\n    ],\n    \"name_zh\": \"\",\n    \"name_en\": \"\",\n    \"description_zh\": \"\"\n  }\n]\n"
 	if got := output.String(); got != want {
 		t.Fatalf("renderList(json) = %q, want %q", got, want)
 	}
@@ -111,7 +111,7 @@ func TestRenderListJSONWithAllIncludesDescriptionAndTags(t *testing.T) {
 	if err := renderList(&output, result, Flags{All: true, JSON: true}); err != nil {
 		t.Fatal(err)
 	}
-	const want = "[\n  {\n    \"agent\": \"codex\",\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\",\n      \"beta\"\n    ]\n  }\n]\n"
+	const want = "[\n  {\n    \"agent\": \"codex\",\n    \"type\": \"skill\",\n    \"name\": \"beta\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\",\n    \"tags\": [\n      \"alpha\",\n      \"beta\"\n    ],\n    \"name_zh\": \"\",\n    \"name_en\": \"\",\n    \"description_zh\": \"\"\n  }\n]\n"
 	if got := output.String(); got != want {
 		t.Fatalf("renderList(json+all) = %q, want %q", got, want)
 	}
@@ -125,7 +125,7 @@ func TestRenderListJSONNormalizesEmptyDescriptionAndTags(t *testing.T) {
 	if err := renderList(&output, result, Flags{JSON: true}); err != nil {
 		t.Fatal(err)
 	}
-	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"bare\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"\",\n    \"tags\": []\n  }\n]\n"
+	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"bare\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"\",\n    \"tags\": [],\n    \"name_zh\": \"\",\n    \"name_en\": \"\",\n    \"description_zh\": \"\"\n  }\n]\n"
 	if got := output.String(); got != want {
 		t.Fatalf("renderList(json, empty metadata) = %q, want %q", got, want)
 	}
@@ -181,3 +181,24 @@ func (w *failOnWrite) Write(p []byte) (int, error) {
 }
 
 var _ io.Writer = (*failOnWrite)(nil)
+
+// TestRenderListJSONCarriesDisplayFields 锁定 list --json 的展示字段通道：
+// 三个字段恒存在（空为 ""），前端据此决定卡片语言；缺失的旧记录回退到 name/description。
+func TestRenderListJSONCarriesDisplayFields(t *testing.T) {
+	result := ListResult{Powers: []ListedPower{{
+		Power:         domain.PowerRef{Type: domain.PowerTypeSkill, Name: "brief-status", Version: "v0.0.1"},
+		Description:   "Use when writing a concise progress status update.",
+		Tags:          []string{"official"},
+		NameZH:        "简报状态",
+		NameEN:        "Brief Status",
+		DescriptionZH: "用于撰写简洁的进度状态更新。",
+	}}}
+	var output strings.Builder
+	if err := renderList(&output, result, Flags{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	const want = "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"brief-status\",\n    \"version\": \"v0.0.1\",\n    \"description\": \"Use when writing a concise progress status update.\",\n    \"tags\": [\n      \"official\"\n    ],\n    \"name_zh\": \"简报状态\",\n    \"name_en\": \"Brief Status\",\n    \"description_zh\": \"用于撰写简洁的进度状态更新。\"\n  }\n]\n"
+	if got := output.String(); got != want {
+		t.Fatalf("renderList(json) = %q, want %q", got, want)
+	}
+}

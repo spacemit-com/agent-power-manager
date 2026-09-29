@@ -507,3 +507,61 @@ func writeLocalCatalogFile(t *testing.T, path string, contents []byte) {
 		t.Fatal(err)
 	}
 }
+
+// TestLocalCatalogParsesDisplayFieldsFromEachAuthoritativeFile 锁定 Local provider 的展示字段来源：
+// Skill 取 SKILL.md frontmatter、Plugin 取 apc-plugin.json、MCP 取 MCP.json、Agent 取 agent.yaml；
+// Plugin 内嵌 Skill 的 frontmatter 不得覆盖插件 manifest（与 description 的既有规则一致）。
+func TestLocalCatalogParsesDisplayFieldsFromEachAuthoritativeFile(t *testing.T) {
+	root, fixtures := writeLocalCatalogFixtureTree(t, false)
+	client, err := local.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Decode(downloadLocalCatalog(t, client))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, fixture := range fixtures {
+		entry, err := snapshot.Metadata(fixture.ref)
+		if err != nil {
+			t.Fatalf("Metadata(%+v) error = %v", fixture.ref, err)
+		}
+		if entry.NameZH != "目录夹具" || entry.NameEN != "Catalog Fixture" || entry.DescriptionZH != "目录夹具描述" {
+			t.Errorf("Metadata(%+v) display fields = %q/%q/%q, want 目录夹具/Catalog Fixture/目录夹具描述",
+				fixture.ref, entry.NameZH, entry.NameEN, entry.DescriptionZH)
+		}
+	}
+}
+
+// TestLocalCatalogOmitsDisplayFieldsForV1Resources 锁定 V1 兼容：权威文件没有展示字段时
+// 目录条目解码为空串（而不是报错或填入位置相关默认值），前端因此回退到 name/description。
+func TestLocalCatalogOmitsDisplayFieldsForV1Resources(t *testing.T) {
+	root := t.TempDir()
+	name := "v1-skill"
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: name, Version: "v1.0.0"}
+	source := filepath.Join(root, "skills", name, ref.Version)
+	writeLocalCatalogFile(t, filepath.Join(source, "SKILL.md"),
+		[]byte("---\nschema_version: 1\nname: "+name+"\ndescription: legacy skill\nversion: \""+ref.Version+"\"\n---\n# Legacy\n"))
+	writeLocalCatalogFile(t, filepath.Join(source, "skill-card.md"), []byte(localCatalogSkillCard))
+
+	client, err := local.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Decode(downloadLocalCatalog(t, client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := snapshot.Metadata(ref)
+	if err != nil {
+		t.Fatalf("Metadata(%+v) error = %v", ref, err)
+	}
+	if entry.Description != "legacy skill" {
+		t.Fatalf("Metadata(%+v).Description = %q, want the v1 description", ref, entry.Description)
+	}
+	if entry.NameZH != "" || entry.NameEN != "" || entry.DescriptionZH != "" {
+		t.Fatalf("Metadata(%+v) display fields = %q/%q/%q, want all empty for a v1 resource",
+			ref, entry.NameZH, entry.NameEN, entry.DescriptionZH)
+	}
+}

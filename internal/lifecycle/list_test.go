@@ -295,3 +295,59 @@ func catalogEntryFromRef(ref domain.PowerRef) domain.CatalogEntry {
 		ContentSize: 1, ContentMD5: "00000000000000000000000000000000", PublishedAt: "2026-08-25T00:00:00Z", Tags: []string{},
 	}
 }
+
+// TestListAndShowCarryDisplayMetadata 锁定 list/show 结果装配携带 v2 展示字段：
+// market（目录条目）与 installed（本地清单）两条路径都要逐字段复制，前端才能按语言显示。
+func TestListAndShowCarryDisplayMetadata(t *testing.T) {
+	entry := domain.CatalogEntry{
+		Ref:           domain.PowerRef{Type: domain.PowerTypeSkill, Name: "brief-status", Version: "v0.0.1"},
+		Description:   "Use when writing a concise progress status update.",
+		Message:       "fixture",
+		ContentType:   "application/gzip",
+		ContentSize:   1,
+		ContentMD5:    "0123456789abcdef0123456789abcdef",
+		PublishedAt:   "2026-08-25T12:34:56Z",
+		Tags:          []string{},
+		NameZH:        "简报状态",
+		NameEN:        "Brief Status",
+		DescriptionZH: "用于撰写简洁的进度状态更新。",
+	}
+	market := listedPowerFromCatalogEntry(entry)
+	if market.NameZH != entry.NameZH || market.NameEN != entry.NameEN || market.DescriptionZH != entry.DescriptionZH {
+		t.Fatalf("market listed power display fields = %q/%q/%q, want the catalog values",
+			market.NameZH, market.NameEN, market.DescriptionZH)
+	}
+	if show := makeShowResult(entry); show.Power.NameZH != entry.NameZH || show.Power.DescriptionZH != entry.DescriptionZH {
+		t.Fatalf("show result display fields = %q/%q, want the catalog values", show.Power.NameZH, show.Power.DescriptionZH)
+	}
+
+	installed := listedPowerFromInstalled(domain.AgentBibit, domain.InstalledPower{
+		Ref:           entry.Ref,
+		Description:   entry.Description,
+		Tags:          []string{},
+		NameZH:        entry.NameZH,
+		NameEN:        entry.NameEN,
+		DescriptionZH: entry.DescriptionZH,
+	})
+	if installed.Agent != domain.AgentBibit || installed.NameZH != entry.NameZH || installed.DescriptionZH != entry.DescriptionZH {
+		t.Fatalf("installed listed power = %#v, want the manifest display fields with the agent", installed)
+	}
+}
+
+// TestSearchResultCarriesNoDisplayMetadata 锁定 search 不是展示字段通道（ADR-040）：
+// 即使目录条目带展示字段，search 的 CLI 记录也逐字节保持改动前的字段集。
+func TestSearchResultCarriesNoDisplayMetadata(t *testing.T) {
+	entry := domain.CatalogEntry{
+		Ref:         domain.PowerRef{Type: domain.PowerTypeSkill, Name: "brief-status", Version: "v0.0.1"},
+		Description: "Use when writing a concise progress status update.",
+		NameZH:      "简报状态", NameEN: "Brief Status", DescriptionZH: "用于撰写简洁的进度状态更新。",
+	}
+	powers := catalogPowers([]domain.CatalogEntry{entry})
+	if len(powers) != 1 {
+		t.Fatalf("catalogPowers() = %#v, want one record", powers)
+	}
+	if powers[0].NameZH != "" || powers[0].NameEN != "" || powers[0].DescriptionZH != "" {
+		t.Fatalf("search record display fields = %q/%q/%q, want them deliberately dropped",
+			powers[0].NameZH, powers[0].NameEN, powers[0].DescriptionZH)
+	}
+}

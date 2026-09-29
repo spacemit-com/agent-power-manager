@@ -95,3 +95,36 @@ func catalogEntryFixture() CatalogEntry {
 		Tags:        []string{"catalog", "resource"},
 	}
 }
+
+// TestCatalogEntryValidateDisplayMetadata 锁定目录条目展示字段的可选语义：
+// 缺失合法（历史 v1 条目），提供时必须满足 ADR-039 的形状约束。
+func TestCatalogEntryValidateDisplayMetadata(t *testing.T) {
+	tests := []struct {
+		name          string
+		nameZH        string
+		nameEN        string
+		descriptionZH string
+		wantErr       bool
+	}{
+		{name: "absent"},
+		{name: "valid", nameZH: "演示技能", nameEN: "Demo Skill", descriptionZH: "用于演示的 Skill。"},
+		{name: "blank name_zh", nameZH: "  ", wantErr: true},
+		{name: "short name_zh", nameZH: "演", wantErr: true},
+		{name: "long name_zh", nameZH: "一二三四五六七八九十一二三四五六七", wantErr: true},
+		{name: "non ASCII name_en", nameEN: "演示", wantErr: true},
+		{name: "name_en without letter", nameEN: "1234", wantErr: true},
+		{name: "long name_en", nameEN: "abcdefghijklmnopqrstuvwxyzabcdefg", wantErr: true},
+		{name: "blank description_zh", descriptionZH: "   ", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := catalogEntryFixture()
+			entry.NameZH = tt.nameZH
+			entry.NameEN = tt.nameEN
+			entry.DescriptionZH = tt.descriptionZH
+			if err := entry.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}

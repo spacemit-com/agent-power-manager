@@ -339,3 +339,37 @@ func (w *prefixWriter) Write(data []byte) (int, error) {
 func (w *prefixWriter) WriteString(data string) (int, error) {
 	return w.Write([]byte(data))
 }
+
+// TestSearchOutputCarriesNoDisplayFields 锁定 search 不是展示字段通道（ADR-040）：
+// 即便生命周期结果携带展示字段，search 的文本与 JSON 输出也必须逐字节不变。
+func TestSearchOutputCarriesNoDisplayFields(t *testing.T) {
+	result := cli.SearchResult{Powers: []cli.ListedPower{{
+		Power:         domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"},
+		Description:   "a demo skill",
+		Tags:          []string{"alpha"},
+		NameZH:        "演示",
+		NameEN:        "Demo",
+		DescriptionZH: "演示描述",
+	}}}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "text", args: []string{"search", "demo"}, want: "skill/demo@v1.0.0\n  description: a demo skill\n"},
+		{name: "json", args: []string{"search", "demo", "--json"}, want: "[\n  {\n    \"type\": \"skill\",\n    \"name\": \"demo\",\n    \"version\": \"v1.0.0\",\n    \"description\": \"a demo skill\"\n  }\n]\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			lifecycle := &recordingSearchLifecycle{result: result}
+			entry := newSearchEntry(t, &stdout, &stderr, func() (cli.SearchLifecycle, error) { return lifecycle, nil })
+			if err := entry.Execute(tt.args); err != nil {
+				t.Fatalf("Execute(%q) error = %v", tt.args, err)
+			}
+			if got := stdout.String(); got != tt.want {
+				t.Fatalf("stdout = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

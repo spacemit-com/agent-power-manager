@@ -255,54 +255,17 @@ func canonicalLocalCatalog(t *testing.T, root string) []byte {
 	t.Helper()
 	entries := make([]domain.CatalogEntry, 0, len(canonicalPowerOracle))
 	for _, ref := range canonicalPowerOracle {
-		var description, contentType string
-		var content []byte
-		var err error
-		switch ref.Type {
-		case domain.PowerTypeSkill:
-			source := filepath.Join(root, "skills", ref.Name, ref.Version)
-			content, err = submission.BuildTarGz(source)
-			description = canonicalSkillDescription(t, filepath.Join(source, "SKILL.md"))
-			contentType = "application/gzip"
-		case domain.PowerTypePlugin:
-			source := filepath.Join(root, "plugins", ref.Name, ref.Version)
-			content, err = submission.BuildTarGz(source)
-			var manifest pluginartifact.APCPluginManifest
-			manifestBytes := readCanonicalFile(t, filepath.Join(source, "apc-plugin.json"))
-			if decodeErr := json.Unmarshal(manifestBytes, &manifest); decodeErr != nil {
-				t.Fatal(decodeErr)
-			}
-			description = manifest.Description
-			contentType = "application/gzip"
-		case domain.PowerTypeMCP:
-			raw := readCanonicalFile(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
-			resource, decodeErr := domain.DecodeMCPResourceJSON(raw)
-			if decodeErr != nil {
-				t.Fatal(decodeErr)
-			}
-			description = resource.Description
-			content, err = submission.CanonicalizeJSON(raw)
-			contentType = "application/json"
-		case domain.PowerTypeAgent:
-			source := filepath.Join(root, "agents", ref.Name, ref.Version)
-			content, err = submission.BuildTarGz(source)
-			config, decodeErr := domain.DecodeAgentConfigYAML(readCanonicalFile(t, filepath.Join(source, "agent.yaml")))
-			if decodeErr != nil {
-				t.Fatal(decodeErr)
-			}
-			description = config.Agent.Description
-			contentType = "application/gzip"
-		default:
-			t.Fatalf("unsupported canonical Local type %q", ref.Type)
-		}
+		metadata := canonicalResourceMetadata(t, root, ref)
+		content, err := canonicalResourceContent(t, root, ref)
 		if err != nil {
 			t.Fatalf("build canonical Local resource %+v: %v", ref, err)
 		}
 		digest := md5.Sum(content)
 		entries = append(entries, domain.CatalogEntry{
-			Ref: ref, Description: description, Message: "local fixture",
-			ContentType: contentType, ContentSize: int64(len(content)), ContentMD5: hex.EncodeToString(digest[:]),
+			Ref: ref, Description: metadata.description, Message: "local fixture",
+			ContentType: metadata.contentType, ContentSize: int64(len(content)), ContentMD5: hex.EncodeToString(digest[:]),
 			PublishedAt: "1970-01-01T00:00:00Z", Tags: []string{},
+			NameZH: metadata.nameZH, NameEN: metadata.nameEN, DescriptionZH: metadata.descriptionZH,
 		})
 	}
 	contents, err := catalog.Encode(entries)
@@ -312,7 +275,88 @@ func canonicalLocalCatalog(t *testing.T, root string) []byte {
 	return contents
 }
 
-func canonicalSkillDescription(t *testing.T, path string) string {
+// canonicalMetadata 是一类资源权威文件解析出的发布元数据，作为 provider oracle 的
+// 独立期望值：直接读 fixture 文件，不调用被测解析代码。
+type canonicalMetadata struct {
+	description   string
+	contentType   string
+	nameZH        string
+	nameEN        string
+	descriptionZH string
+}
+
+// canonicalResourceMetadata 从四类资源的唯一权威文件读出 description 与三个 v2 展示字段：
+// Skill 的 SKILL.md frontmatter、Plugin 的 apc-plugin.json、MCP 的 MCP.json、Agent 的 agent.yaml。
+func canonicalResourceMetadata(t *testing.T, root string, ref domain.PowerRef) canonicalMetadata {
+	t.Helper()
+	switch ref.Type {
+	case domain.PowerTypeSkill:
+		display := canonicalSkillDisplayMetadata(t, filepath.Join(root, "skills", ref.Name, ref.Version, "SKILL.md"))
+		return canonicalMetadata{
+			description: display.description, contentType: "application/gzip",
+			nameZH: display.nameZH, nameEN: display.nameEN, descriptionZH: display.descriptionZH,
+		}
+	case domain.PowerTypePlugin:
+		var manifest pluginartifact.APCPluginManifest
+		manifestBytes := readCanonicalFile(t, filepath.Join(root, "plugins", ref.Name, ref.Version, "apc-plugin.json"))
+		if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		return canonicalMetadata{
+			description: manifest.Description, contentType: "application/gzip",
+			nameZH: manifest.NameZH, nameEN: manifest.NameEN, descriptionZH: manifest.DescriptionZH,
+		}
+	case domain.PowerTypeMCP:
+		raw := readCanonicalFile(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
+		resource, err := domain.DecodeMCPResourceJSON(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return canonicalMetadata{
+			description: resource.Description, contentType: "application/json",
+			nameZH: resource.NameZH, nameEN: resource.NameEN, descriptionZH: resource.DescriptionZH,
+		}
+	case domain.PowerTypeAgent:
+		config, err := domain.DecodeAgentConfigYAML(readCanonicalFile(t, filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return canonicalMetadata{
+			description: config.Agent.Description, contentType: "application/gzip",
+			nameZH: config.Agent.NameZH, nameEN: config.Agent.NameEN, descriptionZH: config.Agent.DescriptionZH,
+		}
+	default:
+		t.Fatalf("unsupported canonical resource type %q", ref.Type)
+		return canonicalMetadata{}
+	}
+}
+
+func canonicalResourceContent(t *testing.T, root string, ref domain.PowerRef) ([]byte, error) {
+	t.Helper()
+	switch ref.Type {
+	case domain.PowerTypeSkill:
+		return submission.BuildTarGz(filepath.Join(root, "skills", ref.Name, ref.Version))
+	case domain.PowerTypePlugin:
+		return submission.BuildTarGz(filepath.Join(root, "plugins", ref.Name, ref.Version))
+	case domain.PowerTypeMCP:
+		raw := readCanonicalFile(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
+		return submission.CanonicalizeJSON(raw)
+	case domain.PowerTypeAgent:
+		return submission.BuildTarGz(filepath.Join(root, "agents", ref.Name, ref.Version))
+	default:
+		t.Fatalf("unsupported canonical resource type %q", ref.Type)
+		return nil, nil
+	}
+}
+
+type canonicalSkillMetadata struct {
+	description   string
+	nameZH        string
+	nameEN        string
+	descriptionZH string
+}
+
+func canonicalSkillDisplayMetadata(t *testing.T, path string) canonicalSkillMetadata {
 	t.Helper()
 	raw := readCanonicalFile(t, path)
 	if !bytes.HasPrefix(raw, []byte("---\n")) {
@@ -323,12 +367,20 @@ func canonicalSkillDescription(t *testing.T, path string) string {
 		t.Fatalf("canonical Skill %q has no closing frontmatter", path)
 	}
 	var metadata struct {
-		Description string `yaml:"description"`
+		Description   string `yaml:"description"`
+		NameZH        string `yaml:"name_zh"`
+		NameEN        string `yaml:"name_en"`
+		DescriptionZH string `yaml:"description_zh"`
 	}
 	if err := yaml.Unmarshal(raw[len("---\n"):len("---\n")+end], &metadata); err != nil {
 		t.Fatal(err)
 	}
-	return metadata.Description
+	return canonicalSkillMetadata{
+		description:   metadata.Description,
+		nameZH:        metadata.NameZH,
+		nameEN:        metadata.NameEN,
+		descriptionZH: metadata.DescriptionZH,
+	}
 }
 
 func canonicalRemoteCatalog(t *testing.T, resources []canonicalRemoteResource) []byte {

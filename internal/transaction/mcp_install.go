@@ -173,7 +173,7 @@ func (s *Service) newMCPInstallJournal(request MCPInstallRequest, phase Phase) (
 		clone := request.PreviousServer.Clone()
 		previousServer = &clone
 	}
-	return Journal{
+	journal := Journal{
 		SchemaVersion: 1,
 		TransactionID: transactionID,
 		Driver:        DriverAgentCLI,
@@ -181,14 +181,14 @@ func (s *Service) newMCPInstallJournal(request MCPInstallRequest, phase Phase) (
 		Phase:         phase,
 		Agent:         request.Agent,
 		Power:         request.Power,
-		Description:   request.Description,
-		Tags:          request.Tags,
 		Previous:      clonePowerRef(request.Previous),
 		AgentCLI: &AgentCLIJournalPayload{
 			Server:         &server,
 			PreviousServer: previousServer,
 		},
-	}, nil
+	}
+	request.metadata().applyToJournal(&journal)
+	return journal, nil
 }
 
 func mutationError(operation string, err error) error {

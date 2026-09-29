@@ -115,7 +115,8 @@ func (r *JSONRepository) Set(agent domain.AgentID, power domain.InstalledPower) 
 
 // installedPowerEqual 比较两条清单条目的身份与发布元数据是否一致；Tags 使用切片内容比较。
 func installedPowerEqual(left, right domain.InstalledPower) bool {
-	return left.Ref == right.Ref && left.Description == right.Description && slices.Equal(left.Tags, right.Tags)
+	return left.Ref == right.Ref && left.Description == right.Description && slices.Equal(left.Tags, right.Tags) &&
+		left.NameZH == right.NameZH && left.NameEN == right.NameEN && left.DescriptionZH == right.DescriptionZH
 }
 
 // Remove 删除指定智能体目标类别中的全部同名能力引用。

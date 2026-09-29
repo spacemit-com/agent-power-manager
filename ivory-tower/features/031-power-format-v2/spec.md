@@ -2,7 +2,7 @@
 
 - Status：Accepted
 - Date：2026-09-28
-- Related ADRs：[ADR-038](../../adr/ADR-038-power-format-v2-localized-display-fields.md)、[ADR-039](../../adr/ADR-039-add-name-en-and-display-name-length-limits.md)
+- Related ADRs：[ADR-038](../../adr/ADR-038-power-format-v2-localized-display-fields.md)、[ADR-039](../../adr/ADR-039-add-name-en-and-display-name-length-limits.md)、[ADR-040](../../adr/ADR-040-catalog-and-cli-json-carry-display-fields.md)
 - Related Features：[Feature 021](../021-submission-validate/spec.md)（提交校验）、[Feature 023](../023-submission-resource-metadata-query/spec.md)（资源文件是身份来源）、[Feature 026](../026-agent-package-assets/spec.md)（Agent 目录资源）
 
 ## 1. 目标
@@ -15,7 +15,8 @@
 
 - 四类 v2 资源在各自的权威文件中声明三个展示字段，`apm validate` 通过；缺字段、超出长度或写 v1 时报错点名到字段与文件。
 - 已发布的 v1 资源仍可被安装与解码（本地 provider 与既有 fixture 覆盖）。
-- `list --all`、`list --json`、`show` 的输出**不变**（本 Feature 不触碰渲染层）。
+- 展示字段经目录 item 契约与 CLI JSON 通道可达前端：见 [ADR-040](../../adr/ADR-040-catalog-and-cli-json-carry-display-fields.md)
+  与 [§4.4](#44-展示字段的对外通道)（含 [§4.5](#45-已安装记录的回填边界) 的回填边界）。
 - 内置资源 fixture 全部升到 v2 且保持可被安装链读取。
 - 派生 Agent 原生清单不含新字段，且 `reflect.DeepEqual` 复验继续通过。
 
@@ -87,11 +88,30 @@
 - `agent.name_zh` 是唯一被识别的展示名键。
 - 出现 `agent.zh_name` 时返回可操作错误，指出新键名。
 
-### 4.4 未变更行为
+### 4.4 展示字段的对外通道
 
-- `list`、`list --all`、`show`、`search` 的输出与匹配语义一律不变。
+ADR-038 只定义了资源文件里的字段，没有定义它们如何到达前端。ADR-040 补齐这条通道：
+
+- **目录 item**：`GET /api/v1/resources` 的 `items[]` 可选携带 `name_zh`/`name_en`/`description_zh`；
+  缺失即空串，提供时按 §4.1 的形状规则校验。字段与文档由 `../apc` 交付。
+- **本地持久化**：安装时从目录条目捕获三字段写入本地 manifest 与 journal（可选追加字段，不升 schema version），
+  `list --installed` 离线可读、离线 recovery 重放后仍可见。
+- **CLI JSON**：`list --json`（含 `--all`、`--installed`、分组模式）与 `show --json` 的记录恒带三字段（空为 `""`）。
+- **目录与存储版本号**：envelope、分组、item 与 `/resources/version` 的 `schema_version` 均保持 `1`；
+  item 级 `schema_version` 始终不参与 APM 校验。
+
+### 4.5 已安装记录的回填边界
+
+展示字段是**安装时捕获**的元数据，不做离线回填：同版本重装命中 `manifestSameVersion` 短路并返回
+`unchanged`，因此从旧版本 APM 升级后，已安装 Power 的清单记录仍为空串，前端继续走回退，直到该 Power 被
+卸载后重装（或升/降版本）。这是「元数据只在安装时捕获」的既有设计的直接后果，不在本次改动范围内。
+
+### 4.6 未变更行为
+
+- `search` 的输出与匹配语义一律不变（仍只匹配 `name`、仍不输出 `tags` 与展示字段）。
+- `list`、`list --all`、`show` 的**文本**输出逐字节不变。
 - 提交 metadata（multipart）不新增字段。
-- 本地 manifest 与 journal 结构不变。
+- 派生 Agent 原生清单不新增字段；本地 manifest 与 journal 的 schema version 不变。
 
 ## 5. 验收
 
@@ -102,11 +122,17 @@
    锁定 2–16 字与 ≤ 32 字符边界。
 4. `TestSubmitAcceptsV2ResourcesWithDisplayFields`：四类 v2 资源校验通过。
 5. `TestInstallPathAcceptsV1Resources`：v1 的 MCP 与 agent.yaml 可解码并通过安装侧校验。
-6. `TestDerivedAgentManifestsCarryNoLocalizedFields`：派生清单不含展示字段。
+6. `TestDerivedAgentManifestsCarryNoLocalizedFields`：派生清单不含展示字段（复制的 canonical Skill 内容保留）。
 7. `TestDerivedAgentManifestsStillDeriveForV1Artifact`：v1 canonical 包仍可派生落盘清单。
 8. 本地 provider 端到端：`APM_CLOUD_PROVIDER=local APM_CLOUD_LOCAL_ROOT=<repo>/internal/cloud/resources`
    下 `apm list --type skill --json`、`apm show`、安装 skill/plugin/mcp/agent 各一成功。
 9. `../using-apm` 四类模板通过 `apm validate`。
+10. 展示字段通道（ADR-040）：`TestDecodeCatalogWithDisplayFields`、`TestEncodeOmitsEmptyDisplayFields`、
+    `TestDecodeRejectsInvalidDisplayFields`、`TestDecodeCatalogItemSchemaVersionIsNotValidated`、
+    `TestLocalCatalogParsesDisplayFieldsFromEachAuthoritativeFile`、`TestLocalCatalogOmitsDisplayFieldsForV1Resources`、
+    `TestJSONRepositoryManifestRoundTripsDisplayFields`、`TestJournalPersistsDisplayMetadata`、
+    `TestRenderListJSONCarriesDisplayFields`、`TestShowJSONCarriesDisplayFields`、
+    `TestSearchOutputCarriesNoDisplayFields`、`TestInstalledManifestCarriesDisplayFieldsEndToEnd` 全绿。
 
 远端真实提交（v2 content 由 APC 接收）在 APC 就绪前记为 BLOCKED，不计为通过。
 

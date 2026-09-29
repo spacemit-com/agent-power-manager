@@ -263,7 +263,7 @@ func (s *Service) newLocalMarketplacePluginInstallJournal(request PluginInstallR
 		payload.Marketplace.PreviousSource = request.Marketplace.Previous.Source
 		payload.Marketplace.PreviousPresent = true
 	}
-	return Journal{
+	journal := Journal{
 		SchemaVersion: 1,
 		TransactionID: id,
 		Driver:        DriverPlugin,
@@ -271,11 +271,11 @@ func (s *Service) newLocalMarketplacePluginInstallJournal(request PluginInstallR
 		Phase:         phase,
 		Agent:         request.Agent,
 		Power:         request.Power,
-		Description:   request.Description,
-		Tags:          request.Tags,
 		Previous:      clonePowerRef(request.Previous),
 		Plugin:        payload,
-	}, nil
+	}
+	request.metadata().applyToJournal(&journal)
+	return journal, nil
 }
 
 // uninstallLocalMarketplacePlugin 以提交为导向移除 Plugin 与专用 marketplace：先复核两个事实，

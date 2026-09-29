@@ -2,6 +2,57 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+## 2026-09-28（目录与 CLI JSON 携带 v2 展示字段，打通到前端）
+
+分类：契约变更（APC 目录 item 新增可选字段；`list --json`/`show --json` 输出新增字段）
+
+用户需求：前端（Agent Hub 插件）已能按应用语言显示 `name_zh`/`name_en`/`description_zh`，但 apm 从不把
+这三个字段送到上层：目录解码丢弃它们、安装只把 `description`/`tags` 抄进清单、`list --json`/`show` 输出
+里没有它们，导致卡片与详情只能回退到 `name`/`description`，无法随语言切换。要求打通云端市场与已安装
+两个范围（含 per-version 的 `description_zh`），但 `search` 与文本输出保持不变。APC 侧会另行在公共目录
+item 上补齐字段。
+
+解决方案或完成结果：三个字段作为**可选追加字段**进入目录 item 契约与本地持久化，并**恒定出现**在
+`list`/`show` 的 JSON 记录中。目录层：`domain.CatalogEntry`、`catalog.itemDTO` 与 item 字段白名单支持
+`name_zh`/`name_en`/`description_zh`，`CatalogEntry.Validate` 对提供的值执行 ADR-039 形状校验（缺失合法）。
+Local provider 从四类权威文件解析：`SKILL.md` frontmatter、`apc-plugin.json`、`MCP.json`、`agent.yaml`；
+`equalCatalogEntry` 同步比较三个字段。持久化层：`domain.InstalledPower`、`config.powerEntry`、
+`transaction.Journal` 与四个安装 request 携带三字段，`installedPowerEqual` 覆盖它们，离线 recovery 重放
+写回清单时不再丢字段。装配与渲染：`cli.ListedPower` 携带三字段，`listPowerJSON`（覆盖 `list --json`、
+`--all`、`--installed` 与 `--agent=all` 分组模式）与 `show` 的 JSON 记录恒带三字段（空为 `""`）。
+
+关键决策（见 [ADR-040](../ivory-tower/adr/ADR-040-catalog-and-cli-json-carry-display-fields.md)，局部取代
+ADR-038 第 7 条与 ADR-039 第 7 条中「APC 目录契约与 `list`/`show` 输出不变」两处决定）：
+
+- **目录与存储的版本号一律不升**：envelope、分组、item 与 `/resources/version` 的 `schema_version` 保持
+  `1`，本地 manifest 与 journal 的 schema version 也保持 `1`。依据实测：item 级 `schema_version` 完全不
+  参与旧 APM 校验（升它无作用）；envelope/分组版本不是 `1` 会让旧客户端硬拒整份目录，而目录端点路径
+  硬编码 `api/v1`、APC 无匿名可读的 v2 端点可迁，结果是所有旧客户端静默冻结在陈旧快照。
+- **`search` 与全部文本输出不变**：`search --json` 仍只有 `type`/`name`/`version`/`description`，
+  仍只匹配 `name`；`list`/`show` 文本逐字节不变。
+- **派生清单边界不变**：Codex/Claude/Hermes/Bibit 的原生清单仍不含三字段；canonical Skill 子树是原样
+  复制的内容，其展示字段必须保留。守卫测试改为按「派生清单」与「复制的 canonical 内容」逐文件区分，
+  并把 fixture 换成真实 v2 Skill（原实现只对 2 行 stub 通过，属于既有隐患）。
+
+边界：不改 `../apc` 仓库与 APC-API.md（字段与文档由 APC 侧交付）、不改 wire 协议与
+`APC_BASE_URL`/认证语义、不新增 CLI 参数或环境变量、不改 `search` 匹配逻辑与文本渲染。
+**发布顺序是硬约束：APM 必须先于 APC 发布**，否则旧 APM 会因目录字段白名单拒绝新目录。
+
+相关提交：本条目随本次改动一并提交。
+
+验证结果或限制：`gofmt -l .` 无输出、`go vet ./...` 与 `go test ./...` 全绿（域层、目录 codec、Local
+provider、config、transaction、lifecycle、cli、pluginresource 均有新增锁定测试，见
+[Feature 031 验证记录 §1.1](../ivory-tower/features/031-power-format-v2/verification.md)）。手工端到端以
+`APM_CLOUD_PROVIDER=local APM_CLOUD_LOCAL_ROOT=<repo>/internal/cloud/resources` 验证：`list --json`、
+`list <name> --all --json`、`list --installed --json` 与 `show --json` 均带三字段，安装后
+`~/.apm/manifests/<agent>.json` 持久化三字段，`search --json` 无变化。已知代价：单条目录数据形状非法会让
+整份目录解码失败（fail closed），依赖 APC 提交侧已强制形状；旧 APM 读新 journal 会因
+`DisallowUnknownFields` 拒绝恢复（与 ADR-024 同级别风险）；**已安装记录不会自动回填**——展示字段是
+安装时捕获的元数据，同版本重装命中 `manifestSameVersion` 短路并返回 `unchanged`（板端实测：手写旧清单
+后同版本重装结果 `unchanged` 且清单未变，卸载后重装才写入三字段），因此升级后需要重装相关 Power 才能让
+已安装范围切换语言。板端构建 `agent-power-manager_0.1.6_riscv64.deb`（SHA-256 `31d15ff4…`）覆盖安装
+0.1.5 成功，`go test ./...` 22 包全绿，生产目录（APC 未发布字段）下 16 条记录全部空字段且命令正常。
+
 ## 2026-09-28（Power 资源格式升级到 V2，新增本地化展示字段）
 
 分类：契约变更（破坏性：v1 提交被拒绝）

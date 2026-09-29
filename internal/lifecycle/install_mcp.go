@@ -52,12 +52,15 @@ func (s *InstallService) installMCP(ctx context.Context, agent domain.AgentID, e
 			return cli.InstallItem{}, fmt.Errorf("get MCP %+v from Cloud: %w", ref, err)
 		}
 		request := transaction.MCPInstallRequest{
-			Agent:       agent,
-			Power:       ref,
-			Description: entry.Description,
-			Tags:        entry.Tags,
-			Server:      mcpServerPointer(server),
-			Adapter:     mcpAdapter,
+			Agent:         agent,
+			Power:         ref,
+			Description:   entry.Description,
+			Tags:          entry.Tags,
+			NameZH:        entry.NameZH,
+			NameEN:        entry.NameEN,
+			DescriptionZH: entry.DescriptionZH,
+			Server:        mcpServerPointer(server),
+			Adapter:       mcpAdapter,
 		}
 		if err := s.transactions.InstallMCP(ctx, request); err != nil {
 			return cli.InstallItem{}, fmt.Errorf("install MCP %+v for agent %q: %w", ref, agent, err)
@@ -113,12 +116,15 @@ func (s *InstallService) installMCP(ctx context.Context, agent domain.AgentID, e
 			return cli.InstallItem{}, fmt.Errorf("get MCP %+v from Cloud: %w", ref, err)
 		}
 		request := transaction.MCPInstallRequest{
-			Agent:       agent,
-			Power:       ref,
-			Description: entry.Description,
-			Tags:        entry.Tags,
-			Server:      mcpServerPointer(server),
-			Adapter:     mcpAdapter,
+			Agent:         agent,
+			Power:         ref,
+			Description:   entry.Description,
+			Tags:          entry.Tags,
+			NameZH:        entry.NameZH,
+			NameEN:        entry.NameEN,
+			DescriptionZH: entry.DescriptionZH,
+			Server:        mcpServerPointer(server),
+			Adapter:       mcpAdapter,
 		}
 		if err := s.transactions.InstallMCP(ctx, request); err != nil {
 			return cli.InstallItem{}, fmt.Errorf("install MCP %+v for agent %q: %w", ref, agent, err)

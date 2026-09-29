@@ -151,6 +151,17 @@ type localCatalogContent struct {
 	tree  *treeSnapshot
 }
 
+// localMetadata 是单个 Local fixture 从其权威文件解析出的发布元数据：description 必填，
+// 三个 v2 展示字段可选（缺失为空串）。四类资源各自只有一个权威来源——Skill 的
+// SKILL.md frontmatter、Plugin 的 apc-plugin.json、MCP 的 MCP.json、Agent 的 agent.yaml；
+// 派生的 Agent 落盘清单与内嵌 Skill 不得覆盖它（ADR-038/ADR-040）。
+type localMetadata struct {
+	description   string
+	nameZH        string
+	nameEN        string
+	descriptionZH string
+}
+
 // loadCatalogContent 通过现有 Local 物理快照边界固定一个精确 fixture，再从同一快照
 // 构建下载字节与权威 metadata；Task 7 必须复用本入口，不能从目录名重建 metadata。
 func (c *Client) loadCatalogContent(ctx context.Context, ref domain.PowerRef) (localCatalogContent, error) {
@@ -160,22 +171,23 @@ func (c *Client) loadCatalogContent(ctx context.Context, ref domain.PowerRef) (l
 	if _, err := c.catalogSourcePath(ref); err != nil {
 		return localCatalogContent{}, err
 	}
-	var description, contentType string
+	var metadata localMetadata
+	var contentType string
 	var contents []byte
 	var tree *treeSnapshot
 	var err error
 	switch ref.Type {
 	case domain.PowerTypeSkill:
-		description, contents, tree, err = c.loadCatalogSkill(ctx, ref)
+		metadata, contents, tree, err = c.loadCatalogSkill(ctx, ref)
 		contentType = "application/gzip"
 	case domain.PowerTypePlugin:
-		description, contents, tree, err = c.loadCatalogPlugin(ctx, ref)
+		metadata, contents, tree, err = c.loadCatalogPlugin(ctx, ref)
 		contentType = "application/gzip"
 	case domain.PowerTypeMCP:
-		description, contents, err = c.loadCatalogMCP(ctx, ref)
+		metadata, contents, err = c.loadCatalogMCP(ctx, ref)
 		contentType = "application/json"
 	case domain.PowerTypeAgent:
-		description, contents, tree, err = c.loadCatalogAgent(ctx, ref)
+		metadata, contents, tree, err = c.loadCatalogAgent(ctx, ref)
 		contentType = "application/gzip"
 	default:
 		return localCatalogContent{}, cloud.ErrNotFound
@@ -189,9 +201,10 @@ func (c *Client) loadCatalogContent(ctx context.Context, ref domain.PowerRef) (l
 	digest := md5.Sum(contents)
 	return localCatalogContent{
 		entry: domain.CatalogEntry{
-			Ref: ref, Description: description, Message: localCatalogMessage,
+			Ref: ref, Description: metadata.description, Message: localCatalogMessage,
 			ContentType: contentType, ContentSize: int64(len(contents)), ContentMD5: hex.EncodeToString(digest[:]),
 			PublishedAt: localCatalogPublishedAt, Tags: []string{},
+			NameZH: metadata.nameZH, NameEN: metadata.nameEN, DescriptionZH: metadata.descriptionZH,
 		},
 		bytes: append([]byte(nil), contents...),
 		tree:  tree,
@@ -225,52 +238,53 @@ func (c *Client) loadMatchingCatalogContent(ctx context.Context, entry domain.Ca
 func equalCatalogEntry(left, right domain.CatalogEntry) bool {
 	return left.Ref == right.Ref && left.Description == right.Description && left.Message == right.Message &&
 		left.ContentType == right.ContentType && left.ContentSize == right.ContentSize &&
-		left.ContentMD5 == right.ContentMD5 && left.PublishedAt == right.PublishedAt && slices.Equal(left.Tags, right.Tags)
+		left.ContentMD5 == right.ContentMD5 && left.PublishedAt == right.PublishedAt && slices.Equal(left.Tags, right.Tags) &&
+		left.NameZH == right.NameZH && left.NameEN == right.NameEN && left.DescriptionZH == right.DescriptionZH
 }
 
-func (c *Client) loadCatalogSkill(ctx context.Context, ref domain.PowerRef) (string, []byte, *treeSnapshot, error) {
+func (c *Client) loadCatalogSkill(ctx context.Context, ref domain.PowerRef) (localMetadata, []byte, *treeSnapshot, error) {
 	source := filepath.Join(c.resourcesRoot, "skills", ref.Name, ref.Version)
 	snapshot, err := c.validateSkillSource(ctx, source)
 	if err != nil {
-		return "", nil, nil, err
+		return localMetadata{}, nil, nil, err
 	}
-	name, version, description, err := parseLocalSkillMetadata(snapshot)
+	metadata, err := parseLocalSkillMetadata(snapshot)
 	if err != nil {
-		return "", nil, nil, unsafeContent("parse Local Skill metadata %s/%s: %v", ref.Name, ref.Version, err)
+		return localMetadata{}, nil, nil, unsafeContent("parse Local Skill metadata %s/%s: %v", ref.Name, ref.Version, err)
 	}
-	if name != ref.Name || version != ref.Version {
-		return "", nil, nil, unsafeContent("Local Skill metadata %s/%s does not match fixture path %s/%s", name, version, ref.Name, ref.Version)
+	if metadata.name != ref.Name || metadata.version != ref.Version {
+		return localMetadata{}, nil, nil, unsafeContent("Local Skill metadata %s/%s does not match fixture path %s/%s", metadata.name, metadata.version, ref.Name, ref.Version)
 	}
 	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
-	return description, contents, snapshot, err
+	return metadata.localMetadata, contents, snapshot, err
 }
 
-func (c *Client) loadCatalogPlugin(ctx context.Context, ref domain.PowerRef) (string, []byte, *treeSnapshot, error) {
+func (c *Client) loadCatalogPlugin(ctx context.Context, ref domain.PowerRef) (localMetadata, []byte, *treeSnapshot, error) {
 	source := filepath.Join(c.resourcesRoot, "plugins", ref.Name, ref.Version)
 	info, err := os.Lstat(source)
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil, nil, cloud.ErrNotFound
+		return localMetadata{}, nil, nil, cloud.ErrNotFound
 	}
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("stat raw Plugin package %q: %w", source, err)
+		return localMetadata{}, nil, nil, fmt.Errorf("stat raw Plugin package %q: %w", source, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", nil, nil, unsafeContent("raw Plugin package %q is not a physical directory", source)
+		return localMetadata{}, nil, nil, unsafeContent("raw Plugin package %q is not a physical directory", source)
 	}
 	snapshot, err := capturePhysicalTree(ctx, c.resourcesRoot, source, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
-		return "", nil, nil, err
+		return localMetadata{}, nil, nil, err
 	}
 	manifestBytes, err := snapshot.regularFile("apc-plugin.json")
 	if err != nil {
-		return "", nil, nil, err
+		return localMetadata{}, nil, nil, err
 	}
 	var manifest pluginartifact.APCPluginManifest
 	if err := jsonstrict.Decode(manifestBytes, &manifest, true); err != nil {
-		return "", nil, nil, unsafeContent("decode Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
+		return localMetadata{}, nil, nil, unsafeContent("decode Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	if err := pluginartifact.ValidateAPCPluginManifest(ref, manifest); err != nil {
-		return "", nil, nil, unsafeContent("validate Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
+		return localMetadata{}, nil, nil, unsafeContent("validate Local Plugin manifest %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	entries := make([]pluginartifact.RawPackageEntry, 0, len(snapshot.nodes))
 	for _, node := range snapshot.nodes {
@@ -279,55 +293,66 @@ func (c *Client) loadCatalogPlugin(ctx context.Context, ref domain.PowerRef) (st
 		})
 	}
 	if err := pluginartifact.ValidateRawPackageEntries(manifest, entries); err != nil {
-		return "", nil, nil, unsafeContent("validate Local Plugin snapshot %s/%s: %v", ref.Name, ref.Version, err)
+		return localMetadata{}, nil, nil, unsafeContent("validate Local Plugin snapshot %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
-	return manifest.Description, contents, snapshot, err
+	// 插件展示字段的唯一权威来源是 canonical apc-plugin.json；内嵌 Skill 的同名字段忽略。
+	return localMetadata{
+		description:   manifest.Description,
+		nameZH:        manifest.NameZH,
+		nameEN:        manifest.NameEN,
+		descriptionZH: manifest.DescriptionZH,
+	}, contents, snapshot, err
 }
 
-func (c *Client) loadCatalogMCP(ctx context.Context, ref domain.PowerRef) (string, []byte, error) {
+func (c *Client) loadCatalogMCP(ctx context.Context, ref domain.PowerRef) (localMetadata, []byte, error) {
 	source := filepath.Join(c.resourcesRoot, "mcps", ref.Name, ref.Version, "MCP.json")
 	if _, err := os.Lstat(source); errors.Is(err, fs.ErrNotExist) {
-		return "", nil, cloud.ErrNotFound
+		return localMetadata{}, nil, cloud.ErrNotFound
 	} else if err != nil {
-		return "", nil, fmt.Errorf("stat Local MCP resource %q: %w", source, err)
+		return localMetadata{}, nil, fmt.Errorf("stat Local MCP resource %q: %w", source, err)
 	}
 	raw, _, err := capturePhysicalFile(ctx, c.resourcesRoot, source, maxSingleSize, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
-		return "", nil, err
+		return localMetadata{}, nil, err
 	}
 	resource, err := domain.DecodeMCPResourceJSON(raw)
 	if err != nil {
-		return "", nil, unsafeContent("decode Local MCP resource %s/%s: %v", ref.Name, ref.Version, err)
+		return localMetadata{}, nil, unsafeContent("decode Local MCP resource %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	if err := resource.ValidatePowerRef(ref); err != nil {
-		return "", nil, unsafeContent("validate Local MCP resource %s/%s: %v", ref.Name, ref.Version, err)
+		return localMetadata{}, nil, unsafeContent("validate Local MCP resource %s/%s: %v", ref.Name, ref.Version, err)
 	}
 	contents, err := submission.CanonicalizeJSON(raw)
 	if err != nil {
-		return "", nil, unsafeContent("canonicalize Local MCP resource %s/%s: %v", ref.Name, ref.Version, err)
+		return localMetadata{}, nil, unsafeContent("canonicalize Local MCP resource %s/%s: %v", ref.Name, ref.Version, err)
 	}
-	return resource.Description, contents, nil
+	return localMetadata{
+		description:   resource.Description,
+		nameZH:        resource.NameZH,
+		nameEN:        resource.NameEN,
+		descriptionZH: resource.DescriptionZH,
+	}, contents, nil
 }
 
 // loadCatalogAgent 固定版本目录树，先按 Agent 内容策略捕获（agent.yaml 必须文本、
 // assets/ 允许二进制），再转成 artifact Entries 做权威语义校验，最后构建确定性
-// gzip 归档；返回描述、归档字节与已校验快照树。
-func (c *Client) loadCatalogAgent(ctx context.Context, ref domain.PowerRef) (string, []byte, *treeSnapshot, error) {
+// gzip 归档；返回发布元数据、归档字节与已校验快照树。
+func (c *Client) loadCatalogAgent(ctx context.Context, ref domain.PowerRef) (localMetadata, []byte, *treeSnapshot, error) {
 	source := filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version)
 	info, err := os.Lstat(source)
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil, nil, cloud.ErrNotFound
+		return localMetadata{}, nil, nil, cloud.ErrNotFound
 	}
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("stat Local Agent package %q: %w", source, err)
+		return localMetadata{}, nil, nil, fmt.Errorf("stat Local Agent package %q: %w", source, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", nil, nil, unsafeContent("Local Agent package %q is not a physical directory", source)
+		return localMetadata{}, nil, nil, unsafeContent("Local Agent package %q is not a physical directory", source)
 	}
 	snapshot, err := capturePhysicalTreeWithPolicy(ctx, c.resourcesRoot, source, agentLocalTreeContentPolicy, c.beforeTreeSnapshot, c.beforeSnapshotFileOpen, c.afterSnapshotDataOpen)
 	if err != nil {
-		return "", nil, nil, err
+		return localMetadata{}, nil, nil, err
 	}
 	entries := make([]agentartifact.Entry, 0, len(snapshot.nodes))
 	for _, node := range snapshot.nodes {
@@ -340,10 +365,16 @@ func (c *Client) loadCatalogAgent(ctx context.Context, ref domain.PowerRef) (str
 	if err != nil {
 		// agentartifact.Validate 的语义失败已包裹 domain.ErrInvalidAgent，必须原样保留
 		// 在错误链中（与 Remote provider 对齐），不得再归类为 cloud.ErrUnsafeContent。
-		return "", nil, nil, fmt.Errorf("validate Local Agent snapshot %s/%s: %w", ref.Name, ref.Version, err)
+		return localMetadata{}, nil, nil, fmt.Errorf("validate Local Agent snapshot %s/%s: %w", ref.Name, ref.Version, err)
 	}
 	contents, err := buildLocalCatalogArchive(ctx, snapshot, c.catalogArchiveAfterBodyChunk)
-	return validated.Config.Agent.Description, contents, snapshot, err
+	agent := validated.Config.Agent
+	return localMetadata{
+		description:   agent.Description,
+		nameZH:        agent.NameZH,
+		nameEN:        agent.NameEN,
+		descriptionZH: agent.DescriptionZH,
+	}, contents, snapshot, err
 }
 
 func (snapshot *treeSnapshot) regularFile(relative string) ([]byte, error) {
@@ -356,51 +387,74 @@ func (snapshot *treeSnapshot) regularFile(relative string) ([]byte, error) {
 	return nil, unsafeContent("captured tree requires physical regular file %q", relative)
 }
 
-func parseLocalSkillMetadata(snapshot *treeSnapshot) (string, string, string, error) {
+// localSkillMetadata 是 SKILL.md frontmatter 解析结果：身份（name/version）加发布元数据。
+type localSkillMetadata struct {
+	name    string
+	version string
+	localMetadata
+}
+
+func parseLocalSkillMetadata(snapshot *treeSnapshot) (localSkillMetadata, error) {
 	contents, err := snapshot.regularFile("SKILL.md")
 	if err != nil {
-		return "", "", "", err
+		return localSkillMetadata{}, err
 	}
 	frontmatter, err := extractLocalSkillFrontmatter(contents)
 	if err != nil {
-		return "", "", "", err
+		return localSkillMetadata{}, err
 	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(frontmatter, &document); err != nil {
-		return "", "", "", err
+		return localSkillMetadata{}, err
 	}
 	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
-		return "", "", "", fmt.Errorf("SKILL.md frontmatter must be one mapping")
+		return localSkillMetadata{}, fmt.Errorf("SKILL.md frontmatter must be one mapping")
 	}
 	mapping := document.Content[0]
 	seen := make(map[string]struct{}, len(mapping.Content)/2)
-	values := make(map[string]string, 3)
+	values := make(map[string]string, 6)
 	for index := 0; index+1 < len(mapping.Content); index += 2 {
 		key, value := mapping.Content[index], mapping.Content[index+1]
 		if key.Kind != yaml.ScalarNode || key.Tag != "!!str" {
-			return "", "", "", fmt.Errorf("SKILL.md frontmatter key must be a string")
+			return localSkillMetadata{}, fmt.Errorf("SKILL.md frontmatter key must be a string")
 		}
 		if _, duplicate := seen[key.Value]; duplicate {
-			return "", "", "", fmt.Errorf("SKILL.md frontmatter key %q is duplicated", key.Value)
+			return localSkillMetadata{}, fmt.Errorf("SKILL.md frontmatter key %q is duplicated", key.Value)
 		}
 		seen[key.Value] = struct{}{}
-		if key.Value == "name" || key.Value == "version" || key.Value == "description" {
+		switch key.Value {
+		case "name", "version", "description":
 			if value.Kind != yaml.ScalarNode || value.Tag != "!!str" || value.Value == "" || strings.TrimSpace(value.Value) != value.Value {
-				return "", "", "", fmt.Errorf("SKILL.md frontmatter %s must be a non-empty trimmed string", key.Value)
+				return localSkillMetadata{}, fmt.Errorf("SKILL.md frontmatter %s must be a non-empty trimmed string", key.Value)
+			}
+			values[key.Value] = value.Value
+		case "name_zh", "name_en", "description_zh":
+			// v2 展示字段可选：缺失合法；提供时必须是字符串，形状交给 domain 统一校验。
+			if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+				return localSkillMetadata{}, fmt.Errorf("SKILL.md frontmatter %s must be a string", key.Value)
 			}
 			values[key.Value] = value.Value
 		}
 	}
 	if !domain.IsCanonicalPowerName(values["name"]) {
-		return "", "", "", fmt.Errorf("SKILL.md name %q is not canonical", values["name"])
+		return localSkillMetadata{}, fmt.Errorf("SKILL.md name %q is not canonical", values["name"])
 	}
 	if _, err := domain.CanonicalPowerVersion(values["version"]); err != nil {
-		return "", "", "", err
+		return localSkillMetadata{}, err
 	}
 	if values["description"] == "" {
-		return "", "", "", fmt.Errorf("SKILL.md description is required")
+		return localSkillMetadata{}, fmt.Errorf("SKILL.md description is required")
 	}
-	return values["name"], values["version"], values["description"], nil
+	metadata := localMetadata{
+		description:   values["description"],
+		nameZH:        values["name_zh"],
+		nameEN:        values["name_en"],
+		descriptionZH: values["description_zh"],
+	}
+	if err := domain.ValidateOptionalDisplayMetadata(metadata.nameZH, metadata.nameEN, metadata.descriptionZH); err != nil {
+		return localSkillMetadata{}, fmt.Errorf("SKILL.md frontmatter display metadata: %w", err)
+	}
+	return localSkillMetadata{name: values["name"], version: values["version"], localMetadata: metadata}, nil
 }
 
 func extractLocalSkillFrontmatter(contents []byte) ([]byte, error) {

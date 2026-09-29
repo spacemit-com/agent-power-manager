@@ -76,8 +76,6 @@ func (s *Service) InstallSkill(ctx context.Context, request SkillInstallRequest)
 		Phase:         PhasePreparing,
 		Agent:         request.Agent,
 		Power:         request.Power,
-		Description:   request.Description,
-		Tags:          request.Tags,
 		Previous:      clonePowerRef(request.Previous),
 		Filesystem: &FilesystemJournalPayload{
 			StagingRoot:    request.StagingRoot,
@@ -86,6 +84,7 @@ func (s *Service) InstallSkill(ctx context.Context, request SkillInstallRequest)
 			BackupPath:     artifacts.backup,
 		},
 	}
+	request.metadata().applyToJournal(&journal)
 	if err := s.journals.Create(journal); err != nil {
 		return fmt.Errorf("create install journal: %w", err)
 	}
@@ -133,7 +132,7 @@ func (s *Service) InstallSkill(ctx context.Context, request SkillInstallRequest)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.manifests.Set(request.Agent, domain.InstalledPower{Ref: request.Power, Description: request.Description, Tags: request.Tags}); err != nil {
+	if err := s.manifests.Set(request.Agent, request.metadata().installedPower(request.Power)); err != nil {
 		return fmt.Errorf("set installed power manifest: %w", err)
 	}
 	if err := s.files.removeAll(artifacts.backup); err != nil {

@@ -435,3 +435,45 @@ func legacyFlatJournalJSON(journal Journal) string {
 		`","transaction_dir":"` + journal.Filesystem.TransactionDir +
 		`","backup_path":"` + journal.Filesystem.BackupPath + `"}`
 }
+
+// TestJournalPersistsDisplayMetadata 锁定 journal 携带 v2 展示字段：recovery 完全离线，
+// 只有把展示元数据写进 journal，重放写回清单时才不会丢字段（ADR-024 先例、ADR-040）。
+// 同时锁定展示字段是可选追加字段：旧 journal（无它们）仍可解码为空串。
+func TestJournalPersistsDisplayMetadata(t *testing.T) {
+	journal := validInstallJournal(t)
+	journal.Description = "demo description"
+	journal.Tags = []string{"alpha"}
+	journal.NameZH = "演示"
+	journal.NameEN = "Demo"
+	journal.DescriptionZH = "演示描述"
+
+	contents, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeJournal(contents)
+	if err != nil {
+		t.Fatalf("decodeJournal(with display fields) error = %v", err)
+	}
+	if decoded.NameZH != "演示" || decoded.NameEN != "Demo" || decoded.DescriptionZH != "演示描述" {
+		t.Fatalf("decoded display fields = %q/%q/%q, want the persisted values", decoded.NameZH, decoded.NameEN, decoded.DescriptionZH)
+	}
+	installed := decoded.installedPower()
+	if installed.NameZH != "演示" || installed.NameEN != "Demo" || installed.DescriptionZH != "演示描述" {
+		t.Fatalf("installedPower() display fields = %q/%q/%q, want the journal values carried through",
+			installed.NameZH, installed.NameEN, installed.DescriptionZH)
+	}
+
+	// 旧 journal（改动前写出，没有展示字段）必须无损读取。
+	legacy, err := json.Marshal(validInstallJournal(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodedLegacy, err := decodeJournal(legacy)
+	if err != nil {
+		t.Fatalf("decodeJournal(legacy) error = %v", err)
+	}
+	if decodedLegacy.NameZH != "" || decodedLegacy.NameEN != "" || decodedLegacy.DescriptionZH != "" {
+		t.Fatalf("legacy journal display fields = %q/%q/%q, want all empty", decodedLegacy.NameZH, decodedLegacy.NameEN, decodedLegacy.DescriptionZH)
+	}
+}

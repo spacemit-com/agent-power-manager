@@ -62,6 +62,69 @@ type AdapterResolver interface {
 	AgentAdapterResolver
 }
 
+// installMetadata 是安装时从目录条目捕获的发布元数据，四类安装请求与 journal 共用；
+// 它是纯元数据，不参与身份、幂等、缓存键或 recovery 判定（ADR-024、ADR-040）。
+type installMetadata struct {
+	Description   string
+	Tags          []string
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
+}
+
+// applyToJournal 把发布元数据填入 journal envelope，避免各 driver 逐个字段手工复制时漏项。
+func (metadata installMetadata) applyToJournal(journal *Journal) {
+	journal.Description = metadata.Description
+	journal.Tags = metadata.Tags
+	journal.NameZH = metadata.NameZH
+	journal.NameEN = metadata.NameEN
+	journal.DescriptionZH = metadata.DescriptionZH
+}
+
+// installedPower 把发布元数据与给定引用组合为清单条目。
+func (metadata installMetadata) installedPower(ref domain.PowerRef) domain.InstalledPower {
+	return domain.InstalledPower{
+		Ref:           ref,
+		Description:   metadata.Description,
+		Tags:          metadata.Tags,
+		NameZH:        metadata.NameZH,
+		NameEN:        metadata.NameEN,
+		DescriptionZH: metadata.DescriptionZH,
+	}
+}
+
+// metadata 返回 Skill 安装请求捕获的发布元数据。
+func (request SkillInstallRequest) metadata() installMetadata {
+	return installMetadata{
+		Description: request.Description, Tags: request.Tags,
+		NameZH: request.NameZH, NameEN: request.NameEN, DescriptionZH: request.DescriptionZH,
+	}
+}
+
+// metadata 返回 Agent 安装请求捕获的发布元数据。
+func (request AgentInstallRequest) metadata() installMetadata {
+	return installMetadata{
+		Description: request.Description, Tags: request.Tags,
+		NameZH: request.NameZH, NameEN: request.NameEN, DescriptionZH: request.DescriptionZH,
+	}
+}
+
+// metadata 返回 MCP 安装请求捕获的发布元数据。
+func (request MCPInstallRequest) metadata() installMetadata {
+	return installMetadata{
+		Description: request.Description, Tags: request.Tags,
+		NameZH: request.NameZH, NameEN: request.NameEN, DescriptionZH: request.DescriptionZH,
+	}
+}
+
+// metadata 返回 Plugin 安装请求捕获的发布元数据。
+func (request PluginInstallRequest) metadata() installMetadata {
+	return installMetadata{
+		Description: request.Description, Tags: request.Tags,
+		NameZH: request.NameZH, NameEN: request.NameEN, DescriptionZH: request.DescriptionZH,
+	}
+}
+
 // SkillInstallRequest 描述单个 Agent 的已解析文件型 Skill 安装事务输入。
 type SkillInstallRequest struct {
 	Agent       domain.AgentID
@@ -71,6 +134,10 @@ type SkillInstallRequest struct {
 	Previous    *domain.PowerRef
 	StagingRoot string
 	Adapter     adapter.SkillAdapter
+	// v2 展示字段：安装时捕获、随 journal 持久化，供离线 recovery 重放写回清单（ADR-040）。
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
 }
 
 // SkillUninstallRequest 描述单个 Agent 的已解析文件型 Skill 卸载事务输入。
@@ -89,6 +156,10 @@ type AgentInstallRequest struct {
 	Previous    *domain.PowerRef
 	StagingRoot string
 	Adapter     adapter.AgentAdapter
+	// v2 展示字段：安装时捕获、随 journal 持久化，供离线 recovery 重放写回清单（ADR-040）。
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
 }
 
 // AgentUninstallRequest 描述单个 Agent 的已解析文件型 Agent 卸载事务输入。
@@ -108,6 +179,10 @@ type MCPInstallRequest struct {
 	Server         *domain.MCPServer
 	PreviousServer *domain.MCPServer
 	Adapter        adapter.MCPAdapter
+	// v2 展示字段：安装时捕获、随 journal 持久化，供离线 recovery 重放写回清单（ADR-040）。
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
 }
 
 // MCPUninstallRequest 描述单个 Agent 的 MCP 卸载输入；卸载只依赖本地清单和目标 CLI 状态。
@@ -136,6 +211,10 @@ type PluginInstallRequest struct {
 	Target         adapter.PluginTarget
 	PreviousTarget *adapter.PluginTarget
 	Marketplace    *PluginMarketplaceInstallRequest
+	// v2 展示字段：安装时捕获、随 journal 持久化，供离线 recovery 重放写回清单（ADR-040）。
+	NameZH        string
+	NameEN        string
+	DescriptionZH string
 }
 
 // PluginUninstallRequest 描述无需 Cloud 即可执行的 Plugin 卸载输入。
