@@ -117,7 +117,7 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 	}
 	metadata, err := json.Marshal(submissionMetadataDTO{
 		SchemaVersion: request.SchemaVersion,
-		Type:          request.Type,
+		Type:          apcWireType(request.Type),
 		Name:          request.Name,
 		Version:       request.Version,
 		Description:   request.Description,
@@ -191,7 +191,7 @@ func (c *Client) Submit(ctx context.Context, request domain.SubmissionRequest) (
 // submissionContentType 返回 PowerType 对应的合法请求内容媒体类型；未知类型返回空串。
 func submissionContentType(powerType domain.PowerType) string {
 	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeAgent:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeExpert:
 		return "application/gzip"
 	case domain.PowerTypeMCP:
 		return "application/json"
@@ -206,7 +206,7 @@ func submissionFilename(request domain.SubmissionRequest) string {
 	switch request.Type {
 	case domain.PowerTypeMCP:
 		return request.Name + "-" + request.Version + ".json"
-	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeAgent:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeExpert:
 		return request.Name + "-" + request.Version + ".tar.gz"
 	default:
 		return ""
@@ -318,7 +318,7 @@ func (c *Client) GetSubmission(ctx context.Context, submissionID string) (domain
 
 // validateSubmissionDetail 将 presence-sensitive DTO 转为领域详情，并统一验证 get/replay 的完整契约。
 func validateSubmissionDetail(dto submissionDetailDTO) (domain.Submission, error) {
-	identity, err := validateSubmissionIdentity(dto.SubmissionID, dto.Type, dto.Name, dto.Version)
+	identity, err := validateSubmissionIdentity(dto.SubmissionID, apcPowerType(dto.Type), dto.Name, dto.Version)
 	if err != nil {
 		return domain.Submission{}, fmt.Errorf("remote submission has invalid identity: %w", err)
 	}
@@ -374,7 +374,7 @@ func (c *Client) ListSubmissions(ctx context.Context, query domain.SubmissionLis
 		values.Set("status", string(query.Status))
 	}
 	if query.Type != "" {
-		values.Set("type", string(query.Type))
+		values.Set("type", string(apcWireType(query.Type)))
 	}
 	if query.Name != "" {
 		values.Set("name", query.Name)
@@ -392,7 +392,7 @@ func (c *Client) ListSubmissions(ctx context.Context, query domain.SubmissionLis
 	seenIDs := make(map[string]struct{}, len(dto.Items))
 	var previousCreated time.Time
 	for index, item := range dto.Items {
-		identity, err := validateSubmissionIdentity(item.SubmissionID, item.Type, item.Name, item.Version)
+		identity, err := validateSubmissionIdentity(item.SubmissionID, apcPowerType(item.Type), item.Name, item.Version)
 		if err != nil {
 			return domain.SubmissionList{}, fmt.Errorf("list remote submissions has invalid identity: %w", err)
 		}

@@ -308,7 +308,7 @@ Recovery 仍只读取 journal、Adapter、manifest 与现有 artifact，不连�
 - `cmd/apm/main.go`：统一 Client composition。
 - `internal/cloud/resources`：canonical Local fixtures。
 - `BUILD.md`、`ivory-tower/project-overview.md`、相关 C4：只同步本 feature 已实现行为。
-- `../apc/ivory-tower/project-overview.md`、`project-overview-apm.md`：Agent 只读接口与 APM 消费契约。
+- `APC-API.md`（本仓库根目录）：Agent 只读接口与 APM 消费契约；原相邻 APC 仓库已停止维护，其 project-overview 不再引用。
 - `docs/Changelog.md`：仅在行为实现与全量验证完成后增加一条请求级记录。
 
 ## 测试与验收

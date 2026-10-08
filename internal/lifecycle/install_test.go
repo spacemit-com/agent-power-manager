@@ -71,7 +71,7 @@ func TestInstallPropagatesResolvedCatalogEntryToTypeBoundaries(t *testing.T) {
 			},
 		},
 		{
-			name: "Agent to cache", powerType: domain.PowerTypeAgent, agent: domain.AgentBibit,
+			name: "Agent to cache", powerType: domain.PowerTypeExpert, agent: domain.AgentBibit,
 			entries: func(service *InstallService) []domain.CatalogEntry {
 				return service.cache.(*installFakeCache).fixture.cacheEntries
 			},
@@ -244,7 +244,7 @@ func TestInstallExplicitManifestHitSkipsCatalogAndMutableDependencies(t *testing
 		agents    []domain.AgentID
 	}{
 		{name: "skill", powerType: domain.PowerTypeSkill, agent: "all", agents: allAgents},
-		{name: "agent", powerType: domain.PowerTypeAgent, agent: string(domain.AgentBibit), agents: []domain.AgentID{domain.AgentBibit}},
+		{name: "agent", powerType: domain.PowerTypeExpert, agent: string(domain.AgentBibit), agents: []domain.AgentID{domain.AgentBibit}},
 		{name: "mcp", powerType: domain.PowerTypeMCP, agent: "all", agents: allAgents},
 		{name: "plugin", powerType: domain.PowerTypePlugin, agent: "all", agents: allAgents},
 	}
@@ -402,7 +402,7 @@ func TestInstallExplicitManifestHitRequiresExplicitVersion(t *testing.T) {
 		agent     string
 	}{
 		{name: "skill", powerType: domain.PowerTypeSkill, agent: "codex"},
-		{name: "agent", powerType: domain.PowerTypeAgent, agent: "bibit"},
+		{name: "agent", powerType: domain.PowerTypeExpert, agent: "bibit"},
 		{name: "mcp", powerType: domain.PowerTypeMCP, agent: "codex"},
 		{name: "plugin", powerType: domain.PowerTypePlugin, agent: "codex"},
 	}

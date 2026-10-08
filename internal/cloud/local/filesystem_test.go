@@ -23,7 +23,7 @@ func catalogEntryForTest(ref domain.PowerRef) domain.CatalogEntry {
 		contentType = "application/gzip"
 	case domain.PowerTypeMCP:
 		contentType = "application/json"
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		contentType = "application/gzip"
 	}
 	return domain.CatalogEntry{
@@ -280,7 +280,7 @@ func TestMCPRejectsContentOverTwentyMiBAndAgentOverTreeFileLimit(t *testing.T) {
 		t.Fatalf("GetMCP() error = %v, want ErrUnsafeContent", err)
 	}
 	destination := filepath.Join(t.TempDir(), "agent")
-	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}), destination)
 	assertUnsafeNoDownloadResidue(t, err, destination)
 }
 

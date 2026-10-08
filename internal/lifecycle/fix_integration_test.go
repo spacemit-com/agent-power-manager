@@ -260,7 +260,7 @@ func TestRemoteFixRecoversFilesystemJournalAfterServerClose(t *testing.T) {
 
 func TestFixIntegrationAgentIdentityMismatchFailsClosedThenConverges(t *testing.T) {
 	harness := newIsolatedMCPHarness(t, domain.AgentBibit)
-	ref := domain.PowerRef{Name: "demo-agent", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo-agent", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	agentAdapter, err := harness.registry.ResolveAgent(domain.AgentBibit)
 	if err != nil {
 		t.Fatal(err)

@@ -122,7 +122,7 @@ func (config AgentConfig) ValidatePowerRef(ref PowerRef) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
-	if ref.Type != PowerTypeAgent || ref.Name != config.Agent.Name || ref.Version != config.Agent.Version {
+	if ref.Type != PowerTypeExpert || ref.Name != config.Agent.Name || ref.Version != config.Agent.Version {
 		return fmt.Errorf("agent identity does not match power %+v: %w", ref, ErrInvalidAgent)
 	}
 	return nil

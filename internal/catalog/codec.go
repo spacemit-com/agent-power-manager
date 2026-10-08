@@ -20,7 +20,7 @@ var catalogPowerTypes = []domain.PowerType{
 	domain.PowerTypeSkill,
 	domain.PowerTypePlugin,
 	domain.PowerTypeMCP,
-	domain.PowerTypeAgent,
+	domain.PowerTypeExpert,
 }
 
 type catalogDTO struct {
@@ -81,7 +81,7 @@ func Decode(data []byte) (Snapshot, error) {
 		{powerType: domain.PowerTypeSkill, name: "skills", group: dto.Skills},
 		{powerType: domain.PowerTypePlugin, name: "plugins", group: dto.Plugins},
 		{powerType: domain.PowerTypeMCP, name: "mcps", group: dto.MCPs},
-		{powerType: domain.PowerTypeAgent, name: "agents", group: dto.Agents},
+		{powerType: domain.PowerTypeExpert, name: "agents", group: dto.Agents},
 	}
 	entriesByType := make(map[domain.PowerType][]domain.CatalogEntry, len(groups))
 	for _, group := range groups {
@@ -118,7 +118,7 @@ func Encode(entries []domain.CatalogEntry) ([]byte, error) {
 		Skills:        encodeGroup(groups[domain.PowerTypeSkill]),
 		Plugins:       encodeGroup(groups[domain.PowerTypePlugin]),
 		MCPs:          encodeGroup(groups[domain.PowerTypeMCP]),
-		Agents:        encodeGroup(groups[domain.PowerTypeAgent]),
+		Agents:        encodeGroup(groups[domain.PowerTypeExpert]),
 	}
 	data, err := json.Marshal(dto)
 	if err != nil {

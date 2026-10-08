@@ -1,5 +1,8 @@
 # Cloud Client Providers and Canonical APC Plugins Implementation Plan
 
+> APC 仓库说明（2026-10-08）：相邻的 APC 仓库已停止维护，本文中的 `../apc` 路径与命令只是当时的执行
+> 记录，不再可用；APC 的服务端契约以仓库根目录的 `APC-API.md` 为准（见 ADR-025）。
+
 > 历史计划说明：本文记录 Feature 020 当时的实现步骤，不作为当前目录发现或 MCP 卸载接口
 > 权威。公开 `List/Resolve`、cursor/series/latest/exact-metadata、按 Ref 重查 metadata 和
 > definition-bearing MCP uninstall 已由 [Feature 024](../024-catalog-cache/spec.md) 与

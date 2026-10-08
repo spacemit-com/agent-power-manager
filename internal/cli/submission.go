@@ -64,7 +64,7 @@ func newSubmissionListCommand(newLifecycle SubmissionQueryLifecycleFactory) *cob
 		Short: "List submissions",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(command *cobra.Command, args []string) error {
-			if err := validateSubmissionListFlags(flags); err != nil {
+			if err := validateSubmissionListFlags(&flags); err != nil {
 				return err
 			}
 			logParsedCommand(command, flags, args)
@@ -92,12 +92,15 @@ func newSubmissionListCommand(newLifecycle SubmissionQueryLifecycleFactory) *cob
 	return command
 }
 
-func validateSubmissionListFlags(flags Flags) error {
+func validateSubmissionListFlags(flags *Flags) error {
 	if flags.Status != "" && !domain.IsActiveSubmissionStatus(domain.SubmissionStatus(flags.Status)) {
 		return fmt.Errorf("--status must be an active submission status, got %q", flags.Status)
 	}
+	if err := resolvePowerType(flags); err != nil {
+		return fmt.Errorf("--type must be skill, plugin, mcp, or expert, got %q", flags.Type)
+	}
 	if flags.Type != "" && !isSubmissionPowerType(domain.PowerType(flags.Type)) {
-		return fmt.Errorf("--type must be skill, plugin, mcp, or agent, got %q", flags.Type)
+		return fmt.Errorf("--type must be skill, plugin, mcp, or expert, got %q", flags.Type)
 	}
 	if flags.Name != "" && !domain.IsCanonicalPowerName(flags.Name) {
 		return fmt.Errorf("--name must be a canonical power name, got %q", flags.Name)
@@ -114,7 +117,7 @@ func validateSubmissionOutput(output string) error {
 
 func isSubmissionPowerType(powerType domain.PowerType) bool {
 	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP, domain.PowerTypeAgent:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP, domain.PowerTypeExpert:
 		return true
 	default:
 		return false

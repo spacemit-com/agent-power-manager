@@ -858,11 +858,11 @@ func TestJSONRepositoryIsStatelessAcrossAgents(t *testing.T) {
 func TestManifestAgentsGroupRoundTrip(t *testing.T) {
 	repository := config.NewJSONRepository()
 	agent := domain.AgentBibit
-	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	if err := repository.Set(agent, domain.InstalledPower{Ref: ref}); err != nil {
 		t.Fatal(err)
 	}
-	got, found, err := repository.Find(agent, domain.PowerTypeAgent, "bianbu-agent-default")
+	got, found, err := repository.Find(agent, domain.PowerTypeExpert, "bianbu-agent-default")
 	if err != nil || !found || got.Ref != ref {
 		t.Fatalf("Find() = %#v, %t, %v", got, found, err)
 	}
@@ -870,8 +870,8 @@ func TestManifestAgentsGroupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(groups[domain.PowerTypeAgent]) != 1 || groups[domain.PowerTypeAgent][0].Ref != ref {
-		t.Fatalf("List() agent group = %#v", groups[domain.PowerTypeAgent])
+	if len(groups[domain.PowerTypeExpert]) != 1 || groups[domain.PowerTypeExpert][0].Ref != ref {
+		t.Fatalf("List() agent group = %#v", groups[domain.PowerTypeExpert])
 	}
 }
 

@@ -15,8 +15,8 @@ import (
 )
 
 func TestInstallAgentStateTable(t *testing.T) {
-	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"}
-	previous := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	target := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v2.0.0"}
+	previous := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 
 	tests := []struct {
 		name       string
@@ -32,7 +32,7 @@ func TestInstallAgentStateTable(t *testing.T) {
 			name: "new absent installs",
 			want: cli.InstallOutcomeInstalled,
 			wantEvents: []string{
-				"config:find:bibit", "transaction:inspect-target:bibit:agent",
+				"config:find:bibit", "transaction:inspect-target:bibit:expert",
 				"cache:prepare-agent:bibit", "transaction:install-agent:bibit",
 			},
 		},
@@ -41,7 +41,7 @@ func TestInstallAgentStateTable(t *testing.T) {
 			presence: transaction.TargetPresent,
 			wantErr:  adapter.ErrTargetConflict,
 			wantEvents: []string{
-				"config:find:bibit", "transaction:inspect-target:bibit:agent",
+				"config:find:bibit", "transaction:inspect-target:bibit:expert",
 			},
 			forbidden: []string{"cache:prepare-agent:bibit", "transaction:install-agent:bibit"},
 		},
@@ -50,7 +50,7 @@ func TestInstallAgentStateTable(t *testing.T) {
 			installed: &target,
 			want:      cli.InstallOutcomeUnchanged,
 			forbidden: []string{
-				"transaction:inspect-target:bibit:agent", "cache:prepare-agent:bibit",
+				"transaction:inspect-target:bibit:expert", "cache:prepare-agent:bibit",
 				"transaction:install-agent:bibit", "transaction:uninstall-agent:bibit",
 			},
 		},
@@ -60,7 +60,7 @@ func TestInstallAgentStateTable(t *testing.T) {
 			presence:  transaction.TargetPresent,
 			want:      cli.InstallOutcomeUpgraded,
 			wantEvents: []string{
-				"config:find:bibit", "transaction:inspect-target:bibit:agent",
+				"config:find:bibit", "transaction:inspect-target:bibit:expert",
 				"cache:prepare-agent:bibit", "transaction:install-agent:bibit",
 			},
 			forbidden: []string{"transaction:uninstall-agent:bibit"},
@@ -70,7 +70,7 @@ func TestInstallAgentStateTable(t *testing.T) {
 			installed: &previous,
 			want:      cli.InstallOutcomeInstalled,
 			wantEvents: []string{
-				"config:find:bibit", "transaction:inspect-target:bibit:agent",
+				"config:find:bibit", "transaction:inspect-target:bibit:expert",
 				"transaction:uninstall-agent:bibit", "cache:prepare-agent:bibit", "transaction:install-agent:bibit",
 			},
 			wantWarn: true,
@@ -98,7 +98,7 @@ func TestInstallAgentStateTable(t *testing.T) {
 			}
 			service := newInstallService(t, &calls, fixture)
 
-			result, err := service.Install(context.Background(), cli.Flags{Agent: "bibit", Type: "agent", Name: "demo"})
+			result, err := service.Install(context.Background(), cli.Flags{Agent: "bibit", Type: "expert", Name: "demo"})
 
 			if tt.wantErr != nil {
 				assertInstallBatchError(t, err, domain.AgentBibit, tt.wantErr)
@@ -125,7 +125,7 @@ func TestInstallAgentStateTable(t *testing.T) {
 				}
 				for _, want := range []string{
 					`msg="installed power target is missing"`, "operation=install", "agent=bibit",
-					"type=agent", "power=demo", "version=v1.0.0",
+					"type=expert", "power=demo", "version=v1.0.0",
 				} {
 					if !strings.Contains(stderr.String(), want) {
 						t.Fatalf("stderr = %q, want %q", stderr.String(), want)

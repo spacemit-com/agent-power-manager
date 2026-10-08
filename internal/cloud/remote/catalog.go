@@ -352,7 +352,7 @@ func validResolveQuery(ref domain.PowerRef) bool {
 
 func isKnownPowerType(powerType domain.PowerType) bool {
 	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP, domain.PowerTypeAgent:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP, domain.PowerTypeExpert:
 		return true
 	default:
 		return false

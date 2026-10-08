@@ -15,7 +15,7 @@ func newUninstallCommand(newLifecycle UninstallLifecycleFactory) *cobra.Command 
 		Short: "Uninstall a power",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if err := validateCommon(flags); err != nil {
+			if err := validateCommon(&flags); err != nil {
 				return err
 			}
 			if strings.Contains(args[0], "=") {

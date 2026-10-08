@@ -1,5 +1,8 @@
 # Agent Submission 与 Lifecycle 对齐实现计划
 
+> APC 仓库说明（2026-10-08）：相邻的 APC 仓库已停止维护，本文中的 `../apc` 路径与命令只是当时的执行
+> 记录，不再可用；APC 的服务端契约以仓库根目录的 `APC-API.md` 为准（见 ADR-025）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 Agent 与其它 Power 一样支持 validate、submit、审核发布治理，并补齐 Agent 内容身份闭环和 Submission 首次受理/幂等重放结果契约。

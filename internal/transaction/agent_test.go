@@ -18,7 +18,7 @@ import (
 )
 
 func TestValidatePowerAcceptsAgent(t *testing.T) {
-	if err := validatePower(domain.PowerRef{Name: "a", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, ErrInvalidRequest); err != nil {
+	if err := validatePower(domain.PowerRef{Name: "a", Type: domain.PowerTypeExpert, Version: "v1.0.0"}, ErrInvalidRequest); err != nil {
 		t.Fatalf("validatePower(agent) error = %v", err)
 	}
 }
@@ -26,7 +26,7 @@ func TestValidatePowerAcceptsAgent(t *testing.T) {
 func TestValidateAgentInstallRequest(t *testing.T) {
 	valid := AgentInstallRequest{
 		Agent:       domain.AgentBibit,
-		Power:       domain.PowerRef{Name: "a", Type: domain.PowerTypeAgent, Version: "v1.0.0"},
+		Power:       domain.PowerRef{Name: "a", Type: domain.PowerTypeExpert, Version: "v1.0.0"},
 		StagingRoot: agentStagingRoot(t),
 		Adapter:     &agentValidationAdapter{},
 	}
@@ -173,7 +173,7 @@ func newAgentTransactionFixture(t *testing.T) *agentTransactionFixture {
 
 func TestAgentInstallFirstInstallPublishesCompleteDirectory(t *testing.T) {
 	fixture := newAgentTransactionFixture(t)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	writeAgentDirectory(t, filepath.Join(fixture.staging, "agents", ref.Name), []byte(agentFixtureYAML(ref)))
 
 	request := AgentInstallRequest{
@@ -212,8 +212,8 @@ func TestAgentInstallFirstInstallPublishesCompleteDirectory(t *testing.T) {
 
 func TestAgentInstallReplacementBacksUpOldTarget(t *testing.T) {
 	fixture := newAgentTransactionFixture(t)
-	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"}
+	old := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v2.0.0"}
 	writeAgentDirectory(t, filepath.Join(fixture.root, "agents", ref.Name), []byte(agentFixtureYAML(old)))
 	writeAgentDirectory(t, filepath.Join(fixture.staging, "agents", ref.Name), []byte(agentFixtureYAML(ref)))
 
@@ -243,7 +243,7 @@ func TestAgentInstallReplacementBacksUpOldTarget(t *testing.T) {
 
 func TestAgentInstallRejectsUnmanagedTarget(t *testing.T) {
 	fixture := newAgentTransactionFixture(t)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	writeAgentDirectory(t, filepath.Join(fixture.root, "agents", ref.Name), []byte(agentFixtureYAML(ref)))
 	writeAgentDirectory(t, filepath.Join(fixture.staging, "agents", ref.Name), []byte(agentFixtureYAML(ref)))
 
@@ -264,7 +264,7 @@ func TestAgentInstallRejectsUnmanagedTarget(t *testing.T) {
 
 func TestAgentUninstallQuarantinesAndPrunesEmptyAgentsParent(t *testing.T) {
 	fixture := newAgentTransactionFixture(t)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	writeAgentDirectory(t, filepath.Join(fixture.root, "agents", ref.Name), []byte(agentFixtureYAML(ref)))
 
 	request := AgentUninstallRequest{Agent: domain.AgentBibit, Power: ref, Adapter: fixture.adapter}
@@ -284,7 +284,7 @@ func TestAgentUninstallQuarantinesAndPrunesEmptyAgentsParent(t *testing.T) {
 	if fixture.journals.found {
 		t.Fatal("journal remains after successful uninstall")
 	}
-	if fixture.manifests.removed.Name != "demo" || fixture.manifests.removed.Type != domain.PowerTypeAgent {
+	if fixture.manifests.removed.Name != "demo" || fixture.manifests.removed.Type != domain.PowerTypeExpert {
 		t.Fatalf("removed manifest = %+v", fixture.manifests.removed)
 	}
 	if _, err := os.Lstat(filepath.Join(fixture.root, "agents", ref.Name)); !errors.Is(err, os.ErrNotExist) {
@@ -300,8 +300,8 @@ func TestAgentUninstallQuarantinesAndPrunesEmptyAgentsParent(t *testing.T) {
 
 func TestAgentUninstallKeepsAgentsParentWhenNotEmpty(t *testing.T) {
 	fixture := newAgentTransactionFixture(t)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	other := domain.PowerRef{Name: "other", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
+	other := domain.PowerRef{Name: "other", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	writeAgentDirectory(t, filepath.Join(fixture.root, "agents", ref.Name), []byte(agentFixtureYAML(ref)))
 	writeAgentDirectory(t, filepath.Join(fixture.root, "agents", other.Name), []byte(agentFixtureYAML(other)))
 
@@ -319,7 +319,7 @@ func TestAgentUninstallKeepsAgentsParentWhenNotEmpty(t *testing.T) {
 
 func TestAgentUninstallReportsInitiallyMissingTarget(t *testing.T) {
 	fixture := newAgentTransactionFixture(t)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 
 	request := AgentUninstallRequest{Agent: domain.AgentBibit, Power: ref, Adapter: fixture.adapter}
 	result, err := fixture.service.UninstallAgent(context.Background(), request)

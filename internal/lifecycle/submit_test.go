@@ -195,7 +195,7 @@ func TestSubmitAgentMapsAcceptedOutcome(t *testing.T) {
 	}
 	path := writeLifecycleAgent(t, t.TempDir())
 
-	result, err := service.Submit(context.Background(), cli.Flags{Type: "agent", Message: "first release"}, []string{path})
+	result, err := service.Submit(context.Background(), cli.Flags{Type: "expert", Message: "first release"}, []string{path})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -206,7 +206,7 @@ func TestSubmitAgentMapsAcceptedOutcome(t *testing.T) {
 		t.Fatalf("cloud Submit calls = %d, want 1", len(client.submitCalls))
 	}
 	request := client.submitCalls[0]
-	if request.Type != domain.PowerTypeAgent || request.Name != "demo-agent" || request.Version != "v1.0.0" || request.Message != "first release" || request.ContentType != "application/gzip" {
+	if request.Type != domain.PowerTypeExpert || request.Name != "demo-agent" || request.Version != "v1.0.0" || request.Message != "first release" || request.ContentType != "application/gzip" {
 		t.Fatalf("SubmissionRequest = %#v", request)
 	}
 	if request.ContentMD5 == "" || request.IdempotencyKey == "" {
@@ -225,7 +225,7 @@ func TestSubmitAgentMapsReplayedOutcome(t *testing.T) {
 	}
 	path := writeLifecycleAgent(t, t.TempDir())
 
-	result, err := service.Submit(context.Background(), cli.Flags{Type: "agent", Message: "first release"}, []string{path})
+	result, err := service.Submit(context.Background(), cli.Flags{Type: "expert", Message: "first release"}, []string{path})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestSubmitAgentIgnoresVersionOverrideAtLifecycleBoundary(t *testing.T) {
 	}
 	path := writeLifecycleAgent(t, t.TempDir())
 
-	_, err = service.Submit(context.Background(), cli.Flags{Type: "agent", Version: "v9.9.9", Message: "x"}, []string{path})
+	_, err = service.Submit(context.Background(), cli.Flags{Type: "expert", Version: "v9.9.9", Message: "x"}, []string{path})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}

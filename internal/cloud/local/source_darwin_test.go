@@ -32,7 +32,7 @@ func TestDarwinLocalClientRetrievesEveryResourceKind(t *testing.T) {
 	skillRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "v1.0.0"}
 	pluginRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypePlugin, Version: "v1.0.0"}
 	mcpRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeMCP, Version: "v1.0.0"}
-	agentRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	agentRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	skillContent, err := client.loadCatalogContent(context.Background(), skillRef)
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestDarwinSnapshotRejectsHardlinkedSingleFile(t *testing.T) {
 	}
 	destination := filepath.Join(t.TempDir(), "agent")
 
-	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}), destination)
 
 	if !errors.Is(err, cloud.ErrUnsafeContent) {
 		t.Fatalf("DownloadAgent() error = %v, want ErrUnsafeContent", err)

@@ -26,7 +26,7 @@ type powerEntry struct {
 func emptyInstalledPowerGroups() domain.InstalledPowerGroups {
 	return domain.InstalledPowerGroups{
 		domain.PowerTypeSkill:  make([]domain.InstalledPower, 0),
-		domain.PowerTypeAgent:  make([]domain.InstalledPower, 0),
+		domain.PowerTypeExpert: make([]domain.InstalledPower, 0),
 		domain.PowerTypePlugin: make([]domain.InstalledPower, 0),
 		domain.PowerTypeMCP:    make([]domain.InstalledPower, 0),
 	}
@@ -35,7 +35,7 @@ func emptyInstalledPowerGroups() domain.InstalledPowerGroups {
 func manifestToInstalledPowerGroups(document manifestDocument) domain.InstalledPowerGroups {
 	groups := emptyInstalledPowerGroups()
 	groups[domain.PowerTypeSkill] = entriesToInstalledPowers(document.Skills, domain.PowerTypeSkill)
-	groups[domain.PowerTypeAgent] = entriesToInstalledPowers(document.Agents, domain.PowerTypeAgent)
+	groups[domain.PowerTypeExpert] = entriesToInstalledPowers(document.Agents, domain.PowerTypeExpert)
 	groups[domain.PowerTypePlugin] = entriesToInstalledPowers(document.Plugins, domain.PowerTypePlugin)
 	groups[domain.PowerTypeMCP] = entriesToInstalledPowers(document.MCPs, domain.PowerTypeMCP)
 	return groups
@@ -45,7 +45,7 @@ func installedPowerGroupsToManifest(agent domain.AgentID, groups domain.Installe
 	return manifestDocument{
 		Agent:   agent,
 		Skills:  installedPowersToEntries(groups[domain.PowerTypeSkill]),
-		Agents:  installedPowersToEntries(groups[domain.PowerTypeAgent]),
+		Agents:  installedPowersToEntries(groups[domain.PowerTypeExpert]),
 		Plugins: installedPowersToEntries(groups[domain.PowerTypePlugin]),
 		MCPs:    installedPowersToEntries(groups[domain.PowerTypeMCP]),
 	}
@@ -95,7 +95,7 @@ func cloneInstalledPowerGroups(groups domain.InstalledPowerGroups) domain.Instal
 	cloned := emptyInstalledPowerGroups()
 	for _, powerType := range []domain.PowerType{
 		domain.PowerTypeSkill,
-		domain.PowerTypeAgent,
+		domain.PowerTypeExpert,
 		domain.PowerTypePlugin,
 		domain.PowerTypeMCP,
 	} {

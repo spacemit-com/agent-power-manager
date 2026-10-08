@@ -464,14 +464,14 @@ func TestValidatePowerRef(t *testing.T) {
 	entries := []agentartifact.Entry{
 		fileEntry("agent.yaml", minimalAgentYAML("bibit-internal-42", "demo-agent", "v1.0.0")),
 	}
-	matching := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.0.0"}
+	matching := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo-agent", Version: "v1.0.0"}
 	if _, err := agentartifact.Validate(entries, &matching); err != nil {
 		t.Fatalf("Validate() with matching ref error = %v", err)
 	}
 	for name, wrong := range map[string]domain.PowerRef{
 		"wrong type":    {Type: domain.PowerTypeSkill, Name: "demo-agent", Version: "v1.0.0"},
-		"wrong name":    {Type: domain.PowerTypeAgent, Name: "other-agent", Version: "v1.0.0"},
-		"wrong version": {Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.0.1"},
+		"wrong name":    {Type: domain.PowerTypeExpert, Name: "other-agent", Version: "v1.0.0"},
+		"wrong version": {Type: domain.PowerTypeExpert, Name: "demo-agent", Version: "v1.0.1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := agentartifact.Validate(entries, &wrong); !errors.Is(err, domain.ErrInvalidAgent) {

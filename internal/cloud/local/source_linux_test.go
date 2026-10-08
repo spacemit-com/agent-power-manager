@@ -155,7 +155,7 @@ func TestDownloadSkillRejectsSpecialNodeSwapBeforeAnyDataOpen(t *testing.T) {
 
 func TestDownloadAgentRejectsFIFOSwapBeforeAnyDataOpen(t *testing.T) {
 	root := t.TempDir()
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	source := filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml")
 	writeTestFile(t, source, "agent: safe")
 	client, err := New(root)

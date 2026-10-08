@@ -389,7 +389,7 @@ func (c *installFakeCache) PrepareSkill(_ context.Context, entry domain.CatalogE
 	return c.prepare("skill")
 }
 
-func (c *installFakeCache) PrepareAgent(_ context.Context, entry domain.CatalogEntry) (string, error) {
+func (c *installFakeCache) PrepareExpert(_ context.Context, entry domain.CatalogEntry) (string, error) {
 	c.fixture.cacheEntries = append(c.fixture.cacheEntries, entry.Clone())
 	return c.prepare("agent")
 }

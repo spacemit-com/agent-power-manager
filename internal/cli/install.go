@@ -14,7 +14,7 @@ func newInstallCommand(newLifecycle InstallLifecycleFactory) *cobra.Command {
 		Short: "Install a power",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if err := validateCommon(flags); err != nil {
+			if err := validateCommon(&flags); err != nil {
 				return err
 			}
 			name, version, err := parsePower(args[0])

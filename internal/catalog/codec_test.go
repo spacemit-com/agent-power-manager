@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -174,6 +175,43 @@ func replaceJSON(t *testing.T, data []byte, old, replacement string) []byte {
 
 func validCatalogJSON() []byte {
 	return []byte(`{"schema_version":1,"skills":{"schema_version":1,"items":[{"name":"alpha","version":"v2.0.0","description":"skill description","message":"skill message","content_type":"application/gzip","content_size":2,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":["alpha","catalog"]},{"name":"alpha","version":"v1.0.0","description":"skill description","message":"skill message","content_type":"application/gzip","content_size":1,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":["alpha"]},{"name":"bravo","version":"v1.0.0","description":"skill description","message":"skill message","content_type":"application/gzip","content_size":1,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":["bravo"]}]},"plugins":{"schema_version":1,"items":[{"name":"plugin","version":"v1.0.0","description":"plugin description","message":"plugin message","content_type":"application/gzip","content_size":1,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":["plugin"]}]},"mcps":{"schema_version":1,"items":[{"name":"mcp","version":"v1.0.0","description":"mcp description","message":"mcp message","content_type":"application/json","content_size":1,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":["mcp"]}]},"agents":{"schema_version":1,"items":[{"name":"agent","version":"v1.0.0","description":"agent description","message":"agent message","content_type":"application/gzip","content_size":4,"content_md5":"0123456789abcdef0123456789abcdef","published_at":"2026-08-25T12:34:56Z","tags":["agent"]}]}}`)
+}
+
+// Expert 类别在本地叫 expert，但在 APC 的目录格式里那一组仍叫 agents（APC-API.md、
+// ADR-044）。这条断言把「组名是线上契约、不是本地词汇」钉住：跟着改成 experts 会让
+// 这一组在 APC 侧整组消失，而且是静默的——目录仍然合法，只是 Expert 一个都没有。
+func TestExpertCatalogGroupKeepsAPCName(t *testing.T) {
+	entry := domain.CatalogEntry{
+		Ref:         domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"},
+		Description: "description",
+		Message:     "message",
+		ContentType: "application/gzip",
+		ContentSize: 1,
+		ContentMD5:  "0123456789abcdef0123456789abcdef",
+		PublishedAt: "2026-08-25T12:34:56Z",
+		Tags:        []string{},
+	}
+	encoded, err := Encode([]domain.CatalogEntry{entry})
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+	var groups map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &groups); err != nil {
+		t.Fatalf("decode encoded catalog: %v", err)
+	}
+	if _, present := groups["agents"]; !present {
+		t.Fatalf("Encode() = %s, want an agents group for the Expert type", encoded)
+	}
+	if _, present := groups["experts"]; present {
+		t.Fatalf("Encode() = %s, want no experts group: the wire name belongs to APC", encoded)
+	}
+	snapshot, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if got := snapshot.List(domain.PowerTypeExpert); len(got) != 1 || got[0].Ref.Name != "demo" {
+		t.Fatalf("List(expert) = %+v, want the demo entry read back from the agents group", got)
+	}
 }
 
 func catalogEntriesFixture() []domain.CatalogEntry {

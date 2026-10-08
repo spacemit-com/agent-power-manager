@@ -248,11 +248,11 @@ func TestValidateDirectoryRejectsExecutableFiles(t *testing.T) {
 func TestValidateDirectoryPowerRefIdentity(t *testing.T) {
 	root := t.TempDir()
 	writeAgentPackage(t, root, nil, nil)
-	matching := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.0.0"}
+	matching := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo-agent", Version: "v1.0.0"}
 	if _, err := agentartifact.ValidateDirectory(context.Background(), root, &matching); err != nil {
 		t.Fatalf("ValidateDirectory() matching ref error = %v", err)
 	}
-	wrong := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v9.9.9"}
+	wrong := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo-agent", Version: "v9.9.9"}
 	if _, err := agentartifact.ValidateDirectory(context.Background(), root, &wrong); !errors.Is(err, domain.ErrInvalidAgent) {
 		t.Fatalf("ValidateDirectory() error = %v, want ErrInvalidAgent", err)
 	}

@@ -6,7 +6,7 @@
 
 > 状态：设计已确认，待实施计划。APM 的客户端决策将在 ADR-019 记录；APC 的业务治理决策将在相邻 APC 仓库的 ADR-001 记录。
 >
-> 本文扩展 [Feature 021](../021-submission-validate/spec.md) 与 [ADR-018](../../adr/ADR-018-submission-and-local-validation.md)，不改写其历史设计。APC 权威业务与 HTTP 契约位于相邻 `../apc` 仓库的 `ivory-tower/project-overview.md`、`ivory-tower/project-overview-apm.md` 与 `docs/APC-API.md`。
+> 本文扩展 [Feature 021](../021-submission-validate/spec.md) 与 [ADR-018](../../adr/ADR-018-submission-and-local-validation.md)，不改写其历史设计。APC 权威业务与 HTTP 契约以本仓库根目录的 [../../../APC-API.md](../../../APC-API.md) 为准（见 [ADR-025](../../adr/ADR-025-apc-api-client-contract.md)）；原相邻 APC 仓库已停止维护，其 project-overview 不再引用。
 
 ## 背景
 

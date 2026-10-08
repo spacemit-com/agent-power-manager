@@ -4,7 +4,7 @@
 - Date：2026-08-25
 - Decision Makers：APM maintainers
 - Related Feature：[Feature 024](../features/024-catalog-cache/spec.md)
-- Related APC ADR：[ADR-004](../../../apc/ivory-tower/adr/ADR-004-publish-content-addressed-catalog.md)
+- Related APC contract：[APC-API.md](../../APC-API.md)、[ADR-025](ADR-025-apc-api-client-contract.md)（原 APC 仓库已停止维护，其 ADR-004 不再链接）
 
 ## Context
 

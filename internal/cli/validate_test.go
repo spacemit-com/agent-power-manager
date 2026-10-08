@@ -20,7 +20,7 @@ func TestValidateRequiresSubmissionType(t *testing.T) {
 			entry := newSubmissionEntry(t, &stdout, &stderr, func() (cli.ValidateLifecycle, error) { return lifecycle, nil }, unexpectedSubmit(t), unexpectedSubmission(t))
 
 			err := entry.Execute(args)
-			if err == nil || !strings.Contains(err.Error(), "--type must be skill, plugin, mcp, or agent") {
+			if err == nil || !strings.Contains(err.Error(), "--type must be skill, plugin, mcp, or expert") {
 				t.Fatalf("Execute(%q) error = %v", args, err)
 			}
 			if lifecycle.calls != 0 {
@@ -30,15 +30,36 @@ func TestValidateRequiresSubmissionType(t *testing.T) {
 	}
 }
 
-func TestValidateAllowsAgentWithoutVersionOverride(t *testing.T) {
+// 改名前的拼写仍要能跑完，而且必须已经变成规范取值再进 lifecycle：留在 agent 会让
+// Expert 类别在过滤、清单解析与提交路由上凭空消失。同时它会给出弃用提示。
+func TestValidateNormalizesLegacyAgentTypeSpelling(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	lifecycle := &recordingValidateLifecycle{result: cli.ValidateResult{Type: "agent", Name: "demo", Version: "v1.0.0", Description: "demo", FileCount: 1, ContentSize: 10}}
+	lifecycle := &recordingValidateLifecycle{result: cli.ValidateResult{Type: "expert", Name: "demo", Version: "v1.0.0", Description: "demo", FileCount: 1, ContentSize: 10}}
 	entry := newSubmissionEntry(t, &stdout, &stderr, func() (cli.ValidateLifecycle, error) { return lifecycle, nil }, unexpectedSubmit(t), unexpectedSubmission(t))
 	if err := entry.Execute([]string{"validate", "agent.yaml", "--type=agent"}); err != nil {
 		t.Fatalf("Execute(validate agent) error = %v", err)
 	}
-	if lifecycle.calls != 1 || lifecycle.flags.Type != "agent" {
+	if lifecycle.calls != 1 || lifecycle.flags.Type != "expert" {
 		t.Fatalf("lifecycle = %+v", lifecycle)
+	}
+	if !strings.Contains(stderr.String(), "deprecated") {
+		t.Fatalf("stderr = %q, want a deprecation warning", stderr.String())
+	}
+}
+
+// --type=expert 是规范拼写：不进 lifecycle 之前不该再有任何改写。
+func TestValidateAllowsExpertWithoutVersionOverride(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingValidateLifecycle{result: cli.ValidateResult{Type: "expert", Name: "demo", Version: "v1.0.0", Description: "demo", FileCount: 1, ContentSize: 10}}
+	entry := newSubmissionEntry(t, &stdout, &stderr, func() (cli.ValidateLifecycle, error) { return lifecycle, nil }, unexpectedSubmit(t), unexpectedSubmission(t))
+	if err := entry.Execute([]string{"validate", "agent.yaml", "--type=expert"}); err != nil {
+		t.Fatalf("Execute(validate expert) error = %v", err)
+	}
+	if lifecycle.calls != 1 || lifecycle.flags.Type != "expert" {
+		t.Fatalf("lifecycle = %+v", lifecycle)
+	}
+	if strings.Contains(stderr.String(), "deprecated") {
+		t.Fatalf("stderr = %q, want no deprecation warning for the canonical spelling", stderr.String())
 	}
 }
 

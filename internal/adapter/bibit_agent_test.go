@@ -100,7 +100,7 @@ func TestBibitAgentAdapterTargetPathIsDirectory(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("BIANBU_AGENT_HOME", root)
 	a := newBibitAgentAdapterForTest()
-	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	target, err := a.TargetPath(ref)
 	if err != nil || target != filepath.Join(root, "agents", "bianbu-agent-default") {
 		t.Fatalf("TargetPath() = %q, %v", target, err)
@@ -109,7 +109,7 @@ func TestBibitAgentAdapterTargetPathIsDirectory(t *testing.T) {
 
 func TestBibitAgentAdapterInstallsCompleteDirectory(t *testing.T) {
 	root, staging := newBibitAgentFixture(t, true)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	raw := []byte(agentFixtureYAML(ref))
 	writeAgentDirectory(t, staging, ref.Name, raw)
 
@@ -133,7 +133,7 @@ func TestBibitAgentAdapterInstallsCompleteDirectory(t *testing.T) {
 
 func TestBibitAgentAdapterInstallsNormalizedModes(t *testing.T) {
 	root, staging := newBibitAgentFixture(t, true)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	dir := filepath.Join(staging, "agents", ref.Name)
 	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -170,17 +170,17 @@ func TestBibitAgentAdapterValidatesIdentityByName(t *testing.T) {
 	a := newBibitAgentAdapterForTest()
 	directory := filepath.Join(staging, "agents", "demo")
 
-	if err := a.ValidateArtifact(domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}, directory); err != nil {
+	if err := a.ValidateArtifact(domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}, directory); err != nil {
 		t.Fatalf("ValidateArtifact(name) error = %v", err)
 	}
-	if err := a.ValidateArtifact(domain.PowerRef{Type: domain.PowerTypeAgent, Name: "bibit-internal-42", Version: "v1.0.0"}, directory); !errors.Is(err, domain.ErrInvalidAgent) {
+	if err := a.ValidateArtifact(domain.PowerRef{Type: domain.PowerTypeExpert, Name: "bibit-internal-42", Version: "v1.0.0"}, directory); !errors.Is(err, domain.ErrInvalidAgent) {
 		t.Fatalf("ValidateArtifact(id-as-name) error = %v, want ErrInvalidAgent", err)
 	}
 }
 
 func TestBibitAgentAdapterInvalidAvatarPublishesNothing(t *testing.T) {
 	root, staging := newBibitAgentFixture(t, true)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	dir := filepath.Join(staging, "agents", ref.Name)
 	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
 		t.Fatal(err)
@@ -206,7 +206,7 @@ func TestBibitAgentAdapterInvalidAvatarPublishesNothing(t *testing.T) {
 
 func TestBibitAgentAdapterExistingTargetReturnsConflict(t *testing.T) {
 	root, staging := newBibitAgentFixture(t, true)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	writeAgentDirectory(t, staging, ref.Name, []byte(agentFixtureYAML(ref)))
 	if err := os.MkdirAll(filepath.Join(root, "agents", ref.Name), 0o755); err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func TestBibitAgentAdapterExistingTargetReturnsConflict(t *testing.T) {
 
 func TestBibitAgentAdapterCopyFailureCleansPrivateAndStaging(t *testing.T) {
 	root, staging := newBibitAgentFixture(t, true)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	writeAgentDirectory(t, staging, ref.Name, []byte(agentFixtureYAML(ref)))
 
 	a := newBibitAgentAdapterForTest()
@@ -247,7 +247,7 @@ func TestBibitAgentAdapterCopyFailureCleansPrivateAndStaging(t *testing.T) {
 
 func TestBibitAgentAdapterRejectsInvalidYAML(t *testing.T) {
 	_, staging := newBibitAgentFixture(t, true)
-	ref := domain.PowerRef{Name: "x", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "x", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	dir := filepath.Join(staging, "agents", "x")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestBibitAgentAdapterRejectsInvalidYAML(t *testing.T) {
 
 func TestBibitAgentInstallRejectsStagingIdentityMismatchWithoutPublishing(t *testing.T) {
 	root, staging := newBibitAgentFixture(t, true)
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
 	writeAgentDirectory(t, staging, ref.Name, []byte("schema_version: 1\nagent: {id: demo, name: demo, version: v2.0.0, description: demo, soul: demo, metadata: {avatar: assets/avatar.png}}\n"))
 	a := newBibitAgentAdapterForTest()
 	if result, err := a.Install(ref, staging); err == nil || result.Published {
@@ -280,7 +280,7 @@ func TestBibitAgentInstallRejectsStagingIdentityMismatchWithoutPublishing(t *tes
 
 func TestBibitAgentValidateArtifactRequiresExactIdentity(t *testing.T) {
 	root, _ := newBibitAgentFixture(t, true)
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
 	writeAgentDirectory(t, root, "demo", []byte(agentFixtureYAML(ref)))
 	a := newBibitAgentAdapterForTest()
 	path := filepath.Join(root, "agents", "demo")

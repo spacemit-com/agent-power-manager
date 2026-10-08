@@ -1,5 +1,8 @@
 # Feature 031 实施计划：Power 资源格式 V2
 
+> APC 仓库说明（2026-10-08）：相邻的 APC 仓库已停止维护，本文中的 `../apc` 路径与命令只是当时的执行
+> 记录，不再可用；APC 的服务端契约以仓库根目录的 `APC-API.md` 为准（见 ADR-025）。
+
 > **For agentic workers:** 本计划的实施已在本轮完成；下列任务与提交状态用于复核与后续维护。
 
 **Goal:** 为四类 Power 增加展示字段 `name_zh`/`name_en`/`description_zh`，把资源格式升到 v2，提交侧只接受 v2，

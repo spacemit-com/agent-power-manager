@@ -34,7 +34,7 @@ func newBibitAgentAdapter(profile agentProfile) *bibitAgentAdapter {
 // TargetPath 返回指定 Agent 的最终安装目录路径 root/agents/<ref.Name>；
 // 目录名使用 ref.Name（外部身份），不含版本目录，亦无 agent.yaml 后缀。
 func (a *bibitAgentAdapter) TargetPath(ref domain.PowerRef) (string, error) {
-	if ref.Type != domain.PowerTypeAgent || !isSafeSkillName(ref.Name) {
+	if ref.Type != domain.PowerTypeExpert || !isSafeSkillName(ref.Name) {
 		return "", fmt.Errorf("target path for agent %q power %q: %w", a.profile.id, ref.Name, ErrInvalidAgent)
 	}
 	root, err := a.profile.rootPath()
@@ -68,7 +68,7 @@ func (a *bibitAgentAdapter) Install(ref domain.PowerRef, staging string) (result
 		}
 	}()
 
-	if ref.Type != domain.PowerTypeAgent || !isSafeSkillName(ref.Name) || ref.Version == "" {
+	if ref.Type != domain.PowerTypeExpert || !isSafeSkillName(ref.Name) || ref.Version == "" {
 		return result, a.installError(ref, "validation", stagingRoot, ErrInvalidAgent)
 	}
 

@@ -93,14 +93,14 @@ func newAgentRecoveryFixture(t *testing.T, operation Operation, phase Phase) *ag
 		Operation:     operation,
 		Phase:         phase,
 		Agent:         domain.AgentBibit,
-		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"},
+		Power:         domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v2.0.0"},
 		Filesystem: &FilesystemJournalPayload{
 			TargetPath:     target,
 			TransactionDir: artifacts.dir,
 		},
 	}
 	if operation == OperationInstall {
-		journal.Previous = powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"})
+		journal.Previous = powerRefPointer(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"})
 		journal.Filesystem.StagingRoot = staging
 		journal.Filesystem.BackupPath = artifacts.backup
 	} else {

@@ -29,8 +29,8 @@ func loaderFor(powerType domain.PowerType) (sourceLoader, error) {
 		return pluginSourceLoader{}, nil
 	case domain.PowerTypeMCP:
 		return mcpSourceLoader{}, nil
-	case domain.PowerTypeAgent:
-		return agentSourceLoader{}, nil
+	case domain.PowerTypeExpert:
+		return expertSourceLoader{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported type %q: %w", powerType, ErrInvalid)
 	}

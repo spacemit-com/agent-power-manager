@@ -48,7 +48,7 @@ func newSubmitCommand(newLifecycle SubmitLifecycleFactory) *cobra.Command {
 }
 
 func validateSubmitFlags(flags Flags) error {
-	if err := requireSubmissionType(flags); err != nil {
+	if err := requireSubmissionType(&flags); err != nil {
 		return err
 	}
 	if strings.TrimSpace(flags.Message) == "" {

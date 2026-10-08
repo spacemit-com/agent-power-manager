@@ -11,7 +11,7 @@ func (c *Client) listAgents(ctx context.Context) ([]domain.PowerRef, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return c.listResources(ctx, "agents", domain.PowerTypeAgent, "agent.yaml")
+	return c.listResources(ctx, "agents", domain.PowerTypeExpert, "agent.yaml")
 }
 
 // agentLocalTreeContentPolicy 是 Local Agent 的物理快照内容策略：
@@ -30,7 +30,7 @@ func agentLocalTreeContentPolicy(relative string, body []byte) error {
 // DownloadAgent 将精确版本 Agent 版本目录原子复制至调用方提供的私有目录，不访问全局缓存；
 // destination 必须不存在或为空的物理目录，失败时不留任何可见输出。
 func (c *Client) DownloadAgent(ctx context.Context, entry domain.CatalogEntry, destination string) (resultErr error) {
-	content, err := c.loadMatchingCatalogContent(ctx, entry, domain.PowerTypeAgent)
+	content, err := c.loadMatchingCatalogContent(ctx, entry, domain.PowerTypeExpert)
 	if err != nil {
 		return err
 	}

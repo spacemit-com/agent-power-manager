@@ -16,9 +16,9 @@ type agentPowerGroups struct {
 
 // installedListAgents 解析具体 Agent 或 --type agent 的目标集合；非 agent 类型省略 --agent 视为 all。
 func installedListAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.AgentID, error) {
-	if flags.Type == string(domain.PowerTypeAgent) {
+	if flags.Type == string(domain.PowerTypeExpert) {
 		if flags.Agent != "" && domain.AgentID(flags.Agent) != domain.AgentBibit {
-			return nil, fmt.Errorf("list installed power type %q only supports agent %q", domain.PowerTypeAgent, domain.AgentBibit)
+			return nil, fmt.Errorf("list installed power type %q only supports agent %q", domain.PowerTypeExpert, domain.AgentBibit)
 		}
 		if !snapshot.Contains(domain.AgentBibit) {
 			return nil, fmt.Errorf("list installed powers for agent %q: unsupported or not installed", domain.AgentBibit)
@@ -37,7 +37,7 @@ func installedListAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]doma
 
 // isAllInstalledList 报告 installed list 是否进入全部受支持 Agent 的分组模式。
 func isAllInstalledList(flags cli.Flags) bool {
-	return flags.Type != string(domain.PowerTypeAgent) && (flags.Agent == "" || domain.AgentID(flags.Agent) == domain.AllAgents)
+	return flags.Type != string(domain.PowerTypeExpert) && (flags.Agent == "" || domain.AgentID(flags.Agent) == domain.AllAgents)
 }
 
 // listInstalled 无锁读取 Agent 快照和配置，生成 best-effort 的已安装清单。

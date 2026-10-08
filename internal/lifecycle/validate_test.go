@@ -59,7 +59,7 @@ func TestValidateAgentOfflineReportsIDNameMismatch(t *testing.T) {
 	}
 	path := writeLifecycleAgentYAML(t, t.TempDir(), lifecycleAgentYAMLMismatchedID)
 
-	result, err := service.Validate(context.Background(), cli.Flags{Type: "agent"}, []string{path})
+	result, err := service.Validate(context.Background(), cli.Flags{Type: "expert"}, []string{path})
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil: id 与 name 不同取值不是校验错误", err)
 	}
@@ -82,11 +82,11 @@ func TestValidateAgentOfflineMapsResult(t *testing.T) {
 	}
 	path := writeLifecycleAgent(t, t.TempDir())
 
-	result, err := service.Validate(context.Background(), cli.Flags{Type: "agent"}, []string{path})
+	result, err := service.Validate(context.Background(), cli.Flags{Type: "expert"}, []string{path})
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if result.Type != string(domain.PowerTypeAgent) || result.Name != "demo-agent" || result.Version != "v1.0.0" || result.Description != "demo" {
+	if result.Type != string(domain.PowerTypeExpert) || result.Name != "demo-agent" || result.Version != "v1.0.0" || result.Description != "demo" {
 		t.Fatalf("Validate() = %#v", result)
 	}
 	if result.FileCount != 1 || result.ContentSize != int64(len(lifecycleAgentYAML)) {

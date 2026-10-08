@@ -45,7 +45,7 @@ type contractPower struct {
 // 不构成独立例外。
 var contractPowers = []contractPower{
 	{powerType: domain.PowerTypeSkill, agent: domain.AgentCodex},
-	{powerType: domain.PowerTypeAgent, agent: domain.AgentBibit},
+	{powerType: domain.PowerTypeExpert, agent: domain.AgentBibit},
 	{powerType: domain.PowerTypeMCP, agent: domain.AgentCodex},
 	{powerType: domain.PowerTypePlugin, agent: domain.AgentCodex},
 }
@@ -76,7 +76,7 @@ func TestLifecycleStateContract(t *testing.T) {
 						wantInstall: cli.InstallOutcomeInstalled, wantWarning: "installed power target is missing",
 					})
 				}
-				if power.powerType == domain.PowerTypeAgent {
+				if power.powerType == domain.PowerTypeExpert {
 					// 目录型 Agent 的文件级缺陷（缺 agent.yaml / 缺被引用 avatar / 多余
 					// 或不一致资源）都收敛为同一个"缺失/不完整受管目标"：
 					// 一次 target-missing 告警 + 首次安装语义 publish，outcome 仍为 installed，
@@ -105,7 +105,7 @@ func TestLifecycleStateContract(t *testing.T) {
 						wantUninstall: cli.UninstallOutcomeCompleted, wantWarning: "installed power target is missing",
 					})
 				}
-				if power.powerType == domain.PowerTypeAgent {
+				if power.powerType == domain.PowerTypeExpert {
 					// 与 install 方向一致：目录型缺陷在卸载方向同样只产生一次
 					// target-missing 告警，并清理 manifest 后以 completed 收敛。
 					cases = append(cases,
@@ -200,7 +200,7 @@ func contractInstallFixture(power contractPower, manifest, target string) instal
 	}
 
 	switch power.powerType {
-	case domain.PowerTypeSkill, domain.PowerTypeAgent:
+	case domain.PowerTypeSkill, domain.PowerTypeExpert:
 		// 目录型目标（Skill 的 SKILL.md、Agent 的 agent.yaml+assets）在生命周期层
 		// 只探测位置存在性；文件级缺陷（缺清单/缺 avatar/多余资源）一律建模为
 		// TargetAbsent，与共享状态策略的 incomplete 分支收敛为同一条缺失告警路径。

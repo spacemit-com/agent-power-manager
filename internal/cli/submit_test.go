@@ -16,7 +16,7 @@ func TestSubmitRequiresType(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "missing type", args: []string{"submit", "dir"}, want: "--type must be skill, plugin, mcp, or agent"},
+		{name: "missing type", args: []string{"submit", "dir"}, want: "--type must be skill, plugin, mcp, or expert"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -36,7 +36,7 @@ func TestSubmitRequiresType(t *testing.T) {
 }
 
 func TestSubmitRequiresMessageForEveryPowerType(t *testing.T) {
-	for _, powerType := range []string{"skill", "plugin", "mcp", "agent"} {
+	for _, powerType := range []string{"skill", "plugin", "mcp", "expert"} {
 		t.Run(powerType, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			lifecycle := &recordingSubmitLifecycle{}

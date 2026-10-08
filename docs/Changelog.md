@@ -2,6 +2,63 @@
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。
 
+> APC 仓库说明（2026-10-08）：相邻的 APC 仓库已停止维护，历史条目中出现的 `../apc` 路径只是当时的记录，
+> 不再可用；APC 的服务端契约以仓库根目录的 `APC-API.md` 为准（见 ADR-025）。
+
+## 2026-10-08（Power 类别 agent 改名为 expert，APC 边界保留 wire 词汇）
+
+分类：契约变更（CLI 与 JSON 输出的类型取值改为 `expert`；`--type agent` 降为弃用别名）
+
+用户需求：跨 `apm` 与 `bibit-agenthub-plugin` 两个仓库消除「agent」的二义——它既指目标智能体
+（bibit、codex 等），又指 Bibit 的一种特殊资源。插件侧已经先一步把该类别在界面上显示为 Expert，
+要求把两个仓库里剩余的定义（代码、文档、CLI 参数名）同步过来，使两侧接口一致、不至于无法使用出错。
+
+背景：同一个词在一条命令里出现两次（`apm install <agent-power> --type agent --agent bibit`），
+插件的请求里也同时有「目标 Agent」与「类型」两个字段且类型取值恰好是 `agent`。两条硬约束决定了改名
+能走多远：APC 是已实现且不再改动的服务端，其契约以 `APC-API.md` 为唯一权威（`type=agent`、目录分组
+`agents`）；磁盘 `agents/<name>` 与作者包里的 `agent.yaml` 分别是 Bibit Runtime 的定位约定与已发布内容
+的一部分。插件侧的 Provider 把类型原样透传给 `apm --type=` 并解析 apm 输出的 `type` 字段，所以两侧必须
+同批改，任何单侧改动都会让接口对不上。关键决策与保留清单见
+[ADR-044](../ivory-tower/adr/ADR-044-rename-agent-power-type-to-expert.md)。
+
+解决方案或完成结果：
+
+- `domain.PowerTypeExpert = "expert"`，全仓 212 处常量引用与 31 个 `*agent*.go` 文件按「这个名字指的是
+  Power 类别，还是目标 Agent」逐个甄别：`cache.PrepareAgent` → `PrepareExpert`、
+  `lifecycle.installAgentPower`/`uninstallAgentPower` → `installExpertPower`/`uninstallExpertPower`
+  （文件同名）、`submission.agentSourceLoader` → `expertSourceLoader`（`agent.go` → `expert.go`）、
+  `cli.validateAgentTypeFlags` → `validateExpertTypeFlags`、`cli.validatePowerType` →
+  `resolvePowerType`。`transaction.InstallAgent`/`AgentInstallRequest` 等**保留**：那里的 `Agent` 是目标
+  Agent（请求同时携带 `Agent domain.AgentID` 与 `Power domain.PowerRef`）。
+- CLI：`--type=expert` 为规范取值；`--type=agent` 就地改写成 `expert`（`resolvePowerType`），并在
+  非 `--json` 时向 stderr 发一条弃用提示（`--json` 的 stdout 是机器契约，提醒不属于结果）。规范化必须在
+  命令读取 `flags.Type` 之前完成，因为原始字符串会流进 `internal/lifecycle` 参与类型比较与过滤，留着
+  `agent` 会让 Expert 类别静默消失。错误文案改为 `must be skill, plugin, mcp, or expert`。
+- APC 边界：新增唯一翻译层 `internal/cloud/remote/type_vocabulary.go`。出站翻译提交 metadata 的 `type`、
+  系列查询的 `type` 参数与内容下载路径 `resources/<type>/...`；入站把 submission 详情/列表响应里的
+  `agent` 翻回 `expert`（presence-sensitive DTO 上 `nil` 原样透传）。目录分组名仍是 APC 的 `agents`
+  （`codec.go` 的分组表），`APC-API.md` 的契约内容不动，只加一段客户端词汇说明。
+- 明确保留 `agent` 的部分：`--agent` 与 `AgentID`/`AgentAdapter`/`agentProfile`（目标 Agent）、
+  `agents/<name>` 目录与 `cache/agents/...`（Bibit Runtime 与缓存布局）、`agent.yaml` 及其 `agent:` 块、
+  `AgentConfig`/`AgentInfo`/`internal/agentartifact`（作者可见的资源包格式）、清单 `agents` 键、
+  APC 的 wire 取值与目录分组。完整清单在 ADR-044。
+- 文档：`BUILD.md` 的 CLI 示例与目录说明、`ivory-tower/project-overview.md` 的类别小节、
+  `ADR-002` 的语法块（类型枚举补上第四类并改名）、`APC-API.md` 的客户端词汇说明；ADR-015/019/033/034
+  中出现的 `--type agent` 示例加一行拼写说明（保留历史决策正文）。
+
+测试：新增 `TestAPCWireTypeVocabulary`（两个方向 + `nil` 透传）与
+`TestExpertCatalogGroupKeepsAPCName`（编码出 `agents` 组、不出现 `experts` 组，且能解回 Expert 条目）；
+`TestResolvePowerTypeNormalizesLegacyAgentSpelling` 与 `TestResolvePowerTypeWarnsOnlyOutsideJSON`
+钉住别名与提示时机；`TestValidateNormalizesLegacyAgentTypeSpelling` 端到端确认旧拼写进 lifecycle 前已
+变成 `expert`；fake APC 服务端（`internal/cloud`、`internal/lifecycle` 两处）改为按线上词汇校验路径与
+metadata，否则被测代码漏翻译时测试反而会通过。`gofmt`、`go vet ./...`、`go build ./...` 与全量
+`go test ./...`（22 个包）通过。
+
+边界与发布顺序：**apm 与 bibit-agenthub-plugin 必须同批升级**——新 apm + 旧插件解析不了
+`type:"expert"`，旧 apm + 新插件不认识 `--type=expert`，混合状态两个方向都坏。插件的 deb 精确锁自己的
+CLI，但 `agent-power-manager` 不锁版本，所以发布说明必须写明。不改 APC 的服务端行为与 `APC-API.md` 的
+契约、不改磁盘布局与 `agent.yaml`、不改 `apm` 的 deb 版本策略（本次仅补 changelog）。
+
 ## 2026-09-29（MCP 定义改由 content 提供，提交 metadata 不再携带 definition）
 
 分类：契约变更（MCP 提交 metadata 删除 `definition`；`SubmissionRequest` 删除 `Definition` 字段）

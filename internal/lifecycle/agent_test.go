@@ -10,7 +10,7 @@ import (
 
 func TestInstallAgentsDefaultsBibitForAgentType(t *testing.T) {
 	snapshot := domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit}}
-	agents, err := installAgents(cli.Flags{Type: "agent", Agent: ""}, snapshot)
+	agents, err := installAgents(cli.Flags{Type: "expert", Agent: ""}, snapshot)
 	if err != nil || len(agents) != 1 || agents[0] != domain.AgentBibit {
 		t.Fatalf("installAgents() = %v, %v", agents, err)
 	}
@@ -18,14 +18,14 @@ func TestInstallAgentsDefaultsBibitForAgentType(t *testing.T) {
 
 func TestInstallAgentsRejectsNonBibitForAgentType(t *testing.T) {
 	snapshot := domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex, domain.AgentBibit}}
-	if _, err := installAgents(cli.Flags{Type: "agent", Agent: "codex"}, snapshot); err == nil {
+	if _, err := installAgents(cli.Flags{Type: "expert", Agent: "codex"}, snapshot); err == nil {
 		t.Fatal("installAgents() error = nil, want unsupported agent")
 	}
 }
 
 func TestInstalledListAgentsDefaultsBibitForAgentType(t *testing.T) {
 	snapshot := domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentBibit}}
-	agents, err := installedListAgents(cli.Flags{Type: "agent", Agent: ""}, snapshot)
+	agents, err := installedListAgents(cli.Flags{Type: "expert", Agent: ""}, snapshot)
 	if err != nil || len(agents) != 1 || agents[0] != domain.AgentBibit {
 		t.Fatalf("installedListAgents() = %v, %v", agents, err)
 	}
@@ -33,7 +33,7 @@ func TestInstalledListAgentsDefaultsBibitForAgentType(t *testing.T) {
 
 func TestInstalledListAgentsRejectsNonBibitForAgentType(t *testing.T) {
 	snapshot := domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex, domain.AgentBibit}}
-	if _, err := installedListAgents(cli.Flags{Type: "agent", Agent: "codex"}, snapshot); err == nil {
+	if _, err := installedListAgents(cli.Flags{Type: "expert", Agent: "codex"}, snapshot); err == nil {
 		t.Fatal("installedListAgents() error = nil, want unsupported agent")
 	}
 }
@@ -64,7 +64,7 @@ func TestInstalledListAgentsReportsAvailableAgentsWhenTargetMissing(t *testing.T
 
 func TestInstallAgentsOmitsAvailableAgentsForAgentType(t *testing.T) {
 	snapshot := domain.AgentSnapshot{Agents: []domain.AgentID{domain.AgentCodex}}
-	_, err := installAgents(cli.Flags{Type: "agent", Agent: ""}, snapshot)
+	_, err := installAgents(cli.Flags{Type: "expert", Agent: ""}, snapshot)
 	if err == nil || strings.Contains(err.Error(), "available agents") {
 		t.Fatalf("installAgents() error = %v, want no available agents for agent type", err)
 	}

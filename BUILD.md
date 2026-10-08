@@ -73,7 +73,7 @@ provider 配置、Remote 网络/协议或内容错误都不会自动回退另一
 
 ### 资源目录缓存与同步
 
-当前目录发现契约由 [ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md) 定义。APM 在 `~/.apm/catalog.json`（测试时位于 `$APM_HOME/.apm/catalog.json`）保存唯一完整目录，不按 provider、URL 或 Local root 分叉，也不保存 sidecar marker。catalog 顶层 `schema_version=1`，并且必须同时包含 `skills`、`plugins`、`mcps`、`agents` 四组；每组单独维护 `schema_version=1` 且空集合也编码为 `items: []`。条目按组确定类型，包含精确版本、description、message、content type/size/MD5、发布时间和有序 tags。
+当前目录发现契约由 [ADR-021](ivory-tower/adr/ADR-021-cache-versioned-resource-catalog.md) 定义。APM 在 `~/.apm/catalog.json`（测试时位于 `$APM_HOME/.apm/catalog.json`）保存唯一完整目录，不按 provider、URL 或 Local root 分叉，也不保存 sidecar marker。catalog 顶层 `schema_version=1`，并且必须同时包含 `skills`、`plugins`、`mcps`、`agents` 四组（组名是 APC 的格式，本地类别叫 `expert`，见 [ADR-044](ivory-tower/adr/ADR-044-rename-agent-power-type-to-expert.md)）；每组单独维护 `schema_version=1` 且空集合也编码为 `items: []`。条目按组确定类型，包含精确版本、description、message、content type/size/MD5、发布时间和有序 tags。
 
 同步只使用两个匿名接口：`GET /api/v1/resources/version` 返回 catalog 原始字节的 SHA-256 与精确大小，`GET /api/v1/resources` 返回该确定性 JSON 对象。hash 相同时直接复用本地文件；hash 不同时下载到私有临时目录，经 100 MiB 上限、严格 JSON/schema、排序、size/hash 校验后以 `0600` 原子替换。旧的公开分页与逐项发现接口不再存在；latest、显式版本和跨类型歧义都在不可变 `Snapshot` 上完成，Snapshot 查询本身不访问网络或文件系统。
 
@@ -164,17 +164,17 @@ gofmt -w cmd internal
 ./apm uninstall filesystem --agent hermes-agent --type mcp
 ./apm uninstall demo-plugin --agent claude-code --type plugin
 ./apm uninstall demo-plugin --agent bibit --type plugin
-./apm install bianbu-agent-default=v1.0.0 --type agent
-./apm install bianbu-agent-default=v1.0.0 --type agent --agent bibit
-./apm uninstall bianbu-agent-default --type agent
-./apm list --installed --type agent --agent bibit
-./apm search bianbu-agent-default --type agent
-./apm list --type agent
+./apm install bianbu-agent-default=v1.0.0 --type expert
+./apm install bianbu-agent-default=v1.0.0 --type expert --agent bibit
+./apm uninstall bianbu-agent-default --type expert
+./apm list --installed --type expert --agent bibit
+./apm search bianbu-agent-default --type expert
+./apm list --type expert
 ./apm fix
 ./apm --verbose fix
-apm validate <path> --type <skill|plugin|mcp|agent> [--json]
-apm submit <path> --type <skill|plugin|mcp|agent> --message "本次提交说明"
-apm submission list [--status <active-status>] [--type <skill|plugin|mcp|agent>] [--name <canonical-name>] [--output text|json]
+apm validate <path> --type <skill|plugin|mcp|expert> [--json]
+apm submit <path> --type <skill|plugin|mcp|expert> --message "本次提交说明"
+apm submission list [--status <active-status>] [--type <skill|plugin|mcp|expert>] [--name <canonical-name>] [--output text|json]
 apm submission get <submission-id> [--output text|json]
 ```
 
@@ -296,7 +296,7 @@ MCP 支持 Bibit、Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互�
 
 Bibit profile 根优先使用 `BIANBU_AGENT_HOME`，未设置时为 `<有效 HOME>/.bianbu-agent`；根目录存在且为目录才进入本次命令的已安装 Agent 快照。Bibit 接口与路径约束见 [Feature 018](ivory-tower/features/018-bibit-agent/spec.md)，当前 Plugin canonical/派生边界见 [ADR-017](ivory-tower/adr/ADR-017-derive-agent-plugin-manifests-from-apc-plugin.md)。
 
-Agent Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-power/spec.md) 与 [ADR-015](ivory-tower/adr/ADR-015-agent-power-bibit.md)；当前打包与目录契约见 [Feature 026](ivory-tower/features/026-agent-package-assets/spec.md) 与 [ADR-023](ivory-tower/adr/ADR-023-package-agent-with-assets.md)，云端契约见 APC ADR-006）：Agent 权威 content 是确定性 `.tar.gz`，归档根即资源根（必需 `agent.yaml` + 可选 `assets/`，无版本包裹目录）；Local canonical fixture 布局为 `agents/<name>/<version>/agent.yaml + assets/`，Remote exact content 为 `application/gzip` 归档，解包后执行权威 Agent 目录校验。Cache 的 `PrepareAgent` 把完整目录按精确版本发布到 `cache/agents/<name>/<version>` 并物化 `staging/agents/<name>`；本地安装到 `<bibit根>/agents/<name>`（完整目录、不含版本层级，版本仅记 manifest）。外部身份使用 `agent.name`，`agent.id` 仅供 Bibit 内部区分，但必须与 `agent.name` 取相同值（[ADR-033](ivory-tower/adr/ADR-033-require-agent-id-to-equal-agent-name.md)）：Bibit 按 `agent.id` 定位已安装的 `agents/<agent.name>` 目录，取值不同会「能列出、按 ID 查不到」。APM 不比较二者、不把它当作校验错误，只由 `apm validate --type agent` 输出一条 warning（[ADR-034](ivory-tower/adr/ADR-034-report-agent-id-name-mismatch-as-validate-warning.md)）。`agent.metadata.avatar` 可选：存在时必须引用 `assets/` 下真实 PNG 普通文件——大小 ≤ 1 MiB、宽高均为 128..1024 像素且为正方形。`--type agent` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`；`list --installed` 省略 `--agent` 时默认 `bibit`；`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`。显式 `--agent bibit` 允许，其它值（含 `all`）报错。例如 `./apm install bianbu-agent-default=v1.0.0 --type agent`。
+Expert Power 仅 Bibit 支持（[Feature 019](ivory-tower/features/019-agent-power/spec.md) 与 [ADR-015](ivory-tower/adr/ADR-015-agent-power-bibit.md)；当前打包与目录契约见 [Feature 026](ivory-tower/features/026-agent-package-assets/spec.md) 与 [ADR-023](ivory-tower/adr/ADR-023-package-agent-with-assets.md)，云端契约见 APC ADR-006）：Agent 权威 content 是确定性 `.tar.gz`，归档根即资源根（必需 `agent.yaml` + 可选 `assets/`，无版本包裹目录）；Local canonical fixture 布局为 `agents/<name>/<version>/agent.yaml + assets/`，Remote exact content 为 `application/gzip` 归档，解包后执行权威 Agent 目录校验。Cache 的 `PrepareExpert` 把完整目录按精确版本发布到 `cache/agents/<name>/<version>` 并物化 `staging/agents/<name>`；本地安装到 `<bibit根>/agents/<name>`（完整目录、不含版本层级，版本仅记 manifest）。外部身份使用 `agent.name`，`agent.id` 仅供 Bibit 内部区分，但必须与 `agent.name` 取相同值（[ADR-033](ivory-tower/adr/ADR-033-require-agent-id-to-equal-agent-name.md)）：Bibit 按 `agent.id` 定位已安装的 `agents/<agent.name>` 目录，取值不同会「能列出、按 ID 查不到」。APM 不比较二者、不把它当作校验错误，只由 `apm validate --type expert` 输出一条 warning（[ADR-034](ivory-tower/adr/ADR-034-report-agent-id-name-mismatch-as-validate-warning.md)）。`agent.metadata.avatar` 可选：存在时必须引用 `assets/` 下真实 PNG 普通文件——大小 ≤ 1 MiB、宽高均为 128..1024 像素且为正方形。`--type expert` 的 `--agent` 规则：install/uninstall 省略 `--agent` 时默认 `bibit`；`list --installed` 省略 `--agent` 时默认 `bibit`；`search`/`list` 的 Cloud 模式仅过滤结果、不要求 `--agent`。显式 `--agent bibit` 允许，其它值（含 `all`）报错。例如 `./apm install bianbu-agent-default=v1.0.0 --type expert`。改名前的 `--type agent` 作为弃用别名继续可用（[ADR-044](ivory-tower/adr/ADR-044-rename-agent-power-type-to-expert.md)）。
 
 ### Plugin 共享 artifact 与操作顺序
 

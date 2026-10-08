@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestPowerTypeAgentIsStable(t *testing.T) {
-	if PowerTypeAgent != "agent" {
-		t.Fatalf("PowerTypeAgent = %q, want %q", PowerTypeAgent, "agent")
+func TestPowerTypeExpertIsStable(t *testing.T) {
+	if PowerTypeExpert != "expert" {
+		t.Fatalf("PowerTypeExpert = %q, want %q", PowerTypeExpert, "expert")
 	}
 }
 
@@ -227,14 +227,14 @@ func TestAgentConfigValidatePowerRefRequiresExactIdentity(t *testing.T) {
 		ID: "bibit-internal-42", Name: "demo-agent", Version: "v1.2.3",
 		Description: "demo", Soul: "help safely",
 	}}
-	if err := config.ValidatePowerRef(PowerRef{Type: PowerTypeAgent, Name: "demo-agent", Version: "v1.2.3"}); err != nil {
+	if err := config.ValidatePowerRef(PowerRef{Type: PowerTypeExpert, Name: "demo-agent", Version: "v1.2.3"}); err != nil {
 		t.Fatalf("ValidatePowerRef() error = %v", err)
 	}
 	for _, ref := range []PowerRef{
 		{Type: PowerTypeSkill, Name: "demo-agent", Version: "v1.2.3"},
-		{Type: PowerTypeAgent, Name: "other", Version: "v1.2.3"},
-		{Type: PowerTypeAgent, Name: "demo-agent", Version: "v1.2.4"},
-		{Type: PowerTypeAgent, Name: "bibit-internal-42", Version: "v1.2.3"},
+		{Type: PowerTypeExpert, Name: "other", Version: "v1.2.3"},
+		{Type: PowerTypeExpert, Name: "demo-agent", Version: "v1.2.4"},
+		{Type: PowerTypeExpert, Name: "bibit-internal-42", Version: "v1.2.3"},
 	} {
 		if err := config.ValidatePowerRef(ref); !errors.Is(err, ErrInvalidAgent) {
 			t.Fatalf("ValidatePowerRef(%+v) error = %v, want ErrInvalidAgent", ref, err)
@@ -246,10 +246,10 @@ func TestAgentConfigValidatePowerRefRequiresExactIdentity(t *testing.T) {
 // agent.id 只作为 Bibit 内部标识，不参与 PowerRef 比较。
 func TestDecodeAgentConfigIdentityUsesName(t *testing.T) {
 	config := mustDecodeAgent(t, validAgentYAML("bibit-internal-42", "demo-agent", "v1.2.3"))
-	if err := config.ValidatePowerRef(PowerRef{Type: PowerTypeAgent, Name: "demo-agent", Version: "v1.2.3"}); err != nil {
+	if err := config.ValidatePowerRef(PowerRef{Type: PowerTypeExpert, Name: "demo-agent", Version: "v1.2.3"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.ValidatePowerRef(PowerRef{Type: PowerTypeAgent, Name: "bibit-internal-42", Version: "v1.2.3"}); !errors.Is(err, ErrInvalidAgent) {
+	if err := config.ValidatePowerRef(PowerRef{Type: PowerTypeExpert, Name: "bibit-internal-42", Version: "v1.2.3"}); !errors.Is(err, ErrInvalidAgent) {
 		t.Fatalf("error = %v", err)
 	}
 }

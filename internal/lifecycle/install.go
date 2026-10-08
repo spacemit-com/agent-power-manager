@@ -166,7 +166,7 @@ func (s *InstallService) explicitManifestHit(flags cli.Flags, agents []domain.Ag
 // isManifestPowerType 报告显式 fast path 是否支持该 Power 类型。
 func isManifestPowerType(powerType domain.PowerType) bool {
 	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypeAgent, domain.PowerTypeMCP, domain.PowerTypePlugin:
+	case domain.PowerTypeSkill, domain.PowerTypeExpert, domain.PowerTypeMCP, domain.PowerTypePlugin:
 		return true
 	default:
 		return false
@@ -188,11 +188,11 @@ func validManifestRef(ref domain.PowerRef) bool {
 }
 
 func installAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.AgentID, error) {
-	if flags.Type == string(domain.PowerTypeAgent) && flags.Agent != "" && domain.AgentID(flags.Agent) != domain.AgentBibit {
-		return nil, fmt.Errorf("install power type %q only supports agent %q", domain.PowerTypeAgent, domain.AgentBibit)
+	if flags.Type == string(domain.PowerTypeExpert) && flags.Agent != "" && domain.AgentID(flags.Agent) != domain.AgentBibit {
+		return nil, fmt.Errorf("install power type %q only supports agent %q", domain.PowerTypeExpert, domain.AgentBibit)
 	}
 	target := domain.AgentID(flags.Agent)
-	if flags.Type == string(domain.PowerTypeAgent) && flags.Agent == "" {
+	if flags.Type == string(domain.PowerTypeExpert) && flags.Agent == "" {
 		target = domain.AgentBibit
 	}
 	if target == domain.AllAgents {

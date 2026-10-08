@@ -122,16 +122,16 @@ func TestPrepareRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentRequiresMessage(t *testing.T) {
+func TestPrepareExpertRequiresMessage(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
-	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Prepare() error = %v, want ErrInvalid", err)
 	}
 }
 
-func TestPrepareAgentWhitespaceChangesMD5(t *testing.T) {
+func TestPrepareExpertWhitespaceChangesMD5(t *testing.T) {
 	dir := t.TempDir()
 	raw1 := "schema_version: 2\nagent:\n  id: demo\n  name: demo-agent\n  version: v1.0.0\n  name_zh: 演示名称\n  name_en: Demo Agent\n  description: demo\n  description_zh: 演示\n  soul: help safely\n"
 	raw2 := raw1 + "\n"
@@ -139,11 +139,11 @@ func TestPrepareAgentWhitespaceChangesMD5(t *testing.T) {
 	secondRoot := filepath.Join(dir, "b")
 	writeAgentYAMLOnlyDir(t, firstRoot, raw1)
 	writeAgentYAMLOnlyDir(t, secondRoot, raw2)
-	first, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: firstRoot, Message: "first"})
+	first, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: firstRoot, Message: "first"})
 	if err != nil {
 		t.Fatalf("Prepare(a) error = %v", err)
 	}
-	second, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: secondRoot, Message: "first"})
+	second, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: secondRoot, Message: "first"})
 	if err != nil {
 		t.Fatalf("Prepare(b) error = %v", err)
 	}
@@ -172,7 +172,7 @@ func TestPrepareAllTypesUseRequestMessageOnly(t *testing.T) {
 		{name: "skill", powerType: domain.PowerTypeSkill, path: skillDir},
 		{name: "plugin", powerType: domain.PowerTypePlugin, path: pluginDir},
 		{name: "mcp", powerType: domain.PowerTypeMCP, path: mcpPath},
-		{name: "agent", powerType: domain.PowerTypeAgent, path: agentDir},
+		{name: "agent", powerType: domain.PowerTypeExpert, path: agentDir},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

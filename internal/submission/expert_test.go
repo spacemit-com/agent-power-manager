@@ -133,7 +133,7 @@ func readTarGzHeaders(t *testing.T, packed []byte) map[string]*tar.Header {
 func TestValidateAgentReturnsDirectoryMetadata(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
-	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -156,7 +156,7 @@ func TestValidateAgentWarnsWhenIDDiffersFromName(t *testing.T) {
 		"  description: demo\n"+
 		"  description_zh: 演示\n"+
 		"  soul: help safely\n")
-	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil: id 与 name 不同取值不是校验错误", err)
 	}
@@ -177,7 +177,7 @@ func TestValidateAgentWarnsWhenIDDiffersFromName(t *testing.T) {
 func TestValidateAgentDoesNotWarnWhenIDEqualsName(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
-	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	got, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -186,9 +186,9 @@ func TestValidateAgentDoesNotWarnWhenIDEqualsName(t *testing.T) {
 	}
 }
 
-// TestPrepareAgentAcceptsIDNameMismatch 守护 submit 路径不受 ADR-034 影响：
+// TestPrepareExpertAcceptsIDNameMismatch 守护 submit 路径不受 ADR-034 影响：
 // id 与 name 不同取值只影响 validate 的 warning，Prepare 仍必须成功。
-func TestPrepareAgentAcceptsIDNameMismatch(t *testing.T) {
+func TestPrepareExpertAcceptsIDNameMismatch(t *testing.T) {
 	root := t.TempDir()
 	writeAgentYAMLOnlyDir(t, root, "schema_version: 2\nagent:\n"+
 		"  id: demo-agent-internal\n"+
@@ -199,7 +199,7 @@ func TestPrepareAgentAcceptsIDNameMismatch(t *testing.T) {
 		"  description: demo\n"+
 		"  description_zh: 演示\n"+
 		"  soul: help safely\n")
-	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: root, Message: "first"})
+	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: root, Message: "first"})
 	if err != nil {
 		t.Fatalf("Prepare() error = %v, want nil: id 与 name 不同取值不是提交错误", err)
 	}
@@ -209,10 +209,10 @@ func TestPrepareAgentAcceptsIDNameMismatch(t *testing.T) {
 	assertTarGzFiles(t, got.Bytes, []string{"agent.yaml"})
 }
 
-func TestPrepareAgentProducesDeterministicGzip(t *testing.T) {
+func TestPrepareExpertProducesDeterministicGzip(t *testing.T) {
 	root := t.TempDir()
 	writeValidAgentDir(t, root)
-	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: root, Message: "first"})
+	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: root, Message: "first"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,10 +226,10 @@ func TestPrepareAgentProducesDeterministicGzip(t *testing.T) {
 	verifyMD5(t, got.Bytes, got.MD5)
 }
 
-func TestPrepareAgentIsDeterministicAcrossUnchangedDirectories(t *testing.T) {
+func TestPrepareExpertIsDeterministicAcrossUnchangedDirectories(t *testing.T) {
 	root := t.TempDir()
 	writeValidAgentDir(t, root)
-	request := Request{Type: domain.PowerTypeAgent, Path: root, Message: "first"}
+	request := Request{Type: domain.PowerTypeExpert, Path: root, Message: "first"}
 	first, err := Prepare(context.Background(), request)
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
@@ -246,10 +246,10 @@ func TestPrepareAgentIsDeterministicAcrossUnchangedDirectories(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentNormalizesOutputModes(t *testing.T) {
+func TestPrepareExpertNormalizesOutputModes(t *testing.T) {
 	root := t.TempDir()
 	writeValidAgentDir(t, root)
-	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: root, Message: "first"})
+	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: root, Message: "first"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,22 +268,22 @@ func TestPrepareAgentNormalizesOutputModes(t *testing.T) {
 func TestValidateAgentRejectsSingleYAMLFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	writeTestFile(t, path, validAgentYAML)
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: path})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
 }
 
-func TestPrepareAgentRejectsSingleYAMLFile(t *testing.T) {
+func TestPrepareExpertRejectsSingleYAMLFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	writeTestFile(t, path, validAgentYAML)
-	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: path, Message: "first"})
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: path, Message: "first"})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Prepare() error = %v, want ErrInvalid", err)
 	}
 }
 
-func TestPrepareAgentRejectsPrebuiltGzipFile(t *testing.T) {
+func TestPrepareExpertRejectsPrebuiltGzipFile(t *testing.T) {
 	root := t.TempDir()
 	writeValidAgentDir(t, root)
 	prebuilt := filepath.Join(t.TempDir(), "demo-agent-v1.0.0.tar.gz")
@@ -294,7 +294,7 @@ func TestPrepareAgentRejectsPrebuiltGzipFile(t *testing.T) {
 	if err := os.WriteFile(prebuilt, packed, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: prebuilt, Message: "first"})
+	_, err = Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: prebuilt, Message: "first"})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Prepare() error = %v, want ErrInvalid", err)
 	}
@@ -306,7 +306,7 @@ func TestValidateAgentRejectsSymlinkInsideTree(t *testing.T) {
 	if err := os.Symlink("agent.yaml", filepath.Join(dir, "assets", "alias")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -316,7 +316,7 @@ func TestValidateAgentRejectsExtraRootEntry(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
 	writeTestFile(t, filepath.Join(dir, "README.md"), "not allowed at root")
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -329,7 +329,7 @@ func TestValidateAgentRejectsHardLink(t *testing.T) {
 	if err := os.Link(filepath.Join(dir, "agent.yaml"), link); err != nil {
 		t.Skipf("hard link unsupported: %v", err)
 	}
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -341,7 +341,7 @@ func TestValidateAgentRejectsExecutableFile(t *testing.T) {
 	if err := os.Chmod(filepath.Join(dir, "agent.yaml"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -351,7 +351,7 @@ func TestAgentSourcePermitsBinaryAssets(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
 	writeTestFile(t, filepath.Join(dir, "assets", "data.bin"), string([]byte{0x00, 0x01, 0x02, 0xff}))
-	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir, Message: "first"})
+	got, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir, Message: "first"})
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
 	}
@@ -362,13 +362,13 @@ func TestValidateAgentRejectsNestedArchiveAsset(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
 	writeTestFile(t, filepath.Join(dir, "assets", "payload.gz"), string([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00}))
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
 }
 
-func TestPrepareAgentRejectsOversizePackedOutput(t *testing.T) {
+func TestPrepareExpertRejectsOversizePackedOutput(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
 	for i := 0; i < 3; i++ {
@@ -376,17 +376,17 @@ func TestPrepareAgentRejectsOversizePackedOutput(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir, Message: "first"})
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir, Message: "first"})
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "packed content size") {
 		t.Fatalf("Prepare() error = %v, want packed-size ErrInvalid", err)
 	}
 }
 
-func TestPrepareAgentRejectsExpansionAboveLimit(t *testing.T) {
+func TestPrepareExpertRejectsExpansionAboveLimit(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
 	writeTestFile(t, filepath.Join(dir, "assets", "highly-compressible.txt"), strings.Repeat("a", 1<<20))
-	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir, Message: "first"})
+	_, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir, Message: "first"})
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "decompression ratio") {
 		t.Fatalf("Prepare() error = %v, want decompression-ratio ErrInvalid", err)
 	}

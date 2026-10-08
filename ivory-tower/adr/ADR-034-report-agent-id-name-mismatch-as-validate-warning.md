@@ -5,6 +5,10 @@
 - Decision Makers：APM maintainers
 - Related ADR：[ADR-033](ADR-033-require-agent-id-to-equal-agent-name.md)（本决策实现其「后续动作」，并部分取代其「不新增告警」条款）
 
+> 拼写说明（2026-10-08）：本文出现的 `--type agent` 是改名前的写法，现在规范拼写为
+> `--type expert`（旧值仍被接受，非 `--json` 时会提示弃用）。类别改名与保留清单见
+> [ADR-044](ADR-044-rename-agent-power-type-to-expert.md)。
+
 ## Context
 
 [ADR-033](ADR-033-require-agent-id-to-equal-agent-name.md) 确定了 Agent 资源的创作规则

@@ -1309,7 +1309,7 @@ func newLifecycleRemoteServer(t *testing.T) *lifecycleRemoteServer {
 		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"},
 		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
 		{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"},
-		{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"},
+		{Name: "bianbu-agent-default", Type: domain.PowerTypeExpert, Version: "v1.0.0"},
 	} {
 		entry, err := snapshot.Resolve(ref)
 		if err != nil {
@@ -1341,7 +1341,7 @@ func lifecycleFixtureContent(t *testing.T, root string, ref domain.PowerRef) (st
 		return "application/gzip", lifecycleDeterministicArchive(t, filepath.Join(root, "plugins", ref.Name, ref.Version))
 	case domain.PowerTypeMCP:
 		return "application/json", lifecycleReadFixture(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		return "application/gzip", lifecycleDeterministicArchive(t, filepath.Join(root, "agents", ref.Name, ref.Version))
 	default:
 		t.Fatalf("unsupported lifecycle fixture type %q", ref.Type)
@@ -1467,7 +1467,13 @@ func (server *lifecycleRemoteServer) serveHTTP(writer http.ResponseWriter, reque
 		server.rejectProtocol(writer, request, "unknown endpoint")
 		return
 	}
-	ref := domain.PowerRef{Type: domain.PowerType(segments[3]), Name: segments[4], Version: segments[6]}
+	// APC 仍把 Expert 类别叫 agent（ADR-044），路径段是线上取值，得先翻回域类型，
+	// 否则这个假服务端会用错误的内容类型去校验，把被测代码的翻译错误掩盖掉。
+	wireType := domain.PowerType(segments[3])
+	if wireType == "agent" {
+		wireType = domain.PowerTypeExpert
+	}
+	ref := domain.PowerRef{Type: wireType, Name: segments[4], Version: segments[6]}
 	expectedSegments := []string{"api", "v1", "resources", segments[3], segments[4], "versions", segments[6]}
 	wantAccept := "application/json"
 	if len(segments) == 8 && segments[7] == "content" {
@@ -1537,7 +1543,7 @@ func lifecycleEscapedPath(segments ...string) string {
 
 func lifecycleExpectedContentType(powerType domain.PowerType) string {
 	switch powerType {
-	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeAgent:
+	case domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeExpert:
 		return "application/gzip"
 	case domain.PowerTypeMCP:
 		return "application/json"
@@ -1729,7 +1735,7 @@ func installLifecycleProviderState(t *testing.T, client cloud.Client) (*isolated
 		{Agent: "bibit", Type: "skill", Name: "brief-status", Version: "v0.0.1"},
 		{Agent: "bibit", Type: "mcp", Name: "filesystem", Version: "v0.0.1"},
 		{Agent: "bibit", Type: "plugin", Name: "demo-plugin", Version: "v0.0.1"},
-		{Agent: "bibit", Type: "agent", Name: "bianbu-agent-default", Version: "v1.0.0"},
+		{Agent: "bibit", Type: "expert", Name: "bianbu-agent-default", Version: "v1.0.0"},
 	} {
 		result, err := harness.install.Install(context.Background(), flags)
 		if err != nil || len(result.Items) != 1 || result.Items[0].Outcome != cli.InstallOutcomeInstalled {
@@ -1941,10 +1947,10 @@ func TestInstalledManifestCarriesDisplayFieldsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[domain.PowerRef]struct{ nameZH, nameEN, descriptionZH string }{
-		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"}:         {"简报状态", "Brief Status", "用于撰写简洁的进度状态更新。"},
-		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}:             {"文件系统", "Filesystem MCP", "文件系统 MCP 服务。"},
-		{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}:         {"演示插件", "Demo Plugin", "由 APC 管理的共享插件夹具。"},
-		{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}: {"Bianbu 默认助手", "Bianbu Default Agent", "项目本地的 Bianbu 智能体。"},
+		{Name: "brief-status", Type: domain.PowerTypeSkill, Version: "v0.0.1"}:          {"简报状态", "Brief Status", "用于撰写简洁的进度状态更新。"},
+		{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"}:              {"文件系统", "Filesystem MCP", "文件系统 MCP 服务。"},
+		{Name: "demo-plugin", Type: domain.PowerTypePlugin, Version: "v0.0.1"}:          {"演示插件", "Demo Plugin", "由 APC 管理的共享插件夹具。"},
+		{Name: "bianbu-agent-default", Type: domain.PowerTypeExpert, Version: "v1.0.0"}: {"Bianbu 默认助手", "Bianbu Default Agent", "项目本地的 Bianbu 智能体。"},
 	}
 	found := 0
 	for _, powers := range groups {

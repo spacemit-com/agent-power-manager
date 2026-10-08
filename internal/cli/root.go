@@ -127,7 +127,7 @@ func bindCommonFlags(command *cobra.Command, flags *Flags) {
 }
 
 func bindTypeFlag(command *cobra.Command, flags *Flags) {
-	command.Flags().StringVar(&flags.Type, "type", "", "power type: skill, plugin, mcp, or agent")
+	command.Flags().StringVar(&flags.Type, "type", "", "power type: skill, plugin, mcp, or expert")
 }
 
 func logParsedCommand(command *cobra.Command, flags Flags, args []string) {

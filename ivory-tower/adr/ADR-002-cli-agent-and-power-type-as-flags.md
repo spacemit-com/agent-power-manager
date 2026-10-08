@@ -2,7 +2,7 @@
 
 - Status：Accepted
 - Date：2026-08-03
-- Revised：2026-08-14
+- Revised：2026-08-14、2026-10-08（第四类改名 expert，见 [ADR-044](ADR-044-rename-agent-power-type-to-expert.md)）
 - Decision Makers：liangjunzhao
 
 ## Context
@@ -21,13 +21,13 @@ APM 的本地 Power 命令 `list --installed`/`install`/`uninstall` 需要同时
 CLI 语法采用：
 
 ```text
-apm search <keyword> [--type=<skill|plugin|mcp>]
-apm list [name] [--type=<skill|plugin|mcp>]
-apm list [name] --all [--type=<skill|plugin|mcp>]
-apm list [name] --installed [--agent=<agent-id|all>] [--type=<skill|plugin|mcp>]
-apm show <name>[=<version>] [--type=<skill|plugin|mcp>] [--json]
-apm install <power>[=<version>] --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
-apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp>]
+apm search <keyword> [--type=<skill|plugin|mcp|expert>]
+apm list [name] [--type=<skill|plugin|mcp|expert>]
+apm list [name] --all [--type=<skill|plugin|mcp|expert>]
+apm list [name] --installed [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>]
+apm show <name>[=<version>] [--type=<skill|plugin|mcp|expert>] [--json]
+apm install <power>[=<version>] --agent=<agent-id|all> [--type=<skill|plugin|mcp|expert>]
+apm uninstall <power> --agent=<agent-id|all> [--type=<skill|plugin|mcp|expert>]
 apm fix
 ```
 

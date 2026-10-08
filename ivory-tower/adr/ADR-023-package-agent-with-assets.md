@@ -4,7 +4,7 @@
 - Date：2026-08-26
 - Decision Makers：APM maintainers
 - Related Feature：[Feature 026](../features/026-agent-package-assets/spec.md)
-- Related APC Decision：[APC ADR-006](../../../apc/ivory-tower/adr/ADR-006-package-agent-with-assets.md)
+- Related APC contract：[APC-API.md](../../APC-API.md)、[ADR-025](ADR-025-apc-api-client-contract.md)（原 APC 仓库已停止维护，其 ADR-006 不再链接）
 - Related ADR：[ADR-033](ADR-033-require-agent-id-to-equal-agent-name.md)（`agent.id` 必须与 `agent.name` 取相同值）
 
 ## Context

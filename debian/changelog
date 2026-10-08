@@ -1,3 +1,25 @@
+agent-power-manager (0.0.2) resolute-porting; urgency=medium
+
+  * Rename the Expert power type locally. APC still calls it "agent" on the wire
+    (metadata type, catalog group, content path), and the disk layout keeps
+    agents/<name> and agent.yaml, so all of that is translated at the HTTP
+    boundary in internal/cloud/remote/type_vocabulary.go instead of being
+    renamed out from under APC, Bibit and already-published content.
+  * The CLI value is now --type=expert. --type=agent is still accepted and is
+    rewritten to expert on the spot, with a deprecation note on stderr unless
+    --json was requested: that mode's stdout is a machine contract.
+  * The rest of the vocabulary follows: Go symbols and file names that denote
+    the power *category* became Expert, while everything that denotes the target
+    agent (--agent, AgentID, AgentAdapter) or the author-facing artifact
+    (agents/, agent.yaml, AgentConfig) keeps its name. The keep list is written
+    down in ADR-044 so the split is a decision rather than an accident.
+  * Must be installed together with bibit-agenthub-plugin 0.3.20: an older
+    plugin cannot parse the type field this version now emits, and an older apm
+    cannot accept the --type=expert this plugin sends.
+
+ -- liangjunzhao <junzhao.liang@spacemit.com>  Thu, 08 Oct 2026 17:20:00 +0800
+
+
 agent-power-manager (0.0.1) resolute-porting; urgency=medium
 
   * Build and install the APM command-line client for Bianbu.

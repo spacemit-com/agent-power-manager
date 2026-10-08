@@ -4,6 +4,10 @@
 - Date：2026-08-24
 - Decision Makers：APM maintainers
 
+> 拼写说明（2026-10-08）：本文出现的 `--type agent` 是改名前的写法，现在规范拼写为
+> `--type expert`（旧值仍被接受，非 `--json` 时会提示弃用）。类别改名与保留清单见
+> [ADR-044](ADR-044-rename-agent-power-type-to-expert.md)。
+
 > 局部取代说明：本文保留 Feature 022 落定时的历史决策；其中资源元数据来源、CLI version/message、MCP content 与 Submission 查询部分已由 [ADR-020](ADR-020-source-owned-submission-metadata.md) 和 [Feature 023](../features/023-submission-resource-metadata-query/spec.md) 取代，当前实现与接口以二者为准。
 
 > 局部取代说明：本文保留 ADR-019 落定时的历史决策；其中 Agent 使用单个原始 `agent.yaml`、PowerRef name 来自 `agent.id`、单文件 cache/staging/target 与 `application/yaml` content 的约定已由 [Feature 026](../features/026-agent-package-assets/spec.md) 和 [ADR-023](ADR-023-package-agent-with-assets.md) 取代（Agent 改为确定性 `.tar.gz` 目录资源，根含 `agent.yaml` 与可选 `assets/`，外部身份使用 `agent.name`），当前实现与接口以 Feature 026/ADR-023 为准；本决策的 Submission 治理、身份闭环与错误边界中未被修改的部分继续有效。

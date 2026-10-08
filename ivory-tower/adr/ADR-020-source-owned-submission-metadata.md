@@ -10,7 +10,7 @@ APM 已支持 Skill、Plugin、MCP、Agent 的离线校验与 Submission，但�
 
 同时，现有 Submission 查询虽然领域端口含 cursor 和 limit，CLI 却没有完整传递这些能力，也未消费详情中的 description、更新说明、时间和 timeline。APC 尚未部署，可以在不承担兼容成本的前提下统一命名并收敛查询契约。
 
-本决策关联 [Feature 023](../features/023-submission-resource-metadata-query/spec.md)，并与 APC [ADR-003](../../../apc/ivory-tower/adr/ADR-003-bound-active-submission-query.md) 共同定义客户端与服务端边界。
+本决策关联 [Feature 023](../features/023-submission-resource-metadata-query/spec.md)；服务端边界以 [APC-API.md](../../APC-API.md) 为准（见 [ADR-025](ADR-025-apc-api-client-contract.md)），原 APC 仓库已停止维护，其 ADR-003 不再链接。
 
 ## Decision
 

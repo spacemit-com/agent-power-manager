@@ -79,7 +79,7 @@ func catalogEntryForLocalTest(ref domain.PowerRef) domain.CatalogEntry {
 		contentType = "application/gzip"
 	case domain.PowerTypeMCP:
 		contentType = "application/json"
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		contentType = "application/gzip"
 	}
 	return domain.CatalogEntry{
@@ -148,7 +148,7 @@ func TestLocalCatalogIsDeterministicAndUsesAuthoritativeContent(t *testing.T) {
 		if entry.Message != "local fixture" || entry.PublishedAt != "1970-01-01T00:00:00Z" || entry.Tags == nil || len(entry.Tags) != 0 {
 			t.Errorf("Metadata(%+v) fixed fields = message %q published %q tags %#v", fixture.ref, entry.Message, entry.PublishedAt, entry.Tags)
 		}
-		if fixture.ref.Type == domain.PowerTypeAgent {
+		if fixture.ref.Type == domain.PowerTypeExpert {
 			assertLocalCatalogAgentContent(t, entry, fixture)
 			continue
 		}
@@ -185,7 +185,7 @@ func TestLocalContentRejectsCatalogEntryMetadataDrift(t *testing.T) {
 				err = client.DownloadPlugin(context.Background(), entry, filepath.Join(t.TempDir(), "plugin"))
 			case domain.PowerTypeMCP:
 				_, err = client.GetMCP(context.Background(), entry)
-			case domain.PowerTypeAgent:
+			case domain.PowerTypeExpert:
 				err = client.DownloadAgent(context.Background(), entry, filepath.Join(t.TempDir(), "agent"))
 			}
 			if !errors.Is(err, cloud.ErrIntegrity) {
@@ -433,7 +433,8 @@ func assertLocalCatalogAgentContent(t *testing.T, entry domain.CatalogEntry, fix
 
 func assertLocalCatalogAgentUsesArchive(t *testing.T, snapshot catalog.Snapshot, fixtures []localCatalogFixture) {
 	t.Helper()
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "catalog-agent", Version: "v2.0.0"}
+	// 夹具名由类型推导（`catalog-<type>`），所以这里跟着类型走，避免下次改名再漂移。
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "catalog-" + string(domain.PowerTypeExpert), Version: "v2.0.0"}
 	entry, err := snapshot.Metadata(ref)
 	if err != nil {
 		t.Fatal(err)
@@ -450,10 +451,10 @@ func assertLocalCatalogAgentUsesArchive(t *testing.T, snapshot catalog.Snapshot,
 func writeLocalCatalogFixtureTree(t *testing.T, reverse bool) (string, []localCatalogFixture) {
 	t.Helper()
 	root := t.TempDir()
-	typeVersion := []domain.PowerType{domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP, domain.PowerTypeAgent}
+	typeVersion := []domain.PowerType{domain.PowerTypeSkill, domain.PowerTypePlugin, domain.PowerTypeMCP, domain.PowerTypeExpert}
 	versions := []string{"v1.0.0", "v2.0.0"}
 	if reverse {
-		typeVersion = []domain.PowerType{domain.PowerTypeAgent, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeSkill}
+		typeVersion = []domain.PowerType{domain.PowerTypeExpert, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeSkill}
 		versions = []string{"v2.0.0", "v1.0.0"}
 	}
 	fixtures := make([]localCatalogFixture, 0, 8)
@@ -488,7 +489,7 @@ func writeLocalCatalogPower(t *testing.T, root string, powerType domain.PowerTyp
 		sourcePath = filepath.Join(root, "mcps", name, version, "MCP.json")
 		raw = []byte("{\n  \"version\": \"" + version + "\",\n  \"name\": \"" + name + "\",\n  \"name_zh\": \"目录夹具\",\n  \"name_en\": \"Catalog Fixture\",\n  \"schema_version\": 2,\n  \"definition\": {\"transport\": \"stdio\", \"args\": [\"--version\", \"" + version + "\"], \"command\": \"catalog-mcp\"},\n  \"description\": \"" + description + "\",\n  \"description_zh\": \"目录夹具描述\"\n}\n")
 		writeLocalCatalogFile(t, sourcePath, raw)
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		sourcePath = filepath.Join(root, "agents", name, version)
 		raw = []byte("# preserved raw YAML\nschema_version: 2\nagent:\n  id: bibit-catalog\n  name: " + name + "\n  name_zh: 目录夹具\n  name_en: Catalog Fixture\n  version: " + version + "\n  description: " + description + "\n  description_zh: 目录夹具描述\n  soul: help safely\n")
 		writeLocalCatalogFile(t, filepath.Join(sourcePath, "agent.yaml"), raw)

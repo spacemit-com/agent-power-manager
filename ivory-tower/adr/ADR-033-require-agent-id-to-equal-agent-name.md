@@ -5,6 +5,10 @@
 - Decision Makers：APM maintainers
 - Related ADR：[ADR-023](ADR-023-package-agent-with-assets.md)、[ADR-034](ADR-034-report-agent-id-name-mismatch-as-validate-warning.md)（已实现本文「后续动作」，并取代本文「不新增告警」的表述）
 
+> 拼写说明（2026-10-08）：本文出现的 `--type agent` 是改名前的写法，现在规范拼写为
+> `--type expert`（旧值仍被接受，非 `--json` 时会提示弃用）。类别改名与保留清单见
+> [ADR-044](ADR-044-rename-agent-power-type-to-expert.md)。
+
 ## Context
 
 [ADR-023](ADR-023-package-agent-with-assets.md) 定下两件事：Agent 的外部身份使用 `agent.name`，

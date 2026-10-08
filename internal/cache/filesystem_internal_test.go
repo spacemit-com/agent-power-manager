@@ -79,21 +79,21 @@ func TestPrepareSkillStagingFailureRetainsPreviousStaging(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentStagingFailureRetainsPreviousStaging(t *testing.T) {
+func TestPrepareExpertStagingFailureRetainsPreviousStaging(t *testing.T) {
 	store := newInternalFilesystemCache(t)
-	if _, err := store.PrepareAgent(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"})); err != nil {
+	if _, err := store.PrepareExpert(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"})); err != nil {
 		t.Fatal(err)
 	}
 	store.copyDir = func(string, string) error { return errors.New("copy staging candidate") }
-	if _, err := store.PrepareAgent(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"})); err == nil {
-		t.Fatal("PrepareAgent() error = nil, want staging copy error")
+	if _, err := store.PrepareExpert(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v2.0.0"})); err == nil {
+		t.Fatal("PrepareExpert() error = nil, want staging copy error")
 	}
 	for _, relative := range []string{"agent.yaml", "assets/avatar.png"} {
 		if _, err := os.Stat(filepath.Join(store.stagingPath, "agents", "demo", relative)); err != nil {
 			t.Fatalf("previous staging %q: %v", relative, err)
 		}
 	}
-	want := stagingAgentYAML(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"})
+	want := stagingAgentYAML(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"})
 	if got, err := os.ReadFile(filepath.Join(store.stagingPath, "agents", "demo", "agent.yaml")); err != nil || string(got) != want {
 		t.Fatalf("previous staging = %q, %v, want %q", got, err, want)
 	}
@@ -114,18 +114,18 @@ func TestPrepareSkillJoinsCandidateCleanupFailureWithBuildFailure(t *testing.T) 
 	}
 }
 
-func TestPrepareAgentReturnsCleanupFailureAfterAtomicPublication(t *testing.T) {
+func TestPrepareExpertReturnsCleanupFailureAfterAtomicPublication(t *testing.T) {
 	store := newInternalFilesystemCache(t)
-	if _, err := store.PrepareAgent(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"})); err != nil {
+	if _, err := store.PrepareExpert(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"})); err != nil {
 		t.Fatal(err)
 	}
 	cleanupErr := errors.New("remove exchanged old staging")
 	store.removeAll = func(string) error { return cleanupErr }
-	staging, err := store.PrepareAgent(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"}))
+	staging, err := store.PrepareExpert(context.Background(), internalCacheEntry(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v2.0.0"}))
 	if !errors.Is(err, cleanupErr) || !strings.Contains(err.Error(), "clean staging candidate") {
-		t.Fatalf("PrepareAgent() error = %v, want stable cleanup context", err)
+		t.Fatalf("PrepareExpert() error = %v, want stable cleanup context", err)
 	}
-	want := stagingAgentYAML(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v2.0.0"})
+	want := stagingAgentYAML(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v2.0.0"})
 	if got, readErr := os.ReadFile(filepath.Join(staging, "agents", "demo", "agent.yaml")); readErr != nil || string(got) != want {
 		t.Fatalf("new staging = %q, %v, want %q", got, readErr, want)
 	}

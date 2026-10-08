@@ -83,7 +83,7 @@ func TestAgentSourceBuildUsesLoadedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loaded, err := (agentSourceLoader{}).Load(context.Background(), dir)
+	loaded, err := (expertSourceLoader{}).Load(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -110,7 +110,7 @@ func TestAgentSourceBuildUsesLoadedSnapshot(t *testing.T) {
 func TestAgentSourceBuildReturnsDefensiveCopies(t *testing.T) {
 	dir := t.TempDir()
 	writeValidAgentDir(t, dir)
-	loaded, err := (agentSourceLoader{}).Load(context.Background(), dir)
+	loaded, err := (expertSourceLoader{}).Load(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

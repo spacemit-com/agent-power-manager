@@ -29,7 +29,7 @@ func TestLocalSubmissionUnsupported(t *testing.T) {
 
 func TestLocalAgentReadWorksWhileSubmissionUnsupported(t *testing.T) {
 	client := newAgentTestClient(t)
-	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 
 	destination := filepath.Join(t.TempDir(), "agent")
 	content, err := client.loadCatalogContent(context.Background(), ref)

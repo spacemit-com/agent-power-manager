@@ -100,14 +100,14 @@ func (c *FilesystemCache) PrepareSkill(ctx context.Context, entry domain.Catalog
 	return c.stageSkill(ref)
 }
 
-// PrepareAgent 确保精确版本 Agent 已原子发布到缓存并返回可安装 staging 根目录。
-func (c *FilesystemCache) PrepareAgent(ctx context.Context, entry domain.CatalogEntry) (string, error) {
+// PrepareExpert 确保精确版本 Expert 已原子发布到缓存并返回可安装 staging 根目录。
+func (c *FilesystemCache) PrepareExpert(ctx context.Context, entry domain.CatalogEntry) (string, error) {
 	if err := entry.Validate(); err != nil {
-		return "", fmt.Errorf("validate Agent catalog entry: %w", err)
+		return "", fmt.Errorf("validate Expert catalog entry: %w", err)
 	}
 	ref := entry.Ref
-	if !validExactCacheRef(ref, domain.PowerTypeAgent) {
-		return "", errors.New("exact Agent type and version are required")
+	if !validExactCacheRef(ref, domain.PowerTypeExpert) {
+		return "", errors.New("exact Expert type and version are required")
 	}
 	final := filepath.Join(c.cacheRoot, "agents", ref.Name, ref.Version)
 	lock := c.lockFor(final)

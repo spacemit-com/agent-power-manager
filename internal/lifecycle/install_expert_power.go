@@ -12,8 +12,9 @@ import (
 	"apm/internal/transaction"
 )
 
-// installAgentPower 先核对本地清单与目标现状，按共享状态策略决策后准备 staging 并交由 Agent 事务发布。
-func (s *InstallService) installAgentPower(ctx context.Context, agent domain.AgentID, entry domain.CatalogEntry) (cli.InstallItem, error) {
+// installExpertPower 先核对本地清单与目标 Agent 的现状，按共享状态策略决策后准备 staging
+// 并交由事务层发布。
+func (s *InstallService) installExpertPower(ctx context.Context, agent domain.AgentID, entry domain.CatalogEntry) (cli.InstallItem, error) {
 	ref := entry.Ref
 	resolvedAdapter, err := s.registry.ResolveAgent(agent)
 	if err != nil {
@@ -47,7 +48,7 @@ func (s *InstallService) installAgentPower(ctx context.Context, agent domain.Age
 	decision := decideInstallState(manifest, target)
 	switch decision.action {
 	case actionInstallNew:
-		staging, err := s.cache.PrepareAgent(ctx, entry)
+		staging, err := s.cache.PrepareExpert(ctx, entry)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("prepare install power %+v: %w", ref, err)
 		}
@@ -67,7 +68,7 @@ func (s *InstallService) installAgentPower(ctx context.Context, agent domain.Age
 		}
 		return cli.InstallItem{Agent: agent, Power: ref, Outcome: cli.InstallOutcomeInstalled}, nil
 	case actionReplace:
-		staging, err := s.cache.PrepareAgent(ctx, entry)
+		staging, err := s.cache.PrepareExpert(ctx, entry)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("prepare install power %+v: %w", ref, err)
 		}
@@ -105,7 +106,7 @@ func (s *InstallService) installAgentPower(ctx context.Context, agent domain.Age
 		}); err != nil {
 			return cli.InstallItem{}, fmt.Errorf("repair installed power %+v for agent %q: %w", previous.Ref, agent, err)
 		}
-		staging, err := s.cache.PrepareAgent(ctx, entry)
+		staging, err := s.cache.PrepareExpert(ctx, entry)
 		if err != nil {
 			return cli.InstallItem{}, fmt.Errorf("prepare install power %+v: %w", ref, err)
 		}

@@ -2,7 +2,7 @@
 
 - Status：Accepted
 - Date：2026-08-26
-- Related ADRs：[ADR-023](../../adr/ADR-023-package-agent-with-assets.md)、APC [ADR-006](../../../../apc/ivory-tower/adr/ADR-006-package-agent-with-assets.md)
+- Related ADRs：[ADR-023](../../adr/ADR-023-package-agent-with-assets.md)、APC 契约 [../../../APC-API.md](../../../APC-API.md)（原 APC 仓库已停止维护）
 - Input Template：`agent_yaml_配置模板_V0.5.yaml`
 
 ## 1. Goal

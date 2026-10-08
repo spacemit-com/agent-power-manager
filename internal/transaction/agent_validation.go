@@ -11,7 +11,7 @@ func validateAgentInstallRequest(request AgentInstallRequest) error {
 	if err := validateAgentAndPower(request.Agent, request.Power); err != nil {
 		return fmt.Errorf("validate install request: %w", err)
 	}
-	if request.Power.Type != domain.PowerTypeAgent {
+	if request.Power.Type != domain.PowerTypeExpert {
 		return fmt.Errorf("filesystem install power type %q: %w", request.Power.Type, ErrInvalidRequest)
 	}
 	if isNilInterface(request.Adapter) {
@@ -36,7 +36,7 @@ func validateAgentUninstallRequest(request AgentUninstallRequest) error {
 	if err := validateAgentAndPower(request.Agent, request.Power); err != nil {
 		return fmt.Errorf("validate uninstall request: %w", err)
 	}
-	if request.Power.Type != domain.PowerTypeAgent {
+	if request.Power.Type != domain.PowerTypeExpert {
 		return fmt.Errorf("filesystem uninstall power type %q: %w", request.Power.Type, ErrInvalidRequest)
 	}
 	if isNilInterface(request.Adapter) {

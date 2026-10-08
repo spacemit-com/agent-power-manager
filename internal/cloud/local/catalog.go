@@ -186,7 +186,7 @@ func (c *Client) loadCatalogContent(ctx context.Context, ref domain.PowerRef) (l
 	case domain.PowerTypeMCP:
 		metadata, contents, err = c.loadCatalogMCP(ctx, ref)
 		contentType = "application/json"
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		metadata, contents, tree, err = c.loadCatalogAgent(ctx, ref)
 		contentType = "application/gzip"
 	default:
@@ -585,7 +585,7 @@ func (c *Client) catalogSourcePath(ref domain.PowerRef) (string, error) {
 		return filepath.Join(c.resourcesRoot, "plugins", ref.Name, ref.Version), nil
 	case domain.PowerTypeMCP:
 		return filepath.Join(c.resourcesRoot, "mcps", ref.Name, ref.Version, "MCP.json"), nil
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		return filepath.Join(c.resourcesRoot, "agents", ref.Name, ref.Version), nil
 	default:
 		return "", cloud.ErrNotFound

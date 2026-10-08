@@ -10,8 +10,10 @@ const (
 	PowerTypeMCP PowerType = "mcp"
 	// PowerTypePlugin 表示插件能力。
 	PowerTypePlugin PowerType = "plugin"
-	// PowerTypeAgent 表示 Agent 能力（Bibit 子代理，由 agent.yaml 配置）。
-	PowerTypeAgent PowerType = "agent"
+	// PowerTypeExpert 表示 Expert 能力（Bibit 子代理，由 agent.yaml 配置）。它是唯一
+	// 名字与线上值不一致的类型：APC 仍把它叫 agent（见 APC-API.md 与 ADR-044），翻译只
+	// 发生在 internal/cloud/remote 的 HTTP 边界与目录组名上，本地一律叫 expert。
+	PowerTypeExpert PowerType = "expert"
 )
 
 // PowerRef 表示能力的类别、名称和可选版本。

@@ -109,7 +109,7 @@ const validAgentYAMLV1 = "schema_version: 1\nagent:\n  id: demo-agent\n  name: d
 func TestValidateAgentRejectsEmptyAgentYAML(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "agent.yaml"), "")
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -118,7 +118,7 @@ func TestValidateAgentRejectsEmptyAgentYAML(t *testing.T) {
 func TestValidateAgentRequiresAgentYAML(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "assets", "data.bin"), "payload")
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -131,7 +131,7 @@ func TestValidateAgentRejectsSymlink(t *testing.T) {
 	if err := os.Symlink(realRoot, linkPath); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: linkPath})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: linkPath})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -140,7 +140,7 @@ func TestValidateAgentRejectsSymlink(t *testing.T) {
 func TestValidateAgentRejectsBinaryAgentYAML(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "agent.yaml"), string([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00}))
-	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -159,7 +159,7 @@ func TestValidateAgentRejectsOversizedFile(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err = Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Validate() error = %v, want ErrInvalid", err)
 	}
@@ -170,7 +170,7 @@ func TestValidateAgentHonorsCancelledContext(t *testing.T) {
 	writeValidAgentDir(t, dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := Validate(ctx, Request{Type: domain.PowerTypeAgent, Path: dir})
+	_, err := Validate(ctx, Request{Type: domain.PowerTypeExpert, Path: dir})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Validate() error = %v, want context.Canceled", err)
 	}
@@ -194,7 +194,7 @@ func TestValidateAllTypesDoNotRequireMessage(t *testing.T) {
 		{name: "skill", powerType: domain.PowerTypeSkill, path: skillDir},
 		{name: "plugin", powerType: domain.PowerTypePlugin, path: pluginDir},
 		{name: "mcp", powerType: domain.PowerTypeMCP, path: mcpPath},
-		{name: "agent", powerType: domain.PowerTypeAgent, path: agentDir},
+		{name: "agent", powerType: domain.PowerTypeExpert, path: agentDir},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := Validate(context.Background(), Request{Type: test.powerType, Path: test.path}); err != nil {

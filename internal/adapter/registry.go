@@ -127,7 +127,7 @@ func (r *Registry) ResolvePlugin(agent domain.AgentID) (PluginAdapter, error) {
 func (r *Registry) ResolveAgent(agent domain.AgentID) (AgentAdapter, error) {
 	adapter, ok := r.agentByAgent[agent]
 	if !ok {
-		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, domain.PowerTypeAgent, ErrUnsupportedAdapter)
+		return nil, fmt.Errorf("resolve agent %q power %q: %w", agent, domain.PowerTypeExpert, ErrUnsupportedAdapter)
 	}
 	return adapter, nil
 }

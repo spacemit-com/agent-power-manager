@@ -36,7 +36,7 @@ func TestSubmitRejectsV1Resources(t *testing.T) {
 		{name: "skill", powerType: domain.PowerTypeSkill, path: skillDir},
 		{name: "plugin", powerType: domain.PowerTypePlugin, path: pluginDir},
 		{name: "mcp", powerType: domain.PowerTypeMCP, path: mcpPath},
-		{name: "agent", powerType: domain.PowerTypeAgent, path: agentDir},
+		{name: "agent", powerType: domain.PowerTypeExpert, path: agentDir},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := Validate(context.Background(), Request{Type: test.powerType, Path: test.path}); !errors.Is(err, ErrInvalid) {
@@ -141,7 +141,7 @@ func TestSubmitRequiresLocalizedDisplayFields(t *testing.T) {
 	t.Run("agent missing display fields", func(t *testing.T) {
 		dir := t.TempDir()
 		writeTestFile(t, filepath.Join(dir, "agent.yaml"), "schema_version: 2\nagent:\n  id: demo-agent\n  name: demo-agent\n  version: v1.0.0\n  description: demo\n  soul: help safely\n")
-		_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+		_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "name_zh") {
 			t.Fatalf("Validate() error = %v, want ErrInvalid naming name_zh", err)
 		}
@@ -168,7 +168,7 @@ func TestSubmitAcceptsV2ResourcesWithDisplayFields(t *testing.T) {
 		{name: "skill", powerType: domain.PowerTypeSkill, path: skillDir},
 		{name: "plugin", powerType: domain.PowerTypePlugin, path: pluginDir},
 		{name: "mcp", powerType: domain.PowerTypeMCP, path: mcpPath},
-		{name: "agent", powerType: domain.PowerTypeAgent, path: agentDir},
+		{name: "agent", powerType: domain.PowerTypeExpert, path: agentDir},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := Validate(context.Background(), Request{Type: test.powerType, Path: test.path}); err != nil {
@@ -227,7 +227,7 @@ func TestValidateRejectsOverlongDescription(t *testing.T) {
 		dir := t.TempDir()
 		writeTestFile(t, filepath.Join(dir, "agent.yaml"),
 			"schema_version: 2\nagent:\n  id: demo-agent\n  name: demo-agent\n  version: v1.0.0\n  name_zh: 演示\n  name_en: Demo Agent\n  description: \""+long+"\"\n  description_zh: 演示\n  soul: help safely\n")
-		_, err := Validate(context.Background(), Request{Type: domain.PowerTypeAgent, Path: dir})
+		_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: dir})
 		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "description") {
 			t.Fatalf("Validate() error = %v, want ErrInvalid naming description", err)
 		}

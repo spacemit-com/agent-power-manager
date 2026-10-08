@@ -110,7 +110,7 @@ func (entry CatalogEntry) Validate() error {
 
 func isCatalogPowerType(powerType PowerType) bool {
 	switch powerType {
-	case PowerTypeSkill, PowerTypePlugin, PowerTypeMCP, PowerTypeAgent:
+	case PowerTypeSkill, PowerTypePlugin, PowerTypeMCP, PowerTypeExpert:
 		return true
 	default:
 		return false
@@ -119,7 +119,7 @@ func isCatalogPowerType(powerType PowerType) bool {
 
 func catalogContentType(powerType PowerType) string {
 	switch powerType {
-	case PowerTypeSkill, PowerTypePlugin, PowerTypeAgent:
+	case PowerTypeSkill, PowerTypePlugin, PowerTypeExpert:
 		return "application/gzip"
 	case PowerTypeMCP:
 		return "application/json"

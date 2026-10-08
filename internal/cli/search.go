@@ -16,7 +16,7 @@ func newSearchCommand(newLifecycle SearchLifecycleFactory) *cobra.Command {
 		Short: "Search available powers",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if err := validatePowerType(flags); err != nil {
+			if err := resolvePowerType(&flags); err != nil {
 				return err
 			}
 			flags.Keyword = strings.TrimSpace(args[0])

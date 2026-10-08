@@ -91,7 +91,7 @@ func (c *Client) downloadVerifiedContent(
 	}
 
 	ref := entry.Ref
-	endpoint := c.endpoint("api", "v1", "resources", string(ref.Type), ref.Name, "versions", ref.Version, "content")
+	endpoint := c.endpoint("api", "v1", "resources", string(apcWireType(ref.Type)), ref.Name, "versions", ref.Version, "content")
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create remote content request: %w", err)

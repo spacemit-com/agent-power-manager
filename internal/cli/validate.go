@@ -16,7 +16,7 @@ func newValidateCommand(newLifecycle ValidateLifecycleFactory) *cobra.Command {
 		Short: "Validate a skill, plugin, MCP, or agent source",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if err := requireSubmissionType(flags); err != nil {
+			if err := requireSubmissionType(&flags); err != nil {
 				return err
 			}
 			logParsedCommand(command, flags, args)
@@ -42,14 +42,16 @@ func newValidateCommand(newLifecycle ValidateLifecycleFactory) *cobra.Command {
 	return command
 }
 
-// requireSubmissionType 限定提交类命令的 --type 只能是 skill/plugin/mcp/agent。
-func requireSubmissionType(flags Flags) error {
-	switch flags.Type {
-	case "skill", "plugin", "mcp", "agent":
-		return nil
-	default:
-		return fmt.Errorf("--type must be skill, plugin, mcp, or agent, got %q", flags.Type)
+// requireSubmissionType 限定提交类命令的 --type 只能是 skill/plugin/mcp/expert，
+// 且必须显式给出；改名前的 agent 拼写先被规范化再判定。
+func requireSubmissionType(flags *Flags) error {
+	if err := resolvePowerType(flags); err != nil {
+		return fmt.Errorf("--type must be skill, plugin, mcp, or expert, got %q", flags.Type)
 	}
+	if flags.Type == "" {
+		return fmt.Errorf("--type must be skill, plugin, mcp, or expert, got %q", flags.Type)
+	}
+	return nil
 }
 
 func renderValidate(writer io.Writer, result ValidateResult, asJSON bool) error {

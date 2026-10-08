@@ -50,7 +50,7 @@ APC 会在公共目录 item 上补齐三字段，因此本仓库需要打通「�
 1. **目录 item 契约**：`CatalogEntry`（`GET /api/v1/resources` 的 `items[]`）在 `description`/`tags`
    之外新增可选的 `name_zh`、`name_en`、`description_zh`。字段缺失即空串（历史 v1 条目一律如此），
    提供时按 ADR-039 的形状规则校验。APM 侧对应 `domain.CatalogEntry`、`catalog.itemDTO` 与
-   `catalogObjectAllowsKey` 的 item 白名单。APC 侧补齐字段与文档属 `../apc` 的独立交付。
+   `catalogObjectAllowsKey` 的 item 白名单。APC 侧补齐字段与文档属 APC 侧的独立交付；原 APC 仓库已停止维护，契约以 [APC-API.md](../../APC-API.md) 为准。
 2. **`list --json` 字段恒集扩展**：`apm list --json`（含 `--all`、`--installed`、`--installed --agent=all`
    分组模式）的每条记录在 `description`/`tags` 之外恒带 `name_zh`/`name_en`/`description_zh`，空值为 `""`。
    这局部取代 ADR-029 的字段恒集，沿用其理由：前端需要一次批量取得展示元数据。

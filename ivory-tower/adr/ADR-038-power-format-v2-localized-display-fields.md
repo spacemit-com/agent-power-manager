@@ -59,7 +59,7 @@
 6. **派生物不带新字段**：Codex/Claude/Hermes/Bibit 的原生落盘清单与 marketplace 继续只含
    `name`/`version`/`description`/`skills`（或 `plugin.yaml` 四字段）；`apc-plugin.json` 是唯一权威源，
    派生清单由 `reflect.DeepEqual` 严格复验，不得携带本地化字段。
-7. **不改的范围**：APC 目录 item 契约与 `../apc` 文档不动；`list --all` 仍只展示全版本；`list --json` / `show`
+7. **不改的范围**：APC 目录 item 契约与 [APC-API.md](../../APC-API.md) 不动；`list --all` 仍只展示全版本；`list --json` / `show`
    输出不变；`search` 仍只匹配 `name`；提交 metadata 不上报这两个字段（它们只在资源内容里，供服务端解析）。
 
 ## Consequences
@@ -73,7 +73,7 @@
 - 代价与风险：`skill-card.md` 的结构没有变化却升了版本，纯粹为了「一份资源的版本取值一致」；若未来
   两个文件需要独立演进，需要在新的 ADR 中拆分版本语义。
 - 代价与风险：APC 若从 content 解析这两个字段，则历史已发布版本没有它们，前端对旧版本只能回退显示
-  `name`/`description`；APC 侧如需回填，属于 `../apc` 的独立决策。
+  `name`/`description`；APC 侧如需回填，属 APC 侧的独立决策（原 APC 仓库已停止维护；契约以 [APC-API.md](../../APC-API.md) 为准）。
 - 后续动作：Bibit Runtime 的 `agents/<name>/agent.yaml` 字段由 `zh_name` 变为 `name_zh`，Runtime 侧读取
   与 `/api/v1/agents` 响应需要同步映射（跨仓库依赖，不在本仓库范围内，已在 Feature 031 中记录）。
 
@@ -81,7 +81,7 @@
 
 | 方案 | 未选择原因 |
 | --- | --- |
-| 在 APC 目录 item 上新增字段承载展示名 | 用户明确要求不改 APC 目录契约与 `../apc` 交付；且目录是内容寻址的字段闭集，扩展需要服务端与客户端同步升级。 |
+| 在 APC 目录 item 上新增字段承载展示名 | 用户明确要求不改 APC 目录契约与 APC 侧交付（契约以 [APC-API.md](../../APC-API.md) 为准）；且目录是内容寻址的字段闭集，扩展需要服务端与客户端同步升级。 |
 | 保留 v1 并对新字段做可选扩展 | 用户明确要求提交拒绝 v1、全面升 v2；无版本门的字段无法与存量数据区分。 |
 | 提交侧与安装侧使用同一套严格校验 | 会让已发布的 v1 资源无法安装，破坏离线安装与既有缓存；需要服务端重发全部历史资源才可恢复。 |
 | 同时新增 `name_en` | 首轮依据「`name` 默认即英文名」判断其与调用名重复而未引入；用户在 ADR-039 中追加要求独立的英文展示名，该取舍随之被取代。 |

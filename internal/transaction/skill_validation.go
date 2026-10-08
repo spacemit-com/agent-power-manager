@@ -48,7 +48,7 @@ func validateSkillUninstallRequest(request SkillUninstallRequest) error {
 
 // isFilesystemPowerType 报告该类型是否由 filesystem driver 恢复。
 func isFilesystemPowerType(powerType domain.PowerType) bool {
-	return powerType == domain.PowerTypeSkill || powerType == domain.PowerTypeAgent
+	return powerType == domain.PowerTypeSkill || powerType == domain.PowerTypeExpert
 }
 
 // validateFilesystemJournal 校验 Skill driver 的路径、阶段与产物归属。

@@ -16,7 +16,7 @@
 
 - Status：Accepted
 - Date：2026-08-24
-- Related ADRs：[ADR-020](../../adr/ADR-020-source-owned-submission-metadata.md)、APC [ADR-003](../../../../apc/ivory-tower/adr/ADR-003-bound-active-submission-query.md)
+- Related ADRs：[ADR-020](../../adr/ADR-020-source-owned-submission-metadata.md)、APC 契约 [../../../APC-API.md](../../../APC-API.md)（原 APC 仓库已停止维护）
 
 ## 1. Goal
 

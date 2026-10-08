@@ -45,7 +45,7 @@ func TestSkillAcceptsExactFileAndTreeSizeLimits(t *testing.T) {
 
 func TestAgentAcceptsExactTreeFileLimitAndMCPExactTwentyMiB(t *testing.T) {
 	root := t.TempDir()
-	agentRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	agentRef := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	agentPath := filepath.Join(root, "agents", agentRef.Name, agentRef.Version, "agent.yaml")
 	agentPrefix := "schema_version: 1\nagent: {id: demo, name: demo, version: v1.0.0, description: demo, soul: help safely}\n#"
 	agentContents := agentPrefix + strings.Repeat("x", int(maxTreeFileSize)-len(agentPrefix)-1) + "\n"
@@ -140,7 +140,7 @@ func TestMCPAndAgentRejectHardlinkBinaryAndArchiveContent(t *testing.T) {
 					return
 				}
 				destination := filepath.Join(t.TempDir(), "agent")
-				err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+				err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}), destination)
 				assertUnsafeNoDownloadResidue(t, err, destination)
 			})
 		}

@@ -47,7 +47,7 @@ func (s *Service) recoverInstallRollback(ctx context.Context, journal Journal, s
 		if state.TargetExists {
 			return fmt.Errorf("install target and backup both exist during rollback: %w", ErrIndeterminateState)
 		}
-		if journal.Power.Type == domain.PowerTypeAgent {
+		if journal.Power.Type == domain.PowerTypeExpert {
 			if journal.Previous == nil {
 				return fmt.Errorf("install rollback backup %q has no previous power: %w", filesystem.BackupPath, ErrIndeterminateState)
 			}
@@ -217,7 +217,7 @@ func (s *Service) validateRecoveryArtifacts(journal Journal) error {
 // validateAgentRecoveryArtifact 在写入清单或改名/删除之前，校验即将成为本地已安装事实的
 // Agent 恢复材料身份与 ref 完全一致；非 Agent 类型直接放行。
 func (s *Service) validateAgentRecoveryArtifact(journal Journal, ref domain.PowerRef, path string) error {
-	if journal.Power.Type != domain.PowerTypeAgent {
+	if journal.Power.Type != domain.PowerTypeExpert {
 		return nil
 	}
 	if isNilInterface(s.agentAdapters) {

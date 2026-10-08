@@ -35,7 +35,7 @@
 
 ### 2.2 Excluded
 
-- 不修改 APC 目录契约、`../apc` 仓库文档与交付。
+- 不修改 APC 目录契约与 APC 侧交付；契约以 [../../../APC-API.md](../../../APC-API.md) 为准（原 APC 仓库已停止维护）。
 - 不修改 `list` / `show` / `search` 的任何输出或匹配行为。
 - 不把展示字段写入本地 manifest、journal 或提交 metadata。
   （**提交 metadata 一句已由 [ADR-041](../../adr/ADR-041-align-submission-metadata-with-resource-content.md) 取代**：
@@ -102,7 +102,7 @@
 ADR-038 只定义了资源文件里的字段，没有定义它们如何到达前端。ADR-040 补齐这条通道：
 
 - **目录 item**：`GET /api/v1/resources` 的 `items[]` 可选携带 `name_zh`/`name_en`/`description_zh`；
-  缺失即空串，提供时按 §4.1 的形状规则校验。字段与文档由 `../apc` 交付。
+  缺失即空串，提供时按 §4.1 的形状规则校验。字段与文档由 APC 侧交付（契约以 [../../../APC-API.md](../../../APC-API.md) 为准）。
 - **本地持久化**：安装时从目录条目捕获三字段写入本地 manifest 与 journal（可选追加字段，不升 schema version），
   `list --installed` 离线可读、离线 recovery 重放后仍可见。
 - **CLI JSON**：`list --json`（含 `--all`、`--installed`、分组模式）与 `show --json` 的记录恒带三字段（空为 `""`）。

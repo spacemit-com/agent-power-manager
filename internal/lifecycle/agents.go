@@ -11,7 +11,7 @@ import (
 // availableAgentSuffix 为“未安装”报错追加当前已安装智能体提示。
 // `--type agent` 仅支持 bibit，无其它可选值，因此不追加提示。
 func availableAgentSuffix(flags cli.Flags, snapshot domain.AgentSnapshot) string {
-	if flags.Type == string(domain.PowerTypeAgent) {
+	if flags.Type == string(domain.PowerTypeExpert) {
 		return ""
 	}
 	installed := snapshot.Ordered()

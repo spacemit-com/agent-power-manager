@@ -35,7 +35,7 @@ const localAgentFixtureYAML = "schema_version: 1\nagent:\n  id: bibit-internal-d
 // writeLocalAgentFixture 写出版本目录结构的 Agent fixture，并通过 mutate 追加或改写。
 func writeLocalAgentFixture(t *testing.T, root string, mutate func(*testing.T, string)) domain.PowerRef {
 	t.Helper()
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	source := filepath.Join(root, "agents", ref.Name, ref.Version)
 	writeTestBytes(t, filepath.Join(source, "agent.yaml"), []byte(localAgentFixtureYAML))
 	writeTestBytes(t, filepath.Join(source, "assets", "avatar.png"), testPNGBytes(t, 128))
@@ -62,7 +62,7 @@ func TestLocalDownloadAgentPublishesDirectoryTreeWithoutGlobalCache(t *testing.T
 	cacheHome := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 	client := newAgentTestClient(t)
-	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "bianbu-agent-default", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	content, err := client.loadCatalogContent(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestLocalDownloadAgentRejectsInvalidAvatarWithoutDestination(t *testing.T) 
 		t.Fatal(err)
 	}
 	destination := filepath.Join(t.TempDir(), "agent")
-	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}), destination)
 	assertInvalidAgentNoDownloadResidue(t, err, destination)
 }
 
@@ -174,7 +174,7 @@ func TestLocalDownloadAgentRejectsExtraRootFileWithoutDestination(t *testing.T) 
 		t.Fatal(err)
 	}
 	destination := filepath.Join(t.TempDir(), "agent")
-	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}), destination)
 	assertInvalidAgentNoDownloadResidue(t, err, destination)
 }
 
@@ -189,7 +189,7 @@ func TestLocalDownloadAgentRejectsIdentityMismatchWithoutDestination(t *testing.
 		t.Fatal(err)
 	}
 	destination := filepath.Join(t.TempDir(), "agent")
-	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}), destination)
+	err = client.DownloadAgent(context.Background(), catalogEntryForTest(domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}), destination)
 	assertInvalidAgentNoDownloadResidue(t, err, destination)
 }
 

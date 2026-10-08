@@ -105,7 +105,7 @@ func safePowerIdentity(ref domain.PowerRef) bool {
 		return false
 	}
 	switch ref.Type {
-	case domain.PowerTypeSkill, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeAgent:
+	case domain.PowerTypeSkill, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeExpert:
 		return true
 	default:
 		return false

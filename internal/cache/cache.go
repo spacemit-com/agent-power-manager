@@ -20,5 +20,5 @@ type Source interface {
 // miss 必须把同一权威 CatalogEntry 完整透传给 Source，禁止重建 metadata。
 type PowerCache interface {
 	PrepareSkill(context.Context, domain.CatalogEntry) (stagingRoot string, err error)
-	PrepareAgent(context.Context, domain.CatalogEntry) (stagingRoot string, err error)
+	PrepareExpert(context.Context, domain.CatalogEntry) (stagingRoot string, err error)
 }

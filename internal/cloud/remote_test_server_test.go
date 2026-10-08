@@ -84,7 +84,7 @@ func canonicalRemoteContent(t *testing.T, root string, ref domain.PowerRef) (str
 		return "application/gzip", deterministicArchive(t, filepath.Join(root, "plugins", ref.Name, ref.Version))
 	case domain.PowerTypeMCP:
 		return "application/json", readCanonicalFile(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		return "application/gzip", deterministicArchive(t, filepath.Join(root, "agents", ref.Name, ref.Version))
 	default:
 		t.Fatalf("unsupported canonical resource type %q", ref.Type)
@@ -203,7 +203,7 @@ func (fixture *canonicalRemoteServer) serveHTTP(writer http.ResponseWriter, requ
 		fixture.rejectProtocol(writer, request, "unknown endpoint")
 		return
 	}
-	ref := domain.PowerRef{Type: domain.PowerType(segments[3]), Name: segments[4]}
+	ref := domain.PowerRef{Type: apcDomainPowerType(segments[3]), Name: segments[4]}
 	if len(segments) == 8 && segments[5] == "versions" && segments[7] == "content" {
 		ref.Version = segments[6]
 		if !fixture.requireRequest(writer, request, []string{"api", "v1", "resources", segments[3], segments[4], "versions", segments[6], "content"}, canonicalContentType(ref.Type)) {
@@ -270,7 +270,7 @@ func canonicalContentType(powerType domain.PowerType) string {
 		return "application/gzip"
 	case domain.PowerTypeMCP:
 		return "application/json"
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		return "application/gzip"
 	default:
 		return ""
@@ -502,6 +502,23 @@ func readCanonicalSubmissionParts(request *http.Request) (map[string]any, string
 	return metadata, contentType, content, nil
 }
 
+// APC 至今把 Expert 类别叫 agent（APC-API.md、ADR-044）。这个假 APC 服务端必须站在
+// 线上词汇那一侧校验与回包：如果它也改用本地词汇，被测代码漏掉翻译时测试反而会通过。
+func apcWirePowerType(powerType domain.PowerType) string {
+	if powerType == domain.PowerTypeExpert {
+		return "agent"
+	}
+	return string(powerType)
+}
+
+// apcDomainPowerType 与 apcWirePowerType 相反：把线上取值翻回域类型。
+func apcDomainPowerType(raw string) domain.PowerType {
+	if raw == "agent" {
+		return domain.PowerTypeExpert
+	}
+	return domain.PowerType(raw)
+}
+
 func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, want domain.PowerType, name, version, description, message, contentType, nameZH, nameEN, descriptionZH string) {
 	t.Helper()
 	fixture.mu.Lock()
@@ -516,10 +533,10 @@ func (fixture *canonicalRemoteServer) assertReceivedSubmission(t *testing.T, wan
 	if got.metadata["schema_version"] != float64(2) {
 		t.Fatalf("metadata schema_version = %#v, want 2 (resource format version)", got.metadata["schema_version"])
 	}
-	if got.metadata["type"] != string(want) || got.metadata["name"] != name ||
+	if got.metadata["type"] != apcWirePowerType(want) || got.metadata["name"] != name ||
 		got.metadata["version"] != version || got.metadata["description"] != description ||
 		got.metadata["message"] != message {
-		t.Fatalf("metadata = %#v, want %s/%s@%s description=%q message=%q", got.metadata, want, name, version, description, message)
+		t.Fatalf("metadata = %#v, want %s/%s@%s description=%q message=%q", got.metadata, apcWirePowerType(want), name, version, description, message)
 	}
 	// metadata 必须与资源内容携带同一组展示字段，APC 才可能从任一侧重建（ADR-041）。
 	if got.metadata["name_zh"] != nameZH || got.metadata["name_en"] != nameEN ||

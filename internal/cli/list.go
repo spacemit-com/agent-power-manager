@@ -24,7 +24,7 @@ func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 			if flags.All && flags.Name == "" {
 				return errors.New("--all requires name")
 			}
-			if err := validateListFlags(command, flags); err != nil {
+			if err := validateListFlags(command, &flags); err != nil {
 				return err
 			}
 			logParsedCommand(command, flags, args)
@@ -60,21 +60,21 @@ func newListCommand(newLifecycle ListLifecycleFactory) *cobra.Command {
 	return command
 }
 
-func validateListFlags(command *cobra.Command, flags Flags) error {
+func validateListFlags(command *cobra.Command, flags *Flags) error {
 	if !flags.Installed {
 		if command.Flags().Changed("agent") {
 			return errors.New("--agent requires --installed")
 		}
-		return validatePowerType(flags)
+		return resolvePowerType(flags)
 	}
-	if flags.Type == "agent" {
-		return validateAgentTypeFlags(flags)
+	if isExpertType(flags.Type) {
+		return validateExpertTypeFlags(flags)
 	}
 	if strings.TrimSpace(flags.Agent) == "" && command.Flags().Changed("agent") {
 		return errors.New("--agent must not be empty")
 	}
-	if err := validateAgentValue(flags); err != nil {
+	if err := validateAgentValue(*flags); err != nil {
 		return err
 	}
-	return validatePowerType(flags)
+	return resolvePowerType(flags)
 }

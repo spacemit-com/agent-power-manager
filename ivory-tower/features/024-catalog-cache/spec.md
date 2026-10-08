@@ -8,7 +8,7 @@
 
 - Status：Accepted
 - Date：2026-08-25
-- Related ADRs：[ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md)、APC [ADR-004](../../../../apc/ivory-tower/adr/ADR-004-publish-content-addressed-catalog.md)
+- Related ADRs：[ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md)、APC 契约 [../../../APC-API.md](../../../APC-API.md)（原 APC 仓库已停止维护）
 
 ## 1. Goal
 

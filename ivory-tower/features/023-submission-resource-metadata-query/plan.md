@@ -1,5 +1,8 @@
 # Submission Resource Metadata and Authenticated Query Implementation Plan
 
+> APC 仓库说明（2026-10-08）：相邻的 APC 仓库已停止维护，本文中的 `../apc` 路径与命令只是当时的执行
+> 记录，不再可用；APC 的服务端契约以仓库根目录的 `APC-API.md` 为准（见 ADR-025）。
+
 > 历史计划说明：本文记录 Feature 023 当时的实现步骤；其 Submission 契约仍有效，但关于保留
 > 公开资源 cursor/latest/exact-metadata 的步骤已由 [Feature 024](../024-catalog-cache/spec.md) 与
 > [ADR-021](../../adr/ADR-021-cache-versioned-resource-catalog.md) 取代。

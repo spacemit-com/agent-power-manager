@@ -12,13 +12,15 @@ import (
 	"apm/internal/domain"
 )
 
-type agentSourceLoader struct{}
+// expertSourceLoader 读取 Expert 类别的资源包。它的资源根目录里放的是 agent.yaml，
+// 那个文件名仍是作者可见的外部约定，所以本文件与 agentartifact 的命名都跟着它走。
+type expertSourceLoader struct{}
 
-// Load 只接受 Agent 资源根目录：按 Agent 内容策略冻结整棵树，再转换为逻辑快照交给
+// Load 只接受 Expert 资源根目录：按该类别的内容策略冻结整棵树，再转换为逻辑快照交给
 // agentartifact.Validate 统一校验（根闭集、可执行文件、嵌套归档、avatar 与 agent.yaml
 // 解码）。单个 YAML 文件、预构建 gzip 与远程 URL 均被拒绝；symlink 与特殊文件由
 // ValidatePhysicalTree 拦截。构建只消费冻结快照，不重读源目录。
-func (agentSourceLoader) Load(ctx context.Context, path string) (source, error) {
+func (expertSourceLoader) Load(ctx context.Context, path string) (source, error) {
 	if err := ctx.Err(); err != nil {
 		return source{}, err
 	}
@@ -46,7 +48,7 @@ func (agentSourceLoader) Load(ctx context.Context, path string) (source, error) 
 	}
 	return source{
 		validation: Validation{
-			Type: domain.PowerTypeAgent, SchemaVersion: validated.Config.SchemaVersion,
+			Type: domain.PowerTypeExpert, SchemaVersion: validated.Config.SchemaVersion,
 			Name: validated.Config.Agent.Name, Version: validated.Config.Agent.Version,
 			Description: validated.Config.Agent.Description,
 			NameZH:      validated.Config.Agent.NameZH, NameEN: validated.Config.Agent.NameEN,

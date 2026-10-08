@@ -96,11 +96,11 @@ func (s *UninstallService) Uninstall(ctx context.Context, flags cli.Flags) (cli.
 }
 
 func uninstallAgents(flags cli.Flags, snapshot domain.AgentSnapshot) ([]domain.AgentID, error) {
-	if flags.Type == string(domain.PowerTypeAgent) && flags.Agent != "" && domain.AgentID(flags.Agent) != domain.AgentBibit {
-		return nil, fmt.Errorf("uninstall power type %q only supports agent %q", domain.PowerTypeAgent, domain.AgentBibit)
+	if flags.Type == string(domain.PowerTypeExpert) && flags.Agent != "" && domain.AgentID(flags.Agent) != domain.AgentBibit {
+		return nil, fmt.Errorf("uninstall power type %q only supports agent %q", domain.PowerTypeExpert, domain.AgentBibit)
 	}
 	target := domain.AgentID(flags.Agent)
-	if flags.Type == string(domain.PowerTypeAgent) && flags.Agent == "" {
+	if flags.Type == string(domain.PowerTypeExpert) && flags.Agent == "" {
 		target = domain.AgentBibit
 	}
 	if target == domain.AllAgents {

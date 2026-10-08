@@ -40,14 +40,14 @@ func walkAgentTree(t *testing.T, root string) map[string][]byte {
 	return tree
 }
 
-func TestPrepareAgentPublishesCompleteDirectoryAndStaging(t *testing.T) {
+func TestPrepareExpertPublishesCompleteDirectoryAndStaging(t *testing.T) {
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(&recordingSource{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
-	staging, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref))
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
+	staging, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestPrepareAgentPublishesCompleteDirectoryAndStaging(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentDownloadsMatchingIdentity(t *testing.T) {
+func TestPrepareExpertDownloadsMatchingIdentity(t *testing.T) {
 	_, cacheHome := setCacheEnvironment(t)
 	custom := []byte("schema_version: 1\nagent: {id: custom, name: custom, version: v2.3.4, description: custom, soul: custom, metadata: {avatar: assets/avatar.png}}\n")
 	source := &recordingSource{agentContents: custom}
@@ -71,8 +71,8 @@ func TestPrepareAgentDownloadsMatchingIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "custom", Version: "v2.3.4"}
-	staging, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref))
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "custom", Version: "v2.3.4"}
+	staging, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	remoteAgentRef = domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.2.3"}
+	remoteAgentRef = domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo-agent", Version: "v1.2.3"}
 	remoteMCPRef   = domain.PowerRef{Type: domain.PowerTypeMCP, Name: "filesystem", Version: "v1.2.3"}
 )
 
@@ -509,7 +509,7 @@ func expectedContentTypeForTest(powerType domain.PowerType) string {
 		return "application/gzip"
 	case domain.PowerTypeMCP:
 		return "application/json"
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		return "application/gzip"
 	default:
 		return ""
@@ -613,7 +613,7 @@ func TestCatalogEntryContentTypeMapping(t *testing.T) {
 		{name: "skill", ref: domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo-skill", Version: "v1.0.0"}, want: "application/gzip"},
 		{name: "plugin", ref: domain.PowerRef{Type: domain.PowerTypePlugin, Name: "demo-plugin", Version: "v1.0.0"}, want: "application/gzip"},
 		{name: "mcp", ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: "demo-mcp", Version: "v1.0.0"}, want: "application/json"},
-		{name: "agent", ref: domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.0.0"}, want: "application/gzip"},
+		{name: "agent", ref: domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo-agent", Version: "v1.0.0"}, want: "application/gzip"},
 	}
 	contents := []byte("opaque content")
 	for _, tt := range cases {

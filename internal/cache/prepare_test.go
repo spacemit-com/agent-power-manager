@@ -140,12 +140,12 @@ func TestPrepareSkillDownloadsOnceThenUsesImmutableCache(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentDownloadsCompleteDirectoryIntoCache(t *testing.T) {
+func TestPrepareExpertDownloadsCompleteDirectoryIntoCache(t *testing.T) {
 	source := &recordingSource{}
 	store := newTestFilesystemCache(t, source)
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	entry := cacheCatalogEntry(ref)
-	staging, err := store.PrepareAgent(context.Background(), entry)
+	staging, err := store.PrepareExpert(context.Background(), entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestPrepareSkillFailureCleansOnlyCallTemporaryDirectory(t *testing.T) {
 
 func TestPrepareSourcesReceivePrivateCacheTemporaryTargets(t *testing.T) {
 	_, cacheHome := setCacheEnvironment(t)
-	source := &recordingSource{agentContents: []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeAgent, Name: "agent", Version: "v1.0.0"}))}
+	source := &recordingSource{agentContents: []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeExpert, Name: "agent", Version: "v1.0.0"}))}
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestPrepareSourcesReceivePrivateCacheTemporaryTargets(t *testing.T) {
 	if _, err := store.PrepareSkill(context.Background(), cacheCatalogEntry(domain.PowerRef{Name: "skill", Type: domain.PowerTypeSkill, Version: "v1.0.0"})); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(domain.PowerRef{Name: "agent", Type: domain.PowerTypeAgent, Version: "v1.0.0"})); err != nil {
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(domain.PowerRef{Name: "agent", Type: domain.PowerTypeExpert, Version: "v1.0.0"})); err != nil {
 		t.Fatal(err)
 	}
 	wantRoot := filepath.Join(cacheHome, "apm", ".tmp")
@@ -245,8 +245,8 @@ func TestPrepareRejectsUnsafeOrNoncanonicalReferenceBeforeCacheHit(t *testing.T)
 	}{
 		{name: "Skill traversal", prepare: (*cache.FilesystemCache).PrepareSkill, ref: domain.PowerRef{Name: "../escaped", Type: domain.PowerTypeSkill, Version: "v1.0.0"}, marker: "SKILL.md", path: []string{"escaped", "v1.0.0"}},
 		{name: "Skill noncanonical version", prepare: (*cache.FilesystemCache).PrepareSkill, ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypeSkill, Version: "1.0.0"}, marker: "SKILL.md", path: []string{"skills", "demo", "1.0.0"}},
-		{name: "Agent traversal", prepare: (*cache.FilesystemCache).PrepareAgent, ref: domain.PowerRef{Name: "../escaped", Type: domain.PowerTypeAgent, Version: "v1.0.0"}, marker: "agent.yaml", path: []string{"escaped", "v1.0.0"}},
-		{name: "Agent noncanonical version", prepare: (*cache.FilesystemCache).PrepareAgent, ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "1.0.0"}, marker: "agent.yaml", path: []string{"agents", "demo", "1.0.0"}},
+		{name: "Agent traversal", prepare: (*cache.FilesystemCache).PrepareExpert, ref: domain.PowerRef{Name: "../escaped", Type: domain.PowerTypeExpert, Version: "v1.0.0"}, marker: "agent.yaml", path: []string{"escaped", "v1.0.0"}},
+		{name: "Agent noncanonical version", prepare: (*cache.FilesystemCache).PrepareExpert, ref: domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "1.0.0"}, marker: "agent.yaml", path: []string{"agents", "demo", "1.0.0"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -280,34 +280,34 @@ func TestNewFilesystemRejectsTypedNilSource(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentRejectsDownloadedIdentityBeforeCachePublication(t *testing.T) {
-	source := &recordingSource{agentContents: []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeAgent, Name: "other", Version: "v1.0.0"}))}
+func TestPrepareExpertRejectsDownloadedIdentityBeforeCachePublication(t *testing.T) {
+	source := &recordingSource{agentContents: []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeExpert, Name: "other", Version: "v1.0.0"}))}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
-		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareExpert() error = %v, want ErrInvalidAgent", err)
 	}
 	if _, err := os.Lstat(filepath.Join(cacheHome, "apm", "agents", "demo", "v1.0.0")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("published invalid cache: %v", err)
 	}
 }
 
-func TestPrepareAgentRejectsCacheWrongNameWithoutCloudCall(t *testing.T) {
+func TestPrepareExpertRejectsCacheWrongNameWithoutCloudCall(t *testing.T) {
 	source := &recordingSource{}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
-	rawYAML := []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeAgent, Name: "other", Version: "v1.0.0"}))
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
+	rawYAML := []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeExpert, Name: "other", Version: "v1.0.0"}))
 	root := seedAgentCache(t, cacheHome, ref, rawYAML)
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
-		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareExpert() error = %v, want ErrInvalidAgent", err)
 	}
 	assertCachedAgentPreserved(t, root, rawYAML)
 	if source.agentCalls != 0 {
@@ -356,7 +356,7 @@ func TestPrepareSkillRejectsCachedIdentityMismatchWithoutProviderCall(t *testing
 	}
 }
 
-func TestPrepareAgentRejectsMalformedCachedYAMLWithoutCloudCall(t *testing.T) {
+func TestPrepareExpertRejectsMalformedCachedYAMLWithoutCloudCall(t *testing.T) {
 	source := &recordingSource{}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
@@ -371,9 +371,9 @@ func TestPrepareAgentRejectsMalformedCachedYAMLWithoutCloudCall(t *testing.T) {
 	if err := os.WriteFile(cached, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
-		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareExpert() error = %v, want ErrInvalidAgent", err)
 	}
 	got, err := os.ReadFile(cached)
 	if err != nil || !bytes.Equal(got, raw) {
@@ -384,7 +384,7 @@ func TestPrepareAgentRejectsMalformedCachedYAMLWithoutCloudCall(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentRejectsCachedAgentMissingDescription(t *testing.T) {
+func TestPrepareExpertRejectsCachedAgentMissingDescription(t *testing.T) {
 	source := &recordingSource{}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
@@ -399,23 +399,23 @@ func TestPrepareAgentRejectsCachedAgentMissingDescription(t *testing.T) {
 	if err := os.WriteFile(cached, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
-		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareExpert() error = %v, want ErrInvalidAgent", err)
 	}
 	if source.agentCalls != 0 {
 		t.Fatalf("agent calls = %d, want 0", source.agentCalls)
 	}
 }
 
-func TestPrepareAgentRejectsCacheMissingAvatarWithoutCloudCall(t *testing.T) {
+func TestPrepareExpertRejectsCacheMissingAvatarWithoutCloudCall(t *testing.T) {
 	source := &recordingSource{}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
 	raw := []byte(agentFixtureYAML(ref))
 	root := filepath.Join(cacheHome, "apm", "agents", ref.Name, ref.Version)
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -424,8 +424,8 @@ func TestPrepareAgentRejectsCacheMissingAvatarWithoutCloudCall(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "agent.yaml"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
-		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareExpert() error = %v, want ErrInvalidAgent", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(root, "agent.yaml")); err != nil || !bytes.Equal(got, raw) {
 		t.Fatalf("preserved cache agent.yaml = %q, %v", got, err)
@@ -435,14 +435,14 @@ func TestPrepareAgentRejectsCacheMissingAvatarWithoutCloudCall(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentRejectsCacheCorruptAvatarWithoutCloudCall(t *testing.T) {
+func TestPrepareExpertRejectsCacheCorruptAvatarWithoutCloudCall(t *testing.T) {
 	source := &recordingSource{}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
 	root := filepath.Join(cacheHome, "apm", "agents", ref.Name, ref.Version)
 	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o755); err != nil {
 		t.Fatal(err)
@@ -455,8 +455,8 @@ func TestPrepareAgentRejectsCacheCorruptAvatarWithoutCloudCall(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "assets", "avatar.png"), corrupt, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
-		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareExpert() error = %v, want ErrInvalidAgent", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(root, "assets", "avatar.png")); err != nil || !bytes.Equal(got, corrupt) {
 		t.Fatalf("preserved cache avatar = %q, %v", got, err)
@@ -466,22 +466,22 @@ func TestPrepareAgentRejectsCacheCorruptAvatarWithoutCloudCall(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentRejectsCacheExtraRootFileWithoutCloudCall(t *testing.T) {
+func TestPrepareExpertRejectsCacheExtraRootFileWithoutCloudCall(t *testing.T) {
 	source := &recordingSource{}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
 	rawYAML := []byte(agentFixtureYAML(ref))
 	root := seedAgentCache(t, cacheHome, ref, rawYAML)
 	extra := filepath.Join(root, "notes.txt")
 	if err := os.WriteFile(extra, []byte("outside closed set"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
-		t.Fatalf("PrepareAgent() error = %v, want ErrInvalidAgent", err)
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, domain.ErrInvalidAgent) {
+		t.Fatalf("PrepareExpert() error = %v, want ErrInvalidAgent", err)
 	}
 	assertCachedAgentPreserved(t, root, rawYAML)
 	if _, err := os.Stat(extra); err != nil {
@@ -492,14 +492,14 @@ func TestPrepareAgentRejectsCacheExtraRootFileWithoutCloudCall(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentRejectsCacheSymlinkAssetWithoutCloudCall(t *testing.T) {
+func TestPrepareExpertRejectsCacheSymlinkAssetWithoutCloudCall(t *testing.T) {
 	source := &recordingSource{}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
 	root := seedAgentCache(t, cacheHome, ref, []byte(agentFixtureYAML(ref)))
 	realPNG := filepath.Join(t.TempDir(), "real.png")
 	if err := os.WriteFile(realPNG, testAgentAvatarPNG, 0o644); err != nil {
@@ -512,8 +512,8 @@ func TestPrepareAgentRejectsCacheSymlinkAssetWithoutCloudCall(t *testing.T) {
 	if err := os.Symlink(realPNG, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); err == nil {
-		t.Fatal("PrepareAgent() error = nil, want physical tree error")
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); err == nil {
+		t.Fatal("PrepareExpert() error = nil, want physical tree error")
 	}
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("preserved symlink asset = %v, %v", info, err)
@@ -523,22 +523,22 @@ func TestPrepareAgentRejectsCacheSymlinkAssetWithoutCloudCall(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentFailureCleansOnlyCallTemporaryDirectory(t *testing.T) {
+func TestPrepareExpertFailureCleansOnlyCallTemporaryDirectory(t *testing.T) {
 	source := &recordingSource{agentErr: errors.New("source failed")}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeAgent, Version: "v1.0.0"}
+	ref := domain.PowerRef{Name: "demo", Type: domain.PowerTypeExpert, Version: "v1.0.0"}
 	preserved := filepath.Join(cacheHome, "apm", "agents", "other", "v1.0.0")
-	if err := writeCompleteAgentDirectory(preserved, []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeAgent, Name: "other", Version: "v1.0.0"}))); err != nil {
+	if err := writeCompleteAgentDirectory(preserved, []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeExpert, Name: "other", Version: "v1.0.0"}))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, source.agentErr) {
-		t.Fatalf("PrepareAgent() error = %v", err)
+	if _, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref)); !errors.Is(err, source.agentErr) {
+		t.Fatalf("PrepareExpert() error = %v", err)
 	}
-	assertCachedAgentPreserved(t, preserved, []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeAgent, Name: "other", Version: "v1.0.0"})))
+	assertCachedAgentPreserved(t, preserved, []byte(agentFixtureYAML(domain.PowerRef{Type: domain.PowerTypeExpert, Name: "other", Version: "v1.0.0"})))
 	entries, err := os.ReadDir(filepath.Join(cacheHome, "apm", ".tmp"))
 	if err != nil {
 		t.Fatal(err)
@@ -548,16 +548,16 @@ func TestPrepareAgentFailureCleansOnlyCallTemporaryDirectory(t *testing.T) {
 	}
 }
 
-func TestPrepareAgentUsesValidCachedIdentityWithoutCloudCall(t *testing.T) {
+func TestPrepareExpertUsesValidCachedIdentityWithoutCloudCall(t *testing.T) {
 	source := &recordingSource{}
 	_, cacheHome := setCacheEnvironment(t)
 	store, err := cache.NewFilesystem(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.PowerRef{Type: domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0"}
+	ref := domain.PowerRef{Type: domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0"}
 	seedAgentCache(t, cacheHome, ref, []byte(agentFixtureYAML(ref)))
-	staging, err := store.PrepareAgent(context.Background(), cacheCatalogEntry(ref))
+	staging, err := store.PrepareExpert(context.Background(), cacheCatalogEntry(ref))
 	if err != nil {
 		t.Fatal(err)
 	}

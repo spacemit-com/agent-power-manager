@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -27,32 +28,32 @@ type Flags struct {
 	Limit     int
 }
 
-func validateCommon(flags Flags) error {
-	if flags.Type == "agent" {
-		return validateAgentTypeFlags(flags)
+func validateCommon(flags *Flags) error {
+	if isExpertType(flags.Type) {
+		return validateExpertTypeFlags(flags)
 	}
 	if strings.TrimSpace(flags.Agent) == "" {
 		return errors.New("--agent is required")
 	}
-	if err := validateAgentValue(flags); err != nil {
+	if err := validateAgentValue(*flags); err != nil {
 		return err
 	}
-	return validatePowerType(flags)
+	return resolvePowerType(flags)
 }
 
-// validateAgentTypeFlags 约束 agent power 仅适用于 Bibit；空 --agent 由 lifecycle 默认 bibit。
-func validateAgentTypeFlags(flags Flags) error {
-	if err := validatePowerType(flags); err != nil {
+// validateExpertTypeFlags 约束 expert power 仅适用于 Bibit；空 --agent 由 lifecycle 默认 bibit。
+func validateExpertTypeFlags(flags *Flags) error {
+	if err := resolvePowerType(flags); err != nil {
 		return err
 	}
-	if err := validateAgentValue(flags); err != nil {
+	if err := validateAgentValue(*flags); err != nil {
 		return err
 	}
 	switch flags.Agent {
 	case "", "bibit":
 		return nil
 	default:
-		return fmt.Errorf("--type agent only supports --agent bibit, got %q", flags.Agent)
+		return fmt.Errorf("--type expert only supports --agent bibit, got %q", flags.Agent)
 	}
 }
 
@@ -75,12 +76,39 @@ func agentOptionList() string {
 	return strings.Join(parts[:len(parts)-1], ", ") + ", or " + parts[len(parts)-1]
 }
 
-func validatePowerType(flags Flags) error {
+// isExpertType 判断原始的 --type 取值是否指向 Expert 类别，改名前的拼写也算。
+//
+// 单独抽出它是因为 normalize 必须在判断之后才能发生：各命令的报错顺序依赖
+// 「先看是不是 Expert 类型，再看 --agent」，顺序一乱就改变了既有的报错优先级。
+func isExpertType(rawType string) bool {
+	return rawType == string(domain.PowerTypeExpert) || rawType == legacyAgentTypeValue
+}
+
+// legacyAgentTypeValue 是 Expert 类别改名前的 wire 取值。APC 至今仍用它（见
+// APC-API.md 与 ADR-044），但 apm 自己的 CLI 只把它当作旧拼写接受，并在下一轮
+// 移除；翻译到 APC 的那份映射在 internal/cloud/remote 里。
+const legacyAgentTypeValue = "agent"
+
+// resolvePowerType 校验 --type 并把改名前的拼写就地改成规范取值。
+//
+// 每个命令都必须在读取 flags.Type 之前调用它：原始字符串会一路流进
+// internal/lifecycle 并最终参与 domain.PowerType 比较与过滤，留着 "agent"
+// 会让 Expert 类别凭空消失（过滤为空、清单查不到）。
+//
+// --json 下不提示弃用：那种模式的 stdout 是机器契约，而这是一句提醒而不是结果。
+func resolvePowerType(flags *Flags) error {
 	switch flags.Type {
-	case "", "skill", "plugin", "mcp", "agent":
+	case "", string(domain.PowerTypeSkill), string(domain.PowerTypePlugin), string(domain.PowerTypeMCP), string(domain.PowerTypeExpert):
+		return nil
+	case legacyAgentTypeValue:
+		flags.Type = string(domain.PowerTypeExpert)
+		if !flags.JSON {
+			slog.Warn("--type agent is deprecated and will be removed; use --type expert",
+				slog.String("type", string(domain.PowerTypeExpert)))
+		}
 		return nil
 	default:
-		return fmt.Errorf("invalid --type %q: must be skill, plugin, mcp, or agent", flags.Type)
+		return fmt.Errorf("invalid --type %q: must be skill, plugin, mcp, or expert", flags.Type)
 	}
 }
 

@@ -174,7 +174,7 @@ func TestSubmitAgentUsesGzipPart(t *testing.T) {
 	client := newTestSubmissionClient(t, server)
 	got, err := client.Submit(context.Background(), domain.SubmissionRequest{
 		SchemaVersion: 2,
-		Type:          domain.PowerTypeAgent, Name: "demo", Version: "v1.0.0", Description: "demo",
+		Type:          domain.PowerTypeExpert, Name: "demo", Version: "v1.0.0", Description: "demo",
 		NameZH: "演示代理", NameEN: "Demo Agent", DescriptionZH: "演示用 Agent",
 		Message: "first", ContentType: "application/gzip", Content: raw,
 		ContentMD5: md5Hex(raw), IdempotencyKey: "7d7e6d70-13ec-4cd5-9ad6-37e49e861ac2",
@@ -501,7 +501,7 @@ func TestSubmitRejectsContentTypeMismatchBeforeRequest(t *testing.T) {
 		{name: "mcp with gzip", request: domain.SubmissionRequest{
 			SchemaVersion: 2, Type: domain.PowerTypeMCP, Message: "fixture", ContentType: "application/gzip", Content: []byte("x")}},
 		{name: "agent with yaml", request: domain.SubmissionRequest{
-			SchemaVersion: 2, Type: domain.PowerTypeAgent, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
+			SchemaVersion: 2, Type: domain.PowerTypeExpert, Message: "fixture", ContentType: "application/yaml", Content: []byte("x")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -524,7 +524,7 @@ func TestSubmitAcceptsValidTypeContentTypeMappings(t *testing.T) {
 		{"skill", domain.PowerTypeSkill, "application/gzip"},
 		{"plugin", domain.PowerTypePlugin, "application/gzip"},
 		{"mcp", domain.PowerTypeMCP, "application/json"},
-		{"agent", domain.PowerTypeAgent, "application/gzip"},
+		{"agent", domain.PowerTypeExpert, "application/gzip"},
 	}
 	for _, tt := range valid {
 		t.Run(tt.name, func(t *testing.T) {
@@ -569,7 +569,7 @@ func TestSubmissionFilename(t *testing.T) {
 		{name: "plugin", request: domain.SubmissionRequest{
 			SchemaVersion: 2, Type: domain.PowerTypePlugin, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.tar.gz"},
 		{name: "agent", request: domain.SubmissionRequest{
-			SchemaVersion: 2, Type: domain.PowerTypeAgent, Name: "demo-agent", Version: "v1.2.3"}, want: "demo-agent-v1.2.3.tar.gz"},
+			SchemaVersion: 2, Type: domain.PowerTypeExpert, Name: "demo-agent", Version: "v1.2.3"}, want: "demo-agent-v1.2.3.tar.gz"},
 		{name: "mcp", request: domain.SubmissionRequest{
 			SchemaVersion: 2, Type: domain.PowerTypeMCP, Name: "demo", Version: "v1.0.0"}, want: "demo-v1.0.0.json"},
 		{name: "unknown type", request: domain.SubmissionRequest{
@@ -593,7 +593,7 @@ func TestSubmitWritesMultipartContentFilenames(t *testing.T) {
 	}{
 		{"skill", domain.PowerTypeSkill, "application/gzip", "demo-v1.0.0.tar.gz"},
 		{"plugin", domain.PowerTypePlugin, "application/gzip", "demo-v1.0.0.tar.gz"},
-		{"agent", domain.PowerTypeAgent, "application/gzip", "demo-v1.0.0.tar.gz"},
+		{"agent", domain.PowerTypeExpert, "application/gzip", "demo-v1.0.0.tar.gz"},
 		{"mcp", domain.PowerTypeMCP, "application/json", "demo-v1.0.0.json"},
 	}
 	for _, tt := range tests {

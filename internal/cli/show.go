@@ -30,7 +30,7 @@ func newShowCommand(newLifecycle ShowLifecycleFactory) *cobra.Command {
 					return fmt.Errorf("invalid power version %q: must be vMAJOR.MINOR.PATCH", flags.Version)
 				}
 			}
-			if err := validatePowerType(flags); err != nil {
+			if err := resolvePowerType(&flags); err != nil {
 				return err
 			}
 			if newLifecycle == nil {

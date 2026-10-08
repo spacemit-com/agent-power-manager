@@ -4,6 +4,13 @@
 
 APC 是 SpacemiT 的资源分发平台，支持开发者提交和分发 skill、plugin、mcp、agent 等资源。
 
+> **客户端词汇说明（2026-10-08 起）**：本文是 APC 服务端契约的唯一权威，其中的 `agent` 取值与
+> `agents` 分组名**不随客户端改名**。APM 客户端从同一版本起在本地把该类别统一叫 `expert`
+> （`--type expert`、本地 JSON 输出里的 `type` 也是 `expert`），只在跨到本接口时才翻译成这里的
+> `agent`/`agents`；翻译点与保留清单见仓库内
+> [ADR-044](ivory-tower/adr/ADR-044-rename-agent-power-type-to-expert.md)。服务端行为没有任何变化，
+> 因此本文的字段表、示例与枚举保持原样。
+
 **Base URL**：
 
 - 测试环境：`https://developer.bianbu.xyz/api-server/apc/api/v1`

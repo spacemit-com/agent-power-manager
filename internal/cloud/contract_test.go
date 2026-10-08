@@ -56,7 +56,7 @@ var canonicalPowerOracle = []domain.PowerRef{
 	{Name: "company-tools", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
 	{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.1.0"},
 	{Name: "filesystem", Type: domain.PowerTypeMCP, Version: "v0.0.1"},
-	{Name: "bianbu-agent-default", Type: domain.PowerTypeAgent, Version: "v1.0.0"},
+	{Name: "bianbu-agent-default", Type: domain.PowerTypeExpert, Version: "v1.0.0"},
 }
 
 func TestProviderContract(t *testing.T) {
@@ -316,7 +316,7 @@ func canonicalResourceMetadata(t *testing.T, root string, ref domain.PowerRef) c
 			description: resource.Description, contentType: "application/json",
 			nameZH: resource.NameZH, nameEN: resource.NameEN, descriptionZH: resource.DescriptionZH,
 		}
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		config, err := domain.DecodeAgentConfigYAML(readCanonicalFile(t, filepath.Join(root, "agents", ref.Name, ref.Version, "agent.yaml")))
 		if err != nil {
 			t.Fatal(err)
@@ -341,7 +341,7 @@ func canonicalResourceContent(t *testing.T, root string, ref domain.PowerRef) ([
 	case domain.PowerTypeMCP:
 		raw := readCanonicalFile(t, filepath.Join(root, "mcps", ref.Name, ref.Version, "MCP.json"))
 		return submission.CanonicalizeJSON(raw)
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		return submission.BuildTarGz(filepath.Join(root, "agents", ref.Name, ref.Version))
 	default:
 		t.Fatalf("unsupported canonical resource type %q", ref.Type)
@@ -423,7 +423,7 @@ func contractEntry(ref domain.PowerRef) domain.CatalogEntry {
 		domain.PowerTypeSkill:  "application/gzip",
 		domain.PowerTypePlugin: "application/gzip",
 		domain.PowerTypeMCP:    "application/json",
-		domain.PowerTypeAgent:  "application/gzip",
+		domain.PowerTypeExpert: "application/gzip",
 	}[ref.Type]
 	return domain.CatalogEntry{
 		Ref: ref, Description: "contract fixture", Message: "contract fixture",
@@ -509,7 +509,7 @@ func assertPowerReadable(t *testing.T, client cloud.Client, entry domain.Catalog
 		if _, err := client.GetMCP(context.Background(), entry); err != nil {
 			t.Fatalf("GetMCP(%+v): %v", ref, err)
 		}
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		if err := client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent")); err != nil {
 			t.Fatalf("DownloadAgent(%+v): %v", ref, err)
 		}
@@ -529,7 +529,7 @@ func assertMismatchedCatalogMetadataRejected(t *testing.T, client cloud.Client, 
 		err = client.DownloadPlugin(context.Background(), entry, filepath.Join(privateTestDir(t), "plugin"))
 	case domain.PowerTypeMCP:
 		_, err = client.GetMCP(context.Background(), entry)
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		err = client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent"))
 	default:
 		t.Fatalf("unsupported Power type %q", entry.Ref.Type)
@@ -550,7 +550,7 @@ func assertInvalidCatalogMetadataRejected(t *testing.T, client cloud.Client, ent
 		err = client.DownloadPlugin(context.Background(), entry, filepath.Join(privateTestDir(t), "plugin"))
 	case domain.PowerTypeMCP:
 		_, err = client.GetMCP(context.Background(), entry)
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		err = client.DownloadAgent(context.Background(), entry, filepath.Join(privateTestDir(t), "agent"))
 	default:
 		t.Fatalf("unsupported Power type %q", entry.Ref.Type)
@@ -577,7 +577,7 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 		{name: "GetMCP", ref: oracleRef(t, domain.PowerTypeMCP), invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
 			return client.GetMCP(ctx, contractEntry(ref))
 		}},
-		{name: "DownloadAgent", ref: oracleRef(t, domain.PowerTypeAgent), hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
+		{name: "DownloadAgent", ref: oracleRef(t, domain.PowerTypeExpert), hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
 			return domain.MCPServer{}, client.DownloadAgent(ctx, contractEntry(ref), destination)
 		}},
 	}
@@ -600,7 +600,7 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 
 	missingByType := make(map[domain.PowerType]domain.PowerRef)
 	for _, powerType := range []domain.PowerType{
-		domain.PowerTypeSkill, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeAgent,
+		domain.PowerTypeSkill, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeExpert,
 	} {
 		missingByType[powerType] = domain.PowerRef{Type: powerType, Name: "contract-exact-miss", Version: "v9.9.9"}
 	}
@@ -614,7 +614,7 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 		{name: "GetMCP", ref: missingByType[domain.PowerTypeMCP], invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
 			return client.GetMCP(ctx, contractEntry(ref))
 		}},
-		{name: "DownloadAgent", ref: missingByType[domain.PowerTypeAgent], hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
+		{name: "DownloadAgent", ref: missingByType[domain.PowerTypeExpert], hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
 			return domain.MCPServer{}, client.DownloadAgent(ctx, contractEntry(ref), destination)
 		}},
 	}
@@ -633,7 +633,7 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 		})
 	}
 	for _, powerType := range []domain.PowerType{
-		domain.PowerTypeSkill, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeAgent,
+		domain.PowerTypeSkill, domain.PowerTypeMCP, domain.PowerTypePlugin, domain.PowerTypeExpert,
 	} {
 		ref := missingByType[powerType]
 		t.Run("exact_miss_invalid_metadata/"+string(powerType), func(t *testing.T) {
@@ -660,7 +660,7 @@ func assertClientOperationErrors(t *testing.T, client cloud.Client) {
 			{name: "GetMCP", ref: domain.PowerRef{Type: domain.PowerTypeMCP, Name: invalidName, Version: "v1.0.0"}, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, _ string) (domain.MCPServer, error) {
 				return client.GetMCP(ctx, contractEntry(ref))
 			}},
-			{name: "DownloadAgent", ref: domain.PowerRef{Type: domain.PowerTypeAgent, Name: invalidName, Version: "v1.0.0"}, hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
+			{name: "DownloadAgent", ref: domain.PowerRef{Type: domain.PowerTypeExpert, Name: invalidName, Version: "v1.0.0"}, hasDestination: true, invoke: func(ctx context.Context, client cloud.Client, ref domain.PowerRef, destination string) (domain.MCPServer, error) {
 				return domain.MCPServer{}, client.DownloadAgent(ctx, contractEntry(ref), destination)
 			}},
 		} {
@@ -688,7 +688,7 @@ func invokeContentEntry(ctx context.Context, client cloud.Client, entry domain.C
 		return domain.MCPServer{}, client.DownloadPlugin(ctx, entry, destination)
 	case domain.PowerTypeMCP:
 		return client.GetMCP(ctx, entry)
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		return domain.MCPServer{}, client.DownloadAgent(ctx, entry, destination)
 	default:
 		return domain.MCPServer{}, fmt.Errorf("unsupported contract Power type %q", entry.Ref.Type)
@@ -800,7 +800,7 @@ func comparePowerOutcome(t *testing.T, localClient, remoteClient cloud.Client, l
 		if localErr != nil || remoteErr != nil || !reflect.DeepEqual(localServer, remoteServer) {
 			t.Fatalf("MCP parity for %+v: local=%#v/%v remote=%#v/%v", ref, localServer, localErr, remoteServer, remoteErr)
 		}
-	case domain.PowerTypeAgent:
+	case domain.PowerTypeExpert:
 		localTarget := filepath.Join(privateTestDir(t), "local")
 		remoteTarget := filepath.Join(privateTestDir(t), "remote")
 		localErr := localClient.DownloadAgent(context.Background(), localEntry, localTarget)
@@ -935,7 +935,7 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 			nameZH: "文件系统", nameEN: "Filesystem MCP", descriptionZH: "带工作区根目录的文件系统 MCP 服务。",
 		},
 		{
-			powerType: domain.PowerTypeAgent,
+			powerType: domain.PowerTypeExpert,
 			path:      filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0"),
 			name:      "bianbu-agent-default", version: "v1.0.0",
 			description: "Project-local Bianbu agent", contentType: "application/gzip",
@@ -951,7 +951,7 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			if result.Outcome != string(domain.SubmissionAccepted) || result.SubmissionID != "sub_"+string(test.powerType) || result.Status != string(domain.SubmissionReceived) {
+			if result.Outcome != string(domain.SubmissionAccepted) || result.SubmissionID != "sub_"+apcWirePowerType(test.powerType) || result.Status != string(domain.SubmissionReceived) {
 				t.Fatalf("Submit() = %#v, want accepted/received", result)
 			}
 			server.assertReceivedSubmission(t, test.powerType, test.name, test.version, test.description, message, test.contentType,
@@ -1008,7 +1008,7 @@ func TestRemoteSubmissionAndMCPContract(t *testing.T) {
 	server.tooManyActive = true
 	server.mu.Unlock()
 	_, err = submitService.Submit(context.Background(), cli.Flags{
-		Type: "agent", Message: "quota probe",
+		Type: "expert", Message: "quota probe",
 	}, []string{filepath.Join(root, "agents", "bianbu-agent-default", "v1.0.0")})
 	if !errors.Is(err, cloud.ErrTooManyActiveSubmissions) || !errors.Is(err, cloud.ErrSubmissionConflict) ||
 		!strings.Contains(err.Error(), "TOO_MANY_ACTIVE_SUBMISSIONS") {

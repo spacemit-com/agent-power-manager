@@ -41,7 +41,7 @@ func agentArchivePolicy(ctx context.Context, ref domain.PowerRef) *archivePolicy
 // 解包后在私有输出上执行 agentartifact 语义校验，再以不覆盖语义发布到调用方的
 // 物理空目录；任何失败都不留下可见目标。
 func (c *Client) DownloadAgent(ctx context.Context, entry domain.CatalogEntry, destination string) error {
-	if entry.Ref.Type != domain.PowerTypeAgent || !validResolveQuery(entry.Ref) || entry.Ref.Version == "" {
+	if entry.Ref.Type != domain.PowerTypeExpert || !validResolveQuery(entry.Ref) || entry.Ref.Version == "" {
 		return fmt.Errorf("download invalid remote Agent identity: %w", cloud.ErrNotFound)
 	}
 	return c.downloadArchivePower(ctx, entry, destination, agentArchivePolicy(ctx, entry.Ref), "agent.yaml")

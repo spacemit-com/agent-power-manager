@@ -22,8 +22,8 @@ func (s *InstallService) installForAgent(ctx context.Context, agent domain.Agent
 		return s.installMCP(ctx, agent, entry, snapshot)
 	case domain.PowerTypePlugin:
 		return s.installPlugin(ctx, agent, entry)
-	case domain.PowerTypeAgent:
-		return s.installAgentPower(ctx, agent, entry)
+	case domain.PowerTypeExpert:
+		return s.installExpertPower(ctx, agent, entry)
 	default:
 		return cli.InstallItem{}, fmt.Errorf("install power type %q: %w", ref.Type, adapter.ErrUnsupportedAdapter)
 	}
