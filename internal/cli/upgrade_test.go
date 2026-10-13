@@ -15,15 +15,17 @@ import (
 )
 
 type recordingUpgradeLifecycle struct {
-	flags  cli.Flags
-	result cli.UpgradeResult
-	err    error
-	calls  int
+	flags   cli.Flags
+	options cli.UpgradeOptions
+	result  cli.UpgradeResult
+	err     error
+	calls   int
 }
 
-func (l *recordingUpgradeLifecycle) Upgrade(_ context.Context, flags cli.Flags) (cli.UpgradeResult, error) {
+func (l *recordingUpgradeLifecycle) Upgrade(_ context.Context, flags cli.Flags, options cli.UpgradeOptions) (cli.UpgradeResult, error) {
 	l.calls++
 	l.flags = flags
+	l.options = options
 	return l.result, l.err
 }
 
@@ -74,7 +76,7 @@ func TestUpgradeDefaultsAgentToAllAndForwardsType(t *testing.T) {
 	lifecycle := &recordingUpgradeLifecycle{}
 	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
 
-	if err := entry.Execute([]string{"upgrade", "--type=plugin"}); err != nil {
+	if err := entry.Execute([]string{"upgrade", "--type=plugin", "--yes"}); err != nil {
 		t.Fatalf("Execute(upgrade) error = %v", err)
 	}
 	if lifecycle.calls != 1 {
@@ -86,8 +88,9 @@ func TestUpgradeDefaultsAgentToAllAndForwardsType(t *testing.T) {
 	if lifecycle.flags.Type != "plugin" {
 		t.Fatalf("Upgrade type = %q, want plugin", lifecycle.flags.Type)
 	}
-	if stdout.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("output = stdout %q, stderr %q; want empty", stdout.String(), stderr.String())
+	// 空结果的文本输出现在固定为一行汇总。
+	if stdout.String() != "nothing to upgrade\n" || stderr.Len() != 0 {
+		t.Fatalf("output = stdout %q, stderr %q; want only the summary line", stdout.String(), stderr.String())
 	}
 }
 
@@ -110,7 +113,7 @@ func TestUpgradeNormalizesLegacyAgentTypeAlias(t *testing.T) {
 	lifecycle := &recordingUpgradeLifecycle{}
 	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
 
-	if err := entry.Execute([]string{"upgrade", "--type=agent", "--agent=bibit"}); err != nil {
+	if err := entry.Execute([]string{"upgrade", "--type=agent", "--agent=bibit", "--yes"}); err != nil {
 		t.Fatalf("Execute(upgrade --type=agent) error = %v", err)
 	}
 	if lifecycle.flags.Type != "expert" {
@@ -167,7 +170,7 @@ func TestUpgradeRequiresLifecycleFactory(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	entry := newUpgradeEntry(t, &stdout, &stderr, nil)
 
-	err := entry.Execute([]string{"upgrade"})
+	err := entry.Execute([]string{"upgrade", "--yes"})
 	if err == nil || !strings.Contains(err.Error(), "upgrade lifecycle factory is required") {
 		t.Fatalf("Execute(upgrade) error = %v, want missing factory error", err)
 	}
@@ -178,7 +181,7 @@ func TestUpgradeRejectsTypedNilLifecycle(t *testing.T) {
 	var typedNil *recordingUpgradeLifecycle
 	entry := newUpgradeEntry(t, &stdout, &stderr, func() (cli.UpgradeLifecycle, error) { return typedNil, nil })
 
-	err := entry.Execute([]string{"upgrade"})
+	err := entry.Execute([]string{"upgrade", "--yes"})
 	if err == nil || !strings.Contains(err.Error(), "nil service") {
 		t.Fatalf("Execute(upgrade) error = %v, want nil service error", err)
 	}
@@ -199,14 +202,16 @@ func TestUpgradeRendersBatchFailureThenReturnsNonZero(t *testing.T) {
 	}
 	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
 
-	err := entry.Execute([]string{"upgrade"})
+	err := entry.Execute([]string{"upgrade", "--yes"})
 	if err == nil {
 		t.Fatal("Execute(upgrade) error = nil, want batch failure")
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("Execute(upgrade) error = %v, want cause %v", err, cause)
 	}
-	want := "codex/plugin/demo-plugin@v0.1.0 failed\ncodex/plugin/demo-plugin@v0.1.0 unexecuted\n"
+	want := "codex/plugin/demo-plugin@v0.1.0 failed\n" +
+		"codex/plugin/demo-plugin@v0.1.0 unexecuted\n" +
+		"1 failed, 1 unexecuted.\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -221,7 +226,7 @@ func TestUpgradeSuppressesBusinessLinesOnFatalError(t *testing.T) {
 	lifecycle := &recordingUpgradeLifecycle{err: errors.New("acquire upgrade lock: APM lock is already held")}
 	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
 
-	err := entry.Execute([]string{"upgrade"})
+	err := entry.Execute([]string{"upgrade", "--yes"})
 	if err == nil || !strings.Contains(err.Error(), "APM lock is already held") {
 		t.Fatalf("Execute(upgrade) error = %v, want lock error", err)
 	}
@@ -230,5 +235,136 @@ func TestUpgradeSuppressesBusinessLinesOnFatalError(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "Usage:") {
 		t.Fatalf("stderr = %q, want no usage for runtime failure", stderr.String())
+	}
+}
+
+func TestUpgradeRequiresYesWhenInputIsNotInteractive(t *testing.T) {
+	// --json 的调用方按定义无人值守，因此也必须显式 --yes，否则 fail closed。
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "plain", args: []string{"upgrade"}},
+		{name: "json", args: []string{"upgrade", "--json"}},
+		{name: "agent filter", args: []string{"upgrade", "--agent=codex", "--type=skill"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			entry := newUpgradeEntry(t, &stdout, &stderr, func() (cli.UpgradeLifecycle, error) {
+				t.Fatal("non-interactive upgrade without --yes invoked the factory")
+				return nil, nil
+			})
+
+			err := entry.Execute(test.args)
+			if err == nil || !strings.Contains(err.Error(), "requires --yes") {
+				t.Fatalf("Execute(%q) error = %v, want the --yes requirement", test.args, err)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+		})
+	}
+}
+
+func TestUpgradeDryRunNeverRequiresYes(t *testing.T) {
+	// --dry-run 不产生变更，因此不进入确认门禁。
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingUpgradeLifecycle{}
+	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
+
+	if err := entry.Execute([]string{"upgrade", "--dry-run"}); err != nil {
+		t.Fatalf("Execute(upgrade --dry-run) error = %v", err)
+	}
+	if lifecycle.calls != 1 {
+		t.Fatalf("Upgrade calls = %d, want 1", lifecycle.calls)
+	}
+	if lifecycle.options.Confirm != nil {
+		t.Fatal("dry-run must not install a confirmation callback")
+	}
+}
+
+func TestUpgradeYesSkipsConfirmationCallback(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingUpgradeLifecycle{}
+	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
+
+	if err := entry.Execute([]string{"upgrade", "--yes"}); err != nil {
+		t.Fatalf("Execute(upgrade --yes) error = %v", err)
+	}
+	if !lifecycle.flags.Yes {
+		t.Fatal("Upgrade flags.Yes = false, want true")
+	}
+	if lifecycle.options.Confirm != nil {
+		t.Fatal("--yes must not install a confirmation callback")
+	}
+}
+
+func TestUpgradeJSONSuppressesProgress(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingUpgradeLifecycle{}
+	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
+
+	if err := entry.Execute([]string{"upgrade", "--json", "--yes"}); err != nil {
+		t.Fatalf("Execute(upgrade --json --yes) error = %v", err)
+	}
+	if lifecycle.options.Progress != nil {
+		t.Fatal("--json must not install a progress callback (stdout stays a machine contract)")
+	}
+}
+
+func TestUpgradeTextModeInstallsProgressCallbackOnStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingUpgradeLifecycle{}
+	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
+
+	if err := entry.Execute([]string{"upgrade", "--yes"}); err != nil {
+		t.Fatalf("Execute(upgrade --yes) error = %v", err)
+	}
+	if lifecycle.options.Progress == nil {
+		t.Fatal("text mode must install a progress callback")
+	}
+	// 进度走 stderr，绝不进入 stdout（stdout 只承载业务结果行）。
+	lifecycle.options.Progress(cli.UpgradeProgress{Stage: cli.UpgradeStageSyncingCatalog})
+	if strings.Contains(stdout.String(), "upgrade:") {
+		t.Fatalf("stdout = %q, want progress kept out of stdout", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "upgrade: syncing-catalog") {
+		t.Fatalf("stderr = %q, want the progress line", stderr.String())
+	}
+}
+
+func TestSetStdinDoesNotBypassTheConfirmationGate(t *testing.T) {
+	// SetStdin 注入的是非终端 reader，因此仍必须 --yes；
+	// 它让确认读取有确定来源，而不是放宽「非交互必须有 --yes」。
+	var stdout, stderr bytes.Buffer
+	entry := newUpgradeEntry(t, &stdout, &stderr, func() (cli.UpgradeLifecycle, error) {
+		t.Fatal("non-interactive injected reader invoked the factory")
+		return nil, nil
+	})
+	entry.SetStdin(strings.NewReader("y\n"))
+
+	err := entry.Execute([]string{"upgrade"})
+	if err == nil || !strings.Contains(err.Error(), "requires --yes") {
+		t.Fatalf("Execute(upgrade) error = %v, want the --yes requirement", err)
+	}
+}
+
+func TestUpgradeDeclinedIsRuntimeFailureWithNoBusinessOutput(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	lifecycle := &recordingUpgradeLifecycle{err: cli.ErrUpgradeDeclined}
+	entry := newRecordingUpgradeEntry(t, &stdout, &stderr, lifecycle)
+
+	err := entry.Execute([]string{"upgrade", "--yes"})
+	if err == nil || !errors.Is(err, cli.ErrUpgradeDeclined) {
+		t.Fatalf("Execute(upgrade) error = %v, want ErrUpgradeDeclined", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("declined stdout = %q, want no business lines", stdout.String())
+	}
+	// 用户拒绝是 runtime failure：不打印 usage。
+	if strings.Contains(stderr.String(), "Usage:") {
+		t.Fatalf("stderr = %q, want no usage for a declined upgrade", stderr.String())
 	}
 }

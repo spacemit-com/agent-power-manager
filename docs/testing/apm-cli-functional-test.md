@@ -2,7 +2,9 @@
 
 本指引供执行任务的 agent 阅读并操作真实 APM/agent CLI，交付功能测试报告，不需要开发测试程序。只有用户要求执行功能测试时才运行。各机器本地执行，开发机与板端分别出具报告，不自动调度 SSH。
 
-覆盖范围是 APM CLI 的全部命令面：帮助与参数校验、`search`、`list`（云端列表与已安装清单）、`show`、`install`、`uninstall`、`fix`、`validate`、`submit` 与 `submission`；其中安装与卸载按每个 agent、每种 Power 类型展开。全部用例见第 5 节。
+覆盖范围是 APM CLI 的全部命令面：帮助与参数校验、`search`、`list`（云端列表与已安装清单）、`show`、`install`、`upgrade`、`uninstall`、`fix`、`validate`、`submit` 与 `submission`；其中安装与卸载按每个 agent、每种 Power 类型展开。全部用例见第 5 节。
+
+`upgrade` 的执行前确认给 agent 驱动的测试带来一条调用约束：`apm upgrade` 会先列出待升级项再询问，而测试环境的 stdin 不是终端，因此**非交互执行必须显式加 `-y`**（`apm upgrade -y`），否则命令会在创建 lifecycle、取锁与同步目录之前以 `upgrade requires --yes` 失败；`--json` 的机器契约同理要求 `-y`，`--dry-run` 不产生变更则不需要。本指引固定单一版本、不覆盖升级/降级路径（见第 4 节范围限制），但这条调用约束对所有 `upgrade` 调用成立。
 
 ## 1. 确定范围
 

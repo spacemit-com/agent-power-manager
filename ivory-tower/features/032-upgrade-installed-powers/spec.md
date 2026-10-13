@@ -26,10 +26,16 @@
 
 ### 2.1 Included
 
-- `upgrade` CLI 端口：位置参数拒绝、`--agent`（默认 all）、`--type`、`--dry-run`、`--json` 的解析与校验。
-- CLI 契约类型 `UpgradeOutcome`/`UpgradeItem`/`UpgradeResult`/`UpgradeFailure`/`UpgradeBatchError`
+- `upgrade` CLI 端口：位置参数拒绝、`--agent`（默认 all）、`--type`、`-y/--yes`、`--dry-run`、
+  `--json` 的解析与校验。
+- 执行前确认询问（`apt upgrade` 风格）、非交互/`--json` 的 fail-closed 门禁，以及 isatty 语义的
+  终端判定（Unix termios、Windows `GetConsoleMode`）。
+- 阶段性进度：lifecycle 上报结构化阶段事件，CLI 渲染到 stderr，`--json` 下静默。
+- CLI 契约类型 `UpgradeOutcome`/`UpgradeItem`/`UpgradeResult`/`UpgradeFailure`/`UpgradeBatchError`、
+  `UpgradeStage`/`UpgradeProgress`/`UpgradePrompt`/`UpgradeOptions`/`ErrUpgradeDeclined`
   与 `UpgradeLifecycle` 端口。
-- 文本渲染 `<agent>/<type>/<name>@<version> <outcome>` 与跳过原因；`--json` 数组记录。
+- 文本渲染 `<agent>/<type>/<name>@<version> <outcome>`、跳过原因、省略逐条 `up-to-date`
+  与末尾计数汇总行；`--json` 数组记录保留全部条目。
 - 纯函数升级计划器：manifest 分组 × 目录快照 → 有序升级计划。
 - `UpgradeService` 生命周期：单锁区间内的 Recover、`RefreshInstalled`、`SnapshotLocked`、
   计划、`--dry-run` 提前返回、逐条执行、journal 残留停止、Release gate。
@@ -56,7 +62,7 @@
 ### 3.1 用法
 
 ```text
-apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-run] [--json]
+apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [-y|--yes] [--dry-run] [--json]
 ```
 
 - 零个位置参数；出现任何位置参数由 Cobra 在创建 lifecycle 前以
@@ -67,11 +73,59 @@ apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-r
   仍是弃用别名，就地改写并 warning，见 [ADR-044](../../adr/ADR-044-rename-agent-power-type-to-expert.md)）；
   非法值报 `invalid --type`。
 - `--type=expert` 只支持 `--agent` 省略或 `bibit`，其它值（含 `all`）报错。
-- `--dry-run` 只输出计划，不落盘。
+- `-y`/`--yes` 跳过执行前的确认询问。
+- `--dry-run` 只输出计划，不落盘，也永不要求 `--yes`。
 - `--json` 输出机器可读数组；warning 与跳过原因仍走 stderr，不污染 stdout。
+  机器模式不做交互询问，因此 `--json` 必须与 `--yes` 同时给出，否则 fail closed。
 - `--verbose` 为根命令全局选项，不在 upgrade 单独注册。
 
-### 3.2 目标版本选择
+### 3.2 确认询问与门禁
+
+筛选出「需要升级」的条目后、执行任何事务前，命令按 `apt upgrade` 的方式列出清单并提问：
+
+```text
+The following powers will be upgraded:
+  codex/skill/foo-before-summary@v0.0.1 -> v0.1.0
+  hermes-agent/plugin/demo-plugin@v0.1.0 -> v0.2.0
+2 planned, 3 up-to-date, 1 skipped.
+Do you want to continue? [Y/n]
+```
+
+- 空回车与 `y`/`yes`（不区分大小写、去空白）同意；`n`/`no` 拒绝；其它输入重新提问。
+- EOF 视为拒绝：绝不把「输入结束」当作同意。
+- 答 `n` 时不做任何变更、不渲染业务行，并以非零状态退出（脚本据此判断「确实没升级」）。
+- 计划中没有待升级条目时不提问，避免对已最新的系统无谓阻塞。
+- 确认文本写入 stderr，stdout 仍只承载业务结果。
+
+门禁规则（唯一判定点，位于 CLI 层，在创建 lifecycle 之前）：
+
+| 条件 | 行为 |
+| --- | --- |
+| 省略 `--yes` 且不是 `--dry-run`，stdin 是真终端 | 提问 |
+| 省略 `--yes` 且不是 `--dry-run`，stdin 不是终端 | 报 `upgrade requires --yes when not running interactively` |
+| 省略 `--yes` 且给出 `--json` | 报 `upgrade requires --yes when --json is used`（机器模式不提问） |
+| `--yes` 或 `--dry-run` | 不提问 |
+
+交互性判定必须用 `isatty` 语义：`os.ModeCharDevice` 对 `/dev/null` 也为真，用它判定会让
+`apm upgrade < /dev/null` 与 CI 管道误入确认分支并永远读不到答复。
+
+### 3.3 阶段性进度
+
+长时间操作在 stderr 输出阶段进度，避免命令看起来无响应：
+
+```text
+upgrade: reading-installed
+upgrade: syncing-catalog
+upgrade: planning
+upgrade: [1/2] codex/skill/foo-before-summary@v0.0.1 -> v0.1.0
+```
+
+- 进度走 stderr（**不能用 `slog.Info`**：info 级按 ADR-004 路由到 stdout，会污染 `--json`）。
+- `--json` 下不输出进度。
+- `--dry-run` 不输出执行阶段进度。
+- 进度是诊断而非业务结果，允许在锁内输出；业务行仍只在成功 Release 后渲染。
+
+### 3.4 目标版本选择
 
 对每条已安装记录 `(agent, type, name, current)`：
 
@@ -86,7 +140,7 @@ apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-r
    只有 MCP 的版本切换依赖旧版本目录 metadata 以支持回滚（`snapshot.Metadata(previous.Ref)`），
    因此在计划阶段前置为可读原因；其余类型的替换不依赖旧条目，仍按规则 4 正常升级，避免无谓阻断。
 
-### 3.4 结果映射
+### 3.5 结果映射
 
 批量升级复用安装路径的结果，必须如实映射，不一律记为 `upgraded`：
 
@@ -97,22 +151,33 @@ apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-r
 | `downgraded` | `downgraded` | 执行期事实与计划不一致，仍如实报告 |
 | `unchanged` | `up-to-date` | 目标版本已满足 |
 
-### 3.5 输出
+### 3.6 输出
 
 文本模式逐行输出，`<version>` 为计划目标版本（跳过时为本地当前版本）：
 
 ```text
-<agent>/<type>/<name>@<version> <installed|upgraded|downgraded|planned|up-to-date|skipped|failed|unexecuted>
+<agent>/<type>/<name>@<version> <installed|upgraded|downgraded|planned|skipped|failed|unexecuted>
 ```
 
-`planned` 只在 `--dry-run` 出现，表示计划要升级但未做变更。`skipped` 行在同一行追加机器可读原因：
+**`up-to-date` 不再逐条打印**：批量场景下它们会淹没真正需要关注的条目。其计数由末尾汇总行
+承接。`planned` 只在 `--dry-run` 出现，表示计划要升级但未做变更。`skipped` 行在同一行追加
+机器可读原因：
 
 ```text
 codex/skill/foo@v0.0.1 skipped skip=not-in-catalog
 hermes-agent/plugin/demo@v0.1.0 skipped skip=newer-local
 ```
 
-`--json` 输出顶层数组，每条记录字段恒定存在（空值为 `""`）：
+末尾汇总行按固定顺序 `planned、installed、upgraded、downgraded、up-to-date、skipped、failed、
+unexecuted` 只列出计数非零的标签；全部为零时输出 `nothing to upgrade`：
+
+```text
+2 upgraded, 3 up-to-date, 1 skipped.
+```
+
+`--json` 输出顶层数组，**保留全部记录（含 `up-to-date`）**：消费者需要能自行统计「一共装了
+多少、多少已最新」，机器契约不因人类可读性而缩水。每条记录字段恒定存在（空值为 `""`），
+且不追加文本汇总行：
 
 ```json
 [
@@ -130,7 +195,7 @@ hermes-agent/plugin/demo@v0.1.0 skipped skip=newer-local
 
 `--dry-run` 使用同一格式与同一 JSON 形状，只表示计划。
 
-### 3.6 退出状态与失败聚合
+### 3.7 退出状态与失败聚合
 
 - 全部 `upgraded`/`up-to-date`/`skipped`：退出码 0。
 - 存在至少一条 `failed`：先渲染完整结果，再以非零状态退出；错误为 `UpgradeBatchError`，
@@ -164,6 +229,15 @@ hermes-agent/plugin/demo@v0.1.0 skipped skip=newer-local
 | UPG-12 | 无已安装 Agent / 无已安装 Power | 成功退出，空结果 |
 | UPG-13 | `--type=expert --agent=codex` | 校验失败，不创建 lifecycle |
 | UPG-14 | 四类 Power 混合 | 每类各自 upgraded/up-to-date，互不影响 |
+| UPG-15 | 交互终端且无 `--yes` | 列出待升级清单并询问；答 `y`/空回车继续，答 `n` 中止且零变更、非零退出 |
+| UPG-16 | 非终端 stdin 且无 `--yes` | 报 `upgrade requires --yes when not running interactively`，不创建 lifecycle |
+| UPG-17 | `--json` 且无 `--yes` | 报 `upgrade requires --yes when --json is used` |
+| UPG-18 | `--yes` | 不提问，直接执行 |
+| UPG-19 | 确认答 `n` 或 stdin EOF | 零事务、零变更、不渲染业务行、非零退出 |
+| UPG-20 | 无待升级条目 | 不提问，直接给出汇总 |
+| UPG-21 | 文本输出 | 不打印 `up-to-date` 行，末尾给出计数汇总 |
+| UPG-22 | `--json` 输出 | 仍含 `up-to-date` 记录，且不追加文本汇总行 |
+| UPG-23 | 阶段性进度 | 阶段与每条进度写 stderr；`--json` 下不输出 |
 
 ## 6. 依赖与影响
 

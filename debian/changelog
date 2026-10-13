@@ -1,3 +1,46 @@
+agent-power-manager (0.0.4) resolute-porting; urgency=medium
+
+  * `apm upgrade` now asks before it changes anything, like `apt upgrade`:
+    once the resources that need upgrading are filtered, it lists them and
+    asks "Do you want to continue? [Y/n]". Enter or y/yes proceeds, n/no
+    aborts with no changes and a non-zero exit so scripts can tell that
+    nothing was upgraded. EOF counts as no -- an ended input stream is never
+    treated as consent. The question is skipped when nothing needs upgrading.
+  * New -y/--yes skips the question. The confirmation happens inside the lock
+    and after planning, because ADR-045 requires the plan and the execution to
+    share one SnapshotLocked result; asking outside the lock would let the
+    catalog drift so that the set you confirmed is not the set that runs. The
+    cost is that the global lock is held while the prompt waits, which matches
+    apt holding its own lock while it prompts.
+  * The gate fails closed. Without --yes, `--json` (a machine contract, so it
+    never prompts) or a stdin that is not a real terminal is refused before
+    the lifecycle is created, the lock taken or the catalog synced, and the
+    error says to pass --yes. This is a deliberate breaking change:
+    `apm upgrade --json` now requires -y. --dry-run changes nothing, so it
+    never requires -y.
+  * Interactivity is decided by isatty, not by os.ModeCharDevice: /dev/null
+    and /dev/zero are character devices too, so the old-style check would send
+    `apm upgrade < /dev/null` and CI pipes into a prompt that can never be
+    answered. Unix uses a termios ioctl and Windows uses GetConsoleMode.
+  * Text output no longer prints an up-to-date line per resource; in a batch
+    they bury the entries that matter. A trailing summary line carries the
+    counts instead (for example "2 upgraded, 3 up-to-date, 1 skipped.", or
+    "nothing to upgrade"). --json still carries every record including
+    up-to-date, since machine consumers need to total things up themselves,
+    and adds no text summary.
+  * Long operations now report stage progress on stderr -- reading-installed,
+    syncing-catalog, planning, and a [i/n] line per upgrade -- so the command
+    does not look hung. This cannot use slog.Info: info-level logs route to
+    stdout by ADR-004 and would corrupt the --json contract, so progress goes
+    to stderr and is suppressed under --json. Progress is diagnostic rather
+    than a business result, which is why it may be emitted inside the lock;
+    result lines are still rendered only after a successful Release.
+  * CLIEntry gains SetStdin so the confirmation reads from a deterministic
+    source in tests instead of the process-wide os.Stdin. See ADR-045.
+
+ -- liangjunzhao <junzhao.liang@spacemit.com>  Tue, 13 Oct 2026 15:05:00 +0800
+
+
 agent-power-manager (0.0.3) resolute-porting; urgency=medium
 
   * Add `apm upgrade`: reconcile every installed power against one catalog

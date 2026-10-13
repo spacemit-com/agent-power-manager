@@ -27,6 +27,7 @@ type Flags struct {
 	Status    string
 	Limit     int
 	DryRun    bool // DryRun 仅用于 upgrade：只输出升级计划，不写本地状态。
+	Yes       bool // Yes 仅用于 upgrade：跳过确认询问（-y/--yes）。
 }
 
 func validateCommon(flags *Flags) error {

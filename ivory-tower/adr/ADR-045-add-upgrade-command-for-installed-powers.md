@@ -2,6 +2,7 @@
 
 - Status：Accepted
 - Date：2026-10-13
+- Revised：2026-10-13（新增确认询问、`-y`、阶段性进度与文本输出收敛，见下）
 - Decision Makers：liangjunzhao
 
 ## Context
@@ -58,7 +59,28 @@ apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-r
   结果。这与 `install --agent=all` 在无已安装 Agent 时报错不同：install 缺少目标即无法完成
   用户请求，而 upgrade 的请求是收敛现状，现状为空即已收敛。
 - **`--json` 是长期机器契约**。stdout 只承载结果记录，warning 与跳过原因走 stderr 的
-  `slog.Warn`；记录字段与空值策略一旦发布即按 ADR-040 的展示字段惯例稳定。
+  `slog.Warn`；记录字段与空值策略一旦发布即按 ADR-040 的展示字段惯例稳定。文本模式省略逐条
+  `up-to-date`（其计数由末尾汇总行承接），但 `--json` 保留全部记录：消费者需要能自行统计
+  「一共装了多少、多少已最新」，机器契约不因人类可读性而缩水。
+- **执行前确认（`-y`/`--yes`）**。`upgrade` 在筛选出「需要升级」的条目后、执行任何事务前，
+  像 `apt upgrade` 一样列出清单并询问 `Do you want to continue? [Y/n]`；空回车与 `y/yes`
+  同意，`n/no` 拒绝，EOF 拒绝（绝不把输入结束当作同意）。答 `n` 时不做任何变更，也不渲染
+  业务行，并以非零状态退出，使脚本能区分「确实没升级」。计划中没有待升级条目时不提问。
+- **确认发生在锁内、计划之后**。ADR-003 与本文档已决定计划与执行共用同一个 `SnapshotLocked`
+  结果；把确认拆到锁外做两阶段会让目录在两次获取之间漂移，从而出现「用户确认的集合」与
+  「实际执行的集合」不一致。代价是确认期间持有全局锁，此时其它 `apm` 命令会因锁竞争失败——
+  与 apt 持有自身锁时提示的行为一致。
+- **确认无法进行时 fail closed**。`--json`（其 stdout 是机器契约，机器模式不做交互询问）或
+  stdin 不是真终端时，没有 `--yes` 即报错并要求显式给出，不获取锁、不同步目录。这是有意的
+  破坏性变更：`apm upgrade --json` 从此需要 `-y`。`--dry-run` 不产生变更，因此永不要求 `--yes`。
+- **终端判定用 isatty，而非字符设备**。`os.ModeCharDevice` 对 `/dev/null` 与 `/dev/zero` 同样
+  为真，用它判定会让 `apm upgrade < /dev/null` 与 CI 管道误入确认分支并永远读不到答复；判定
+  改为「能否取得终端属性」（Unix 用 termios ioctl、Windows 用 `GetConsoleMode`），语义与
+  `isatty(3)` 一致。
+- **阶段性进度走 stderr，不用 `slog.Info`**。`slog` 的 info 级按 ADR-004 的约定路由到 stdout，
+  用它输出进度会污染 `--json` 的机器契约。进度由 lifecycle 在锁内以结构化事件上报（读取清单、
+  同步目录、计算计划、逐条执行），CLI 负责渲染到 stderr；`--json` 下不安装进度回调。
+  进度是诊断而非业务结果，因此允许在锁内输出，业务行仍只在成功 Release 后渲染。
 
 复用边界：`upgrade` 复用 `InstallService` 的 per-type 安装路径（`installForAgent` 及其
 Skill/MCP/Plugin/Expert 分支）、Adapter、Cache、Plugin Resource 与 Transaction。它不新增
@@ -81,6 +103,10 @@ Skill/MCP/Plugin/Expert 分支）、Adapter、Cache、Plugin Resource 与 Transa
   Skill/Plugin/Expert 的替换不依赖旧目录条目，因此旧版本下架不会阻断它们的升级，避免因一条
   与本机无关的限制过度阻断升级。Plugin 的旧版本制品必须仍在本地 Cache（安装路径只
   `Locate`/`Exists`、不回源），缓存被手工清理时该条为 `failed` 且不中断整批。
+- 代价与风险：确认期间持有全局锁，等待用户答复时其它 `apm` 命令会因锁竞争失败。这是保留
+  「计划与执行共用同一快照」不变量的代价，与 apt 持有自身锁时提示的行为一致。
+- 代价与风险：`--json` 从此需要显式 `--yes`，既有机器调用方必须补上该 flag。错误信息直接给出
+  修复方式；本决策不提供「机器模式静默自动确认」，否则确认门禁恰好在最需要它的无人值守场景失效。
 - 后续动作：Feature 032 实现 CLI 端口、planner、生命周期与组合根接线；BUILD.md、Project
   Overview 与 `docs/Changelog.md` 引用本决策；`--to`/`--patch`/`--minor`/`--prune` 与
   `list --outdated` 留待后续 feature，planner 的纯函数边界即为它们的接入点。
@@ -97,3 +123,8 @@ Skill/MCP/Plugin/Expert 分支）、Adapter、Cache、Plugin Resource 与 Transa
 | 单条失败即停止（沿用 install 的 fail-fast） | 批量升级条目多，一条与本机无关的失败不应阻断其余；真正需要停止的条件是未收敛的全局事务，而非业务失败。 |
 | 支持 `apm upgrade <name>` 单资源升级 | 与 `install <name>=<version>` 职责重叠，且会引入「不指定版本时 upgrade 到 latest」与 install 的歧义；单资源路径保留给 install 更清晰。 |
 | 同时提供 `--prune` 清理云端已下架资源 | 删除本地资源属于 uninstall 的职责，与「升级」混在一条命令会引入误删风险，需要独立的职责边界与 ADR；留待后续演进。 |
+| 把确认放到锁外，拆成「计划 → 提问 → 执行」两阶段 | 需要在两次获取之间重新同步目录，计划可能漂移，用户确认的集合与实际执行的集合会不一致；ADR-045 已决定计划与执行共用同一快照。 |
+| `--json` 静默自动确认（或让 `--json` 隐含 `--yes`） | 机器模式正是最可能无人值守跑批量升级的场景，静默确认会让确认门禁恰好在最需要它的地方失效；要求显式 `--yes` 才是 fail closed。 |
+| 用 `os.ModeCharDevice` 判定交互性 | `/dev/null`、`/dev/zero` 也是字符设备，会把重定向与 CI 管道误判为交互终端，使确认分支永远读不到答复；必须用 isatty 语义。 |
+| 用 `slog.Info` 输出阶段进度 | info 级按 ADR-004 的约定路由到 stdout，会污染 `--json` 的机器契约；进度必须走 stderr。 |
+| 文本模式继续逐条打印 `up-to-date` | 批量场景下淹没真正需要关注的条目；改为只在汇总行保留计数，`--json` 仍完整。 |

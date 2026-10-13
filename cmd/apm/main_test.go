@@ -930,7 +930,7 @@ func TestNewUpgradeLifecycleUpgradesBundledSkillToLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newUpgradeLifecycle() error = %v", err)
 	}
-	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"})
+	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"}, cli.UpgradeOptions{})
 	if err != nil {
 		t.Fatalf("Upgrade() error = %v", err)
 	}
@@ -960,7 +960,7 @@ func TestNewUpgradeLifecycleUpgradesBundledSkillToLatest(t *testing.T) {
 	assertPathAbsent(t, filepath.Join(home, ".apm", "staging"))
 
 	// 幂等：第二次执行全部为 up-to-date。
-	second, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"})
+	second, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"}, cli.UpgradeOptions{})
 	if err != nil {
 		t.Fatalf("second Upgrade() error = %v", err)
 	}
@@ -987,7 +987,7 @@ func TestNewUpgradeLifecycleDryRunLeavesLocalStateUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newUpgradeLifecycle() error = %v", err)
 	}
-	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex", DryRun: true})
+	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex", DryRun: true}, cli.UpgradeOptions{})
 	if err != nil {
 		t.Fatalf("Upgrade(dry-run) error = %v", err)
 	}
@@ -1015,12 +1015,29 @@ func TestNewUpgradeLifecycleSucceedsWithNothingInstalled(t *testing.T) {
 	}
 
 	// 无已安装 Power 时 upgrade 的成功语义是「已收敛」，而不是 install --agent=all 那样的错误。
-	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"})
+	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"}, cli.UpgradeOptions{})
 	if err != nil {
 		t.Fatalf("Upgrade(empty) error = %v, want success", err)
 	}
 	if len(result.Items) != 0 {
 		t.Fatalf("Upgrade(empty) = %#v, want no items", result.Items)
+	}
+}
+
+func TestBundledCLIUpgradeRequiresYesBeforeTouchingCloud(t *testing.T) {
+	// 确认门禁必须在创建 lifecycle、获取锁与同步目录之前触发：
+	// 用非终端 stdin 注入，确保它在任何 Cloud 访问之前就 fail closed。
+	upgradeTestEnvironment(t)
+	var stdout, stderr bytes.Buffer
+	entry := newBundledCLIEntry(t, &stdout, &stderr)
+	entry.SetStdin(strings.NewReader(""))
+
+	err := entry.Execute([]string{"upgrade"})
+	if err == nil || !strings.Contains(err.Error(), "requires --yes") {
+		t.Fatalf("Execute(upgrade) error = %v, want the --yes requirement", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want no business output before confirmation", stdout.String())
 	}
 }
 

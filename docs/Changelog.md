@@ -5,6 +5,41 @@
 > APC 仓库说明（2026-10-08）：相邻的 APC 仓库已停止维护，历史条目中出现的 `../apc` 路径只是当时的记录，
 > 不再可用；APC 的服务端契约以仓库根目录的 `APC-API.md` 为准（见 ADR-025）。
 
+## 2026-10-13（`apm upgrade` 增加确认询问、`-y`、阶段性进度与输出收敛）
+
+分类：契约变更（新增 `-y/--yes`；文本输出省略 `up-to-date` 并追加汇总行；`--json` 需配 `-y`）
+
+用户需求：`apm upgrade` 在真正动手前应像 `apt upgrade` 一样先列出将要升级的资源并请求确认，
+提供 `-y` 跳过询问；已是最新的资源不必逐条打印；长时间操作要有阶段性输出，避免命令看起来无响应。
+
+解决方案或完成结果：
+
+- 新增 `-y`/`--yes` 与执行前确认。筛选出「需要升级」的条目后、执行任何事务前列出清单并询问
+  `Do you want to continue? [Y/n]`；空回车与 `y/yes` 同意，`n/no` 拒绝，**EOF 视为拒绝**
+  （绝不把输入结束当作同意）。答 `n` 时零变更、不渲染业务行、以非零状态退出，使脚本能区分
+  「确实没升级」。计划中没有待升级条目时不提问。
+- 确认在**锁内、计划之后**进行。ADR-045 已决定计划与执行共用同一个 `SnapshotLocked` 结果，
+  拆成锁外两阶段会让目录漂移，出现「用户确认的集合」与「实际执行的集合」不一致。代价是确认
+  期间持有全局锁，与 apt 持有自身锁时提示的行为一致。
+- 门禁 fail closed：`--json`（机器契约，机器模式不提问）或 stdin 不是真终端时，没有 `--yes`
+  即报错并要求显式给出，且发生在创建 lifecycle、取锁与同步目录之前。**这是有意的破坏性变更：
+  `apm upgrade --json` 从此需要 `-y`。** `--dry-run` 不产生变更，因此永不要求 `--yes`。
+- 交互性判定改用 `isatty` 语义。`os.ModeCharDevice` 对 `/dev/null`、`/dev/zero` 同样为真，
+  用它判定会让 `apm upgrade < /dev/null` 与 CI 管道误入确认分支并永远读不到答复；现按平台分别用
+  Unix termios ioctl 与 Windows `GetConsoleMode`（`internal/cli/terminal_{linux,bsd,windows,other}.go`）。
+- 文本模式**省略逐条 `up-to-date`**，改由末尾汇总行承接计数（如 `2 upgraded, 3 up-to-date, 1 skipped.`；
+  无条目时 `nothing to upgrade`）。`--json` 仍保留全部记录：消费者需要能自行统计，机器契约不因
+  人类可读性而缩水，且不追加文本汇总行。
+- 新增阶段性进度：lifecycle 以结构化事件上报 `reading-installed`、`syncing-catalog`、`planning`
+  与逐条 `executing`（携带 `[i/n]` 与版本迁移），CLI 渲染到 **stderr**。不用 `slog.Info`——
+  info 级按 ADR-004 路由到 stdout，会污染 `--json`；`--json` 下不安装进度回调。进度是诊断而非
+  业务结果，允许在锁内输出，业务行仍只在成功 Release 后渲染。
+- CLIEntry 新增 `SetStdin`，使确认读取有确定来源（不替换全局 `os.Stdin`），并让「非交互必须
+  有 `--yes`」在测试中可复现。
+- 测试：确认文本与应答解析（含 EOF、非法输入重问）、门禁三种拒绝路径、`-y`/`--dry-run`/`--json`
+  的选项装配、汇总行与省略规则、事务前零变更与锁释放、进度事件顺序，以及一条在确认门禁处
+  提前失败、不触碰 Cloud 的端到端用例。ADR-045 相应修订。
+
 ## 2026-10-13（新增 `apm upgrade`：按本地已安装清单全量升级）
 
 分类：新命令 + 契约新增（outcome 词表与 `--json` 记录为长期机器契约）

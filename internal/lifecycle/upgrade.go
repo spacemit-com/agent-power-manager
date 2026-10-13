@@ -72,7 +72,10 @@ var _ cli.UpgradeLifecycle = (*UpgradeService)(nil)
 // 与 install 的 fail-fast 不同：单条业务失败记为 failed 后继续下一条，因为批量升级中
 // 一条与本机无关的失败不应阻断其余条目。真正需要停止的条件是「未收敛的全局事务」——
 // 检测到残留 journal 时立即停止，剩余条目记 unexecuted，否则下一条事务无法安全创建。
-func (s *UpgradeService) Upgrade(ctx context.Context, flags cli.Flags) (cli.UpgradeResult, error) {
+//
+// 确认询问发生在锁内、计划之后：ADR-045 要求计划与执行共用同一个 SnapshotLocked 结果，
+// 把确认放到锁外拆成两阶段会让目录在两次获取之间漂移。
+func (s *UpgradeService) Upgrade(ctx context.Context, flags cli.Flags, options cli.UpgradeOptions) (cli.UpgradeResult, error) {
 	// Recover、快照、计划与逐条 Transaction 共同读写受保护状态，必须位于同一锁区间。
 	unlock, err := s.locker.Acquire()
 	if err != nil {
@@ -95,6 +98,7 @@ func (s *UpgradeService) Upgrade(ctx context.Context, flags cli.Flags) (cli.Upgr
 	}
 
 	// 先读本地清单：无任何已安装 Power 时 upgrade 已经收敛，不需要同步目录、更不访问网络。
+	reportUpgradeProgress(options, cli.UpgradeProgress{Stage: cli.UpgradeStageReadingInstalled})
 	groups, installedCount, err := s.readInstalledGroups(agents)
 	if err != nil {
 		return cli.UpgradeResult{}, releaseUpgrade(unlock, err)
@@ -108,12 +112,14 @@ func (s *UpgradeService) Upgrade(ctx context.Context, flags cli.Flags) (cli.Upgr
 	}
 
 	// 计划与执行共用这一个快照，避免计划目标与执行时解析出的条目漂移。
+	reportUpgradeProgress(options, cli.UpgradeProgress{Stage: cli.UpgradeStageSyncingCatalog})
 	catalogSnapshot, catalogStatus, err := s.catalogs.SnapshotLocked(ctx)
 	if err != nil {
 		return cli.UpgradeResult{}, releaseUpgrade(unlock, fmt.Errorf("snapshot catalog for upgrade: %w", err))
 	}
 	warnStaleCatalog("upgrade", catalogStatus)
 
+	reportUpgradeProgress(options, cli.UpgradeProgress{Stage: cli.UpgradeStagePlanning})
 	plans := s.planAgents(groups, catalogSnapshot, flags)
 
 	// --dry-run 只交付计划：不创建事务、不下载内容、不写 manifest 或 journal。
@@ -129,16 +135,43 @@ func (s *UpgradeService) Upgrade(ctx context.Context, flags cli.Flags) (cli.Upgr
 		return result, nil
 	}
 
+	// 确认只针对真正需要动作的条目；已经全部最新时不无谓阻塞。
+	if confirmed, confirmErr := confirmUpgrade(options, plans); confirmErr != nil {
+		return cli.UpgradeResult{}, releaseUpgrade(unlock, confirmErr)
+	} else if !confirmed {
+		// 用户拒绝：不做任何变更，也不返回任何业务项。
+		if releaseErr := unlock.Release(); releaseErr != nil {
+			return cli.UpgradeResult{}, errors.Join(cli.ErrUpgradeDeclined, fmt.Errorf("release upgrade lock: %w", releaseErr))
+		}
+		slog.Debug("upgrade declined by user")
+		return cli.UpgradeResult{}, cli.ErrUpgradeDeclined
+	}
+
 	items := make([]cli.UpgradeItem, 0, len(plans))
 	failures := make([]cli.UpgradeFailure, 0)
 	stopped := false
+	executed := 0
+	total := countUpgradeActions(plans)
 	for index, plan := range plans {
 		if stopped {
 			items = append(items, upgradeUnexecutedItem(plan))
 			continue
 		}
+		if plan.action == planActionUpgrade {
+			reportUpgradeProgress(options, cli.UpgradeProgress{
+				Stage:   cli.UpgradeStageExecuting,
+				Agent:   plan.agent,
+				Power:   plan.target,
+				Current: plan.current,
+				Index:   executed,
+				Total:   total,
+			})
+		}
 		item, itemErr := s.executeUpgradePlan(ctx, plan, catalogSnapshot)
 		items = append(items, item)
+		if plan.action == planActionUpgrade {
+			executed++
+		}
 		if itemErr == nil {
 			continue
 		}
@@ -169,6 +202,51 @@ func (s *UpgradeService) Upgrade(ctx context.Context, flags cli.Flags) (cli.Upgr
 		return result, &cli.UpgradeBatchError{Failures: failures}
 	}
 	return result, nil
+}
+
+// confirmUpgrade 在锁内、计划之后询问用户是否继续。
+// Confirm 为 nil 或没有任何需要动作的条目时直接视为已确认：对已最新的系统提问只会无谓阻塞。
+func confirmUpgrade(options cli.UpgradeOptions, plans []upgradePlanItem) (bool, error) {
+	if options.Confirm == nil {
+		return true, nil
+	}
+	prompt := cli.UpgradePrompt{}
+	for _, plan := range plans {
+		switch plan.action {
+		case planActionUpgrade:
+			prompt.Upgrades = append(prompt.Upgrades, upgradeItemFromPlan(plan, true))
+		case planActionUpToDate:
+			prompt.UpToDate++
+		case planActionSkip:
+			prompt.Skipped++
+		}
+	}
+	if len(prompt.Upgrades) == 0 {
+		return true, nil
+	}
+	confirmed, err := options.Confirm(prompt)
+	if err != nil {
+		return false, fmt.Errorf("confirm upgrade: %w", err)
+	}
+	return confirmed, nil
+}
+
+// countUpgradeActions 统计真正需要执行事务的条目数，用于进度分母。
+func countUpgradeActions(plans []upgradePlanItem) int {
+	total := 0
+	for _, plan := range plans {
+		if plan.action == planActionUpgrade {
+			total++
+		}
+	}
+	return total
+}
+
+// reportUpgradeProgress 转发一次进度事件；回调缺失即为静默。
+func reportUpgradeProgress(options cli.UpgradeOptions, progress cli.UpgradeProgress) {
+	if options.Progress != nil {
+		options.Progress(progress)
+	}
 }
 
 // readInstalledGroups 读取每个目标 Agent 的本地清单；任一清单不可读即为 fatal。

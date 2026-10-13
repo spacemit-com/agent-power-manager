@@ -26,6 +26,7 @@ type SetupLoggingFunc func(verbose bool)
 type CLIEntry struct {
 	stdout                 io.Writer
 	stderr                 io.Writer
+	stdin                  io.Reader
 	setupLogging           SetupLoggingFunc
 	newSearchLifecycle     SearchLifecycleFactory
 	newListLifecycle       ListLifecycleFactory
@@ -69,9 +70,18 @@ func NewWithUpgrade(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, new
 	}
 }
 
+// SetStdin 覆盖交互确认读取的输入源；未调用时子命令使用进程标准输入。
+// 它让「确认询问」在测试中确定可复现，而不必替换全局 os.Stdin。
+func (entry *CLIEntry) SetStdin(reader io.Reader) {
+	entry.stdin = reader
+}
+
 // Execute 解析参数并执行选定的 CLI 命令。
 func (entry *CLIEntry) Execute(args []string) error {
 	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle, entry.newListLifecycle, entry.newShowLifecycle, entry.newInstallLifecycle, entry.newUpgradeLifecycle, entry.newUninstallLifecycle, entry.newFixLifecycle, entry.newValidateLifecycle, entry.newSubmitLifecycle, entry.newSubmissionLifecycle)
+	if entry.stdin != nil {
+		root.SetIn(entry.stdin)
+	}
 	preparseLogging(root, args, entry.setupLogging)
 	root.SetArgs(args)
 	executed, err := root.ExecuteC()

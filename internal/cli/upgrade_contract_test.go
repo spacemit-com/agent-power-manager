@@ -24,14 +24,88 @@ func TestRenderUpgradeWritesExactOutcomeLines(t *testing.T) {
 	if err := renderUpgrade(&output, result, Flags{}); err != nil {
 		t.Fatal(err)
 	}
+	// up-to-date 不再逐条打印，其计数由末尾汇总行承接。
 	want := "codex/skill/demo@v0.1.0 upgraded\n" +
-		"codex/skill/demo@v0.1.0 up-to-date\n" +
 		"claude-code/skill/gone@v0.0.1 skipped skip=not-in-catalog\n" +
 		"hermes-agent/mcp/filesystem@v0.2.0 skipped skip=newer-local\n" +
 		"codex/mcp/filesystem@v0.1.0 failed\n" +
-		"hermes-agent/mcp/filesystem@v0.1.0 unexecuted\n"
+		"hermes-agent/mcp/filesystem@v0.1.0 unexecuted\n" +
+		"1 upgraded, 1 up-to-date, 2 skipped, 1 failed, 1 unexecuted.\n"
 	if output.String() != want {
 		t.Fatalf("renderUpgrade() = %q, want %q", output.String(), want)
+	}
+}
+
+func TestRenderUpgradeSummaryLine(t *testing.T) {
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v1.0.0"}
+	tests := []struct {
+		name  string
+		items []UpgradeItem
+		flags Flags
+		want  string
+	}{
+		{
+			name:  "nothing installed",
+			items: nil,
+			want:  "nothing to upgrade\n",
+		},
+		{
+			name: "all up to date keeps the count visible",
+			items: []UpgradeItem{
+				{Agent: domain.AgentCodex, Current: ref, Target: ref, Outcome: UpgradeOutcomeUpToDate},
+				{Agent: domain.AgentCodex, Current: ref, Target: ref, Outcome: UpgradeOutcomeUpToDate},
+			},
+			want: "2 up-to-date.\n",
+		},
+		{
+			name: "dry run itemizes planned entries and summarises",
+			items: []UpgradeItem{
+				{Agent: domain.AgentCodex, Current: ref, Target: ref, Outcome: UpgradeOutcomePlanned},
+				{Agent: domain.AgentCodex, Current: ref, Target: ref, Outcome: UpgradeOutcomeUpToDate},
+			},
+			flags: Flags{DryRun: true},
+			want:  "codex/skill/demo@v1.0.0 planned\n1 planned, 1 up-to-date.\n",
+		},
+		{
+			name: "skipped is itemized with its reason and counted in the summary",
+			items: []UpgradeItem{
+				{Agent: domain.AgentCodex, Current: ref, Target: ref, Outcome: UpgradeOutcomeSkipped, Skip: UpgradeSkipNewerLocal},
+			},
+			want: "codex/skill/demo@v1.0.0 skipped skip=newer-local\n1 skipped.\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output strings.Builder
+			if err := renderUpgrade(&output, UpgradeResult{Items: test.items}, test.flags); err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != test.want {
+				t.Fatalf("renderUpgrade() = %q, want %q", output.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestRenderUpgradeJSONKeepsUpToDateRecords(t *testing.T) {
+	// --json 是完整对账记录：文本省略 up-to-date，但机器契约不得缩水。
+	ref := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "demo", Version: "v0.1.0"}
+	result := UpgradeResult{Items: []UpgradeItem{
+		{Agent: domain.AgentCodex, Current: ref, Target: ref, Outcome: UpgradeOutcomeUpToDate},
+		{Agent: domain.AgentCodex, Current: ref, Target: ref, Outcome: UpgradeOutcomeUpgraded},
+	}}
+
+	var output strings.Builder
+	if err := renderUpgrade(&output, result, Flags{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(output.String(), `"outcome": "up-to-date"`); got != 1 {
+		t.Fatalf("JSON up-to-date records = %d, want 1 in %q", got, output.String())
+	}
+	// JSON 模式不追加文本汇总行。
+	if strings.Contains(output.String(), "nothing to upgrade") {
+		t.Fatalf("JSON output = %q, want no text summary line", output.String())
 	}
 }
 

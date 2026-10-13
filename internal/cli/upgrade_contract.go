@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -108,9 +109,56 @@ func (e *UpgradeBatchError) Unwrap() []error {
 }
 
 // UpgradeLifecycle 定义 upgrade 命令唯一需要的生命周期入口。
+//
+// 第二个参数承载 Flags 无法表达的副作用边界（确认与进度）：Flags 是参与 == 比较的值类型，
+// 放入函数字段会使其不可比较。
 type UpgradeLifecycle interface {
-	Upgrade(context.Context, Flags) (UpgradeResult, error)
+	Upgrade(context.Context, Flags, UpgradeOptions) (UpgradeResult, error)
 }
 
 // UpgradeLifecycleFactory 在日志初始化后创建 Upgrade 生命周期。
 type UpgradeLifecycleFactory func() (UpgradeLifecycle, error)
+
+// UpgradeStage 表示升级过程中的一个可见阶段，用于在长时间无输出时提示进度。
+type UpgradeStage string
+
+const (
+	// UpgradeStageReadingInstalled 表示正在读取本地已安装清单。
+	UpgradeStageReadingInstalled UpgradeStage = "reading-installed"
+	// UpgradeStageSyncingCatalog 表示正在同步云端目录快照。
+	UpgradeStageSyncingCatalog UpgradeStage = "syncing-catalog"
+	// UpgradeStagePlanning 表示正在计算升级计划。
+	UpgradeStagePlanning UpgradeStage = "planning"
+	// UpgradeStageExecuting 表示正在逐条执行升级。
+	UpgradeStageExecuting UpgradeStage = "executing"
+)
+
+// UpgradeProgress 是一次阶段进度事件。
+// executing 阶段携带当前目标、对应版本与 (Index, Total)，使长批次可见进度。
+type UpgradeProgress struct {
+	Stage   UpgradeStage
+	Agent   domain.AgentID
+	Power   domain.PowerRef
+	Current domain.PowerRef
+	Index   int
+	Total   int
+}
+
+// UpgradePrompt 是确认询问所需的全部事实：只包含将要升级的条目与计数。
+type UpgradePrompt struct {
+	Upgrades []UpgradeItem
+	UpToDate int
+	Skipped  int
+}
+
+// UpgradeOptions 承载 Flags 无法表达的副作用边界。
+// Confirm 为 nil 表示无需确认（由 CLI 依 -y/--dry-run/--json 与交互性判定）；
+// Progress 为 nil 表示静默（--json 机器模式）。
+type UpgradeOptions struct {
+	Confirm  func(UpgradePrompt) (bool, error)
+	Progress func(UpgradeProgress)
+}
+
+// ErrUpgradeDeclined 表示用户在确认询问中拒绝继续。
+// 该错误不做任何变更，CLI 以非零状态退出且不渲染业务结果。
+var ErrUpgradeDeclined = errors.New("upgrade aborted by user")

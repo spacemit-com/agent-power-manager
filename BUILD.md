@@ -168,9 +168,10 @@ gofmt -w cmd internal
 ./apm install bianbu-agent-default=v1.0.0 --type expert --agent bibit
 ./apm uninstall bianbu-agent-default --type expert
 ./apm upgrade
+./apm upgrade -y
 ./apm upgrade --agent codex --type skill
 ./apm upgrade --dry-run
-./apm upgrade --json
+./apm upgrade --json -y
 ./apm list --installed --type expert --agent bibit
 ./apm search bianbu-agent-default --type expert
 ./apm list --type expert
@@ -292,7 +293,7 @@ stdout 只有两种精确行形式：
 `apm upgrade` 以本地已安装清单为唯一输入，在一次全局锁区间内对账一次不可变目录快照，把每条已安装 Power 升到云端最新版本。它不新增事务或安装语义，而是复用 Install 的 per-type 安装路径；边界与取舍见 [ADR-045](ivory-tower/adr/ADR-045-add-upgrade-command-for-installed-powers.md) 与 [Feature 032](ivory-tower/features/032-upgrade-installed-powers/spec.md)。
 
 ```text
-apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-run] [--json]
+apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [-y|--yes] [--dry-run] [--json]
 ```
 
 - 不接受位置参数：针对单个资源的升级、降级或精确版本安装仍由 `install <power>[=<version>]` 承担。
@@ -303,19 +304,59 @@ apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-r
 - `--dry-run` 只输出计划：不创建事务、不下载内容、不写 manifest 或 journal。计划中的待升级条目记为 `planned`，不声称变更已发生。
 - 无已安装 Agent 或无已安装 Power 时成功退出并输出空结果，且**不读取目录、不访问网络**——upgrade 的请求是收敛现状，现状为空即已收敛。
 
-stdout 逐行为：
+确认询问（参照 `apt upgrade`）：筛选出待升级条目后、执行任何事务前，命令列出清单并询问，
+答 `y`/空回车继续，答 `n`（或 stdin EOF）中止且不做任何变更、以非零状态退出。确认文本与
+进度都写 stderr，stdout 仍只承载业务结果。`-y`/`--yes` 跳过询问。
 
 ```text
-<agent>/<type>/<name>@<version> <installed|upgraded|downgraded|planned|up-to-date|skipped|failed|unexecuted>
+The following powers will be upgraded:
+  codex/skill/foo-before-summary@v0.0.1 -> v0.1.0
+2 planned, 3 up-to-date, 1 skipped.
+Do you want to continue? [Y/n]
 ```
 
-`skipped` 行额外追加机器可读原因，例如 `codex/skill/foo-before-summary@v0.0.1 skipped skip=not-in-catalog`。outcome 复用安装结果时如实映射：受管目标此前被删除而按首次安装补齐记为 `installed`，不会伪装成 `upgraded`。`--json` 输出顶层数组，每条记录恒带 `agent`、`type`、`name`、`current_version`、`target_version`、`outcome`、`skip`；warning 与跳过原因只走 stderr，不污染 stdout。存在 `failed` 时先渲染完整结果再以非零状态退出。
+门禁在创建 lifecycle 之前判定（fail closed，不取锁、不同步目录）：
+
+| 条件 | 行为 |
+| --- | --- |
+| 省略 `--yes` 且不是 `--dry-run`，stdin 是真终端 | 提问 |
+| 省略 `--yes` 且不是 `--dry-run`，stdin 不是终端 | 报 `upgrade requires --yes when not running interactively` |
+| 省略 `--yes` 且给出 `--json` | 报 `upgrade requires --yes when --json is used`（机器模式不提问） |
+| `--yes` 或 `--dry-run` | 不提问 |
+
+因此 `apm upgrade --json` 必须与 `-y` 同时使用。交互性判定用 `isatty` 语义（Unix termios、
+Windows `GetConsoleMode`），不能用 `os.ModeCharDevice`——它对 `/dev/null` 同样为真。
+
+阶段性进度在长时间操作时写 stderr，避免命令看起来无响应；`--json` 下静默：
+
+```text
+upgrade: reading-installed
+upgrade: syncing-catalog
+upgrade: planning
+upgrade: [1/2] codex/skill/foo-before-summary@v0.0.1 -> v0.1.0
+```
+
+stdout 逐行为（**文本模式省略 `up-to-date`**，其计数由末尾汇总行承接）：
+
+```text
+<agent>/<type>/<name>@<version> <installed|upgraded|downgraded|planned|skipped|failed|unexecuted>
+```
+
+末尾汇总行只列出计数非零的结果，例如 `2 upgraded, 3 up-to-date, 1 skipped.`；无任何条目时输出
+`nothing to upgrade`。`skipped` 行额外追加机器可读原因，例如
+`codex/skill/foo-before-summary@v0.0.1 skipped skip=not-in-catalog`。outcome 复用安装结果时如实
+映射：受管目标此前被删除而按首次安装补齐记为 `installed`，不会伪装成 `upgraded`。
+
+`--json` 输出顶层数组，**保留全部记录（含 `up-to-date`）**，每条恒带 `agent`、`type`、`name`、
+`current_version`、`target_version`、`outcome`、`skip`，且不追加文本汇总行；warning 与跳过原因
+只走 stderr，不污染 stdout。存在 `failed` 时先渲染完整结果再以非零状态退出。
 
 ```bash
-./apm upgrade
+./apm upgrade                 # 交互确认后升级
+./apm upgrade -y              # 不询问
 ./apm upgrade --agent codex --type skill
-./apm upgrade --dry-run
-./apm upgrade --json
+./apm upgrade --dry-run       # 只出计划，永不询问
+./apm upgrade --json -y       # 机器可读；--json 必须配 -y
 ```
 
 MCP 支持 Bibit、Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互斥结构：本地 stdio 使用 `transport=stdio`、`command`、`args`，远程端点使用 `transport=http`、`url`。Claude Code 固定写入 user scope；Bibit 由独立 Adapter 调用 `bianbu-agent mcp`，不与 Codex 共享命令协议实现。所有同名检查、安装、卸载和恢复都通过目标 Agent CLI 完成。CLI 从当前 `PATH` 动态解析，不经 shell，30 秒超时，输出有界；解析或状态不清晰时 fail closed 并保留共享 journal。Hermes 正常 Add/Remove 后按设计不额外执行 list。
