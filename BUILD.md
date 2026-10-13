@@ -167,6 +167,10 @@ gofmt -w cmd internal
 ./apm install bianbu-agent-default=v1.0.0 --type expert
 ./apm install bianbu-agent-default=v1.0.0 --type expert --agent bibit
 ./apm uninstall bianbu-agent-default --type expert
+./apm upgrade
+./apm upgrade --agent codex --type skill
+./apm upgrade --dry-run
+./apm upgrade --json
 ./apm list --installed --type expert --agent bibit
 ./apm search bianbu-agent-default --type expert
 ./apm list --type expert
@@ -282,6 +286,37 @@ stdout 只有两种精确行形式：
 ```
 
 例如成功卸载可输出 `codex/skill/foo-before-summary@v0.0.1 completed` 或 `codex/mcp/filesystem@v0.0.1 completed`；重复执行时可输出 `codex unexecuted`。`--agent=all` 按 Agent ID 字典序 fail-fast：首个业务失败后，当前 Agent 记为 `failed`、剩余 Agent 记为 `unexecuted`。只有成功 Release 后才渲染汇总；Release error 抑制全部业务行。
+
+### Upgrade：按本地已安装清单全量升级
+
+`apm upgrade` 以本地已安装清单为唯一输入，在一次全局锁区间内对账一次不可变目录快照，把每条已安装 Power 升到云端最新版本。它不新增事务或安装语义，而是复用 Install 的 per-type 安装路径；边界与取舍见 [ADR-045](ivory-tower/adr/ADR-045-add-upgrade-command-for-installed-powers.md) 与 [Feature 032](ivory-tower/features/032-upgrade-installed-powers/spec.md)。
+
+```text
+apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-run] [--json]
+```
+
+- 不接受位置参数：针对单个资源的升级、降级或精确版本安装仍由 `install <power>[=<version>]` 承担。
+- 省略 `--agent` 等价于 `all`，覆盖当前快照中全部已安装 Agent，按 Agent ID 字典序串行；`--type=expert` 仍只支持 `bibit`。
+- 只升不降：目标版本低于本地版本时记为 `skipped skip=newer-local` 并 warning，绝不静默降级。不支持 `--allow-downgrade`。
+- 云端已无该能力的候选版本时记为 `skipped skip=not-in-catalog` 并 warning，不使整条命令失败。MCP 的版本切换需要旧版本的目录条目做回滚，因此本地当前版本已下架时同样跳过；其余类型的替换不依赖旧条目，仍会正常升级。
+- 单条失败记为 `failed` 后继续下一条；但检测到残留 journal（`ErrActiveTransaction` 或 Inspect 报告 active）时立即停止，剩余条目记为 `unexecuted` 并提示 `run apm fix`。
+- `--dry-run` 只输出计划：不创建事务、不下载内容、不写 manifest 或 journal。计划中的待升级条目记为 `planned`，不声称变更已发生。
+- 无已安装 Agent 或无已安装 Power 时成功退出并输出空结果，且**不读取目录、不访问网络**——upgrade 的请求是收敛现状，现状为空即已收敛。
+
+stdout 逐行为：
+
+```text
+<agent>/<type>/<name>@<version> <installed|upgraded|downgraded|planned|up-to-date|skipped|failed|unexecuted>
+```
+
+`skipped` 行额外追加机器可读原因，例如 `codex/skill/foo-before-summary@v0.0.1 skipped skip=not-in-catalog`。outcome 复用安装结果时如实映射：受管目标此前被删除而按首次安装补齐记为 `installed`，不会伪装成 `upgraded`。`--json` 输出顶层数组，每条记录恒带 `agent`、`type`、`name`、`current_version`、`target_version`、`outcome`、`skip`；warning 与跳过原因只走 stderr，不污染 stdout。存在 `failed` 时先渲染完整结果再以非零状态退出。
+
+```bash
+./apm upgrade
+./apm upgrade --agent codex --type skill
+./apm upgrade --dry-run
+./apm upgrade --json
+```
 
 MCP 支持 Bibit、Codex、Claude Code 和 Hermes Agent。Cloud 定义采用互斥结构：本地 stdio 使用 `transport=stdio`、`command`、`args`，远程端点使用 `transport=http`、`url`。Claude Code 固定写入 user scope；Bibit 由独立 Adapter 调用 `bianbu-agent mcp`，不与 Codex 共享命令协议实现。所有同名检查、安装、卸载和恢复都通过目标 Agent CLI 完成。CLI 从当前 `PATH` 动态解析，不经 shell，30 秒超时，输出有界；解析或状态不清晰时 fail closed 并保留共享 journal。Hermes 正常 Add/Remove 后按设计不额外执行 list。
 

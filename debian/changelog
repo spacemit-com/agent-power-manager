@@ -1,3 +1,37 @@
+agent-power-manager (0.0.3) resolute-porting; urgency=medium
+
+  * Add `apm upgrade`: reconcile every installed power against one catalog
+    snapshot and upgrade them all. It takes no positional argument -- single
+    resource upgrades stay on `apm install <power>[=<version>]` -- and
+    defaults to every installed agent, ordered by agent ID.
+  * Upgrade never downgrades. When the catalog latest is behind the local
+    version the entry is skipped with a warning (skip=newer-local), and there
+    is no --allow-downgrade. An entry whose name has no catalog candidate at
+    all is skipped as not-in-catalog instead of failing the whole run.
+  * A single failure is reported as `failed` and the remaining entries keep
+    going, unlike install's fail-fast. The one condition that does stop the
+    run is a residual transaction journal, because a next transaction cannot
+    be created safely; the rest is reported as `unexecuted` with a hint to
+    run `apm fix`.
+  * The outcome vocabulary is deliberately separate from install's:
+    installed/upgraded/downgraded/planned/up-to-date/skipped/failed/
+    unexecuted. `unchanged` could not be reused because it conflates "the
+    explicit request is already satisfied" with "the plan decided to do
+    nothing", and `planned` keeps --dry-run from claiming a change happened.
+    Install results are mapped faithfully, so a repair after a manually
+    deleted target reports `installed` rather than posing as `upgraded`.
+  * MCP replacement needs the previous version's catalog entry for rollback,
+    so a withdrawn local MCP version is skipped; the other three types do not
+    depend on it and still upgrade. --dry-run writes nothing at all, and an
+    empty reconciliation (nothing installed) returns before any catalog
+    access, so it needs no network.
+  * --json is a machine contract: records always carry agent, type, name,
+    current_version, target_version, outcome and skip, while warnings and
+    skip reasons stay on stderr. See ADR-045 and Feature 032.
+
+ -- liangjunzhao <junzhao.liang@spacemit.com>  Tue, 13 Oct 2026 14:20:00 +0800
+
+
 agent-power-manager (0.0.2) resolute-porting; urgency=medium
 
   * Rename the Expert power type locally. APC still calls it "agent" on the wire
@@ -13,7 +47,7 @@ agent-power-manager (0.0.2) resolute-porting; urgency=medium
     agent (--agent, AgentID, AgentAdapter) or the author-facing artifact
     (agents/, agent.yaml, AgentConfig) keeps its name. The keep list is written
     down in ADR-044 so the split is a decision rather than an accident.
-  * Must be installed together with bibit-agenthub-plugin 0.3.20: an older
+  * Must be installed together with bibit-agenthub-plugin 0.4.0: an older
     plugin cannot parse the type field this version now emits, and an older apm
     cannot accept the --type=expert this plugin sends.
 

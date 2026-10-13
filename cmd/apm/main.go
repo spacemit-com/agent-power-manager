@@ -27,7 +27,7 @@ var errNilCatalogManager = errors.New("catalog manager factory returned nil mana
 
 func main() {
 	catalogLifecycles := newCatalogLifecycleComposition()
-	entry := cli.New(
+	entry := cli.NewWithUpgrade(
 		os.Stdout,
 		os.Stderr,
 		logging.SetupLogging,
@@ -39,6 +39,7 @@ func main() {
 		newValidateLifecycle,
 		newSubmitLifecycle,
 		newSubmissionQueryLifecycle,
+		catalogLifecycles.newUpgradeLifecycle,
 		catalogLifecycles.newShowLifecycle,
 	)
 	if err := entry.Execute(os.Args[1:]); err != nil {
@@ -99,6 +100,16 @@ func (composition *catalogLifecycleComposition) newListLifecycle() (cli.ListLife
 
 func (composition *catalogLifecycleComposition) newInstallLifecycle() (cli.InstallLifecycle, error) {
 	return newInstallLifecycleWithCatalogAndCloudFactories(
+		composition.manager,
+		newCloudClient,
+		func(source cache.Source) (cache.PowerCache, error) { return cache.NewFilesystem(source) },
+		newPluginResources,
+	)
+}
+
+// newUpgradeLifecycle 创建 Upgrade 命令所需的默认依赖；与 Install 共用同一惰性目录 Manager。
+func (composition *catalogLifecycleComposition) newUpgradeLifecycle() (cli.UpgradeLifecycle, error) {
+	return newUpgradeLifecycleWithCatalogAndCloudFactories(
 		composition.manager,
 		newCloudClient,
 		func(source cache.Source) (cache.PowerCache, error) { return cache.NewFilesystem(source) },
@@ -226,6 +237,11 @@ func newInstallLifecycle() (cli.InstallLifecycle, error) {
 	return newCatalogLifecycleComposition().newInstallLifecycle()
 }
 
+// newUpgradeLifecycle 创建 Upgrade 命令所需的默认依赖；与 Install 共享同一依赖集合。
+func newUpgradeLifecycle() (cli.UpgradeLifecycle, error) {
+	return newCatalogLifecycleComposition().newUpgradeLifecycle()
+}
+
 // cloudClientFactory 是命令级 composition 边界：每次 lifecycle 构造只能调用一次，返回的同一 Client 必须共享给全部 Cloud 消费者。
 type cloudClientFactory func() (cloud.Client, error)
 
@@ -251,47 +267,134 @@ func newInstallLifecycleWithCloudFactories(
 	)
 }
 
+// installCompositionDeps 汇总 Install 与 Upgrade 共用的一次性依赖；两者执行同一套安装路径。
+type installCompositionDeps struct {
+	locker       lock.Locker
+	transactions transaction.Manager
+	registry     lifecycle.AdapterRegistry
+	repository   config.Repository
+	cloudClient  cloud.Client
+	powerCache   cache.PowerCache
+	pluginRes    pluginresource.Manager
+	selector     lifecycle.VersionSelector
+}
+
+// newInstallCompositionDeps 按固定顺序装配依赖；Cloud Client 只创建一次并共享给 Cache 与 Plugin Resource。
+func newInstallCompositionDeps(
+	openCloud cloudClientFactory,
+	newCache func(cache.Source) (cache.PowerCache, error),
+	newPlugins func(pluginresource.Downloader) (pluginresource.Manager, error),
+) (installCompositionDeps, error) {
+	if openCloud == nil || newCache == nil || newPlugins == nil {
+		return installCompositionDeps{}, fmt.Errorf("create install lifecycle with nil composition factory: %w", cloud.ErrProviderConfig)
+	}
+	locker, err := lock.NewDefault()
+	if err != nil {
+		return installCompositionDeps{}, fmt.Errorf("create default lock: %w", err)
+	}
+	repository := config.NewJSONRepository()
+	registry := adapter.NewRegistry()
+	transactions, err := transaction.NewManager(repository, registry)
+	if err != nil {
+		return installCompositionDeps{}, fmt.Errorf("create transaction manager: %w", err)
+	}
+	cloudClient, err := openCloud()
+	if err != nil {
+		return installCompositionDeps{}, fmt.Errorf("create install Cloud client: %w", err)
+	}
+	powerCache, err := newCache(cloudClient)
+	if err != nil {
+		return installCompositionDeps{}, fmt.Errorf("create power cache: %w", err)
+	}
+	pluginResources, err := newPlugins(cloudClient)
+	if err != nil {
+		return installCompositionDeps{}, err
+	}
+	return installCompositionDeps{
+		locker:       locker,
+		transactions: transactions,
+		registry:     registry,
+		repository:   repository,
+		cloudClient:  cloudClient,
+		powerCache:   powerCache,
+		pluginRes:    pluginResources,
+		selector:     version.NewSelector(),
+	}, nil
+}
+
 func newInstallLifecycleWithCatalogAndCloudFactories(
 	catalogs lifecycle.CatalogManager,
 	openCloud cloudClientFactory,
 	newCache func(cache.Source) (cache.PowerCache, error),
 	newPlugins func(pluginresource.Downloader) (pluginresource.Manager, error),
 ) (cli.InstallLifecycle, error) {
-	if isNilCatalogManager(catalogs) || openCloud == nil || newCache == nil || newPlugins == nil {
+	if isNilCatalogManager(catalogs) {
 		return nil, fmt.Errorf("create install lifecycle with nil composition factory: %w", cloud.ErrProviderConfig)
 	}
-	locker, err := lock.NewDefault()
-	if err != nil {
-		return nil, fmt.Errorf("create default lock: %w", err)
-	}
-	repository := config.NewJSONRepository()
-	registry := adapter.NewRegistry()
-	transactions, err := transaction.NewManager(repository, registry)
-	if err != nil {
-		return nil, fmt.Errorf("create transaction manager: %w", err)
-	}
-	cloudClient, err := openCloud()
-	if err != nil {
-		return nil, fmt.Errorf("create install Cloud client: %w", err)
-	}
-	powerCache, err := newCache(cloudClient)
-	if err != nil {
-		return nil, fmt.Errorf("create power cache: %w", err)
-	}
-	pluginResources, err := newPlugins(cloudClient)
+	deps, err := newInstallCompositionDeps(openCloud, newCache, newPlugins)
 	if err != nil {
 		return nil, err
 	}
 	return lifecycle.NewInstall(
-		locker,
-		transactions,
+		deps.locker,
+		deps.transactions,
 		catalogs,
-		cloudClient,
-		powerCache,
-		pluginResources,
-		registry,
-		repository,
-		version.NewSelector(),
+		deps.cloudClient,
+		deps.powerCache,
+		deps.pluginRes,
+		deps.registry,
+		deps.repository,
+		deps.selector,
+	)
+}
+
+// newUpgradeLifecycleWithCloudFactory 暴露无状态构造 seam，供组合根复验同一 Client 被注入 Cache 与 Plugin Resource。
+func newUpgradeLifecycleWithCloudFactory(openCloud cloudClientFactory) (cli.UpgradeLifecycle, error) {
+	return newUpgradeLifecycleWithCloudFactories(
+		openCloud,
+		func(source cache.Source) (cache.PowerCache, error) { return cache.NewFilesystem(source) },
+		newPluginResources,
+	)
+}
+
+func newUpgradeLifecycleWithCloudFactories(
+	openCloud cloudClientFactory,
+	newCache func(cache.Source) (cache.PowerCache, error),
+	newPlugins func(pluginresource.Downloader) (pluginresource.Manager, error),
+) (cli.UpgradeLifecycle, error) {
+	return newUpgradeLifecycleWithCatalogAndCloudFactories(
+		newCatalogLifecycleComposition().manager,
+		openCloud,
+		newCache,
+		newPlugins,
+	)
+}
+
+// newUpgradeLifecycleWithCatalogAndCloudFactories 与 Install 共享同一依赖装配；
+// upgrade 与 install 执行的是同一套 per-type 安装路径，因此依赖集合完全一致。
+func newUpgradeLifecycleWithCatalogAndCloudFactories(
+	catalogs lifecycle.CatalogManager,
+	openCloud cloudClientFactory,
+	newCache func(cache.Source) (cache.PowerCache, error),
+	newPlugins func(pluginresource.Downloader) (pluginresource.Manager, error),
+) (cli.UpgradeLifecycle, error) {
+	if isNilCatalogManager(catalogs) {
+		return nil, fmt.Errorf("create upgrade lifecycle with nil composition factory: %w", cloud.ErrProviderConfig)
+	}
+	deps, err := newInstallCompositionDeps(openCloud, newCache, newPlugins)
+	if err != nil {
+		return nil, err
+	}
+	return lifecycle.NewUpgrade(
+		deps.locker,
+		deps.transactions,
+		catalogs,
+		deps.cloudClient,
+		deps.powerCache,
+		deps.pluginRes,
+		deps.registry,
+		deps.repository,
+		deps.selector,
 	)
 }
 

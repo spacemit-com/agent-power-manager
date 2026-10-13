@@ -38,7 +38,7 @@ func newBundledCLIEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntr
 	original := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(original) })
 	composition := newCatalogLifecycleComposition()
-	return cli.New(
+	return cli.NewWithUpgrade(
 		stdout,
 		stderr,
 		func(verbose bool) { slog.SetDefault(logging.NewLogger(stdout, stderr, verbose)) },
@@ -50,6 +50,7 @@ func newBundledCLIEntry(t *testing.T, stdout, stderr *bytes.Buffer) *cli.CLIEntr
 		newValidateLifecycle,
 		newSubmitLifecycle,
 		newSubmissionQueryLifecycle,
+		composition.newUpgradeLifecycle,
 		composition.newShowLifecycle,
 	)
 }
@@ -885,6 +886,163 @@ func TestNewInstallLifecycleRejectsAllWhenNoAgentsAreInstalled(t *testing.T) {
 	assertPathAbsent(t, filepath.Join(home, ".apm", "staging"))
 	assertPathAbsent(t, filepath.Join(home, ".apm", ".tmp", "staging"))
 	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions"))
+}
+
+// upgradeTestEnvironment 隔离 APM_HOME/缓存与 agent 目录，并切到仓库根以使用 bundled local Cloud。
+func upgradeTestEnvironment(t *testing.T) (home, cacheHome string) {
+	t.Helper()
+	home = t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cacheHome = t.TempDir()
+	if err := os.Chmod(cacheHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("APM_HOME", home)
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HERMES_HOME", "")
+	useBundledLocalCloud(t)
+	changeToRepositoryRoot(t)
+	if err := os.Mkdir(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatalf("create Codex root: %v", err)
+	}
+	return home, cacheHome
+}
+
+func TestNewUpgradeLifecycleUpgradesBundledSkillToLatest(t *testing.T) {
+	home, _ := upgradeTestEnvironment(t)
+	installer, err := newInstallLifecycle()
+	if err != nil {
+		t.Fatalf("newInstallLifecycle() error = %v", err)
+	}
+	// 先装旧版本，再用 upgrade 收敛到目录最新版本。
+	oldRef := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.0.1"}
+	if _, err := installer.Install(context.Background(), cli.Flags{
+		Agent: "codex", Type: "skill", Name: oldRef.Name, Version: oldRef.Version,
+	}); err != nil {
+		t.Fatalf("Install(v0.0.1) error = %v", err)
+	}
+
+	upgrader, err := newUpgradeLifecycle()
+	if err != nil {
+		t.Fatalf("newUpgradeLifecycle() error = %v", err)
+	}
+	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"})
+	if err != nil {
+		t.Fatalf("Upgrade() error = %v", err)
+	}
+
+	newRef := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.1.0"}
+	if len(result.Items) != 1 {
+		t.Fatalf("Upgrade() = %#v, want one item", result.Items)
+	}
+	item := result.Items[0]
+	if item.Agent != domain.AgentCodex || item.Outcome != cli.UpgradeOutcomeUpgraded ||
+		item.Current != oldRef || item.Target != newRef {
+		t.Fatalf("Upgrade() item = %#v, want codex %v -> %v upgraded", item, oldRef, newRef)
+	}
+
+	// 清单与磁盘都必须落到新版本，且事务现场被清理。
+	manifested, found, err := config.NewJSONRepository().Find(domain.AgentCodex, newRef.Type, newRef.Name)
+	if err != nil {
+		t.Fatalf("find installed manifest = %v", err)
+	}
+	if !found || manifested.Ref != newRef {
+		t.Fatalf("installed manifest = (%#v, %t), want (%#v, true)", manifested, found, newRef)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "skills", newRef.Name, "SKILL.md")); err != nil {
+		t.Fatalf("upgraded skill marker: %v", err)
+	}
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", "staging"))
+
+	// 幂等：第二次执行全部为 up-to-date。
+	second, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"})
+	if err != nil {
+		t.Fatalf("second Upgrade() error = %v", err)
+	}
+	if len(second.Items) != 1 || second.Items[0].Outcome != cli.UpgradeOutcomeUpToDate {
+		t.Fatalf("second Upgrade() = %#v, want a single up-to-date item", second.Items)
+	}
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
+}
+
+func TestNewUpgradeLifecycleDryRunLeavesLocalStateUntouched(t *testing.T) {
+	home, _ := upgradeTestEnvironment(t)
+	installer, err := newInstallLifecycle()
+	if err != nil {
+		t.Fatalf("newInstallLifecycle() error = %v", err)
+	}
+	oldRef := domain.PowerRef{Type: domain.PowerTypeSkill, Name: "foo-before-summary", Version: "v0.0.1"}
+	if _, err := installer.Install(context.Background(), cli.Flags{
+		Agent: "codex", Type: "skill", Name: oldRef.Name, Version: oldRef.Version,
+	}); err != nil {
+		t.Fatalf("Install(v0.0.1) error = %v", err)
+	}
+
+	upgrader, err := newUpgradeLifecycle()
+	if err != nil {
+		t.Fatalf("newUpgradeLifecycle() error = %v", err)
+	}
+	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex", DryRun: true})
+	if err != nil {
+		t.Fatalf("Upgrade(dry-run) error = %v", err)
+	}
+	if !result.DryRun || len(result.Items) != 1 || result.Items[0].Outcome != cli.UpgradeOutcomePlanned {
+		t.Fatalf("Upgrade(dry-run) = %#v, want one planned item", result)
+	}
+
+	// 计划不得改动清单，也不得建事务。
+	manifested, found, err := config.NewJSONRepository().Find(domain.AgentCodex, oldRef.Type, oldRef.Name)
+	if err != nil {
+		t.Fatalf("find installed manifest = %v", err)
+	}
+	if !found || manifested.Ref != oldRef {
+		t.Fatalf("manifest after dry-run = (%#v, %t), want the original %#v", manifested, found, oldRef)
+	}
+	assertPathAbsent(t, filepath.Join(home, ".apm", "transactions", "active.json"))
+	assertPathAbsent(t, filepath.Join(home, ".apm", "staging"))
+}
+
+func TestNewUpgradeLifecycleSucceedsWithNothingInstalled(t *testing.T) {
+	upgradeTestEnvironment(t)
+	upgrader, err := newUpgradeLifecycle()
+	if err != nil {
+		t.Fatalf("newUpgradeLifecycle() error = %v", err)
+	}
+
+	// 无已安装 Power 时 upgrade 的成功语义是「已收敛」，而不是 install --agent=all 那样的错误。
+	result, err := upgrader.Upgrade(context.Background(), cli.Flags{Agent: "codex"})
+	if err != nil {
+		t.Fatalf("Upgrade(empty) error = %v, want success", err)
+	}
+	if len(result.Items) != 0 {
+		t.Fatalf("Upgrade(empty) = %#v, want no items", result.Items)
+	}
+}
+
+func TestUpgradeCompositionOpensOneCloudClientPerInvocation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("APM_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	client := &recordingCloudClient{}
+	calls := 0
+	service, err := newUpgradeLifecycleWithCloudFactory(func() (cloud.Client, error) {
+		calls++
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("compose upgrade lifecycle: %v", err)
+	}
+	if service == nil {
+		t.Fatal("composed upgrade lifecycle = nil")
+	}
+	if calls != 1 {
+		t.Fatalf("Cloud factory calls = %d, want 1", calls)
+	}
 }
 
 func TestNewUninstallLifecycleRemovesBundledSkillAndThenReportsNotInstalled(t *testing.T) {

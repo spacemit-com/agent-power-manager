@@ -225,7 +225,7 @@ func TestCLIHelpListsCommandsOnStdout(t *testing.T) {
 	if err := entry.Execute([]string{"--help"}); err != nil {
 		t.Fatalf("Execute(--help) error = %v", err)
 	}
-	for _, command := range []string{"search", "list", "install", "uninstall", "fix"} {
+	for _, command := range []string{"search", "list", "install", "upgrade", "uninstall", "fix"} {
 		if !strings.Contains(stdout.String(), command) {
 			t.Errorf("help stdout = %q, want command %q", stdout.String(), command)
 		}

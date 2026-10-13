@@ -5,6 +5,45 @@
 > APC 仓库说明（2026-10-08）：相邻的 APC 仓库已停止维护，历史条目中出现的 `../apc` 路径只是当时的记录，
 > 不再可用；APC 的服务端契约以仓库根目录的 `APC-API.md` 为准（见 ADR-025）。
 
+## 2026-10-13（新增 `apm upgrade`：按本地已安装清单全量升级）
+
+分类：新命令 + 契约新增（outcome 词表与 `--json` 记录为长期机器契约）
+
+用户需求：一条命令把本机已安装的全部 Power 收敛到云端最新版本。此前只能用外部脚本拼接
+`list --installed --json` 与 `list --json` 自行做版本对账，再逐条调用 `apm install`；脚本层
+既无法判断「云端已下架本地资源」与「云端最新版比本地还旧」这两种需要不同处理的情况，也无法
+在一条失败后判断全局 journal 是否仍残留，因而无法安全续跑。
+
+背景：APM 已能安装、升级、降级单个 Power，也有只读的已安装清单视图，但缺少「以本机现状为
+输入、对账云端目录并批量收敛」的入口。关键在于复用既有 Install 的 per-type 安装路径与单锁
+区间，而不是引入第二套安装语义。决策与取舍见
+[ADR-045](../ivory-tower/adr/ADR-045-add-upgrade-command-for-installed-powers.md)。
+
+解决方案或完成结果：
+
+- 新增 `apm upgrade [--agent=<agent-id|all>] [--type=<skill|plugin|mcp|expert>] [--dry-run] [--json]`。
+  不接受位置参数：单资源的升级/降级/精确版本安装继续由 `install <power>[=<version>]` 承担，
+  两者是「收敛全部」与「指定一个」的分工。
+- 新增纯函数计划器 `planUpgrade`：输入单 Agent 的清单分组与已验证的不可变目录快照，输出有序
+  升级计划；遍历顺序固定 `skill → plugin → mcp → expert`，组内保持清单原序，输出确定。
+- 新增 `UpgradeService`：在一次 Acquire/Release 内完成 Recover、`RefreshInstalled`、
+  `SnapshotLocked`（计划与执行共用同一快照，避免目录漂移）、计划与串行执行，逐条委托给
+  `InstallService.installForAgent`，不新增事务类型、不放宽 journal 不变量。
+- 语义拍板：只升不降（目标更低记 `skipped skip=newer-local` + warning，不提供 `--allow-downgrade`）；
+  云端无候选记 `skipped skip=not-in-catalog` + warning 而不使整条命令失败；省略 `--agent` 默认
+  `all`；单条失败继续下一条，但检测到残留 journal 立即停止并把剩余记为 `unexecuted` 且提示
+  `apm fix`；空输入成功退出（upgrade 的请求是收敛现状）。
+- outcome 词表新增 `up-to-date`、`skipped`、`planned`、`installed`、`downgraded`，与 install 的
+  既有词表解耦：批量场景下「显式请求即当前版本」与「计划判定无需动作」必须区分。复用安装结果时
+  如实映射——受管目标此前被删除而按首次安装补齐记为 `installed`，不伪装成 `upgraded`。
+- 计划器把 MCP 的既有约束前置：MCP 版本切换需要旧版本的目录条目做回滚，旧条目已下架时跳过；
+  其余类型的替换不依赖旧条目，仍正常升级（避免无谓地阻断升级）。
+- `cli.New` 以新增 `cli.NewWithUpgrade` + variadic factory 扩展，既有 10 处调用点无需改动；
+  `cmd/apm/main.go` 抽出共享依赖装配 `newInstallCompositionDeps`，Install 与 Upgrade 共用同一
+  Cloud Client、Cache、Plugin Resource 与 Registry。
+- 测试：planner 决策表、UpgradeService（含 dry-run 零写入、失败继续、journal 残留停止、Release
+  失败抑制结果、空快照）、CLI 参数与渲染契约、组合根与端到端用例。
+
 ## 2026-10-08（Power 类别 agent 改名为 expert，APC 边界保留 wire 词汇）
 
 分类：契约变更（CLI 与 JSON 输出的类型取值改为 `expert`；`--type agent` 降为弃用别名）

@@ -31,6 +31,7 @@ type CLIEntry struct {
 	newListLifecycle       ListLifecycleFactory
 	newShowLifecycle       ShowLifecycleFactory
 	newInstallLifecycle    InstallLifecycleFactory
+	newUpgradeLifecycle    UpgradeLifecycleFactory
 	newUninstallLifecycle  UninstallLifecycleFactory
 	newFixLifecycle        FixLifecycleFactory
 	newValidateLifecycle   ValidateLifecycleFactory
@@ -41,6 +42,12 @@ type CLIEntry struct {
 // New 使用指定输出、日志初始化函数和相互独立的 Search/List/Install/Uninstall/Fix/Validate/Submit/Submission 生命周期工厂创建 CLI 入口。
 
 func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newInstallLifecycle InstallLifecycleFactory, newUninstallLifecycle UninstallLifecycleFactory, newFixLifecycle FixLifecycleFactory, newValidateLifecycle ValidateLifecycleFactory, newSubmitLifecycle SubmitLifecycleFactory, newSubmissionLifecycle SubmissionQueryLifecycleFactory, showFactories ...ShowLifecycleFactory) *CLIEntry {
+	return NewWithUpgrade(stdout, stderr, setupLogging, newSearchLifecycle, newListLifecycle, newInstallLifecycle, newUninstallLifecycle, newFixLifecycle, newValidateLifecycle, newSubmitLifecycle, newSubmissionLifecycle, nil, showFactories...)
+}
+
+// NewWithUpgrade 在 New 的基础上注册可选的 Upgrade 生命周期工厂。
+// upgrade 走单独的 variadic 参数，使既有调用点在新增该命令后无需改动签名。
+func NewWithUpgrade(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newInstallLifecycle InstallLifecycleFactory, newUninstallLifecycle UninstallLifecycleFactory, newFixLifecycle FixLifecycleFactory, newValidateLifecycle ValidateLifecycleFactory, newSubmitLifecycle SubmitLifecycleFactory, newSubmissionLifecycle SubmissionQueryLifecycleFactory, newUpgradeLifecycle UpgradeLifecycleFactory, showFactories ...ShowLifecycleFactory) *CLIEntry {
 	var newShowLifecycle ShowLifecycleFactory
 	if len(showFactories) > 0 {
 		newShowLifecycle = showFactories[0]
@@ -53,6 +60,7 @@ func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifec
 		newListLifecycle:       newListLifecycle,
 		newShowLifecycle:       newShowLifecycle,
 		newInstallLifecycle:    newInstallLifecycle,
+		newUpgradeLifecycle:    newUpgradeLifecycle,
 		newUninstallLifecycle:  newUninstallLifecycle,
 		newFixLifecycle:        newFixLifecycle,
 		newValidateLifecycle:   newValidateLifecycle,
@@ -63,7 +71,7 @@ func New(stdout, stderr io.Writer, setupLogging SetupLoggingFunc, newSearchLifec
 
 // Execute 解析参数并执行选定的 CLI 命令。
 func (entry *CLIEntry) Execute(args []string) error {
-	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle, entry.newListLifecycle, entry.newShowLifecycle, entry.newInstallLifecycle, entry.newUninstallLifecycle, entry.newFixLifecycle, entry.newValidateLifecycle, entry.newSubmitLifecycle, entry.newSubmissionLifecycle)
+	root := newRootCommand(entry.stdout, entry.stderr, entry.newSearchLifecycle, entry.newListLifecycle, entry.newShowLifecycle, entry.newInstallLifecycle, entry.newUpgradeLifecycle, entry.newUninstallLifecycle, entry.newFixLifecycle, entry.newValidateLifecycle, entry.newSubmitLifecycle, entry.newSubmissionLifecycle)
 	preparseLogging(root, args, entry.setupLogging)
 	root.SetArgs(args)
 	executed, err := root.ExecuteC()
@@ -98,7 +106,7 @@ func isNilInterface(value any) bool {
 	}
 }
 
-func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newShowLifecycle ShowLifecycleFactory, newInstallLifecycle InstallLifecycleFactory, newUninstallLifecycle UninstallLifecycleFactory, newFixLifecycle FixLifecycleFactory, newValidateLifecycle ValidateLifecycleFactory, newSubmitLifecycle SubmitLifecycleFactory, newSubmissionLifecycle SubmissionQueryLifecycleFactory) *cobra.Command {
+func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycleFactory, newListLifecycle ListLifecycleFactory, newShowLifecycle ShowLifecycleFactory, newInstallLifecycle InstallLifecycleFactory, newUpgradeLifecycle UpgradeLifecycleFactory, newUninstallLifecycle UninstallLifecycleFactory, newFixLifecycle FixLifecycleFactory, newValidateLifecycle ValidateLifecycleFactory, newSubmitLifecycle SubmitLifecycleFactory, newSubmissionLifecycle SubmissionQueryLifecycleFactory) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "apm",
 		Short:         "Agent Power Manager",
@@ -113,6 +121,7 @@ func newRootCommand(stdout, stderr io.Writer, newSearchLifecycle SearchLifecycle
 		newListCommand(newListLifecycle),
 		newShowCommand(newShowLifecycle),
 		newInstallCommand(newInstallLifecycle),
+		newUpgradeCommand(newUpgradeLifecycle),
 		newUninstallCommand(newUninstallLifecycle),
 		newFixCommand(newFixLifecycle),
 		newValidateCommand(newValidateLifecycle),

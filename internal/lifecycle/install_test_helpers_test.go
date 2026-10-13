@@ -24,7 +24,10 @@ type installFixture struct {
 	catalogStatus  catalog.SyncStatus
 	selected       string
 	installed      map[domain.AgentID]domain.PowerRef
-	cacheResponses map[domain.AgentID][]installCacheResponse
+	// installedGroups 供 Upgrade 路径的 config.List 使用；install 路径只读 installed。
+	installedGroups  map[domain.AgentID]domain.InstalledPowerGroups
+	configListErrors map[domain.AgentID]error
+	cacheResponses   map[domain.AgentID][]installCacheResponse
 
 	acquireErr               error
 	releaseErr               error
@@ -68,6 +71,12 @@ type installFixture struct {
 
 	beforeRefresh func()
 	beforeRelease func()
+
+	// 以下字段仅由 Upgrade 路径使用。
+	inspectAllowed               bool
+	inspection                   transaction.InspectionResult
+	inspectErr                   error
+	transactionInstallErrByPower map[string]error
 }
 
 type fakePluginResources struct {
@@ -220,6 +229,10 @@ type installFakeTransactions struct {
 
 func (m *installFakeTransactions) Inspect(context.Context) (transaction.InspectionResult, error) {
 	*m.calls = append(*m.calls, "inspect")
+	// install 路径从不 Inspect；只有 Upgrade 用它兜底判断 journal 是否残留。
+	if m.fixture.inspectAllowed {
+		return m.fixture.inspection, m.fixture.inspectErr
+	}
 	return transaction.InspectionResult{}, errors.New("Install lifecycle called Inspect before Recover")
 }
 
@@ -239,6 +252,10 @@ func (m *installFakeTransactions) InspectFilesystemTarget(ref domain.PowerRef, _
 
 func (m *installFakeTransactions) InstallSkill(_ context.Context, request transaction.SkillInstallRequest) error {
 	*m.calls = append(*m.calls, "transaction:install:"+string(request.Agent))
+	// Upgrade 用例需要「某一条失败、其余继续」，因此支持按 Power 名称注入失败。
+	if err, found := m.fixture.transactionInstallErrByPower[request.Power.Name]; found {
+		return err
+	}
 	return m.fixture.transactionInstallErr[request.Agent]
 }
 
@@ -549,7 +566,14 @@ func (c *installFakeConfig) Find(agent domain.AgentID, _ domain.PowerType, _ str
 	return domain.InstalledPower{Ref: ref}, ok, c.fixture.configFindErrors[agent]
 }
 
-func (*installFakeConfig) List(domain.AgentID) (domain.InstalledPowerGroups, error) { return nil, nil }
+// List 返回该 Agent 的完整清单分组；未配置时保持 nil，使 install 路径的既有断言不受影响。
+func (c *installFakeConfig) List(agent domain.AgentID) (domain.InstalledPowerGroups, error) {
+	*c.calls = append(*c.calls, "config:list:"+string(agent))
+	if err := c.fixture.configListErrors[agent]; err != nil {
+		return nil, err
+	}
+	return c.fixture.installedGroups[agent], nil
+}
 
 func (*installFakeConfig) Set(domain.AgentID, domain.InstalledPower) error { return nil }
 
