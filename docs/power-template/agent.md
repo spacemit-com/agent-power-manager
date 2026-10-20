@@ -1,13 +1,24 @@
 # Agent 模板
 
-Agent 提交对象是**资源根目录**，APM 把整棵树打包为确定性 `.tar.gz`；目录根闭集为必需普通文件 `agent.yaml` 与可选 `assets/` 目录，不接受单个原始 `agent.yaml`、用户预制归档或远程 URL。字段源为 `agent_yaml_配置模板_V0.5.yaml`。
+Agent 提交对象是**资源根目录**，APM 把整棵树打包为确定性 `.tar.gz`；目录根闭集为必需普通文件 `agent.yaml`，以及四个可选目录 `assets/`、`skills/`、`plugins/`、`mcp/`。不接受单个原始 `agent.yaml`、用户预制归档或远程 URL。字段源为 `agent_yaml_配置模板_V0.5.yaml`。
 
 ```text
 bibit-edge-assistant/
 ├── agent.yaml
-└── assets/               # 可选
-    └── avatar.png        # 可选，被 metadata.avatar 引用
+├── assets/                     # 可选：展示资产
+│   └── avatar.png              #   可选，被 metadata.avatar 引用
+├── skills/                     # 可选：只属于本 Agent 的 Skill
+│   └── <skill-name>/           #   一个完整 Skill：SKILL.md + skill-card.md + …
+├── plugins/                    # 可选：只属于本 Agent 的 Plugin
+│   └── <plugin-name>/          #   一个完整 APC Plugin：apc-plugin.json + skills/…
+└── mcp/                        # 可选：只属于本 Agent 的 MCP
+    └── <mcp-name>.json         #   一个完整 MCP 资源（单 JSON 文件）
 ```
+
+子资源用于「配套能力随 Agent 一起交付」：使用者安装这个 Agent 就得到完整可用的能力组合，
+不需要再单独安装配套的 Skill/Plugin/MCP（[ADR-046](../ivory-tower/adr/ADR-046-allow-expert-to-carry-exclusive-sub-resources.md)）。
+每个子资源都是**裸目录/裸文件**，内容与独立的 Skill、Plugin、MCP 资源完全一致，可直接从
+对应模板拷入，不需要改写格式，也不需要额外打包。
 
 ```yaml
 schema_version: 2
@@ -67,7 +78,15 @@ agent:
 约束：
 
 - 输入必须是资源根**目录**；`validate`/`submit` 不接受单个 `agent.yaml` 文件、预制 `.tar.gz` 或符号链接。
-- 根闭集为必需普通文件 `agent.yaml` 与可选 `assets/` 目录，不允许其它根条目；`assets/` 内只允许普通文件与目录；归档根不额外包裹 `<name>/` 版本目录。
+- 根闭集为必需普通文件 `agent.yaml` 与可选目录 `assets/`、`skills/`、`plugins/`、`mcp/`，不允许其它根条目；这些目录内只允许普通文件与目录；归档根不额外包裹 `<name>/` 版本目录。
+- 子资源的**身份取自其内部内容**，不取目录名：Skill 看 `SKILL.md` frontmatter 的 `name`/`version`，Plugin 看 `apc-plugin.json`，MCP 看 JSON 内的 `name`/`version`。目录名只是容器（须非空、不以点号开头），因此可以把独立资源目录原样拷入。
+- 每个子资源必须自洽：`skills/<n>/` 必须有 `SKILL.md` 与 `skill-card.md`；`plugins/<n>/` 必须有 `apc-plugin.json`，且其声明的 `skills/` 子树必须齐全、不得出现未声明目录；`mcp/<n>.json` 必须是可解码的完整 MCP 资源。缺任何一项都会让整份资源校验失败。
+- 同一类型内身份唯一：不能有两个同名 Skill、两个同名 Plugin 或两个同名 MCP；不同类型可以同名（Skill `demo` 与 MCP `demo` 可共存）。
+- 子资源内的 Skill/Plugin/MCP 遵循各自类型的完整 v2 提交规则（展示字段必填等），与独立提交同源。
+- 既有安全规则对子资源继续生效：不允许可执行文件、嵌套归档、symlink 或特殊文件，单文件 ≤ 10 MiB、总量 ≤ 100 MiB、深度 ≤ 16、路径 ≤ 255 字节。
+- 子资源计入 Agent 归档体积，整份上传仍受 20 MiB 与 100× 解包倍率约束；配套资源较多时需要自行裁剪。
+- 安装后 `skills/`、`plugins/`、`mcp/` 原样保留在 `agents/<agent.name>/` 下，APM 不会把它们拆到 Bibit 全局目录。
+- `agent.skills` / `agent.mcps` 仍是原样透传的扩展字段，APM **不校验**它们与 `skills/`、`mcp/` 目录是否一一对应。
 - 单文档，所有 mapping 键为字符串且无重复，根与 `agent` 均为 mapping。
 - 必填字段：整数 `schema_version: 2`；`agent.id`/`agent.name`/`agent.version`/`agent.description`/`agent.soul` 均为 trim 后非空字符串；`agent.name_zh`/`agent.name_en`/`agent.description_zh` 提交时必填，仅用于 APC 前端展示（`name` 仍是调用名与默认英文名）。`agent.description` 与 `agent.description_zh` 均不超过 500 个 UTF-16 码元（[ADR-042](../ivory-tower/adr/ADR-042-cap-description-length-to-apc-server-limit.md)）。
 - `agent.zh_name` 已更名为 `agent.name_zh`；旧键会被显式拒绝，不会静默忽略。

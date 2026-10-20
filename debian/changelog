@@ -1,3 +1,61 @@
+agent-power-manager (0.0.5) resolute-porting; urgency=medium
+
+  * An expert (agent) resource may now carry its own exclusive skills,
+    plugins and MCP servers alongside agent.yaml. The agent root closed set
+    grows from "agent.yaml plus optional assets/" to also allow optional
+    skills/, plugins/ and mcp/, so an agent ships as one archive with the
+    capabilities it needs instead of asking the user to install each
+    companion power separately and hoping none is missed. See ADR-046.
+  * Sub-resources stay bare directories and files inside the same
+    deterministic tar.gz: skills/<name>/ is a complete skill,
+    plugins/<name>/ is a complete APC plugin, mcp/<name>.json is a complete
+    MCP resource. No nested archives -- the validators reject archive
+    extensions and magic, and nesting would add a packing layer on upload, an
+    extraction layer on install, and break "the archive root is the resource
+    root". Upload, download, extraction, cache, install and recovery all keep
+    working through the existing chain; only the root closed set widens.
+  * Identity comes from the sub-resource's own content, not its directory
+    name: the skill's SKILL.md frontmatter, the plugin's apc-plugin.json, the
+    MCP resource's name and version. A standalone skill, plugin or MCP
+    directory can therefore be copied in unchanged. Directory names are just
+    containers and only have to be non-empty and not dot-prefixed.
+  * Each sub-resource must be self-consistent. A skill missing SKILL.md or
+    skill-card.md, a plugin missing apc-plugin.json or with a declared skills/
+    subtree that does not match, or an MCP file that does not decode fails the
+    whole resource -- a half-finished bundle is never installed. Identities are
+    unique within a type; the same name may appear across types (skill demo and
+    MCP demo can coexist).
+  * Sub-resources reuse the authoritative validation of their own type rather
+    than a second set of rules: skills go through the new internal/skillartifact
+    package (the same implementation used by standalone skills and plugin-
+    embedded skills), plugins through pluginartifact's manifest and closed-set
+    checks, MCP through domain.DecodeMCPResourceJSON plus ValidateSubmit.
+  * Skill format validation moved from internal/submission down into the leaf
+    package internal/skillartifact. submission depends on agentartifact, and
+    agentartifact now validates skill subtrees too, so without the extraction
+    the dependency would cycle. submission keeps thin delegating wrappers and
+    bridges skillartifact.ErrInvalid into its own ErrInvalid with errors.Join,
+    so existing errors.Is assertions and error messages are unchanged.
+  * Every existing safety rule still applies inside sub-resources: path
+    canonicalisation, duplicate paths, symlinks and special files, the
+    executable bit, nested archives, 10 MiB per file, 100 MiB total, depth 16
+    and 255-byte paths. Sub-resources are not a way around them.
+  * Installed layout does not move: skills/, plugins/ and mcp/ stay inside
+    agents/<name>/. APM does not split them into Bibit's global directories,
+    because that needs the runtime's discovery rules and this repository
+    cannot confirm them. The agent.yaml skills and mcps fields are still passed
+    through unchecked; requiring them to match the directories would turn
+    existing valid resources invalid, so consistency is recorded as a known
+    limitation for a later ADR.
+  * Tests cover the new leaf package, the widened root closed set, incomplete
+    and duplicate sub-resources, cross-type names, safety rules inside
+    subtrees, validate/submit accepting and packing sub-resources into one
+    archive, byte-identical repacking, and the adapter landing sub-resources
+    inside agents/<name>/ while rejecting an incomplete bundle before publish.
+
+ -- liangjunzhao <junzhao.liang@spacemit.com>  Tue, 20 Oct 2026 17:10:00 +0800
+
+
 agent-power-manager (0.0.4) resolute-porting; urgency=medium
 
   * `apm upgrade` now asks before it changes anything, like `apt upgrade`:

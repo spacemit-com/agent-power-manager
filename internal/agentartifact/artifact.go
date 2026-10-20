@@ -75,12 +75,17 @@ func Validate(entries []Entry, ref *domain.PowerRef) (Snapshot, error) {
 				if !entry.Directory {
 					failures = append(failures, agentError("root entry assets must be a directory"))
 				}
+			case subSkillsDir, subPluginsDir, subMCPDir:
+				// Agent 可以携带只属于自己的 Skill、Plugin 与 MCP（ADR-046）。
+				if !entry.Directory {
+					failures = append(failures, agentError("root entry %s must be a directory", entry.Path))
+				}
 			default:
 				failures = append(failures, agentError("root entry %q is outside the closed set", entry.Path))
 			}
 		} else {
 			first, _, _ := strings.Cut(entry.Path, "/")
-			if first != "agent.yaml" && first != "assets" {
+			if first != "agent.yaml" && first != "assets" && !isSubResourceRoot(first) {
 				failures = append(failures, agentError("entry %q is outside the root closed set", entry.Path))
 			}
 		}
@@ -102,6 +107,10 @@ func Validate(entries []Entry, ref *domain.PowerRef) (Snapshot, error) {
 		}
 	}
 	if err := validateAvatar(config, index); err != nil {
+		return Snapshot{}, err
+	}
+	// 子资源必须自洽：缺标记文件或身份不合法时整体拒绝，不留下半成品。
+	if err := validateSubResources(index); err != nil {
 		return Snapshot{}, err
 	}
 

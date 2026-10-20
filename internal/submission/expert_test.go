@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -390,4 +391,219 @@ func TestPrepareExpertRejectsExpansionAboveLimit(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "decompression ratio") {
 		t.Fatalf("Prepare() error = %v, want decompression-ratio ErrInvalid", err)
 	}
+}
+
+// --- Agent 携带独有子资源（ADR-046） ---
+
+const expertSubSkillMD = "---\n" +
+	"schema_version: 2\n" +
+	"name: %NAME%\n" +
+	"version: v1.0.0\n" +
+	"description: Probe skill.\n" +
+	"name_zh: 探针技能\n" +
+	"name_en: Probe Skill\n" +
+	"description_zh: 探针技能用途。\n" +
+	"---\n" +
+	"# Probe\n\nBody.\n"
+
+const expertSubSkillCard = "---\n" +
+	"schema_version: 2\n" +
+	"---\n" +
+	"# Skill Card: Probe Skill\n\n" +
+	"## Capability\nDoes a thing.\n\n" +
+	"## Use Cases\nProbing.\n\n" +
+	"## Inputs and Outputs\nNone.\n\n" +
+	"## Dependencies\nNone.\n\n" +
+	"## Limitations\nNone.\n\n" +
+	"## Maintainer\nOwner: Probe\nContact: probe@example.com\n"
+
+const expertSubMCPJSON = `{"schema_version":2,"name":"%NAME%","name_zh":"探针MCP","name_en":"Probe MCP","version":"v1.0.0","description":"Probe MCP server.","description_zh":"探针MCP服务。","definition":{"transport":"stdio","command":"probe"}}`
+
+const expertSubPluginJSON = `{"schema_version":2,"name":"%NAME%","version":"v1.0.0","description":"Probe plugin.","name_zh":"探针插件","name_en":"Probe Plugin","description_zh":"探针插件。","skills":["skills/probe"]}`
+
+// writeExpertSubResourceDir 写入带独有 Skill、Plugin 与 MCP 子资源的 Agent 资源根。
+func writeExpertSubResourceDir(t *testing.T, root string) {
+	t.Helper()
+	writeTestFile(t, filepath.Join(root, "agent.yaml"), agentYAMLWithAvatar)
+	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "assets", "avatar.png"), pngBytes(t, 128, 128), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, "skills", "probe-skill", "SKILL.md"),
+		strings.ReplaceAll(expertSubSkillMD, "%NAME%", "probe-skill"))
+	writeTestFile(t, filepath.Join(root, "skills", "probe-skill", "skill-card.md"), expertSubSkillCard)
+	writeTestFile(t, filepath.Join(root, "mcp", "probe-mcp.json"),
+		strings.ReplaceAll(expertSubMCPJSON, "%NAME%", "probe-mcp"))
+	writeTestFile(t, filepath.Join(root, "plugins", "probe-plugin", "apc-plugin.json"),
+		strings.ReplaceAll(expertSubPluginJSON, "%NAME%", "probe-plugin"))
+	writeTestFile(t, filepath.Join(root, "plugins", "probe-plugin", "skills", "probe", "SKILL.md"),
+		strings.ReplaceAll(expertSubSkillMD, "%NAME%", "probe-inner"))
+	writeTestFile(t, filepath.Join(root, "plugins", "probe-plugin", "skills", "probe", "skill-card.md"), expertSubSkillCard)
+}
+
+func TestValidateAgentAcceptsSubResources(t *testing.T) {
+	root := t.TempDir()
+	writeExpertSubResourceDir(t, root)
+
+	validation, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: root})
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want sub-resources accepted", err)
+	}
+	if validation.Name != "demo-agent" || validation.Version != "v1.0.0" {
+		t.Fatalf("identity = %s@%s, want demo-agent@v1.0.0", validation.Name, validation.Version)
+	}
+	// 文件数必须计入子资源：agent.yaml + avatar + 2 Skill + 1 MCP + 1 清单 + 2 内嵌 Skill。
+	if validation.FileCount != 8 {
+		t.Fatalf("FileCount = %d, want 8 (sub-resources counted)", validation.FileCount)
+	}
+	if validation.ContentSize <= 0 {
+		t.Fatalf("ContentSize = %d, want the sub-resource bytes counted", validation.ContentSize)
+	}
+}
+
+func TestPrepareAgentPacksSubResourcesIntoOneArchive(t *testing.T) {
+	root := t.TempDir()
+	writeExpertSubResourceDir(t, root)
+
+	content, err := Prepare(context.Background(), Request{
+		Type: domain.PowerTypeExpert, Path: root, Message: "add exclusive sub-resources",
+	})
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if content.ContentType != "application/gzip" {
+		t.Fatalf("ContentType = %q, want application/gzip", content.ContentType)
+	}
+	// 子资源仍打成一个 Expert 归档，且归档根不额外包裹 <name>/ 版本目录。
+	headers := readTarGzHeaders(t, content.Bytes)
+	for _, required := range []string{
+		"agent.yaml",
+		"assets/avatar.png",
+		"skills/probe-skill/SKILL.md",
+		"skills/probe-skill/skill-card.md",
+		"mcp/probe-mcp.json",
+		"plugins/probe-plugin/apc-plugin.json",
+		"plugins/probe-plugin/skills/probe/SKILL.md",
+		"plugins/probe-plugin/skills/probe/skill-card.md",
+	} {
+		if _, ok := headers[required]; !ok {
+			t.Fatalf("archive is missing %q; entries = %v", required, sortedHeaderNames(headers))
+		}
+	}
+	for name := range headers {
+		if strings.HasPrefix(name, "demo-agent/") {
+			t.Fatalf("archive entry %q is wrapped in a version directory", name)
+		}
+	}
+}
+
+func TestPrepareAgentSubResourcePackingIsDeterministic(t *testing.T) {
+	root := t.TempDir()
+	writeExpertSubResourceDir(t, root)
+
+	first, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: root, Message: "m"})
+	if err != nil {
+		t.Fatalf("Prepare() first error = %v", err)
+	}
+	second, err := Prepare(context.Background(), Request{Type: domain.PowerTypeExpert, Path: root, Message: "m"})
+	if err != nil {
+		t.Fatalf("Prepare() second error = %v", err)
+	}
+	if !bytes.Equal(first.Bytes, second.Bytes) {
+		t.Fatal("two packing runs produced different bytes, want deterministic output")
+	}
+	if first.MD5 != second.MD5 {
+		t.Fatalf("MD5 = %q vs %q, want identical", first.MD5, second.MD5)
+	}
+}
+
+func TestValidateAgentRejectsIncompleteSubResources(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, root string)
+		want   string
+	}{
+		{
+			name: "skill missing SKILL.md",
+			mutate: func(t *testing.T, root string) {
+				if err := os.Remove(filepath.Join(root, "skills", "probe-skill", "SKILL.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "SKILL.md",
+		},
+		{
+			name: "skill missing skill-card.md",
+			mutate: func(t *testing.T, root string) {
+				if err := os.Remove(filepath.Join(root, "skills", "probe-skill", "skill-card.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "skill-card.md",
+		},
+		{
+			name: "mcp is not valid json",
+			mutate: func(t *testing.T, root string) {
+				writeTestFile(t, filepath.Join(root, "mcp", "probe-mcp.json"), "{")
+			},
+			want: "JSON",
+		},
+		{
+			name: "plugin missing manifest",
+			mutate: func(t *testing.T, root string) {
+				if err := os.Remove(filepath.Join(root, "plugins", "probe-plugin", "apc-plugin.json")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "apc-plugin.json",
+		},
+		{
+			name: "plugin undeclared skill",
+			mutate: func(t *testing.T, root string) {
+				writeTestFile(t, filepath.Join(root, "plugins", "probe-plugin", "skills", "extra", "SKILL.md"),
+					strings.ReplaceAll(expertSubSkillMD, "%NAME%", "extra"))
+			},
+			want: "outside canonical schema",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeExpertSubResourceDir(t, root)
+			test.mutate(t, root)
+
+			_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: root})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want a message naming %q", err, test.want)
+			}
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Validate() error = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}
+
+func TestValidateAgentStillRejectsUnknownRootEntry(t *testing.T) {
+	// 放宽的是三个具名子资源目录，不是整个根闭集。
+	root := t.TempDir()
+	writeExpertSubResourceDir(t, root)
+	writeTestFile(t, filepath.Join(root, "extra", "note.txt"), "hello")
+
+	_, err := Validate(context.Background(), Request{Type: domain.PowerTypeExpert, Path: root})
+	if err == nil || !strings.Contains(err.Error(), "outside the root closed set") {
+		t.Fatalf("Validate() error = %v, want the unknown root entry rejected", err)
+	}
+}
+
+// sortedHeaderNames 返回排序后的归档条目名，仅用于失败信息。
+func sortedHeaderNames(headers map[string]*tar.Header) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

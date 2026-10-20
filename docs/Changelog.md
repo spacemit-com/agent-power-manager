@@ -1,3 +1,44 @@
+## 2026-10-20（放宽 Expert 校验：Agent 可携带独有的 Skill / Plugin / MCP 子资源）
+
+分类：契约变更（Agent 根闭集扩展；`internal/skillartifact` 新增）
+
+用户需求：Expert（Agent）除了 `agent.yaml`，还应能携带只属于自己的 Skill、Plugin、MCP 资源，
+整体打成一个压缩包上传，沿用现有资源文件夹创建、解压与安装链路，只是资源中新增了子资源。
+
+解决方案或完成结果：
+
+- Agent 资源根闭集从「必需 `agent.yaml` + 可选 `assets/`」扩为「+ 可选 `skills/`、`plugins/`、
+  `mcp/`」。子资源是裸目录/裸文件，整体仍是**一个**确定性 Expert `.tar.gz`；不引入内嵌归档
+  （既有校验明确拒绝嵌套归档与归档魔数），因此上传、下载、解包、缓存、安装、恢复全部走既有链路，
+  只在一个地方放宽（[ADR-046](ivory-tower/adr/ADR-046-allow-expert-to-carry-exclusive-sub-resources.md)）。
+- 子资源身份取自其**内部内容**而非目录名：Skill 看 `SKILL.md` frontmatter，Plugin 看
+  `apc-plugin.json`，MCP 看 JSON 内的 `name`/`version`。因此作者可以把独立的 Skill/Plugin/MCP
+  目录原样拷进 Agent 资源根，无需改写格式。目录名只是容器，须非空且不以点号开头。
+- 每个子资源必须自洽：`skills/<n>/` 缺 `SKILL.md` 或 `skill-card.md`、`plugins/<n>/` 缺
+  `apc-plugin.json` 或其声明的 `skills/` 子树不齐、`mcp/<n>.json` 无法解码，整份资源即校验失败，
+  不接受半成品。同一类型内身份唯一，跨类型可同名。
+- 子资源复用各自类型的权威校验：Skill 走新增的 `internal/skillartifact`（与独立 Skill、Plugin
+  内嵌 Skill 同一实现），Plugin 走 `pluginartifact` 的 manifest 与闭集校验，MCP 走
+  `domain.DecodeMCPResourceJSON` + `ValidateSubmit`。不新增第二套格式。
+- 分层调整：Skill 格式校验从 `internal/submission` 下沉为叶子包 `internal/skillartifact`。
+  `submission` 依赖 `agentartifact`，而 `agentartifact` 现在也要校验 Skill 子树，不抽包会成环；
+  `submission` 内部改为薄委托，并用 `errors.Join` 把 `skillartifact.ErrInvalid` 桥接到自己的
+  `ErrInvalid`，既有的 `errors.Is(err, ErrInvalid)` 断言与错误文案保持不变。
+- 既有安全规则对子树继续生效：路径规范化、重复路径、symlink/特殊文件、可执行位、嵌套归档、
+  单文件 10 MiB、总量 100 MiB、深度 16、路径 255 字节。子资源不是绕过这些规则的通道。
+- 安装落盘位置不变：`skills/`、`plugins/`、`mcp/` 原样保留在 `agents/<name>/` 内，APM 不把它们
+  拆到 Bibit 全局目录——这需要 Runtime 的发现规则，本仓库无法确认，故不猜测。
+- 已知限制：`agent.yaml` 的 `skills`/`mcps` 仍是原样透传的扩展字段，本决策**不校验**它们与
+  `skills/`、`mcp/` 目录是否一一对应，否则既有合法资源会变成非法。待 Runtime 发现规则确认后
+  再以独立 ADR 收紧。
+- 测试：`internal/skillartifact` 新增叶子包测试（v2 必填、重复键、非整数 `schema_version`、
+  展示字段、skill-card 章节与 Maintainer）；`agentartifact` 覆盖根闭集新增项、子资源残缺、
+  跨子资源重名、跨类型同名、子树安全规则与身份比较；`submission` 覆盖 validate/submit 接受
+  子资源、打成单一归档、两次打包字节一致、残缺子资源被拒、未知根条目仍被拒；`adapter` 覆盖
+  子资源落在 `agents/<name>/` 内、残缺子资源在发布前被拒且不留可见目标。
+  另确认 `cloud/remote` 的 Agent 解包策略只要求 `agent.yaml` marker、无条目白名单，故下载侧
+  自动接受子资源。
+
 # Changelog
 
 记录约定：承载或维护当前 Changelog 条目的当前提交不列入自身的“相关提交”，避免提交哈希自引用。

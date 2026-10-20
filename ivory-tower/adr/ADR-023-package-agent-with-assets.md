@@ -6,6 +6,7 @@
 - Related Feature：[Feature 026](../features/026-agent-package-assets/spec.md)
 - Related APC contract：[APC-API.md](../../APC-API.md)、[ADR-025](ADR-025-apc-api-client-contract.md)（原 APC 仓库已停止维护，其 ADR-006 不再链接）
 - Related ADR：[ADR-033](ADR-033-require-agent-id-to-equal-agent-name.md)（`agent.id` 必须与 `agent.name` 取相同值）
+- Revised：2026-10-20（根闭集新增 `skills/`、`plugins/`、`mcp/` 三个可选子资源容器目录，由 [ADR-046](ADR-046-allow-expert-to-carry-exclusive-sub-resources.md) 取代本文档的根闭集一条；`assets/`、avatar 与归档形态不变）
 
 ## Context
 
@@ -22,7 +23,9 @@ Skill 和 Plugin 已使用确定性 `.tar.gz`、统一 Submission multipart 和�
 
 ## Decision
 
-Agent 的权威 content 改为确定性 `.tar.gz`，根闭集为必需 `agent.yaml` 和可选 `assets/`。
+Agent 的权威 content 改为确定性 `.tar.gz`，根闭集为必需 `agent.yaml` 和可选 `assets/`；
+后续由 [ADR-046](ADR-046-allow-expert-to-carry-exclusive-sub-resources.md) 扩展为还可选
+`skills/`、`plugins/`、`mcp/` 三个子资源容器目录（Agent 可携带只属于自己的 Skill/Plugin/MCP）。
 Agent 的 `validate`/`submit` 只接受资源根目录，由 APM 固定物理快照、完整校验并自行打包；
 不接受单个 YAML 或预制归档。
 
