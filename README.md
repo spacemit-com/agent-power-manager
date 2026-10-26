@@ -2,50 +2,188 @@
 
 # Agent Power Manager
 
-**为 AI Agent 统一管理 Skill、Plugin、MCP 与 Expert 四类 Power 的命令行工具**
+**A command-line tool that manages Skill, Plugin, MCP and Expert powers for AI agents**
 
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
+[English](README.md) | [简体中文](README_zh.md)
 
 </div>
 
 ---
 
-## 这是什么
+## Overview
 
-APM（Agent Power Manager）是一个 Go 编写的命令行工具，把 AI Agent 的能力扩展——**Skill、Plugin、MCP、Expert** 四类 Power——的检索、安装、升级、卸载与提交收敛到同一套命令。
+APM (Agent Power Manager) is a command-line tool written in Go that unifies the discovery,
+installation, upgrade, removal and submission of the four kinds of AI agent capability
+extension — **Skill**, **Plugin**, **MCP** and **Expert** — under a single command surface.
 
-它从 APC（Agent Power Cloud）同步资源元数据，按版本安装到目标 Agent，并把这些操作记录成可恢复的事务。支持的目标 Agent 包括 `bibit`、`codex`、`claude-code` 与 `hermes-agent`。
+It synchronises resource metadata from APC (Agent Power Cloud), installs a pinned version into
+a target agent, and records every operation as a recoverable transaction. Supported target
+agents are `bibit`, `codex`, `claude-code` and `hermes-agent`.
 
-每类 Power 格式不同，每个 Agent 又各有自己的资源目录、清单格式与注册方式，手工维护很容易失去一致性：版本散落各处，安装失败只留下一半文件。APM 把这些操作变成可重复、可回滚、可查询的，并在本地保留一份精确到版本的已安装清单。
+Each power type has its own format, and each agent has its own resource directory, manifest
+format and registration mechanism, so maintaining them by hand drifts quickly: versions scatter,
+and a failed install leaves a half-written directory behind. APM makes these operations
+repeatable, recoverable and inspectable, and keeps a local inventory that is exact to the
+installed version.
 
-## 核心能力
+## How it works
 
-| 命令 | 用途 |
+APM is not a standalone tool. It is the **client half of an end-to-end resource pipeline**, and
+understanding what it does means seeing how it divides the work with two other systems:
+
+| Component | Role | Where it runs |
+| --- | --- | --- |
+| **APM** (this repository) | Command-line client: validate, package, upload, search, download, install, upgrade, uninstall, transaction recovery | Developer machines and Bianbu boards |
+| **APC** (Agent Power Cloud) | SpacemiT's resource distribution platform: accepts submissions, human review, publish, maintains the catalog, hosts resource files | Server side (`www.spacemit.com` + CDN) |
+| [**bibit-agenthub-plugin**](https://github.com/spacemit-com/bibit-agenthub-plugin) | Agent Hub frontend plugin for Bibit: browse-and-install UI inside Bibit, calling APM and consuming its output | Bibit plugin on the board |
+
+```text
+1) Entry points: both paths reach the same APM client
+┌─────────────────────────────────────────────────────────────────────────┐
+│  User CLI runs apm directly: search / list / install / upgrade          │
+└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  bibit-agenthub-plugin: browse/install UI inside Bibit, calls apm       │
+└─────────────────────────────────────────────────────────────────────────┘
+   │
+   |  both merge here
+   v
+2) APM client (this repo: CLI + lifecycle; the only side mutating local state)
+┌─────────────────────────────────────────────────────────────────────────┐
+│  validate / deterministic packing: apm validate, apm submit             │
+│  catalog sync / version reconciliation: apm search, list, show          │
+│  download / size+MD5 verification / versioned cache                     │
+│  journal transactions and recovery: install, upgrade, uninstall, fix    │
+└─────────────────────────────────────────────────────────────────────────┘
+   | upload: HTTPS + Bearer                    ^ fetch: catalog + content (302 -> CDN)
+   v                                           |
+3) Server and storage (APC + CDN)
+┌─────────────────────────────────────────────────────────────────────────┐
+│  APC: accept submission -> human review -> publish -> maintain catalog  │
+│  CDN: cdn-resource.spacemit.com hosts tar.gz / JSON                     │
+└─────────────────────────────────────────────────────────────────────────┘
+   | land: APM atomic publish + local inventory update
+   v
+4) Landing result
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Target agents: Bibit / Codex / Claude Code / Hermes                    │
+│  Local state: .apm/manifests . cache . staging . transactions           │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Resource storage
+
+APC is the authoritative store, and it keeps **catalog and files separate**:
+
+- **Catalog**: one JSON document whose top level has the four groups `skills`/`plugins`/`mcps`/`agents`,
+  listing each resource's latest version, description, `content_size`, `content_md5`, `download_url`,
+  `published_at` and `tags`. It carries **no file bytes**, so it stays small and can be synced often.
+- **Resource files**: hosted on the CDN (`cdn-resource.spacemit.com`) and addressed by type and
+  version. Skill, Plugin and Expert content is a deterministic `.tar.gz`; MCP is a single
+  JCS-canonicalised JSON document.
+
+APM also keeps local state for offline use and transaction recovery:
+
+| Path | Contents |
 | --- | --- |
-| `search` | 按关键字检索云端可安装的 Power |
-| `list` / `list --installed` | 浏览云端目录，或查看某个 Agent 已安装的清单 |
-| `show` | 查看指定 Power 的详情与可用版本 |
-| `install` | 安装指定版本的 Power 到目标 Agent |
-| `upgrade` | 将已安装的 Power 升到最新版本 |
-| `uninstall` | 卸载 Power 并清理 Agent 侧落地状态 |
-| `fix` | 恢复被中断的事务 |
-| `validate` / `submit` | 离线校验资源格式，并提交到 APC |
+| `.apm/manifests/<agent>.json` | Installed inventory, exact to the version; the sole input to `list --installed` and `upgrade` |
+| `.apm/cache/<type>/<name>/<version>` | Versioned content cache, reused on hit instead of re-downloading |
+| `.apm/staging/` | Materialisation and validation area before install |
+| `.apm/transactions/` | Transaction journals; `apm fix` recovers after a crash |
 
-重复安装同一版本返回 `unchanged`，重复卸载返回 `unexecuted`，都不会产生第二份文件。`--agent all` 可对整个 Agent 列表批量执行，逐 Agent 输出结果，失败即停。
+### Uploading (publishing)
 
-## 支持的 Agent 与 Power 类型
+```text
+resource dir ──> apm validate --type <t>   full offline validation (no network)
+             ──> apm submit --type <t>     deterministic packing + MD5 + HTTP submit
+             ──> APC returns submission_id status received
+             ──> platform review           review_pending -> approved / rejected
+             ──> publish                   publishing -> published (enters catalog)
+```
 
-| 项目 | 取值 |
+- **Validation comes first.** `validate` is fully offline and rejects format errors before any network
+  call; `submit` reuses the same validation.
+- **Deterministic packing.** The same input produces a byte-identical archive (stable ordering, fixed
+  mtime/uid/gid, no gzip timestamp), so the MD5 is stable, verifiable and reproducible.
+- **Credentials only for submission.** Only `submit` and `submission` need `APC_API_KEY`; querying and
+  downloading are anonymous.
+- **Review is a human step.** APM submits and polls status; publication happens on the APC platform.
+
+### Fetching (installing and upgrading)
+
+```text
+apm list / search ──> sync catalog (one snapshot) ──> show installable resources
+apm install       ──> resolve version ──> fetch content (CDN, verify size/MD5) ──> validate format
+                  ──> write staging ──> journal transaction ──> land into target agent
+                  ──> update .apm/manifests
+apm upgrade       ──> read local inventory ──> one catalog snapshot ──> plan each
+                  ──> confirm ──> execute one by one
+```
+
+- **Download on demand.** `list`/`search` fetch only the catalog, never content; only `install` and
+  `upgrade` fetch files.
+- **Content must prove itself.** After download APM checks the catalog's `content_size` and
+  `content_md5`, then runs archive-safety and format validation. Any mismatch fails closed and leaves
+  no partial file behind.
+- **Cache reuse.** Re-installing the same version hits the cache instead of downloading again.
+- **Transactional landing.** Landing is journal-driven, so an interruption can be repaired with
+  `apm fix`; re-installing the same version returns `unchanged` and never writes a second copy.
+
+### Boundaries between the three components
+
+**APM is the client only; it does not change the server contract.** APC's HTTP contract is
+authoritative in [`APC-API.md`](APC-API.md) and uses `agent`/`agents` on the wire, while APM calls the
+category `expert` locally; translation happens only at the HTTP boundary and the catalog group name
+([ADR-044](ivory-tower/adr/ADR-044-rename-agent-power-type-to-expert.md)).
+
+**bibit-agenthub-plugin consumes APM rather than replacing it.** The plugin provides a browse-and-install
+UI inside Bibit and reads APM's command output and JSON fields such as
+`name_zh`/`name_en`/`description_zh`. Because both sides share that JSON contract, **APM and the plugin
+must be upgraded together**: a new APM with an old plugin cannot parse the new fields, and vice versa.
+See [spacemit-com/bibit-agenthub-plugin](https://github.com/spacemit-com/bibit-agenthub-plugin).
+
+**Target agents are adapted per agent.** The four agents differ in resource directory, manifest format
+and registration mechanism; `internal/adapter` isolates those differences. Expert is supported on Bibit
+only.
+
+## Capabilities
+
+| Command | Purpose |
 | --- | --- |
-| Agent（`--agent`） | `bibit`、`codex`、`claude-code`、`hermes-agent`，以及批量值 `all` |
-| Power 类型（`--type`） | `skill`、`plugin`、`mcp`、`expert` |
+| `search` | Search installable powers in the cloud by keyword |
+| `list` / `list --installed` | Browse the cloud catalog, or inspect what an agent has installed |
+| `show` | Show details and available versions of a power |
+| `install` | Install a pinned version into a target agent |
+| `upgrade` | Upgrade installed powers to the latest versions |
+| `uninstall` | Remove a power and clean up the agent-side landing |
+| `fix` | Recover an interrupted transaction |
+| `validate` / `submit` | Validate resource format offline, and submit it to APC |
 
-`expert` 是本地类别名，对应 APC 接口中的 `agent`/`agents` 字段。旧拼写 `--type agent` 仍可使用但会输出弃用警告；`--type expert` 仅支持 `bibit`。
+Re-installing the same version returns `unchanged`, and re-uninstalling returns `unexecuted`;
+neither produces a second copy of anything. `--agent all` runs a command across every agent,
+reporting per agent, and stops on the first failure.
 
-## 快速开始
+## Supported agents and power types
 
-需要 Go 1.26.0（版本以 [`go.mod`](go.mod) 为准）：
+| Item | Values |
+| --- | --- |
+| Agent (`--agent`) | `bibit`, `codex`, `claude-code`, `hermes-agent`, plus the batch value `all` |
+| Power type (`--type`) | `skill`, `plugin`, `mcp`, `expert` |
+
+`expert` is the local type name and corresponds to the `agent`/`agents` fields in the APC API.
+The legacy spelling `--type agent` still works but emits a deprecation warning; `--type expert`
+is only supported with `bibit`.
+
+An Expert may also carry its own Skill, Plugin and MCP resources inside the same archive, under
+`skills/`, `plugins/` and `mcp/` — so a single install delivers an agent together with the
+capabilities it needs.
+
+## Quick start
+
+Go 1.26.0 is required (see [`go.mod`](go.mod) for the exact version):
 
 ```bash
 go mod download
@@ -53,80 +191,85 @@ go build -o ./apm ./cmd/apm
 ./apm --help
 ```
 
-Bianbu 开发板也可以构建 Debian 软件包（产物为 `/usr/bin/apm`）：
+On a Bianbu development board you can also build a Debian package (installs `/usr/bin/apm`):
 
 ```bash
 sudo apt-get install debhelper golang-go ca-certificates
 dpkg-buildpackage -us -uc -b
-sudo apt-get install ../agent-power-manager_<版本>_<架构>.deb
+sudo apt-get install ../agent-power-manager_<version>_<arch>.deb
 ```
 
-## 常用命令
+## Common commands
 
 ```bash
-# 检索与浏览
+# Search and browse
 apm search superpowers
 apm list
 apm list superpowers --all
 apm show superpowers=v6.3.0
 
-# 安装到指定 Agent（四类 Power 语法一致）
+# Install into a target agent (identical syntax for all four power types)
 apm install superpowers=v6.3.0 --type plugin --agent codex
 apm install foo-before-summary=v0.0.1 --type skill --agent claude-code
 apm install nws=v1.0.0 --type mcp --agent hermes-agent
 apm install test-agent=v1.0.0 --type expert --agent bibit
 
-# 查看已安装清单
+# Inspect the installed inventory
 apm list --installed --agent codex --type plugin --json
 
-# 卸载只传名称，不接受版本
+# Uninstall takes only a name, never a version
 apm uninstall superpowers --type plugin --agent codex
 
-# 升级
+# Upgrade
 apm upgrade --dry-run
 apm upgrade -y
 ```
 
-`list`、`search`、`show`、`upgrade`、`validate` 支持 `--json` 输出；`submission get/list` 使用 `--output json`。
+`list`, `search`, `show`, `upgrade` and `validate` support `--json`; `submission get/list` use
+`--output json`.
 
-脚本与 CI 中调用 `apm upgrade` 需要显式加 `-y`：非交互终端或 `--json` 下没有 `-y` 会直接失败，且不会取锁或同步目录。
+When calling `apm upgrade` from a script or CI, pass `-y` explicitly: without it, a
+non-interactive terminal or `--json` fails immediately, without taking the lock or syncing the
+catalog.
 
-## 配置
+## Configuration
 
-默认使用 Remote Provider（生产环境 `https://www.spacemit.com`），配置错误或远端失败时不会自动回退到 Local。
+The Remote provider is the default (production endpoint `https://www.spacemit.com`). A
+configuration error or remote failure never falls back to Local automatically.
 
-| 环境变量 | 默认值与约束 |
+| Environment variable | Default and constraints |
 | --- | --- |
-| `APM_CLOUD_PROVIDER` | 默认 `remote`；只接受 `remote` 或 `local` |
-| `APC_BASE_URL` | 默认 `https://www.spacemit.com`；必须是无凭据、无 query/fragment 的 host-only 根地址；非 loopback 只允许 HTTPS |
-| `APC_API_KEY` | 仅 `submit` 与 `submission` 需要 |
-| `APM_CLOUD_LOCAL_ROOT` | 选择 `local` 时必填，需为 clean absolute path |
-| `APM_HOME` | 状态根父目录，默认取用户主目录；状态写入其下的 `.apm/` |
+| `APM_CLOUD_PROVIDER` | Defaults to `remote`; accepts only `remote` or `local` |
+| `APC_BASE_URL` | Defaults to `https://www.spacemit.com`; must be a credential-free, query/fragment-free host-only root URL; non-loopback requires HTTPS |
+| `APC_API_KEY` | Required only by `submit` and `submission` |
+| `APM_CLOUD_LOCAL_ROOT` | Required when `local` is selected; must be a clean absolute path |
+| `APM_HOME` | Parent of the state root, defaulting to the user home; state lives under its `.apm/` |
 
 ```bash
-# 指向测试环境
+# Point at a test environment
 APC_BASE_URL=https://developer.bianbu.xyz ./apm list
 
-# 使用本地 fixture，离线运行
+# Use local fixtures and run offline
 APM_CLOUD_PROVIDER=local \
 APM_CLOUD_LOCAL_ROOT="$(pwd)/internal/cloud/resources" \
 ./apm list
 ```
 
-`APC_BASE_URL` 只填主机；网关前缀 `/api-server/apc` 由客户端统一拼接。
+`APC_BASE_URL` takes the host only; the gateway prefix `/api-server/apc` is appended by the
+client.
 
-## 文档
+## Documentation
 
-| 文档 | 内容 |
+| Document | Contents |
 | --- | --- |
-| [BUILD.md](BUILD.md) | 构建、测试、Provider 与目录同步说明 |
-| [APC-API.md](APC-API.md) | APC 服务端接口契约 |
-| [docs/power-template/README.md](docs/power-template/README.md) | 四类 Power 的提交格式规则与模板 |
-| [CONTEXT.md](CONTEXT.md) | 领域词汇表 |
-| [docs/Changelog.md](docs/Changelog.md) | 变更记录 |
-| [docs/testing/apm-cli-functional-test.md](docs/testing/apm-cli-functional-test.md) | CLI 功能测试指引 |
-| [ivory-tower/adr](ivory-tower/adr) | 架构决策记录（ADR） |
+| [BUILD.md](BUILD.md) | Build, test, providers and catalog synchronisation |
+| [APC-API.md](APC-API.md) | APC server API contract |
+| [docs/power-template/README.md](docs/power-template/README.md) | Format rules and templates for the four power types |
+| [CONTEXT.md](CONTEXT.md) | Domain glossary |
+| [docs/Changelog.md](docs/Changelog.md) | Changelog |
+| [docs/testing/apm-cli-functional-test.md](docs/testing/apm-cli-functional-test.md) | CLI functional testing guide |
+| [ivory-tower/adr](ivory-tower/adr) | Architecture decision records (ADR) |
 
-## 许可证
+## License
 
 [Apache License 2.0](LICENSE)
